@@ -1,9 +1,9 @@
-import { UserError, color, info, json, out } from '../logger.js';
-import { formatUsage, sumUsage } from '../acpx.js';
-import { ProposalViolation } from '../proposal.js';
-import { runAnalysis } from './analyze.js';
-import { printProposal, runProposal } from './propose.js';
-import { budgetBar, formatTokens } from '../tokens.js';
+import { UserError, color, info, json, out } from "../logger.js";
+import { formatUsage, sumUsage } from "../acpx.js";
+import { ProposalViolation } from "../proposal.js";
+import { runAnalysis } from "./analyze.js";
+import { printProposal, runProposal } from "./propose.js";
+import { budgetBar, formatTokens } from "../tokens.js";
 
 /**
  * The default command: one full backward pass.
@@ -16,7 +16,7 @@ export async function cmdRun(ctx) {
   const { repo, config } = ctx;
 
   info(
-    `${color.bold('backpass')} ${color.dim(
+    `${color.bold("backpass")} ${color.dim(
       `v${ctx.version} · ${repo.name} · budget ${formatTokens(config.budgetTokens)} tok · since ${config.discovery.since}`,
     )}`,
   );
@@ -24,9 +24,13 @@ export async function cmdRun(ctx) {
   const analysis = await runAnalysis(ctx);
 
   if (!analysis.transcripts.length) {
-    out('');
-    out('No agent transcripts are associated with this repo yet.');
-    out(color.dim('  `backpass scan --since all` widens the time window; --include-cursor-ide adds the Cursor IDE store.'));
+    out("");
+    out("No agent transcripts are associated with this repo yet.");
+    out(
+      color.dim(
+        "  `backpass scan --since all` widens the time window; --include-cursor-ide adds the Cursor IDE store.",
+      ),
+    );
     return 0;
   }
 
@@ -35,13 +39,13 @@ export async function cmdRun(ctx) {
     withinBudget: analysis.file.tokens <= config.budgetTokens,
   });
   info(
-    `${color.cyan('·')} ${analysis.file.path}: ${budget} ${formatTokens(analysis.file.tokens)} / ` +
+    `${color.cyan("·")} ${analysis.file.path}: ${budget} ${formatTokens(analysis.file.tokens)} / ` +
       `${formatTokens(config.budgetTokens)} tok · ${analysis.file.units.length} instructions`,
   );
 
   if (analysis.summary) {
     info(
-      `${color.cyan('·')} evidence: ${analysis.summary.analyzed} new · ${analysis.summary.cached} cached · ` +
+      `${color.cyan("·")} evidence: ${analysis.summary.analyzed} new · ${analysis.summary.cached} cached · ` +
         `${analysis.summary.skipped} too short · ${analysis.summary.failed} failed`,
     );
   }
@@ -63,11 +67,11 @@ export async function cmdRun(ctx) {
     return 0;
   } catch (err) {
     if (err instanceof ProposalViolation) {
-      info('');
-      for (const violation of err.violations) info(`  ${color.red('x')} ${violation}`);
-      info('');
+      info("");
+      for (const violation of err.violations) info(`  ${color.red("x")} ${violation}`);
+      info("");
       info(color.dim(`  the rejected proposal was saved to ${config.state.proposalPath}`));
-      throw new UserError(err.message, 'try a stronger synthesis model, or raise --budget / --max-edits');
+      throw new UserError(err.message, "try a stronger synthesis model, or raise --budget / --max-edits");
     }
     throw err;
   }

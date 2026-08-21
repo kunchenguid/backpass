@@ -1,4 +1,4 @@
-import path from 'node:path';
+import path from "node:path";
 
 import {
   attachToolResults,
@@ -10,7 +10,7 @@ import {
   readHeadLines,
   readJsonl,
   statOrNull,
-} from './shared.js';
+} from "./shared.js";
 
 /**
  * Claude Code: ~/.claude/projects/<munged-cwd>/<session-uuid>.jsonl
@@ -23,16 +23,16 @@ import {
 
 const HEADER_LINES = 40;
 
-export const name = 'claude';
+export const name = "claude";
 
 export function storeRoot() {
-  return home('.claude', 'projects');
+  return home(".claude", "projects");
 }
 
 export function enumerate() {
   const out = [];
   for (const dir of listDirs(storeRoot())) {
-    for (const file of listFiles(dir, '.jsonl')) {
+    for (const file of listFiles(dir, ".jsonl")) {
       const stat = statOrNull(file);
       if (!stat) continue;
       out.push({ key: file, path: file, mtimeMs: stat.mtimeMs, bytes: stat.size });
@@ -46,7 +46,7 @@ export function classify(candidate) {
     const entry = parseJsonLine(line);
     if (!entry || !entry.cwd) continue;
     return {
-      id: entry.sessionId || path.basename(candidate.path, '.jsonl'),
+      id: entry.sessionId || path.basename(candidate.path, ".jsonl"),
       cwd: entry.cwd,
       gitBranch: entry.gitBranch || null,
       remotes: [],
@@ -63,13 +63,13 @@ export function read(ref) {
   let model = null;
 
   for (const entry of entries) {
-    if (entry.type === 'user' && entry.message) {
+    if (entry.type === "user" && entry.message) {
       if (entry.isSidechain) continue;
-      contentToEvents('user', entry.message.content, events);
-    } else if (entry.type === 'assistant' && entry.message) {
+      contentToEvents("user", entry.message.content, events);
+    } else if (entry.type === "assistant" && entry.message) {
       if (entry.isSidechain) continue;
       model = model || entry.message.model || null;
-      contentToEvents('assistant', entry.message.content, events);
+      contentToEvents("assistant", entry.message.content, events);
     }
   }
 

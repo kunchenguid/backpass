@@ -1,8 +1,8 @@
-import { UserError, color, info, json, out } from '../logger.js';
-import { applyDecisions } from '../apply/writer.js';
-import { closeApplySurface, openApplySurface, pollDecisions, renderApplySurface } from '../apply/lavish.js';
-import { reviewInTerminal } from '../apply/terminal.js';
-import { budgetBar, formatTokens } from '../tokens.js';
+import { UserError, color, info, json, out } from "../logger.js";
+import { applyDecisions } from "../apply/writer.js";
+import { closeApplySurface, openApplySurface, pollDecisions, renderApplySurface } from "../apply/lavish.js";
+import { reviewInTerminal } from "../apply/terminal.js";
+import { budgetBar, formatTokens } from "../tokens.js";
 
 /**
  * The human gate. `backpass apply` is the only command that writes to the repo.
@@ -16,16 +16,16 @@ export async function cmdApply(ctx) {
   const proposal = config.state.readProposal();
 
   if (!proposal) {
-    throw new UserError('no proposal to apply', 'run `backpass` first to produce one');
+    throw new UserError("no proposal to apply", "run `backpass` first to produce one");
   }
   if (proposal.violations?.length) {
     throw new UserError(
-      'the saved proposal failed its mechanical gates and was never approved for apply',
-      'run `backpass propose` again',
+      "the saved proposal failed its mechanical gates and was never approved for apply",
+      "run `backpass propose` again",
     );
   }
   if (!proposal.edits.length) {
-    out('The last run proposed no edits. Nothing to apply.');
+    out("The last run proposed no edits. Nothing to apply.");
     return 0;
   }
 
@@ -33,22 +33,22 @@ export async function cmdApply(ctx) {
   let decisions;
   let surfaceFile = null;
 
-  if (ctx.flags['no-ui']) {
+  if (ctx.flags["no-ui"]) {
     decisions = await reviewInTerminal(proposal);
   } else {
     surfaceFile = renderApplySurface(proposal, config.state, ctx.version);
     const url = await openApplySurface(surfaceFile);
-    info(`${color.cyan('·')} review surface: ${url || surfaceFile}`);
+    info(`${color.cyan("·")} review surface: ${url || surfaceFile}`);
     decisions = await pollDecisions(surfaceFile, editIds);
   }
 
   if (!decisions) {
-    out('No decisions received - nothing was written.');
+    out("No decisions received - nothing was written.");
     return 0;
   }
 
   // Anything the reviewer never touched stays untouched.
-  for (const id of editIds) if (!decisions[id]) decisions[id] = 'skipped';
+  for (const id of editIds) if (!decisions[id]) decisions[id] = "skipped";
 
   const results = applyDecisions({
     proposal,
@@ -56,7 +56,7 @@ export async function cmdApply(ctx) {
     repo,
     state: config.state,
     config,
-    dryRun: Boolean(ctx.flags['dry-run']),
+    dryRun: Boolean(ctx.flags["dry-run"]),
   });
 
   if (surfaceFile) await closeApplySurface(surfaceFile);
@@ -66,12 +66,12 @@ export async function cmdApply(ctx) {
     return results.failed.length ? 1 : 0;
   }
 
-  out('');
-  const prefix = ctx.flags['dry-run'] ? color.yellow('[dry-run] ') : '';
+  out("");
+  const prefix = ctx.flags["dry-run"] ? color.yellow("[dry-run] ") : "";
   out(`${prefix}${results.accepted} accepted · ${results.rejected} rejected`);
 
   for (const written of results.written) {
-    out(`  ${color.green('wrote')} ${written.file} (${written.edits.join(', ')})`);
+    out(`  ${color.green("wrote")} ${written.file} (${written.edits.join(", ")})`);
     if (written.budget) {
       out(
         `    budget ${budgetBar(written.budget)} ${formatTokens(written.budget.current)} -> ` +
@@ -79,15 +79,15 @@ export async function cmdApply(ctx) {
       );
     }
   }
-  for (const skill of results.skills) out(`  ${color.green('wrote')} ${skill.path} (new skill)`);
+  for (const skill of results.skills) out(`  ${color.green("wrote")} ${skill.path} (new skill)`);
   for (const failure of results.failed) {
-    out(`  ${color.red('failed')} ${failure.file}${failure.edit ? ` (${failure.edit})` : ''}: ${failure.error}`);
+    out(`  ${color.red("failed")} ${failure.file}${failure.edit ? ` (${failure.edit})` : ""}: ${failure.error}`);
   }
 
   if (results.rejected) {
-    out(color.dim('  rejections recorded - they will not be re-proposed without new evidence'));
+    out(color.dim("  rejections recorded - they will not be re-proposed without new evidence"));
   }
-  if (!results.written.length && !results.skills.length) out('  nothing written');
+  if (!results.written.length && !results.skills.length) out("  nothing written");
 
   return results.failed.length ? 1 : 0;
 }

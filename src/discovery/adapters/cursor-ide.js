@@ -1,9 +1,9 @@
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
-import { readJsonFile } from './shared.js';
-import { openReadOnly, safeJsonParse } from './sqlite.js';
+import { readJsonFile } from "./shared.js";
+import { openReadOnly, safeJsonParse } from "./sqlite.js";
 
 /**
  * Cursor IDE - DEFERRED TO v1.1 (captain decision 3).
@@ -24,29 +24,29 @@ import { openReadOnly, safeJsonParse } from './sqlite.js';
  * link exists across Cursor versions (and add Linux/Windows globalStorage paths).
  */
 
-export const name = 'cursor-ide';
+export const name = "cursor-ide";
 export const sqliteBacked = true;
 export const experimental = true;
 
 export function storeRoot() {
-  if (process.platform === 'darwin') {
-    return path.join(os.homedir(), 'Library', 'Application Support', 'Cursor', 'User');
+  if (process.platform === "darwin") {
+    return path.join(os.homedir(), "Library", "Application Support", "Cursor", "User");
   }
-  if (process.platform === 'win32') {
-    return path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'Cursor', 'User');
+  if (process.platform === "win32") {
+    return path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "Cursor", "User");
   }
-  return path.join(os.homedir(), '.config', 'Cursor', 'User');
+  return path.join(os.homedir(), ".config", "Cursor", "User");
 }
 
 function globalDbPath() {
-  return path.join(storeRoot(), 'globalStorage', 'state.vscdb');
+  return path.join(storeRoot(), "globalStorage", "state.vscdb");
 }
 
 /** workspaceId -> folder path, read from workspaceStorage/<id>/workspace.json. */
 function workspaceFolders() {
-  const dir = path.join(storeRoot(), 'workspaceStorage');
+  const dir = path.join(storeRoot(), "workspaceStorage");
   const map = new Map();
-  let entries = [];
+  let entries;
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
   } catch {
@@ -54,10 +54,10 @@ function workspaceFolders() {
   }
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
-    const meta = readJsonFile(path.join(dir, entry.name, 'workspace.json'));
+    const meta = readJsonFile(path.join(dir, entry.name, "workspace.json"));
     const folder = meta?.folder;
-    if (typeof folder !== 'string') continue;
-    map.set(entry.name, decodeURIComponent(folder.replace(/^file:\/\//, '')));
+    if (typeof folder !== "string") continue;
+    map.set(entry.name, decodeURIComponent(folder.replace(/^file:\/\//, "")));
   }
   return map;
 }
@@ -70,7 +70,7 @@ export async function discover({ cutoffMs }) {
     const folders = workspaceFolders();
     let headers = [];
     try {
-      headers = db.prepare('SELECT composerId, workspaceId FROM composerHeaders').all();
+      headers = db.prepare("SELECT composerId, workspaceId FROM composerHeaders").all();
     } catch {
       // Older/newer Cursor builds may not have this table at all.
       return [];
@@ -80,9 +80,7 @@ export async function discover({ cutoffMs }) {
     for (const header of headers) {
       const cwd = header.workspaceId ? folders.get(header.workspaceId) : null;
       if (!cwd) continue; // No usable repo link - the deferral in one line.
-      const row = db
-        .prepare('SELECT value FROM cursorDiskKV WHERE key = ?')
-        .get(`composerData:${header.composerId}`);
+      const row = db.prepare("SELECT value FROM cursorDiskKV WHERE key = ?").get(`composerData:${header.composerId}`);
       const data = row ? safeJsonParse(row.value) : null;
       const updatedAt = data?.lastUpdatedAt || data?.createdAt || 0;
       if (cutoffMs && updatedAt && updatedAt < cutoffMs) continue;
@@ -114,16 +112,16 @@ export async function read(ref) {
   try {
     const composerId = ref.extra?.composerId || ref.id;
     const rows = db
-      .prepare('SELECT key, value FROM cursorDiskKV WHERE key LIKE ? ORDER BY key')
+      .prepare("SELECT key, value FROM cursorDiskKV WHERE key LIKE ? ORDER BY key")
       .all(`bubbleId:${composerId}:%`);
 
     const events = [];
     for (const row of rows) {
       const bubble = safeJsonParse(row.value);
       if (!bubble) continue;
-      const role = bubble.type === 1 ? 'user' : 'assistant';
-      const text = bubble.text || bubble.richText || '';
-      if (typeof text === 'string' && text.trim()) events.push({ kind: 'message', role, text });
+      const role = bubble.type === 1 ? "user" : "assistant";
+      const text = bubble.text || bubble.richText || "";
+      if (typeof text === "string" && text.trim()) events.push({ kind: "message", role, text });
     }
     return { events, model: null };
   } finally {

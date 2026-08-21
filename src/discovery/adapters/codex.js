@@ -1,5 +1,5 @@
-import fs from 'node:fs';
-import path from 'node:path';
+import fs from "node:fs";
+import path from "node:path";
 
 import {
   attachToolResults,
@@ -9,7 +9,7 @@ import {
   readHeadLines,
   readJsonl,
   statOrNull,
-} from './shared.js';
+} from "./shared.js";
 
 /**
  * Codex: ~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl
@@ -20,13 +20,16 @@ import {
  * a working machine), so discovery reads only line 1 and leans on the scan cache.
  */
 
-export const name = 'codex';
+export const name = "codex";
 
 export function storeRoot() {
-  return home('.codex', 'sessions');
+  return home(".codex", "sessions");
 }
 
-/** Walk the YYYY/MM/DD shards, skipping whole day directories outside the time window. */
+/**
+ * Walk the YYYY/MM/DD shards, skipping whole day directories outside the time window.
+ * @param {{ cutoffMs?: number }} [options]
+ */
 export function enumerate({ cutoffMs } = {}) {
   const root = storeRoot();
   const out = [];
@@ -43,7 +46,7 @@ export function enumerate({ cutoffMs } = {}) {
           continue;
         }
         for (const entry of files) {
-          if (!entry.isFile() || !entry.name.startsWith('rollout-') || !entry.name.endsWith('.jsonl')) continue;
+          if (!entry.isFile() || !entry.name.startsWith("rollout-") || !entry.name.endsWith(".jsonl")) continue;
           const file = path.join(day, entry.name);
           const stat = statOrNull(file);
           if (!stat) continue;
@@ -80,11 +83,11 @@ function dayIsBefore(root, dayDir, cutoffMs) {
 export function classify(candidate) {
   const [first] = readHeadLines(candidate.path, 1);
   const entry = first && parseJsonLine(first);
-  if (!entry || entry.type !== 'session_meta') return null;
+  if (!entry || entry.type !== "session_meta") return null;
   const payload = entry.payload || {};
   const git = payload.git || {};
   return {
-    id: payload.session_id || payload.id || path.basename(candidate.path, '.jsonl'),
+    id: payload.session_id || payload.id || path.basename(candidate.path, ".jsonl"),
     cwd: payload.cwd || null,
     gitBranch: git.branch || null,
     remotes: git.repository_url ? [git.repository_url] : [],
@@ -99,33 +102,33 @@ export function read(ref) {
   let model = null;
 
   for (const entry of entries) {
-    if (entry.type === 'turn_context' && entry.payload?.model) {
+    if (entry.type === "turn_context" && entry.payload?.model) {
       model = model || entry.payload.model;
       continue;
     }
-    if (entry.type !== 'response_item') continue;
+    if (entry.type !== "response_item") continue;
     const payload = entry.payload || {};
 
     switch (payload.type) {
-      case 'message': {
+      case "message": {
         // `developer` messages are harness scaffolding, never user intent.
-        if (payload.role !== 'user' && payload.role !== 'assistant') break;
+        if (payload.role !== "user" && payload.role !== "assistant") break;
         contentToEvents(payload.role, payload.content, events);
         break;
       }
-      case 'function_call':
-      case 'custom_tool_call':
+      case "function_call":
+      case "custom_tool_call":
         events.push({
-          kind: 'tool',
+          kind: "tool",
           name: payload.name,
           input: parseMaybeJson(payload.arguments ?? payload.input),
           pendingId: payload.call_id,
         });
         break;
-      case 'function_call_output':
-      case 'custom_tool_call_output':
+      case "function_call_output":
+      case "custom_tool_call_output":
         events.push({
-          kind: 'tool-result',
+          kind: "tool-result",
           id: payload.call_id,
           result: flattenOutput(payload.output),
         });
@@ -139,7 +142,7 @@ export function read(ref) {
 }
 
 function parseMaybeJson(value) {
-  if (typeof value !== 'string') return value;
+  if (typeof value !== "string") return value;
   try {
     return JSON.parse(value);
   } catch {
@@ -148,12 +151,12 @@ function parseMaybeJson(value) {
 }
 
 function flattenOutput(output) {
-  if (typeof output === 'string') return output;
+  if (typeof output === "string") return output;
   if (Array.isArray(output)) {
     return output
-      .map((b) => (typeof b === 'string' ? b : b?.text ?? ''))
+      .map((b) => (typeof b === "string" ? b : (b?.text ?? "")))
       .filter(Boolean)
-      .join('\n');
+      .join("\n");
   }
   return output;
 }

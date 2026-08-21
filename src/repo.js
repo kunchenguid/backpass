@@ -1,11 +1,11 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import fs from "node:fs";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
 
-import { UserError } from './logger.js';
+import { UserError } from "./logger.js";
 
 function git(args, cwd) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
 }
 
 function realpathOrSelf(p) {
@@ -27,11 +27,11 @@ export function normalizeRemote(remote) {
   if (!remote) return null;
   let s = String(remote).trim();
   if (!s) return null;
-  s = s.replace(/^[a-z+]+:\/\//i, '');
-  s = s.replace(/^[^/@]+@/, '');
-  s = s.replace(/:(?=[^/])/, '/');
-  s = s.replace(/\.git\/?$/i, '');
-  s = s.replace(/\/+$/, '');
+  s = s.replace(/^[a-z+]+:\/\//i, "");
+  s = s.replace(/^[^/@]+@/, "");
+  s = s.replace(/:(?=[^/])/, "/");
+  s = s.replace(/\.git\/?$/i, "");
+  s = s.replace(/\/+$/, "");
   return s.toLowerCase() || null;
 }
 
@@ -39,27 +39,27 @@ export function normalizeRemote(remote) {
 function listWorktrees(root) {
   let raw;
   try {
-    raw = git(['worktree', 'list', '--porcelain'], root);
+    raw = git(["worktree", "list", "--porcelain"], root);
   } catch {
     return [realpathOrSelf(root)];
   }
   const paths = [];
-  for (const line of raw.split('\n')) {
-    if (line.startsWith('worktree ')) paths.push(realpathOrSelf(line.slice('worktree '.length)));
+  for (const line of raw.split("\n")) {
+    if (line.startsWith("worktree ")) paths.push(realpathOrSelf(line.slice("worktree ".length)));
   }
   if (!paths.length) paths.push(realpathOrSelf(root));
   return [...new Set(paths)];
 }
 
 function listRemotes(root) {
-  let raw = '';
+  let raw;
   try {
-    raw = git(['remote', '-v'], root);
+    raw = git(["remote", "-v"], root);
   } catch {
     return [];
   }
   const out = new Set();
-  for (const line of raw.split('\n')) {
+  for (const line of raw.split("\n")) {
     const url = line.split(/\s+/)[1];
     const norm = normalizeRemote(url);
     if (norm) out.add(norm);
@@ -74,9 +74,9 @@ function listRemotes(root) {
 export function resolveRepo(cwd = process.cwd()) {
   let root;
   try {
-    root = git(['rev-parse', '--show-toplevel'], cwd);
+    root = git(["rev-parse", "--show-toplevel"], cwd);
   } catch {
-    throw new UserError('not inside a git repository', 'backpass runs per-repo; cd into a repo and retry');
+    throw new UserError("not inside a git repository", "backpass runs per-repo; cd into a repo and retry");
   }
   const realRoot = realpathOrSelf(root);
   return {

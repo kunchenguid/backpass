@@ -1,18 +1,18 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import os from 'node:os';
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
 
 /** Read at most `maxLines` lines (or `maxBytes`) from the head of a file. */
 export function readHeadLines(file, maxLines = 1, maxBytes = 512 * 1024) {
   let fd;
   try {
-    fd = fs.openSync(file, 'r');
+    fd = fs.openSync(file, "r");
     const size = fs.fstatSync(fd).size;
     const length = Math.min(size, maxBytes);
     const buffer = Buffer.alloc(length);
     fs.readSync(fd, buffer, 0, length, 0);
-    const text = buffer.toString('utf8');
-    const lines = text.split('\n');
+    const text = buffer.toString("utf8");
+    const lines = text.split("\n");
     // A final partial line is only safe to use when we read the whole file.
     if (length < size) lines.pop();
     return lines.filter((l) => l.trim()).slice(0, maxLines);
@@ -33,7 +33,7 @@ export function parseJsonLine(line) {
 
 export function readJsonFile(file) {
   try {
-    return JSON.parse(fs.readFileSync(file, 'utf8'));
+    return JSON.parse(fs.readFileSync(file, "utf8"));
   } catch {
     return null;
   }
@@ -45,20 +45,20 @@ export function readJsonl(file, { maxBytes = 64 * 1024 * 1024 } = {}) {
     const stat = fs.statSync(file);
     if (stat.size > maxBytes) {
       // Very large sessions are read tail-first: recent turns carry the loss signal.
-      const fd = fs.openSync(file, 'r');
+      const fd = fs.openSync(file, "r");
       const buffer = Buffer.alloc(maxBytes);
       fs.readSync(fd, buffer, 0, maxBytes, stat.size - maxBytes);
       fs.closeSync(fd);
-      text = buffer.toString('utf8');
-      text = text.slice(text.indexOf('\n') + 1);
+      text = buffer.toString("utf8");
+      text = text.slice(text.indexOf("\n") + 1);
     } else {
-      text = fs.readFileSync(file, 'utf8');
+      text = fs.readFileSync(file, "utf8");
     }
   } catch {
     return [];
   }
   const out = [];
-  for (const line of text.split('\n')) {
+  for (const line of text.split("\n")) {
     if (!line.trim()) continue;
     const value = parseJsonLine(line);
     if (value) out.push(value);
@@ -108,55 +108,55 @@ export function home(...segments) {
  */
 export function contentToEvents(role, content, events) {
   if (content === null || content === undefined) return;
-  if (typeof content === 'string') {
-    if (content.trim()) events.push({ kind: 'message', role, text: content });
+  if (typeof content === "string") {
+    if (content.trim()) events.push({ kind: "message", role, text: content });
     return;
   }
   if (!Array.isArray(content)) {
-    if (typeof content.text === 'string') events.push({ kind: 'message', role, text: content.text });
+    if (typeof content.text === "string") events.push({ kind: "message", role, text: content.text });
     return;
   }
   const texts = [];
   for (const block of content) {
-    if (!block || typeof block !== 'object') {
-      if (typeof block === 'string') texts.push(block);
+    if (!block || typeof block !== "object") {
+      if (typeof block === "string") texts.push(block);
       continue;
     }
     switch (block.type) {
-      case 'text':
-      case 'input_text':
-      case 'output_text':
+      case "text":
+      case "input_text":
+      case "output_text":
         if (block.text) texts.push(block.text);
         break;
-      case 'tool_use':
-      case 'toolCall':
+      case "tool_use":
+      case "toolCall":
         events.push({
-          kind: 'tool',
+          kind: "tool",
           name: block.name,
           input: block.input ?? block.arguments,
           pendingId: block.id ?? block.call_id,
         });
         break;
-      case 'tool_result':
-      case 'toolResult':
+      case "tool_result":
+      case "toolResult":
         events.push({
-          kind: 'tool-result',
+          kind: "tool-result",
           id: block.tool_use_id ?? block.id,
           result: block.content ?? block.output ?? block.text,
-          status: block.is_error ? 'error' : 'completed',
+          status: block.is_error ? "error" : "completed",
         });
         break;
-      case 'thinking':
-      case 'reasoning':
+      case "thinking":
+      case "reasoning":
         break;
       default:
-        if (typeof block.text === 'string') texts.push(block.text);
+        if (typeof block.text === "string") texts.push(block.text);
         break;
     }
   }
   if (texts.length) {
-    const joined = texts.join('\n').trim();
-    if (joined) events.push({ kind: 'message', role, text: joined });
+    const joined = texts.join("\n").trim();
+    if (joined) events.push({ kind: "message", role, text: joined });
   }
 }
 
@@ -168,19 +168,19 @@ export function attachToolResults(events) {
   const out = [];
   const byId = new Map();
   for (const event of events) {
-    if (event.kind === 'tool') {
+    if (event.kind === "tool") {
       out.push(event);
       if (event.pendingId) byId.set(event.pendingId, event);
       continue;
     }
-    if (event.kind === 'tool-result') {
+    if (event.kind === "tool-result") {
       const target = event.id && byId.get(event.id);
       if (target) {
         target.result = event.result;
         target.status = event.status;
       } else {
         // Orphan result (truncated log, or a harness that does not correlate ids).
-        const last = [...out].reverse().find((e) => e.kind === 'tool' && e.result === undefined);
+        const last = [...out].reverse().find((e) => e.kind === "tool" && e.result === undefined);
         if (last) {
           last.result = event.result;
           last.status = event.status;

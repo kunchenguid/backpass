@@ -1,11 +1,11 @@
-import { foldEvidence } from '../fold.js';
-import { synthesizeProposal } from '../synthesize.js';
-import { ProposalViolation } from '../proposal.js';
-import { UserError, color, info, json, out } from '../logger.js';
-import { budgetBar, formatTokens } from '../tokens.js';
-import { formatUsage, sumUsage } from '../acpx.js';
-import { primaryMemoryFile } from './analyze.js';
-import { discoverForRun } from './scan.js';
+import { foldEvidence } from "../fold.js";
+import { synthesizeProposal } from "../synthesize.js";
+import { ProposalViolation } from "../proposal.js";
+import { UserError, color, info, json, out } from "../logger.js";
+import { budgetBar, formatTokens } from "../tokens.js";
+import { formatUsage, sumUsage } from "../acpx.js";
+import { primaryMemoryFile } from "./analyze.js";
+import { discoverForRun } from "./scan.js";
 
 export async function foldForRun(ctx, memoryFile) {
   const evidence = ctx.config.state.listEvidence();
@@ -26,8 +26,8 @@ export async function runProposal(ctx, precomputed = null) {
 
   if (!summary.analyzedSessions) {
     throw new UserError(
-      'no analyzed transcripts to synthesize from',
-      'run `backpass analyze` first, or `backpass` for the full pass',
+      "no analyzed transcripts to synthesize from",
+      "run `backpass analyze` first, or `backpass` for the full pass",
     );
   }
 
@@ -44,44 +44,44 @@ export async function runProposal(ctx, precomputed = null) {
 }
 
 export function printProposal(proposal) {
-  out('');
+  out("");
   out(
-    `${color.bold('proposal')} · ${proposal.repo.name} · ${proposal.memoryFile.path} · ` +
+    `${color.bold("proposal")} · ${proposal.repo.name} · ${proposal.memoryFile.path} · ` +
       `${proposal.edits.length} edit(s) from ${proposal.stats.transcripts} session(s)`,
   );
   out(
     `  budget ${budgetBar(proposal.budget)} ${formatTokens(proposal.budget.current)} -> ` +
       `${formatTokens(proposal.budget.projected)} / ${formatTokens(proposal.budget.capTokens)} tok` +
-      (proposal.budget.mode === 'shrink'
+      (proposal.budget.mode === "shrink"
         ? color.dim(`  [shrink plan: ${formatTokens(proposal.budget.over)} still over]`)
-        : ''),
+        : ""),
   );
   out(
     `  evidence: ${proposal.stats.positive} positive · ${proposal.stats.negative} negative · ` +
       `${proposal.stats.gapClusters} gap clusters`,
   );
-  out('');
+  out("");
 
   if (!proposal.edits.length) {
-    out('  no edits proposed - the evidence did not clear the thresholds this run');
+    out("  no edits proposed - the evidence did not clear the thresholds this run");
   }
 
   for (const edit of proposal.edits) {
-    const kind = edit.kind === 'extract' ? 'EXTRACT' : edit.kind.toUpperCase();
+    const kind = edit.kind === "extract" ? "EXTRACT" : edit.kind.toUpperCase();
     const delta = edit.deltaTokens || 0;
     out(
       `  ${color.cyan(edit.id)} ${kind.padEnd(8)} ${edit.title} ` +
-        color.dim(`(${delta > 0 ? '+' : ''}${delta} tok, ${edit.transcripts} transcript(s))`),
+        color.dim(`(${delta > 0 ? "+" : ""}${delta} tok, ${edit.transcripts} transcript(s))`),
     );
   }
 
   for (const note of proposal.notes || []) out(color.dim(`  note: ${note}`));
 
   const usage = sumUsage(proposal.usage || []);
-  out('');
+  out("");
   out(color.dim(`  tier-2 tokens: ${formatUsage(usage)}`));
-  out('');
-  out('Review and apply with `backpass apply` (nothing has been written).');
+  out("");
+  out("Review and apply with `backpass apply` (nothing has been written).");
 }
 
 export async function cmdPropose(ctx) {
@@ -96,11 +96,11 @@ export async function cmdPropose(ctx) {
   } catch (err) {
     if (err instanceof ProposalViolation) {
       // Loud failure, never silent truncation (design section 6).
-      info('');
-      for (const violation of err.violations) info(`  ${color.red('x')} ${violation}`);
-      info('');
+      info("");
+      for (const violation of err.violations) info(`  ${color.red("x")} ${violation}`);
+      info("");
       info(color.dim(`  the rejected proposal was saved to ${ctx.config.state.proposalPath}`));
-      throw new UserError(err.message, 'try a stronger synthesis model, or raise --budget / --max-edits');
+      throw new UserError(err.message, "try a stronger synthesis model, or raise --budget / --max-edits");
     }
     throw err;
   }

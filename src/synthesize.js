@@ -1,14 +1,14 @@
-import fs from 'node:fs';
-import path from 'node:path';
+import fs from "node:fs";
+import path from "node:path";
 
-import { extractJson, sessionPrompt } from './acpx.js';
-import { renderEvidenceForPrompt } from './fold.js';
-import { renderInstructionIndex } from './memory.js';
-import { renderPrompt } from './prompts.js';
-import { buildProposal, ProposalViolation } from './proposal.js';
-import { loadSkills, renderSkillIndex, resolveOverflowTarget } from './skills.js';
-import { isSuppressedByRejection } from './state.js';
-import { color, info, warn } from './logger.js';
+import { extractJson, sessionPrompt } from "./acpx.js";
+import { renderEvidenceForPrompt } from "./fold.js";
+import { renderInstructionIndex } from "./memory.js";
+import { renderPrompt } from "./prompts.js";
+import { buildProposal, ProposalViolation } from "./proposal.js";
+import { loadSkills, renderSkillIndex, resolveOverflowTarget } from "./skills.js";
+import { isSuppressedByRejection } from "./state.js";
+import { color, info, warn } from "./logger.js";
 
 /**
  * Stage 3 of the pipeline (design section 3): one big high-reasoning call that turns
@@ -45,17 +45,20 @@ function budgetRule(memoryFile, config) {
 
 function budgetState(memoryFile, config) {
   const ratio = memoryFile.tokens / config.budgetTokens;
-  if (ratio > 1) return 'OVER BUDGET';
-  if (ratio > 0.85) return 'near budget';
-  return 'within budget';
+  if (ratio > 1) return "OVER BUDGET";
+  if (ratio > 0.85) return "near budget";
+  return "within budget";
 }
 
 function renderRejections(rejections) {
   const entries = Object.values(rejections.entries || {});
-  if (!entries.length) return '(none)';
+  if (!entries.length) return "(none)";
   return entries
-    .map((e) => `- [${e.kind}] ${e.title} (rejected ${e.rejectedAt.slice(0, 10)} with ${e.transcripts} session(s) of evidence)`)
-    .join('\n');
+    .map(
+      (e) =>
+        `- [${e.kind}] ${e.title} (rejected ${e.rejectedAt.slice(0, 10)} with ${e.transcripts} session(s) of evidence)`,
+    )
+    .join("\n");
 }
 
 function harnessCountsOf(transcripts) {
@@ -74,9 +77,10 @@ export async function synthesizeProposal({ memoryFile, summary, config, repo, tr
   const values = {
     REPO_NAME: repo.name,
     TRANSCRIPT_COUNT: String(summary.analyzedSessions),
-    HARNESS_SUMMARY: Object.entries(harnessCounts)
-      .map(([h, n]) => `${h} ${n}`)
-      .join(' · ') || 'none',
+    HARNESS_SUMMARY:
+      Object.entries(harnessCounts)
+        .map(([h, n]) => `${h} ${n}`)
+        .join(" · ") || "none",
     MEMORY_PATH: memoryFile.path,
     CURRENT_TOKENS: String(memoryFile.tokens),
     BUDGET_TOKENS: String(config.budgetTokens),
@@ -102,10 +106,10 @@ export async function synthesizeProposal({ memoryFile, summary, config, repo, tr
     skillFiles,
   };
 
-  const promptDir = path.join(state.root, 'prompts');
+  const promptDir = path.join(state.root, "prompts");
   fs.mkdirSync(promptDir, { recursive: true });
 
-  let prompt = renderPrompt('synthesis', values);
+  let prompt = renderPrompt("synthesis", values);
   const usage = [];
   const notes = [];
   let lastViolations = [];
@@ -115,10 +119,10 @@ export async function synthesizeProposal({ memoryFile, summary, config, repo, tr
     fs.writeFileSync(promptFile, prompt);
 
     info(
-      `${color.cyan('·')} synthesizing with ${config.synthesis.agent}` +
-        `${config.synthesis.model ? ` (${config.synthesis.model})` : ''}` +
-        `${config.synthesis.effort ? ` effort=${config.synthesis.effort}` : ''}` +
-        `${attempt > 1 ? ' [re-prompt]' : ''}`,
+      `${color.cyan("·")} synthesizing with ${config.synthesis.agent}` +
+        `${config.synthesis.model ? ` (${config.synthesis.model})` : ""}` +
+        `${config.synthesis.effort ? ` effort=${config.synthesis.effort}` : ""}` +
+        `${attempt > 1 ? " [re-prompt]" : ""}`,
     );
 
     const result = await sessionPrompt({
@@ -141,7 +145,7 @@ export async function synthesizeProposal({ memoryFile, summary, config, repo, tr
 
     const parsed = extractJson(result.text);
     if (!parsed) {
-      lastViolations = ['synthesis returned no parseable JSON object'];
+      lastViolations = ["synthesis returned no parseable JSON object"];
     } else {
       const { proposal, violations } = buildProposal(parsed, context);
       if (!violations.length) {
@@ -161,9 +165,9 @@ export async function synthesizeProposal({ memoryFile, summary, config, repo, tr
 
     if (attempt === 1) {
       warn(`synthesis violated ${lastViolations.length} gate(s); re-prompting once with the exact violations`);
-      prompt = `${renderPrompt('synthesis', values)}\n\n## Your previous answer was rejected\n\nIt violated these hard rules. Fix every one of them and return the corrected JSON object only.\n\n${lastViolations
+      prompt = `${renderPrompt("synthesis", values)}\n\n## Your previous answer was rejected\n\nIt violated these hard rules. Fix every one of them and return the corrected JSON object only.\n\n${lastViolations
         .map((v) => `- ${v}`)
-        .join('\n')}\n`;
+        .join("\n")}\n`;
     }
   }
 

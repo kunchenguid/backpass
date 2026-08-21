@@ -11,7 +11,7 @@ const BYTES_PER_TOKEN = 4;
 
 export function estimateTokens(text) {
   if (!text) return 0;
-  return Math.ceil(Buffer.byteLength(text, 'utf8') / BYTES_PER_TOKEN);
+  return Math.ceil(Buffer.byteLength(text, "utf8") / BYTES_PER_TOKEN);
 }
 
 export function estimateTokensFromBytes(bytes) {
@@ -19,7 +19,7 @@ export function estimateTokensFromBytes(bytes) {
 }
 
 export function formatTokens(n) {
-  return n.toLocaleString('en-US');
+  return n.toLocaleString("en-US");
 }
 
 /**
@@ -44,5 +44,5 @@ export function budgetStatus(currentText, projectedText, capTokens) {
 export function budgetBar(status, width = 32) {
   const filled = Math.min(width, Math.round(status.utilization * width));
   const overflow = status.withinBudget ? 0 : Math.min(width - filled, 2);
-  return `[${'#'.repeat(filled)}${'!'.repeat(overflow)}${'.'.repeat(Math.max(0, width - filled - overflow))}]`;
+  return `[${"#".repeat(filled)}${"!".repeat(overflow)}${".".repeat(Math.max(0, width - filled - overflow))}]`;
 }

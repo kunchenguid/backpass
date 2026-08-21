@@ -1,14 +1,14 @@
-import * as claude from './adapters/claude.js';
-import * as codex from './adapters/codex.js';
-import * as pi from './adapters/pi.js';
-import * as grok from './adapters/grok.js';
-import * as opencode from './adapters/opencode.js';
-import * as cursorCli from './adapters/cursor-cli.js';
-import * as cursorIde from './adapters/cursor-ide.js';
+import * as claude from "./adapters/claude.js";
+import * as codex from "./adapters/codex.js";
+import * as pi from "./adapters/pi.js";
+import * as grok from "./adapters/grok.js";
+import * as opencode from "./adapters/opencode.js";
+import * as cursorCli from "./adapters/cursor-cli.js";
+import * as cursorIde from "./adapters/cursor-ide.js";
 
-import { associate, passesStrict } from './association.js';
-import { sinceCutoff } from '../config.js';
-import { warn } from '../logger.js';
+import { associate, passesStrict } from "./association.js";
+import { sinceCutoff } from "../config.js";
+import { warn } from "../logger.js";
 
 export const ADAPTERS = {
   claude,
@@ -17,7 +17,7 @@ export const ADAPTERS = {
   grok,
   opencode,
   cursor: cursorCli,
-  'cursor-ide': cursorIde,
+  "cursor-ide": cursorIde,
 };
 
 export function getAdapter(harness) {
@@ -60,7 +60,17 @@ export async function discoverTranscripts({ repo, config, strict = false, harnes
     try {
       const found = adapter.discover
         ? await discoverDirect(adapter, { repo, config, cutoffMs, strict, stats })
-        : discoverFiles(adapter, { repo, config, cutoffMs, strict, stats, cache, markDirty: () => { cacheDirty = true; } });
+        : discoverFiles(adapter, {
+            repo,
+            config,
+            cutoffMs,
+            strict,
+            stats,
+            cache,
+            markDirty: () => {
+              cacheDirty = true;
+            },
+          });
       transcripts.push(...found);
       stats.matched = found.length;
     } catch (err) {
@@ -80,11 +90,9 @@ async function discoverDirect(adapter, { repo, config, cutoffMs, strict, stats }
   const out = [];
   for (const row of rows) {
     stats.scanned += 1;
-    const association = associate(
-      { cwd: row.cwd, remotes: row.remotes || [], gitRoot: row.gitRoot },
-      repo,
-      { worktreeGlobs: config.discovery.worktreeGlobs },
-    );
+    const association = associate({ cwd: row.cwd, remotes: row.remotes || [], gitRoot: row.gitRoot }, repo, {
+      worktreeGlobs: config.discovery.worktreeGlobs,
+    });
     if (!passesStrict(association, strict)) {
       stats.skipped += 1;
       continue;

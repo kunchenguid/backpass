@@ -1,56 +1,57 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { parseArgs } from 'node:util';
-import { fileURLToPath } from 'node:url';
+import fs from "node:fs";
+import path from "node:path";
+import { parseArgs } from "node:util";
+import { fileURLToPath } from "node:url";
 
-import { UserError, fail, setQuiet } from './logger.js';
-import { loadConfig } from './config.js';
-import { resolveRepo } from './repo.js';
-import { State } from './state.js';
+import { UserError, fail, setQuiet } from "./logger.js";
+import { loadConfig } from "./config.js";
+import { resolveRepo } from "./repo.js";
+import { State } from "./state.js";
 
-import { cmdInit } from './commands/init.js';
-import { cmdScan } from './commands/scan.js';
-import { cmdAnalyze } from './commands/analyze.js';
-import { cmdPropose } from './commands/propose.js';
-import { cmdApply } from './commands/apply.js';
-import { cmdStatus } from './commands/status.js';
-import { cmdRun } from './commands/run.js';
+import { cmdInit } from "./commands/init.js";
+import { cmdScan } from "./commands/scan.js";
+import { cmdAnalyze } from "./commands/analyze.js";
+import { cmdPropose } from "./commands/propose.js";
+import { cmdApply } from "./commands/apply.js";
+import { cmdStatus } from "./commands/status.js";
+import { cmdRun } from "./commands/run.js";
 
 const PKG = JSON.parse(
-  fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8'),
+  fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf8"),
 );
 
 export const VERSION = PKG.version;
 
+/** @type {import("node:util").ParseArgsOptionsConfig} */
 const OPTIONS = {
-  help: { type: 'boolean', short: 'h' },
-  version: { type: 'boolean', short: 'v' },
-  quiet: { type: 'boolean', short: 'q' },
-  json: { type: 'boolean' },
+  help: { type: "boolean", short: "h" },
+  version: { type: "boolean", short: "v" },
+  quiet: { type: "boolean", short: "q" },
+  json: { type: "boolean" },
 
-  since: { type: 'string' },
-  harness: { type: 'string' },
-  jobs: { type: 'string' },
-  strict: { type: 'boolean' },
-  'include-cursor-ide': { type: 'boolean' },
+  since: { type: "string" },
+  harness: { type: "string" },
+  jobs: { type: "string" },
+  strict: { type: "boolean" },
+  "include-cursor-ide": { type: "boolean" },
 
-  budget: { type: 'string' },
-  'max-edits': { type: 'string' },
-  'min-gap-evidence': { type: 'string' },
-  'memory-file': { type: 'string', multiple: true },
-  'skills-dir': { type: 'string' },
+  budget: { type: "string" },
+  "max-edits": { type: "string" },
+  "min-gap-evidence": { type: "string" },
+  "memory-file": { type: "string", multiple: true },
+  "skills-dir": { type: "string" },
 
-  'analysis-agent': { type: 'string' },
-  'analysis-model': { type: 'string' },
-  'analysis-effort': { type: 'string' },
-  'synthesis-agent': { type: 'string' },
-  'synthesis-model': { type: 'string' },
-  'synthesis-effort': { type: 'string' },
+  "analysis-agent": { type: "string" },
+  "analysis-model": { type: "string" },
+  "analysis-effort": { type: "string" },
+  "synthesis-agent": { type: "string" },
+  "synthesis-model": { type: "string" },
+  "synthesis-effort": { type: "string" },
 
-  'dry-run': { type: 'boolean' },
-  'no-ui': { type: 'boolean' },
-  force: { type: 'boolean' },
-  limit: { type: 'string' },
+  "dry-run": { type: "boolean" },
+  "no-ui": { type: "boolean" },
+  force: { type: "boolean" },
+  limit: { type: "string" },
 };
 
 const HELP = `backpass v${VERSION} - gradient descent for your agent memory
@@ -120,28 +121,28 @@ function overridesFrom(values) {
   if (values.since) overrides.discovery.since = values.since;
   if (values.harness) {
     overrides.discovery.harnesses = values.harness
-      .split(',')
+      .split(",")
       .map((h) => h.trim())
       .filter(Boolean);
   }
-  if (values['include-cursor-ide']) overrides.discovery.includeCursorIde = true;
-  if (values.jobs) overrides.jobs = toInt(values.jobs, '--jobs');
-  if (values.budget) overrides.budgetTokens = toInt(values.budget, '--budget');
-  if (values['max-edits']) overrides.maxEditsPerRun = toInt(values['max-edits'], '--max-edits');
-  if (values['min-gap-evidence']) {
-    overrides.minGapEvidence = toInt(values['min-gap-evidence'], '--min-gap-evidence');
+  if (values["include-cursor-ide"]) overrides.discovery.includeCursorIde = true;
+  if (values.jobs) overrides.jobs = toInt(values.jobs, "--jobs");
+  if (values.budget) overrides.budgetTokens = toInt(values.budget, "--budget");
+  if (values["max-edits"]) overrides.maxEditsPerRun = toInt(values["max-edits"], "--max-edits");
+  if (values["min-gap-evidence"]) {
+    overrides.minGapEvidence = toInt(values["min-gap-evidence"], "--min-gap-evidence");
   }
-  if (values['memory-file']?.length) overrides.memoryFiles = values['memory-file'];
-  if (values['skills-dir']) overrides.skillsDir = values['skills-dir'];
+  if (values["memory-file"]?.length) overrides.memoryFiles = values["memory-file"];
+  if (values["skills-dir"]) overrides.skillsDir = values["skills-dir"];
 
-  if (values['analysis-agent']) overrides.analysis.agent = values['analysis-agent'];
-  if (values['analysis-model']) overrides.analysis.model = values['analysis-model'];
-  if (values['analysis-effort']) overrides.analysis.effort = values['analysis-effort'];
-  if (values['synthesis-agent']) overrides.synthesis.agent = values['synthesis-agent'];
-  if (values['synthesis-model']) overrides.synthesis.model = values['synthesis-model'];
-  if (values['synthesis-effort']) overrides.synthesis.effort = values['synthesis-effort'];
+  if (values["analysis-agent"]) overrides.analysis.agent = values["analysis-agent"];
+  if (values["analysis-model"]) overrides.analysis.model = values["analysis-model"];
+  if (values["analysis-effort"]) overrides.analysis.effort = values["analysis-effort"];
+  if (values["synthesis-agent"]) overrides.synthesis.agent = values["synthesis-agent"];
+  if (values["synthesis-model"]) overrides.synthesis.model = values["synthesis-model"];
+  if (values["synthesis-effort"]) overrides.synthesis.effort = values["synthesis-effort"];
 
-  for (const key of ['discovery', 'analysis', 'synthesis']) {
+  for (const key of ["discovery", "analysis", "synthesis"]) {
     if (!Object.keys(overrides[key]).length) delete overrides[key];
   }
   return overrides;
@@ -169,7 +170,7 @@ export async function main(argv) {
     parsed = parseArgs({ args: argv, options: OPTIONS, allowPositionals: true, strict: true });
   } catch (err) {
     fail(err.message);
-    console.error('\nRun `backpass --help` for the full option list.');
+    console.error("\nRun `backpass --help` for the full option list.");
     return 2;
   }
 
@@ -185,11 +186,11 @@ export async function main(argv) {
   }
   setQuiet(values.quiet);
 
-  const commandName = positionals[0] || 'run';
+  const commandName = positionals[0] || "run";
   const command = COMMANDS[commandName];
   if (!command) {
     fail(`unknown command "${commandName}"`);
-    console.error('\nRun `backpass --help` for the command list.');
+    console.error("\nRun `backpass --help` for the command list.");
     return 2;
   }
 
@@ -205,7 +206,7 @@ export async function main(argv) {
       positionals: positionals.slice(1),
       version: VERSION,
       strict: Boolean(values.strict),
-      limit: values.limit ? toInt(values.limit, '--limit') : null,
+      limit: values.limit ? toInt(values.limit, "--limit") : null,
     };
 
     return (await command(ctx)) ?? 0;

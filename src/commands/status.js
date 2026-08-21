@@ -1,11 +1,11 @@
-import fs from 'node:fs';
-import path from 'node:path';
+import fs from "node:fs";
+import path from "node:path";
 
-import { color, json, out } from '../logger.js';
-import { loadMemoryFiles } from '../memory.js';
-import { loadSkills, resolveOverflowTarget } from '../skills.js';
-import { budgetBar, budgetStatus, formatTokens } from '../tokens.js';
-import { table } from './scan.js';
+import { color, json, out } from "../logger.js";
+import { loadMemoryFiles } from "../memory.js";
+import { loadSkills, resolveOverflowTarget } from "../skills.js";
+import { budgetBar, budgetStatus, formatTokens } from "../tokens.js";
+import { table } from "./scan.js";
 
 export async function cmdStatus(ctx) {
   const { repo, config } = ctx;
@@ -44,12 +44,12 @@ export async function cmdStatus(ctx) {
   }
 
   out(`${color.bold(repo.name)} ${color.dim(repo.root)}`);
-  out('');
+  out("");
 
-  out(color.dim('BUDGET (always-loaded)'));
-  if (!budgets.length) out('  no memory file found');
+  out(color.dim("BUDGET (always-loaded)"));
+  if (!budgets.length) out("  no memory file found");
   for (const b of budgets) {
-    const state_ = b.withinBudget ? '' : color.red(` ${b.over} OVER`);
+    const state_ = b.withinBudget ? "" : color.red(` ${b.over} OVER`);
     out(
       `  ${b.path.padEnd(14)} ${budgetBar(b)} ${formatTokens(b.current)} / ${formatTokens(b.capTokens)} tok` +
         ` · ${b.instructions} instructions${state_}`,
@@ -65,11 +65,13 @@ export async function cmdStatus(ctx) {
       ),
     );
   }
-  out('');
+  out("");
 
-  out(color.dim('CACHE'));
+  out(color.dim("CACHE"));
   out(`  scan cache      ${Object.keys(cache.entries).length} file(s) fingerprinted`);
-  out(`  evidence        ${counts.ok || 0} ok · ${counts.skipped || 0} skipped · ${color.red(String(counts.failed || 0))} failed`);
+  out(
+    `  evidence        ${counts.ok || 0} ok · ${counts.skipped || 0} skipped · ${color.red(String(counts.failed || 0))} failed`,
+  );
   if (summary) {
     out(
       `  folded          ${summary.analyzedSessions} session(s) · ${summary.totals.positive}+ ` +
@@ -77,35 +79,37 @@ export async function cmdStatus(ctx) {
     );
   }
   out(`  rejections      ${Object.keys(rejections.entries).length} remembered`);
-  out('');
+  out("");
 
   if (counts.failed) {
-    out(color.dim('FAILED TRANSCRIPTS (retried on the next run)'));
-    const rows = [['HARNESS', 'SESSION', 'ERROR']];
-    for (const e of evidence.filter((x) => x.status === 'failed').slice(0, 10)) {
+    out(color.dim("FAILED TRANSCRIPTS (retried on the next run)"));
+    const rows = [["HARNESS", "SESSION", "ERROR"]];
+    for (const e of evidence.filter((x) => x.status === "failed").slice(0, 10)) {
       rows.push([e.transcript.harness, String(e.transcript.id).slice(-12), String(e.error).slice(0, 60)]);
     }
     out(table(rows));
-    out('');
+    out("");
   }
 
-  out(color.dim('PROPOSAL'));
+  out(color.dim("PROPOSAL"));
   if (!proposal) {
-    out('  none yet - run `backpass`');
+    out("  none yet - run `backpass`");
   } else {
     out(`  generated       ${proposal.generatedAt}`);
-    out(`  edits           ${proposal.edits.length}${proposal.violations?.length ? color.red(' (failed its gates)') : ''}`);
-    const surface = path.join(state.applyDir, 'apply.html');
+    out(
+      `  edits           ${proposal.edits.length}${proposal.violations?.length ? color.red(" (failed its gates)") : ""}`,
+    );
+    const surface = path.join(state.applyDir, "apply.html");
     if (fs.existsSync(surface)) out(color.dim(`  surface         ${surface}`));
-    if (!proposal.violations?.length && proposal.edits.length) out('  review with `backpass apply`');
+    if (!proposal.violations?.length && proposal.edits.length) out("  review with `backpass apply`");
   }
 
-  out('');
+  out("");
   out(
     color.dim(
-      `models: analysis ${config.analysis.agent}${config.analysis.model ? `/${config.analysis.model}` : ''} · ` +
-        `synthesis ${config.synthesis.agent}${config.synthesis.model ? `/${config.synthesis.model}` : ''}` +
-        `${config.synthesis.effort ? ` (effort ${config.synthesis.effort})` : ''}`,
+      `models: analysis ${config.analysis.agent}${config.analysis.model ? `/${config.analysis.model}` : ""} · ` +
+        `synthesis ${config.synthesis.agent}${config.synthesis.model ? `/${config.synthesis.model}` : ""}` +
+        `${config.synthesis.effort ? ` (effort ${config.synthesis.effort})` : ""}`,
     ),
   );
   return 0;

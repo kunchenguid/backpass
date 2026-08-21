@@ -1,9 +1,9 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import crypto from 'node:crypto';
+import fs from "node:fs";
+import path from "node:path";
+import crypto from "node:crypto";
 
-import { STATE_DIRNAME } from './config.js';
-import { warn } from './logger.js';
+import { STATE_DIRNAME } from "./config.js";
+import { warn } from "./logger.js";
 
 /**
  * All mutable run state lives in a gitignored `.backpass/` directory:
@@ -18,12 +18,12 @@ import { warn } from './logger.js';
 export class State {
   constructor(repoRoot) {
     this.root = path.join(repoRoot, STATE_DIRNAME);
-    this.evidenceDir = path.join(this.root, 'evidence');
-    this.applyDir = path.join(this.root, 'apply');
-    this.scanCachePath = path.join(this.root, 'scan-cache.json');
-    this.summaryPath = path.join(this.root, 'evidence-summary.json');
-    this.proposalPath = path.join(this.root, 'proposal.json');
-    this.rejectionsPath = path.join(this.root, 'rejections.json');
+    this.evidenceDir = path.join(this.root, "evidence");
+    this.applyDir = path.join(this.root, "apply");
+    this.scanCachePath = path.join(this.root, "scan-cache.json");
+    this.summaryPath = path.join(this.root, "evidence-summary.json");
+    this.proposalPath = path.join(this.root, "proposal.json");
+    this.rejectionsPath = path.join(this.root, "rejections.json");
   }
 
   ensure() {
@@ -35,7 +35,7 @@ export class State {
   readJsonFile(file, fallback) {
     if (!fs.existsSync(file)) return fallback;
     try {
-      return JSON.parse(fs.readFileSync(file, 'utf8'));
+      return JSON.parse(fs.readFileSync(file, "utf8"));
     } catch (err) {
       warn(`discarding corrupt state file ${path.relative(process.cwd(), file)}: ${err.message}`);
       return fallback;
@@ -74,7 +74,7 @@ export class State {
     if (!fs.existsSync(this.evidenceDir)) return [];
     return fs
       .readdirSync(this.evidenceDir)
-      .filter((f) => f.endsWith('.json'))
+      .filter((f) => f.endsWith(".json"))
       .map((f) => this.readJsonFile(path.join(this.evidenceDir, f), null))
       .filter(Boolean);
   }
@@ -106,11 +106,13 @@ export class State {
 }
 
 export function safeFileName(id) {
-  return String(id).replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120);
+  return String(id)
+    .replace(/[^A-Za-z0-9._-]/g, "_")
+    .slice(0, 120);
 }
 
 export function sha256(text) {
-  return crypto.createHash('sha256').update(text, 'utf8').digest('hex');
+  return crypto.createHash("sha256").update(text, "utf8").digest("hex");
 }
 
 /**
@@ -127,7 +129,7 @@ export function evidenceKey(transcript, memoryHash) {
  * (`minUserTurns`) rather than on the model - recomputing it costs one local file read.
  */
 export function isEvidenceFresh(evidence, transcript, memoryHash) {
-  if (!evidence || evidence.status !== 'ok') return false;
+  if (!evidence || evidence.status !== "ok") return false;
   return evidence.key === evidenceKey(transcript, memoryHash);
 }
 
@@ -137,7 +139,7 @@ export function isEvidenceFresh(evidence, transcript, memoryHash) {
  * backed by strictly more transcripts than when it was turned down.
  */
 export function rejectionKey(edit) {
-  return sha256([edit.kind, edit.file, edit.find || '', edit.replace || ''].join(' ')).slice(0, 16);
+  return sha256([edit.kind, edit.file, edit.find || "", edit.replace || ""].join(" ")).slice(0, 16);
 }
 
 export function isSuppressedByRejection(edit, rejections) {

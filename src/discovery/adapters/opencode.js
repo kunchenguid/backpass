@@ -1,7 +1,7 @@
-import path from 'node:path';
+import path from "node:path";
 
-import { home, listDirs, readJsonFile, statOrNull } from './shared.js';
-import { openReadOnly, safeJsonParse } from './sqlite.js';
+import { home, listDirs, readJsonFile, statOrNull } from "./shared.js";
+import { openReadOnly, safeJsonParse } from "./sqlite.js";
 
 /**
  * opencode: ~/.local/share/opencode/opencode.db (sqlite)
@@ -17,15 +17,15 @@ import { openReadOnly, safeJsonParse } from './sqlite.js';
  * handled as a fallback so long-lived machines still yield transcripts.
  */
 
-export const name = 'opencode';
+export const name = "opencode";
 export const sqliteBacked = true;
 
 export function storeRoot() {
-  return home('.local', 'share', 'opencode');
+  return home(".local", "share", "opencode");
 }
 
 export function dbPath() {
-  return path.join(storeRoot(), 'opencode.db');
+  return path.join(storeRoot(), "opencode.db");
 }
 
 /**
@@ -70,15 +70,15 @@ export async function discover({ cutoffMs }) {
 
 export async function read(ref) {
   const db = await openReadOnly(dbPath());
-  if (!db) return legacyRead(ref);
+  if (!db) return legacyRead();
 
   try {
     const sessionId = ref.extra?.sessionId || ref.id;
     const messages = db
-      .prepare('SELECT id, data FROM message WHERE session_id = ? ORDER BY time_created, id')
+      .prepare("SELECT id, data FROM message WHERE session_id = ? ORDER BY time_created, id")
       .all(sessionId);
     const parts = db
-      .prepare('SELECT message_id, data FROM part WHERE session_id = ? ORDER BY time_created, id')
+      .prepare("SELECT message_id, data FROM part WHERE session_id = ? ORDER BY time_created, id")
       .all(sessionId);
 
     const partsByMessage = new Map();
@@ -92,17 +92,17 @@ export async function read(ref) {
 
     for (const message of messages) {
       const data = safeJsonParse(message.data) || {};
-      const role = data.role === 'user' ? 'user' : 'assistant';
+      const role = data.role === "user" ? "user" : "assistant";
       model = model || data.modelID || data.model?.modelID || null;
 
       const texts = [];
       for (const part of partsByMessage.get(message.id) || []) {
         if (!part) continue;
-        if (part.type === 'text' && part.text) {
+        if (part.type === "text" && part.text) {
           texts.push(part.text);
-        } else if (part.type === 'tool') {
+        } else if (part.type === "tool") {
           events.push({
-            kind: 'tool',
+            kind: "tool",
             name: part.tool || part.name,
             input: part.state?.input ?? part.input,
             result: part.state?.output ?? part.output,
@@ -111,7 +111,7 @@ export async function read(ref) {
         }
         // reasoning / step-start / step-finish / patch / file parts carry no loss signal.
       }
-      if (texts.length) events.push({ kind: 'message', role, text: texts.join('\n') });
+      if (texts.length) events.push({ kind: "message", role, text: texts.join("\n") });
     }
 
     return { events, model };
@@ -122,10 +122,10 @@ export async function read(ref) {
 
 /** Pre-sqlite opencode kept JSON files under storage/. Best-effort, never fatal. */
 function legacyDiscover({ cutoffMs }) {
-  const projectsDir = path.join(storeRoot(), 'storage', 'project');
+  const projectsDir = path.join(storeRoot(), "storage", "project");
   const out = [];
   for (const dir of listDirs(projectsDir)) {
-    const meta = readJsonFile(path.join(dir, 'project.json'));
+    const meta = readJsonFile(path.join(dir, "project.json"));
     const stat = statOrNull(dir);
     if (!meta?.worktree || !stat) continue;
     if (cutoffMs && stat.mtimeMs < cutoffMs) continue;

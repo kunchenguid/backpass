@@ -1,8 +1,8 @@
-import fs from 'node:fs';
-import path from 'node:path';
+import fs from "node:fs";
+import path from "node:path";
 
-import { sha256 } from './state.js';
-import { estimateTokens } from './tokens.js';
+import { sha256 } from "./state.js";
+import { estimateTokens } from "./tokens.js";
 
 /**
  * Memory files are the weights. To talk about them precisely, backpass parses each
@@ -21,8 +21,8 @@ const FENCE = /^\s*(```|~~~)/;
 function normalizeForHash(text) {
   return text
     .toLowerCase()
-    .replace(/[`*_~]/g, '')
-    .replace(/\s+/g, ' ')
+    .replace(/[`*_~]/g, "")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
@@ -31,7 +31,7 @@ export function unitHash(text) {
 }
 
 function alias(index) {
-  return `AG-${String(index + 1).padStart(3, '0')}`;
+  return `AG-${String(index + 1).padStart(3, "0")}`;
 }
 
 /**
@@ -39,7 +39,7 @@ function alias(index) {
  * the paragraph they belong to rather than being split into nonsense lines.
  */
 export function parseMemoryUnits(text) {
-  const lines = text.split('\n');
+  const lines = text.split("\n");
   const units = [];
   const headings = [];
 
@@ -49,11 +49,11 @@ export function parseMemoryUnits(text) {
   let fenceMarker = null;
 
   const flush = (endLine) => {
-    const raw = buffer.join('\n');
+    const raw = buffer.join("\n");
     if (raw.trim()) {
       units.push({
-        text: raw.replace(/\s+$/, ''),
-        section: headings.join(' > '),
+        text: raw.replace(/\s+$/, ""),
+        section: headings.join(" > "),
         startLine: bufferStart + 1,
         endLine,
       });
@@ -88,12 +88,12 @@ export function parseMemoryUnits(text) {
       const depth = heading[1].length;
       headings.length = Math.min(headings.length, depth - 1);
       headings[depth - 1] = heading[2].trim();
-      for (let d = 0; d < depth - 1; d += 1) headings[d] = headings[d] ?? '';
+      for (let d = 0; d < depth - 1; d += 1) headings[d] = headings[d] ?? "";
       continue;
     }
 
     const isListItem = /^\s*([-*+]|\d+[.)])\s+/.test(line);
-    const isBlank = line.trim() === '';
+    const isBlank = line.trim() === "";
 
     if (isBlank) {
       flush(i);
@@ -119,7 +119,7 @@ export function parseMemoryUnits(text) {
 export function readMemoryFile(repoRoot, relativePath) {
   const absolute = path.join(repoRoot, relativePath);
   if (!fs.existsSync(absolute)) return null;
-  const text = fs.readFileSync(absolute, 'utf8');
+  const text = fs.readFileSync(absolute, "utf8");
   return {
     path: relativePath,
     absolute,
@@ -137,18 +137,18 @@ export function loadMemoryFiles(repoRoot, memoryFiles) {
 
 /** Combined hash across all memory files - the "weights version" evidence is keyed to. */
 export function memorySetHash(files) {
-  return `sha256:${sha256(files.map((f) => `${f.path}:${f.hash}`).join('|')).slice(0, 16)}`;
+  return `sha256:${sha256(files.map((f) => `${f.path}:${f.hash}`).join("|")).slice(0, 16)}`;
 }
 
 /** Render the instruction index that both prompt tiers see. */
 export function renderInstructionIndex(file) {
   return file.units
-    .map((u) => `[${u.id}] (${u.tokens} tok)${u.section ? ` <${u.section}>` : ''}\n${u.text}`)
-    .join('\n\n');
+    .map((u) => `[${u.id}] (${u.tokens} tok)${u.section ? ` <${u.section}>` : ""}\n${u.text}`)
+    .join("\n\n");
 }
 
 function bigrams(text) {
-  const words = normalizeForHash(text).split(' ').filter(Boolean);
+  const words = normalizeForHash(text).split(" ").filter(Boolean);
   if (words.length < 2) return new Set(words);
   const out = new Set();
   for (let i = 0; i < words.length - 1; i += 1) out.add(`${words[i]} ${words[i + 1]}`);
@@ -172,15 +172,15 @@ export function similarity(a, b) {
 export function reanchor(reference, file, threshold = 0.6) {
   if (reference.hash) {
     const exact = file.units.find((u) => u.hash === reference.hash);
-    if (exact) return { unit: exact, match: 'hash', score: 1 };
+    if (exact) return { unit: exact, match: "hash", score: 1 };
   }
   if (reference.id) {
     const byId = file.units.find((u) => u.id === reference.id);
     if (byId && (!reference.text || similarity(byId.text, reference.text) >= threshold)) {
-      return { unit: byId, match: 'id', score: 1 };
+      return { unit: byId, match: "id", score: 1 };
     }
   }
-  if (!reference.text) return { unit: null, match: 'stale', score: 0 };
+  if (!reference.text) return { unit: null, match: "stale", score: 0 };
 
   let best = null;
   let bestScore = 0;
@@ -191,6 +191,6 @@ export function reanchor(reference, file, threshold = 0.6) {
       bestScore = score;
     }
   }
-  if (best && bestScore >= threshold) return { unit: best, match: 'fuzzy', score: bestScore };
-  return { unit: null, match: 'stale', score: bestScore };
+  if (best && bestScore >= threshold) return { unit: best, match: "fuzzy", score: bestScore };
+  return { unit: null, match: "stale", score: bestScore };
 }

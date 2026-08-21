@@ -1,7 +1,7 @@
-import fs from 'node:fs';
-import path from 'node:path';
+import fs from "node:fs";
+import path from "node:path";
 
-import { estimateTokens } from './tokens.js';
+import { estimateTokens } from "./tokens.js";
 
 /**
  * Skills as overflow (design section 7).
@@ -26,7 +26,7 @@ export function loadSkills(repoRoot, skillsDir) {
   if (!fs.existsSync(root)) return [];
 
   const skills = [];
-  let entries = [];
+  let entries;
   try {
     entries = fs.readdirSync(root, { withFileTypes: true });
   } catch {
@@ -35,24 +35,24 @@ export function loadSkills(repoRoot, skillsDir) {
 
   for (const entry of entries) {
     const file = entry.isDirectory()
-      ? path.join(root, entry.name, 'SKILL.md')
-      : entry.name.endsWith('.md')
+      ? path.join(root, entry.name, "SKILL.md")
+      : entry.name.endsWith(".md")
         ? path.join(root, entry.name)
         : null;
     if (!file || !fs.existsSync(file)) continue;
     let text;
     try {
-      text = fs.readFileSync(file, 'utf8');
+      text = fs.readFileSync(file, "utf8");
     } catch {
       continue;
     }
     const frontmatter = parseFrontmatter(text);
     skills.push({
-      name: frontmatter.name || entry.name.replace(/\.md$/, ''),
-      description: frontmatter.description || '',
+      name: frontmatter.name || entry.name.replace(/\.md$/, ""),
+      description: frontmatter.description || "",
       path: path.relative(repoRoot, file),
       bodyTokens: estimateTokens(text),
-      descriptionTokens: estimateTokens(frontmatter.description || ''),
+      descriptionTokens: estimateTokens(frontmatter.description || ""),
     });
   }
 
@@ -65,11 +65,11 @@ export function parseFrontmatter(text) {
   if (!match) return {};
   const result = {};
   let currentKey = null;
-  for (const line of match[1].split('\n')) {
+  for (const line of match[1].split("\n")) {
     const kv = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
     if (kv) {
       currentKey = kv[1];
-      result[currentKey] = kv[2].trim().replace(/^["']|["']$/g, '');
+      result[currentKey] = kv[2].trim().replace(/^["']|["']$/g, "");
     } else if (currentKey && /^\s+\S/.test(line)) {
       result[currentKey] = `${result[currentKey]} ${line.trim()}`.trim();
     }
@@ -78,15 +78,18 @@ export function parseFrontmatter(text) {
 }
 
 export function renderSkillIndex(skills) {
-  if (!skills.length) return '(no skills directory found in this repo)';
+  if (!skills.length) return "(no skills directory found in this repo)";
   return skills
-    .map((s) => `- ${s.name} (${s.bodyTokens} tok body, ${s.descriptionTokens} tok description) :: ${s.description || '(no description)'}`)
-    .join('\n');
+    .map(
+      (s) =>
+        `- ${s.name} (${s.bodyTokens} tok body, ${s.descriptionTokens} tok description) :: ${s.description || "(no description)"}`,
+    )
+    .join("\n");
 }
 
 /** Serialize a skill draft to the common SKILL.md shape. */
 export function renderSkillFile(skill) {
-  const description = skill.description.replace(/\n+/g, ' ').trim();
+  const description = skill.description.replace(/\n+/g, " ").trim();
   return `---\nname: ${skill.name}\ndescription: ${description}\n---\n\n${skill.body.trim()}\n`;
 }
 
@@ -95,7 +98,7 @@ export function renderSkillFile(skill) {
  * "-1,900 tok always-loaded, +140 tok description".
  */
 export function extractionBudgetEffect(edit) {
-  if (edit.kind !== 'extract' || !edit.skill) return null;
+  if (edit.kind !== "extract" || !edit.skill) return null;
   const removedFromMemory = estimateTokens(edit.find) - estimateTokens(edit.replace);
   const descriptionCost = estimateTokens(edit.skill.description);
   return {
@@ -112,12 +115,12 @@ export function extractionBudgetEffect(edit) {
  * needs no setup.
  */
 export function resolveOverflowTarget(repoRoot, skillsDir) {
-  if (fs.existsSync(path.join(repoRoot, skillsDir))) return { kind: 'skills', dir: skillsDir };
-  for (const candidate of ['.claude/skills', '.agents/skills', 'skills']) {
-    if (fs.existsSync(path.join(repoRoot, candidate))) return { kind: 'skills', dir: candidate };
+  if (fs.existsSync(path.join(repoRoot, skillsDir))) return { kind: "skills", dir: skillsDir };
+  for (const candidate of [".claude/skills", ".agents/skills", "skills"]) {
+    if (fs.existsSync(path.join(repoRoot, candidate))) return { kind: "skills", dir: candidate };
   }
-  if (fs.existsSync(path.join(repoRoot, 'docs'))) return { kind: 'docs', dir: 'docs' };
-  return { kind: 'skills', dir: skillsDir };
+  if (fs.existsSync(path.join(repoRoot, "docs"))) return { kind: "docs", dir: "docs" };
+  return { kind: "skills", dir: skillsDir };
 }
 
 /** Write an accepted skill extraction to disk. */

@@ -1,6 +1,6 @@
-import { spawn } from 'node:child_process';
+import { spawn } from "node:child_process";
 
-import { warn } from './logger.js';
+import { warn } from "./logger.js";
 
 /**
  * The acpx execution layer (design section 4).
@@ -14,44 +14,48 @@ import { warn } from './logger.js';
  * flows are marked experimental upstream and are the v2 path.
  */
 
-export const ACPX_BIN = process.env.BACKPASS_ACPX_BIN || 'acpx';
+export const ACPX_BIN = process.env.BACKPASS_ACPX_BIN || "acpx";
 
 export class AcpxError extends Error {
-  constructor(message, { stdout = '', stderr = '', code = null } = {}) {
+  constructor(message, { stdout = "", stderr = "", code = null } = {}) {
     super(message);
-    this.name = 'AcpxError';
+    this.name = "AcpxError";
     this.stdout = stdout;
     this.stderr = stderr;
     this.code = code;
   }
 }
 
+/**
+ * @param {string[]} args
+ * @param {{ timeoutMs?: number, cwd?: string, input?: string }} [options]
+ */
 function run(args, { timeoutMs, cwd, input } = {}) {
   return new Promise((resolve) => {
-    const child = spawn(ACPX_BIN, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
-    let stdout = '';
-    let stderr = '';
+    const child = spawn(ACPX_BIN, args, { cwd, stdio: ["pipe", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
     let timedOut = false;
 
     const timer = timeoutMs
       ? setTimeout(() => {
           timedOut = true;
-          child.kill('SIGTERM');
-          setTimeout(() => child.kill('SIGKILL'), 5000).unref();
+          child.kill("SIGTERM");
+          setTimeout(() => child.kill("SIGKILL"), 5000).unref();
         }, timeoutMs)
       : null;
 
-    child.stdout.on('data', (d) => {
+    child.stdout.on("data", (d) => {
       stdout += d;
     });
-    child.stderr.on('data', (d) => {
+    child.stderr.on("data", (d) => {
       stderr += d;
     });
-    child.on('error', (err) => {
+    child.on("error", (err) => {
       if (timer) clearTimeout(timer);
       resolve({ code: null, stdout, stderr: `${stderr}${err.message}`, spawnError: err });
     });
-    child.on('close', (code) => {
+    child.on("close", (code) => {
       if (timer) clearTimeout(timer);
       resolve({ code, stdout, stderr, timedOut });
     });
@@ -63,11 +67,11 @@ function run(args, { timeoutMs, cwd, input } = {}) {
 
 /** acpx prints a per-run accounting line: `[acpx] tokens: input=10 output=47 ... total=34194`. */
 export function parseTokenLine(text) {
-  const match = /\[acpx\]\s+tokens:\s+(.+)/.exec(text || '');
+  const match = /\[acpx\]\s+tokens:\s+(.+)/.exec(text || "");
   if (!match) return null;
   const usage = {};
   for (const pair of match[1].trim().split(/\s+/)) {
-    const [key, value] = pair.split('=');
+    const [key, value] = pair.split("=");
     const n = Number(value);
     if (key && Number.isFinite(n)) usage[key] = n;
   }
@@ -76,10 +80,10 @@ export function parseTokenLine(text) {
 
 /** Strip acpx's own accounting/status lines from the model's answer. */
 export function stripAcpxNoise(text) {
-  return (text || '')
-    .split('\n')
-    .filter((line) => !line.startsWith('[acpx]'))
-    .join('\n')
+  return (text || "")
+    .split("\n")
+    .filter((line) => !line.startsWith("[acpx]"))
+    .join("\n")
     .trim();
 }
 
@@ -100,8 +104,8 @@ export function extractJson(text) {
     } catch {
       // fall through to brace scanning
     }
-    const start = trimmed.indexOf('{');
-    const end = trimmed.lastIndexOf('}');
+    const start = trimmed.indexOf("{");
+    const end = trimmed.lastIndexOf("}");
     if (start !== -1 && end > start) {
       try {
         return JSON.parse(trimmed.slice(start, end + 1));
@@ -115,14 +119,14 @@ export function extractJson(text) {
 
 function baseArgs({ cwd, model, timeoutSeconds, approveReads, suppressReads }) {
   const args = [];
-  if (cwd) args.push('--cwd', cwd);
-  if (approveReads) args.push('--approve-reads');
-  else args.push('--deny-all');
-  if (suppressReads) args.push('--suppress-reads');
-  args.push('--non-interactive-permissions', 'deny');
-  if (timeoutSeconds) args.push('--timeout', String(timeoutSeconds));
-  if (model) args.push('--model', model);
-  args.push('--format', 'quiet');
+  if (cwd) args.push("--cwd", cwd);
+  if (approveReads) args.push("--approve-reads");
+  else args.push("--deny-all");
+  if (suppressReads) args.push("--suppress-reads");
+  args.push("--non-interactive-permissions", "deny");
+  if (timeoutSeconds) args.push("--timeout", String(timeoutSeconds));
+  if (model) args.push("--model", model);
+  args.push("--format", "quiet");
   return args;
 }
 
@@ -144,20 +148,17 @@ export async function execOneShot({
 }) {
   const args = [
     ...baseArgs({ cwd, model, timeoutSeconds, approveReads, suppressReads }),
-    '--prompt-retries',
+    "--prompt-retries",
     String(promptRetries),
     agent,
-    'exec',
-    '--file',
+    "exec",
+    "--file",
     promptFile,
   ];
 
   const result = await run(args, { timeoutMs: (timeoutSeconds + 30) * 1000, cwd });
-  if (result.spawnError && result.spawnError.code === 'ENOENT') {
-    throw new AcpxError(
-      `acpx not found on PATH (looked for "${ACPX_BIN}")`,
-      { stderr: result.stderr },
-    );
+  if (result.spawnError && result.spawnError.code === "ENOENT") {
+    throw new AcpxError(`acpx not found on PATH (looked for "${ACPX_BIN}")`, { stderr: result.stderr });
   }
   if (result.timedOut) {
     throw new AcpxError(`acpx ${agent} exec timed out after ${timeoutSeconds}s`, result);
@@ -189,8 +190,8 @@ export async function sessionPrompt({
   suppressReads = true,
 }) {
   const notes = [];
-  const created = await run([agent, 'sessions', 'new', '--name', sessionName], { timeoutMs: 60_000, cwd });
-  if (created.spawnError && created.spawnError.code === 'ENOENT') {
+  const created = await run([agent, "sessions", "new", "--name", sessionName], { timeoutMs: 60_000, cwd });
+  if (created.spawnError && created.spawnError.code === "ENOENT") {
     throw new AcpxError(`acpx not found on PATH (looked for "${ACPX_BIN}")`, created);
   }
   if (created.code !== 0) {
@@ -210,11 +211,11 @@ export async function sessionPrompt({
 
   try {
     if (model) {
-      const set = await run([agent, '-s', sessionName, 'set', 'model', model], { timeoutMs: 60_000, cwd });
+      const set = await run([agent, "-s", sessionName, "set", "model", model], { timeoutMs: 60_000, cwd });
       if (set.code !== 0) notes.push(`could not set model=${model} on ${agent}: ${firstLine(set.stderr)}`);
     }
     if (effort) {
-      const set = await run([agent, '-s', sessionName, 'set', 'reasoning_effort', effort], {
+      const set = await run([agent, "-s", sessionName, "set", "reasoning_effort", effort], {
         timeoutMs: 60_000,
         cwd,
       });
@@ -226,9 +227,9 @@ export async function sessionPrompt({
     const args = [
       ...baseArgs({ cwd, model: null, timeoutSeconds, approveReads, suppressReads }),
       agent,
-      '-s',
+      "-s",
       sessionName,
-      '--file',
+      "--file",
       promptFile,
     ];
     const result = await run(args, { timeoutMs: (timeoutSeconds + 30) * 1000, cwd });
@@ -238,13 +239,13 @@ export async function sessionPrompt({
     const combined = `${result.stdout}\n${result.stderr}`;
     return { text: stripAcpxNoise(result.stdout), usage: parseTokenLine(combined), raw: result.stdout, notes };
   } finally {
-    const closed = await run([agent, 'sessions', 'close', sessionName], { timeoutMs: 30_000, cwd });
+    const closed = await run([agent, "sessions", "close", sessionName], { timeoutMs: 30_000, cwd });
     if (closed.code !== 0) warn(`could not close acpx session ${sessionName}`);
   }
 }
 
 function firstLine(text) {
-  return (text || '').split('\n').find((l) => l.trim()) || '';
+  return (text || "").split("\n").find((l) => l.trim()) || "";
 }
 
 /** Sum acpx usage records for cost visibility (design section 9). */
@@ -258,8 +259,8 @@ export function sumUsage(records) {
 }
 
 export function formatUsage(usage) {
-  if (!usage || !Object.keys(usage).length) return 'n/a';
+  if (!usage || !Object.keys(usage).length) return "n/a";
   return Object.entries(usage)
-    .map(([k, v]) => `${k}=${v.toLocaleString('en-US')}`)
-    .join(' ');
+    .map(([k, v]) => `${k}=${v.toLocaleString("en-US")}`)
+    .join(" ");
 }

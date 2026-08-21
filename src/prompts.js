@@ -1,14 +1,14 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const PROMPT_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'prompts');
+const PROMPT_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "prompts");
 
 const cache = new Map();
 
 export function loadPrompt(name) {
   if (!cache.has(name)) {
-    cache.set(name, fs.readFileSync(path.join(PROMPT_DIR, `${name}.md`), 'utf8'));
+    cache.set(name, fs.readFileSync(path.join(PROMPT_DIR, `${name}.md`), "utf8"));
   }
   return cache.get(name);
 }
