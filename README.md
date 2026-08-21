@@ -1,14 +1,40 @@
-# backpass
+<h1 align="center">backpass</h1>
+<p align="center">
+  <a href="https://github.com/kunchenguid/backpass/actions/workflows/ci.yml"
+    ><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/kunchenguid/backpass/ci.yml?style=flat-square&label=ci"
+  /></a>
+  <a href="https://github.com/kunchenguid/backpass/actions/workflows/release-please.yml"
+    ><img alt="Release" src="https://img.shields.io/github/actions/workflow/status/kunchenguid/backpass/release-please.yml?style=flat-square&label=release"
+  /></a>
+  <a href="https://www.npmjs.com/package/backpass"
+    ><img alt="npm" src="https://img.shields.io/npm/v/backpass?style=flat-square"
+  /></a>
+  <a href="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue?style=flat-square"
+    ><img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue?style=flat-square"
+  /></a>
+  <a href="https://x.com/kunchenguid"
+    ><img alt="X" src="https://img.shields.io/badge/X-@kunchenguid-black?style=flat-square"
+  /></a>
+</p>
 
-**Gradient descent for your agent memory.**
+<h3 align="center">Gradient descent for your agent memory.</h3>
 
 Your `AGENTS.md` is a set of weights. Every agent session is a forward pass. The
-transcript that session leaves on disk is the loss signal — and today nothing reads it.
+transcript that session leaves on disk is the loss signal - and today nothing reads it.
 The loop only closes when a human happens to remember a failure and edits the file by hand.
 
 `backpass` closes it. It finds the agent sessions that actually ran in your repo, reads
-what happened in them, and proposes evidence-backed edits to your memory file — under a
+what happened in them, and proposes evidence-backed edits to your memory file - under a
 token budget, gated by you.
+
+- **Local-first** - Reads the transcript stores of six agent harnesses directly from disk.
+  No API, no upload; transcripts never leave your machine except into an agent you already
+  authenticated, and obvious secrets are redacted before they do.
+- **Evidence-gated** - Every proposed edit carries verbatim quotes from real sessions, a
+  new instruction needs evidence from at least two independent sessions, and one run
+  proposes at most five edits. Small, noisy, repeated steps - not a rewrite.
+- **Human in the loop** - Analysis never writes. `backpass apply` is the only writing
+  command, and it shows each edit with its evidence for you to accept or reject.
 
 ```
 AGENTS.md / CLAUDE.md          (the weights)
@@ -21,9 +47,9 @@ AGENTS.md / CLAUDE.md          (the weights)
 ```
 
 One run is one gradient step: at most five edits, and a new instruction needs evidence
-from at least two independent sessions. Small, noisy, repeated steps — not a rewrite.
+from at least two independent sessions.
 
-## Install
+## Quick Start
 
 ```sh
 npm install -g backpass
@@ -34,10 +60,7 @@ npx backpass
 Requires **Node >= 22.5** and [`acpx`](https://github.com/openclaw/acpx) on your PATH.
 
 backpass has **no API keys of its own**. Every model call goes through acpx to a harness
-you have already authenticated. Transcripts never leave your machine except into that
-agent, and obvious secrets are redacted before they do.
-
-## Quick start
+you have already authenticated.
 
 ```sh
 cd your-repo
@@ -46,33 +69,33 @@ backpass           # scan → analyze → propose (never writes)
 backpass apply     # review each edit, accept or reject, then write
 ```
 
-## How it works
+## How It Works
 
-### 1. Discovery — which sessions belong to this repo
+### 1. Discovery - which sessions belong to this repo
 
 backpass reads the local transcript stores of six harnesses directly. No API, no upload.
 
-| Harness | Store | Repo tie |
-|---|---|---|
-| **claude** | `~/.claude/projects/<munged-cwd>/<uuid>.jsonl` | per-line `cwd` |
-| **codex** | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | `cwd` + recorded `git.repository_url` |
-| **pi** | `~/.pi/agent/sessions/<escaped-cwd>/*.jsonl` | session-header `cwd` |
-| **opencode** | `~/.local/share/opencode/opencode.db` (sqlite) | `session.directory` |
-| **grok** | `~/.grok/sessions/<encoded-cwd>/<uuid>/` | `summary.json` `cwd` + `git_remotes` |
-| **cursor CLI** | `~/.cursor/chats/<md5(cwd)>/<uuid>/` | `meta.json` `cwd` |
+| Harness        | Store                                          | Repo tie                              |
+| -------------- | ---------------------------------------------- | ------------------------------------- |
+| **claude**     | `~/.claude/projects/<munged-cwd>/<uuid>.jsonl` | per-line `cwd`                        |
+| **codex**      | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | `cwd` + recorded `git.repository_url` |
+| **pi**         | `~/.pi/agent/sessions/<escaped-cwd>/*.jsonl`   | session-header `cwd`                  |
+| **opencode**   | `~/.local/share/opencode/opencode.db` (sqlite) | `session.directory`                   |
+| **grok**       | `~/.grok/sessions/<encoded-cwd>/<uuid>/`       | `summary.json` `cwd` + `git_remotes`  |
+| **cursor CLI** | `~/.cursor/chats/<md5(cwd)>/<uuid>/`           | `meta.json` `cwd`                     |
 
 Association runs in three tiers:
 
-1. **Tier 1 — deterministic.** The session's cwd is (or sits inside) one of this repo's
+1. **Tier 1 - deterministic.** The session's cwd is (or sits inside) one of this repo's
    worktrees.
-2. **Tier 2 — deterministic, survives deletion.** A git remote recorded in the transcript
+2. **Tier 2 - deterministic, survives deletion.** A git remote recorded in the transcript
    matches one of the repo's remotes. This is how codex and grok stay attributable long
    after the worktree is gone.
-3. **Tier 3 — best-effort.** A dead path whose last segment is the repo's directory name,
+3. **Tier 3 - best-effort.** A dead path whose last segment is the repo's directory name,
    or one matching a glob you configured. Labelled as such, and excluded by `--strict`.
 
 Discovery is incremental. Codex alone can hold 10,000+ rollouts, so verdicts are cached in
-`.backpass/scan-cache.json` by path, mtime and size — re-scans cost only the new files.
+`.backpass/scan-cache.json` by path, mtime and size - re-scans cost only the new files.
 A harness whose store is missing or has drifted into an unrecognised shape produces a
 warning and is skipped; the run continues.
 
@@ -80,39 +103,39 @@ warning and is skipped; the run continues.
 backpass scan --since 7d --strict
 ```
 
-### 2. Distillation — cheap first
+### 2. Distillation - cheap first
 
 Raw transcripts are mostly tool-call noise; a megabyte of session is a few thousand tokens
 of actual signal. Before any model sees anything, backpass reduces each session
 deterministically: user and assistant turns verbatim, each tool call collapsed to one line
 (`tool: Bash "npm test" -> 1 failing`), tool output truncated, injected harness scaffolding
-dropped, secrets redacted. Typical reduction is **96–99%**.
+dropped, secrets redacted. Typical reduction is **96-99%**.
 
 The distilled trace ends with the path to the raw transcript, so the analysis agent can
-open the original when — and only when — a specific claim needs it.
+open the original when - and only when - a specific claim needs it.
 
-### 3. Analysis — one cheap call per transcript
+### 3. Analysis - one cheap call per transcript
 
 Each distilled trace goes to a cheap model with the memory file and a rubric. It returns
 strict JSON: which instructions helped, which were violated, and what mistakes no current
 instruction covers.
 
-**Every claim must carry a verbatim quote.** Quoteless items are discarded — the single
+**Every claim must carry a verbatim quote.** Quoteless items are discarded - the single
 most important defence against a model confabulating influence. Negative evidence (a
 visible violation) is weighted highest.
 
-Results are cached per transcript, keyed to both the transcript's content *and* the memory
+Results are cached per transcript, keyed to both the transcript's content _and_ the memory
 file's hash: edit the weights and the evidence correctly re-computes; change nothing and
 the next run is free.
 
-### 4. Folding — deterministic, no model
+### 4. Folding - deterministic, no model
 
 Evidence is grouped by instruction, giving each one a positive/negative count and a
 **relevance** figure: the share of analyzed sessions in which it mattered at all. Duplicate
 gaps across sessions are clustered, and clusters seen in fewer than `minGapEvidence`
 sessions (default 2) are dropped. One bad session never rewrites the weights.
 
-### 5. Synthesis — one big call
+### 5. Synthesis - one big call
 
 A single high-reasoning call turns the folded evidence into concrete edits: ADD, REMOVE,
 REWRITE, or EXTRACT→SKILL. Then mechanical gates run, and they are not negotiable:
@@ -125,17 +148,17 @@ REWRITE, or EXTRACT→SKILL. Then mechanical gates run, and they are not negotia
 A violation triggers exactly one re-prompt naming the exact breach. If that also fails,
 backpass **fails loudly** and saves the rejected proposal. It never silently truncates.
 
-Token deltas shown to you are measured by backpass from the actual text — never taken from
+Token deltas shown to you are measured by backpass from the actual text - never taken from
 the model's own arithmetic.
 
-### 6. The budget — "model size"
+### 6. The budget - "model size"
 
 Every always-loaded token is paid on every future session, forever, and instruction
 following dilutes as the file grows. So the budget is the constraint the whole backward
 pass optimizes under.
 
 **Default: 5,000 estimated tokens (~20KB)** per always-loaded memory file, configurable.
-The estimator is bytes/4 — harness-neutral, ±15%.
+The estimator is bytes/4 - harness-neutral, ±15%.
 
 ```
 AGENTS.md      [###############.................] 2,412 / 5,000 tok · 63 instructions
@@ -150,26 +173,26 @@ A skill's description **is** its when-useful condition: the description is alway
 and cheap, the body is free until the trigger fires. That makes extraction the release
 valve for the budget.
 
-|  | Trigger fits one description line | Trigger not detectable |
-|---|---|---|
-| **Broad** (≥20% of sessions, or safety-critical) | memory file | memory file |
-| **Conditional / narrow** | **skill** | deletion candidate |
+|                                                  | Trigger fits one description line | Trigger not detectable |
+| ------------------------------------------------ | --------------------------------- | ---------------------- |
+| **Broad** (≥20% of sessions, or safety-critical) | memory file                       | memory file            |
+| **Conditional / narrow**                         | **skill**                         | deletion candidate     |
 
-"Matters in N% of sessions" is measured, not guessed — it falls straight out of the fold
+"Matters in N% of sessions" is measured, not guessed - it falls straight out of the fold
 stage. A 640-token procedure relevant to 4% of sessions becomes a 35-token description
 line, and backpass reports the arithmetic: `−611 tok always-loaded, +35 tok description`.
 
 Skill descriptions are weights too. If the evidence shows an agent lacked knowledge a
-skill already contains, that is a *failed trigger* — backpass proposes a description edit,
+skill already contains, that is a _failed trigger_ - backpass proposes a description edit,
 not duplicate content.
 
-### 8. Apply — the human gate
+### 8. Apply - the human gate
 
 `backpass apply` is the only command that writes. It serves a review surface through
 [`lavish-axi`](https://github.com/kunchenguid/lavish-axi): one card per edit with the diff,
 the evidence quotes and their sources, a live budget gauge, and ACCEPT / REJECT.
 
-The surface is a static template shipped in the package — the CLI injects one JSON payload,
+The surface is a static template shipped in the package - the CLI injects one JSON payload,
 so it is instant, deterministic, and identical every run. Nothing there is model-generated.
 
 There is no DEFER button, and it isn't missing: **rejections are remembered.** A rejected
@@ -180,7 +203,21 @@ backpass apply --no-ui     # same decision, in the terminal
 backpass apply --dry-run   # show what would be written
 ```
 
-## Two-tier models
+## CLI Reference
+
+| Command            | What it does                                                  |
+| ------------------ | ------------------------------------------------------------- |
+| `backpass`         | scan → analyze what is new → propose. Never writes.           |
+| `backpass scan`    | discovery only: the transcript table with a confidence column |
+| `backpass analyze` | tier-1 pass over pending transcripts                          |
+| `backpass propose` | tier-2 synthesis from cached evidence                         |
+| `backpass apply`   | review and write the accepted edits                           |
+| `backpass status`  | cache state, failed transcripts, budget bars                  |
+| `backpass init`    | write `.backpassrc.json`, gitignore `.backpass/`              |
+
+Run `backpass --help` for the full flag list.
+
+### Two-tier models
 
 Cheap analysis, smart synthesis. Both go through acpx, so you pick from the harnesses you
 already have.
@@ -191,25 +228,11 @@ backpass \
   --synthesis-agent claude --synthesis-model claude-opus-5 --synthesis-effort high
 ```
 
-Model ids pass straight through to acpx — there is no hardcoded model list to go stale.
+Model ids pass straight through to acpx - there is no hardcoded model list to go stale.
 If an adapter does not advertise reasoning effort, backpass says so in the run report
 rather than pretending it applied.
 
-## Commands
-
-| Command | What it does |
-|---|---|
-| `backpass` | scan → analyze what is new → propose. Never writes. |
-| `backpass scan` | discovery only: the transcript table with a confidence column |
-| `backpass analyze` | tier-1 pass over pending transcripts |
-| `backpass propose` | tier-2 synthesis from cached evidence |
-| `backpass apply` | review and write the accepted edits |
-| `backpass status` | cache state, failed transcripts, budget bars |
-| `backpass init` | write `.backpassrc.json`, gitignore `.backpass/` |
-
-Run `backpass --help` for the full flag list.
-
-## Configuration
+### Configuration
 
 `.backpassrc.json` in the repo root, layered over `~/.config/backpass/config.json`, with
 CLI flags on top:
@@ -221,7 +244,7 @@ CLI flags on top:
   "skillsDir": ".claude/skills",
   "maxEditsPerRun": 5,
   "minGapEvidence": 2,
-  "analysis":  { "agent": "codex",  "model": "gpt-5.2",       "effort": "low"  },
+  "analysis": { "agent": "codex", "model": "gpt-5.2", "effort": "low" },
   "synthesis": { "agent": "claude", "model": "claude-opus-5", "effort": "high" },
   "discovery": {
     "harnesses": ["claude", "codex", "pi", "opencode", "grok", "cursor"],
@@ -233,7 +256,7 @@ CLI flags on top:
 }
 ```
 
-## State
+### State
 
 Everything mutable lives in a gitignored `.backpass/`:
 
@@ -250,8 +273,8 @@ Everything mutable lives in a gitignored `.backpass/`:
 ## Limitations
 
 - **Causal attribution is genuinely hard.** A model can confabulate influence. The
-  mitigations are structural — mandatory verbatim quotes, the two-session rule, negative
-  evidence weighted highest, and a human gate — but read the evidence, not just the title.
+  mitigations are structural - mandatory verbatim quotes, the two-session rule, negative
+  evidence weighted highest, and a human gate - but read the evidence, not just the title.
 - **Transcript formats are undocumented** and can change without notice. Each adapter is
   pinned by a golden fixture and fails soft.
 - **Cursor IDE is deferred to v1.1.** Its composer→workspace link is version-dependent;
@@ -259,6 +282,20 @@ Everything mutable lives in a gitignored `.backpass/`:
 - Global memory (`~/.claude/CLAUDE.md`) is treated as context, never an edit target.
 - Paths are verified on macOS and Linux.
 
-## License
+## Development
 
-MIT © Kun Chen
+```sh
+git clone https://github.com/kunchenguid/backpass.git
+cd backpass
+pnpm install --frozen-lockfile
+```
+
+```sh
+pnpm run check          # Run all verification commands
+pnpm test               # Run node:test tests
+pnpm run lint           # Run ESLint
+pnpm run format:check   # Check Prettier formatting
+pnpm run typecheck      # Run TypeScript checkJs validation
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the contributor workflow.
