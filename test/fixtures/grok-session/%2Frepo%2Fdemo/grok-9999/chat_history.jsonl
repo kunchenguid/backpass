@@ -1,0 +1,6 @@
+{"type":"system","content":"You are Grok. System prompt that is not user intent."}
+{"type":"user","content":[{"type":"text","text":"Deploy the staging build."}]}
+{"type":"reasoning","id":"rs1","summary":[{"type":"summary_text","text":"dropped"}],"encrypted_content":"OPAQUE"}
+{"type":"assistant","content":"","tool_calls":[{"id":"call-1","name":"run_terminal_command","arguments":"{\"command\":\"make deploy\"}"}],"model_id":"grok-4.5"}
+{"type":"tool_result","tool_call_id":"call-1","content":"deployed to staging"}
+{"type":"assistant","content":"Staging is live.","model_id":"grok-4.5"}

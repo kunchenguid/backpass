@@ -1,0 +1,158 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+
+import { STATE_DIRNAME } from './config.js';
+import { warn } from './logger.js';
+
+/**
+ * All mutable run state lives in a gitignored `.backpass/` directory:
+ *
+ *   scan-cache.json        path+mtime+size -> association verdict (design section 2.2)
+ *   evidence/<id>.json     per-transcript tier-1 analysis output (design section 3)
+ *   evidence-summary.json  folded evidence (stage 2)
+ *   proposal.json          latest tier-2 synthesis (stage 3)
+ *   rejections.json        edits the human rejected, and the evidence weight behind them
+ *   apply/                 the rendered Lavish apply surface
+ */
+export class State {
+  constructor(repoRoot) {
+    this.root = path.join(repoRoot, STATE_DIRNAME);
+    this.evidenceDir = path.join(this.root, 'evidence');
+    this.applyDir = path.join(this.root, 'apply');
+    this.scanCachePath = path.join(this.root, 'scan-cache.json');
+    this.summaryPath = path.join(this.root, 'evidence-summary.json');
+    this.proposalPath = path.join(this.root, 'proposal.json');
+    this.rejectionsPath = path.join(this.root, 'rejections.json');
+  }
+
+  ensure() {
+    fs.mkdirSync(this.evidenceDir, { recursive: true });
+    fs.mkdirSync(this.applyDir, { recursive: true });
+    return this;
+  }
+
+  readJsonFile(file, fallback) {
+    if (!fs.existsSync(file)) return fallback;
+    try {
+      return JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch (err) {
+      warn(`discarding corrupt state file ${path.relative(process.cwd(), file)}: ${err.message}`);
+      return fallback;
+    }
+  }
+
+  writeJsonFile(file, value) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = `${file}.tmp`;
+    fs.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`);
+    fs.renameSync(tmp, file);
+  }
+
+  readScanCache() {
+    const cache = this.readJsonFile(this.scanCachePath, null);
+    return cache && cache.version === 1 ? cache : { version: 1, entries: {} };
+  }
+
+  writeScanCache(cache) {
+    this.writeJsonFile(this.scanCachePath, cache);
+  }
+
+  evidencePath(transcriptId) {
+    return path.join(this.evidenceDir, `${safeFileName(transcriptId)}.json`);
+  }
+
+  readEvidence(transcriptId) {
+    return this.readJsonFile(this.evidencePath(transcriptId), null);
+  }
+
+  writeEvidence(transcriptId, evidence) {
+    this.writeJsonFile(this.evidencePath(transcriptId), evidence);
+  }
+
+  listEvidence() {
+    if (!fs.existsSync(this.evidenceDir)) return [];
+    return fs
+      .readdirSync(this.evidenceDir)
+      .filter((f) => f.endsWith('.json'))
+      .map((f) => this.readJsonFile(path.join(this.evidenceDir, f), null))
+      .filter(Boolean);
+  }
+
+  readSummary() {
+    return this.readJsonFile(this.summaryPath, null);
+  }
+
+  writeSummary(summary) {
+    this.writeJsonFile(this.summaryPath, summary);
+  }
+
+  readProposal() {
+    return this.readJsonFile(this.proposalPath, null);
+  }
+
+  writeProposal(proposal) {
+    this.writeJsonFile(this.proposalPath, proposal);
+  }
+
+  readRejections() {
+    const value = this.readJsonFile(this.rejectionsPath, null);
+    return value && value.version === 1 ? value : { version: 1, entries: {} };
+  }
+
+  writeRejections(rejections) {
+    this.writeJsonFile(this.rejectionsPath, rejections);
+  }
+}
+
+export function safeFileName(id) {
+  return String(id).replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 120);
+}
+
+export function sha256(text) {
+  return crypto.createHash('sha256').update(text, 'utf8').digest('hex');
+}
+
+/**
+ * Cache key for a transcript's analysis: the transcript's own content signature plus
+ * the memory-file hash it was judged against. Either changing invalidates the evidence.
+ */
+export function evidenceKey(transcript, memoryHash) {
+  return `${transcript.mtimeMs}:${transcript.bytes}:${memoryHash}`;
+}
+
+/**
+ * Only a successful analysis is worth caching. A `failed` entry is retried, and a
+ * `skipped` entry is re-derived because the skip decision depends on configuration
+ * (`minUserTurns`) rather than on the model - recomputing it costs one local file read.
+ */
+export function isEvidenceFresh(evidence, transcript, memoryHash) {
+  if (!evidence || evidence.status !== 'ok') return false;
+  return evidence.key === evidenceKey(transcript, memoryHash);
+}
+
+/**
+ * A rejected edit stays rejected until materially new evidence arrives - the design's
+ * replacement for a DEFER button (captain tweak 3). "Materially new" means the edit is
+ * backed by strictly more transcripts than when it was turned down.
+ */
+export function rejectionKey(edit) {
+  return sha256([edit.kind, edit.file, edit.find || '', edit.replace || ''].join(' ')).slice(0, 16);
+}
+
+export function isSuppressedByRejection(edit, rejections) {
+  const prior = rejections.entries[rejectionKey(edit)];
+  if (!prior) return false;
+  return (edit.transcripts || 0) <= (prior.transcripts || 0);
+}
+
+export function recordRejection(edit, rejections, at = new Date().toISOString()) {
+  rejections.entries[rejectionKey(edit)] = {
+    kind: edit.kind,
+    file: edit.file,
+    title: edit.title,
+    transcripts: edit.transcripts || 0,
+    rejectedAt: at,
+  };
+  return rejections;
+}

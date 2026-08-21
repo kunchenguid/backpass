@@ -1,0 +1,221 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { parseArgs } from 'node:util';
+import { fileURLToPath } from 'node:url';
+
+import { UserError, fail, setQuiet } from './logger.js';
+import { loadConfig } from './config.js';
+import { resolveRepo } from './repo.js';
+import { State } from './state.js';
+
+import { cmdInit } from './commands/init.js';
+import { cmdScan } from './commands/scan.js';
+import { cmdAnalyze } from './commands/analyze.js';
+import { cmdPropose } from './commands/propose.js';
+import { cmdApply } from './commands/apply.js';
+import { cmdStatus } from './commands/status.js';
+import { cmdRun } from './commands/run.js';
+
+const PKG = JSON.parse(
+  fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8'),
+);
+
+export const VERSION = PKG.version;
+
+const OPTIONS = {
+  help: { type: 'boolean', short: 'h' },
+  version: { type: 'boolean', short: 'v' },
+  quiet: { type: 'boolean', short: 'q' },
+  json: { type: 'boolean' },
+
+  since: { type: 'string' },
+  harness: { type: 'string' },
+  jobs: { type: 'string' },
+  strict: { type: 'boolean' },
+  'include-cursor-ide': { type: 'boolean' },
+
+  budget: { type: 'string' },
+  'max-edits': { type: 'string' },
+  'min-gap-evidence': { type: 'string' },
+  'memory-file': { type: 'string', multiple: true },
+  'skills-dir': { type: 'string' },
+
+  'analysis-agent': { type: 'string' },
+  'analysis-model': { type: 'string' },
+  'analysis-effort': { type: 'string' },
+  'synthesis-agent': { type: 'string' },
+  'synthesis-model': { type: 'string' },
+  'synthesis-effort': { type: 'string' },
+
+  'dry-run': { type: 'boolean' },
+  'no-ui': { type: 'boolean' },
+  force: { type: 'boolean' },
+  limit: { type: 'string' },
+};
+
+const HELP = `backpass v${VERSION} - gradient descent for your agent memory
+
+A backward pass over AGENTS.md / CLAUDE.md: it finds the agent sessions that ran in this
+repo, reads what actually happened in them, and proposes evidence-backed edits to the
+memory file - under a token budget, gated by you.
+
+USAGE
+  backpass [command] [options]
+
+COMMANDS
+  (none)     scan, analyze what is new, and propose. Never writes.
+  scan       discovery only: which transcripts belong to this repo, and how we know
+  analyze    tier-1 pass: one cheap model call per new transcript
+  propose    tier-2 pass: one high-reasoning call turning folded evidence into edits
+  apply      review the proposal and write the accepted edits (the only writer)
+  status     cache state, evidence counts, and the budget bar
+  init       write .backpassrc.json and gitignore .backpass/
+
+DISCOVERY
+  --since <dur>            only sessions newer than this (30d, 12h, 2w, all)  [30d]
+  --harness <a,b>          limit to these harnesses
+                           (claude, codex, pi, opencode, grok, cursor)
+  --strict                 deterministic associations only (tiers 1 and 2)
+  --include-cursor-ide     also scan the Cursor IDE store (best-effort, v1.1 preview)
+  --limit <n>              analyze at most N transcripts this run
+
+MODELS (two-tier: cheap analysis, smart synthesis - all through acpx)
+  --analysis-agent <a>     acpx agent for the per-transcript pass       [codex]
+  --analysis-model <id>    model id for the analysis pass
+  --analysis-effort <e>    reasoning effort, when the adapter advertises it
+  --synthesis-agent <a>    acpx agent for the final proposal pass       [claude]
+  --synthesis-model <id>   model id for the synthesis pass
+  --synthesis-effort <e>   reasoning effort for synthesis               [high]
+  --jobs <n>               parallel analysis calls                      [4]
+
+BUDGET AND SHAPE
+  --budget <tokens>        always-loaded budget per memory file         [5000]
+  --max-edits <n>          edits per run - the learning rate            [5]
+  --min-gap-evidence <n>   sessions needed before a new instruction     [2]
+  --memory-file <path>     memory file to optimize (repeatable)
+  --skills-dir <path>      where skill extractions are written          [.claude/skills]
+
+APPLY
+  --no-ui                  terminal accept/reject instead of the Lavish surface
+  --dry-run                show what would be written, write nothing
+  --force                  re-analyze transcripts that already have fresh evidence
+
+OTHER
+  --json                   machine-readable output on stdout
+  -q, --quiet              suppress progress output
+  -h, --help               this help
+  -v, --version            print version
+
+EXAMPLES
+  backpass                                  a full run, ending with a proposal
+  backpass scan --since 7d --strict         what would be analyzed, deterministic only
+  backpass --analysis-model gpt-5.2 --synthesis-model claude-opus-5
+  backpass apply --no-ui                    review and write from the terminal
+`;
+
+/** Map CLI flags onto the config shape so one merge order covers every layer. */
+function overridesFrom(values) {
+  const overrides = { discovery: {}, analysis: {}, synthesis: {} };
+
+  if (values.since) overrides.discovery.since = values.since;
+  if (values.harness) {
+    overrides.discovery.harnesses = values.harness
+      .split(',')
+      .map((h) => h.trim())
+      .filter(Boolean);
+  }
+  if (values['include-cursor-ide']) overrides.discovery.includeCursorIde = true;
+  if (values.jobs) overrides.jobs = toInt(values.jobs, '--jobs');
+  if (values.budget) overrides.budgetTokens = toInt(values.budget, '--budget');
+  if (values['max-edits']) overrides.maxEditsPerRun = toInt(values['max-edits'], '--max-edits');
+  if (values['min-gap-evidence']) {
+    overrides.minGapEvidence = toInt(values['min-gap-evidence'], '--min-gap-evidence');
+  }
+  if (values['memory-file']?.length) overrides.memoryFiles = values['memory-file'];
+  if (values['skills-dir']) overrides.skillsDir = values['skills-dir'];
+
+  if (values['analysis-agent']) overrides.analysis.agent = values['analysis-agent'];
+  if (values['analysis-model']) overrides.analysis.model = values['analysis-model'];
+  if (values['analysis-effort']) overrides.analysis.effort = values['analysis-effort'];
+  if (values['synthesis-agent']) overrides.synthesis.agent = values['synthesis-agent'];
+  if (values['synthesis-model']) overrides.synthesis.model = values['synthesis-model'];
+  if (values['synthesis-effort']) overrides.synthesis.effort = values['synthesis-effort'];
+
+  for (const key of ['discovery', 'analysis', 'synthesis']) {
+    if (!Object.keys(overrides[key]).length) delete overrides[key];
+  }
+  return overrides;
+}
+
+function toInt(value, flag) {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n <= 0) throw new UserError(`${flag} must be a positive integer (got "${value}")`);
+  return n;
+}
+
+const COMMANDS = {
+  init: cmdInit,
+  scan: cmdScan,
+  analyze: cmdAnalyze,
+  propose: cmdPropose,
+  apply: cmdApply,
+  status: cmdStatus,
+  run: cmdRun,
+};
+
+export async function main(argv) {
+  let parsed;
+  try {
+    parsed = parseArgs({ args: argv, options: OPTIONS, allowPositionals: true, strict: true });
+  } catch (err) {
+    fail(err.message);
+    console.error('\nRun `backpass --help` for the full option list.');
+    return 2;
+  }
+
+  const { values, positionals } = parsed;
+
+  if (values.help) {
+    console.log(HELP);
+    return 0;
+  }
+  if (values.version) {
+    console.log(VERSION);
+    return 0;
+  }
+  setQuiet(values.quiet);
+
+  const commandName = positionals[0] || 'run';
+  const command = COMMANDS[commandName];
+  if (!command) {
+    fail(`unknown command "${commandName}"`);
+    console.error('\nRun `backpass --help` for the command list.');
+    return 2;
+  }
+
+  try {
+    const repo = resolveRepo(process.cwd());
+    const config = loadConfig(repo.root, overridesFrom(values));
+    config.state = new State(repo.root).ensure();
+
+    const ctx = {
+      repo,
+      config,
+      flags: values,
+      positionals: positionals.slice(1),
+      version: VERSION,
+      strict: Boolean(values.strict),
+      limit: values.limit ? toInt(values.limit, '--limit') : null,
+    };
+
+    return (await command(ctx)) ?? 0;
+  } catch (err) {
+    if (err instanceof UserError) {
+      fail(err.message);
+      if (err.hint) console.error(`  ${err.hint}`);
+      return 1;
+    }
+    fail(err.stack || err.message);
+    return 1;
+  }
+}

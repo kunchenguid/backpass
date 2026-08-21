@@ -1,0 +1,8 @@
+{
+  "info": { "id": "grok-9999", "cwd": "/repo/demo" },
+  "created_at": "2026-08-04T12:00:00.000000Z",
+  "current_model_id": "grok-4.5",
+  "git_root_dir": "/repo/demo",
+  "git_remotes": ["git@github.com:acme/demo.git"],
+  "head_branch": "main"
+}

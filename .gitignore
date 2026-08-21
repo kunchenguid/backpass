@@ -1,0 +1,5 @@
+node_modules/
+.backpass/
+*.log
+.DS_Store
+npm-debug.log*

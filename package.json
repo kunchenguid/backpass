@@ -1,0 +1,48 @@
+{
+  "name": "backpass",
+  "version": "0.1.0",
+  "description": "Gradient descent for your agent memory \u2014 analyzes past agent session transcripts and proposes evidence-backed edits to AGENTS.md / CLAUDE.md",
+  "type": "module",
+  "license": "MIT",
+  "author": "Kun Chen",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kunchenguid/backpass.git"
+  },
+  "homepage": "https://github.com/kunchenguid/backpass#readme",
+  "bugs": {
+    "url": "https://github.com/kunchenguid/backpass/issues"
+  },
+  "keywords": [
+    "agents",
+    "agent-memory",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "transcripts",
+    "acpx",
+    "cli",
+    "llm"
+  ],
+  "bin": {
+    "backpass": "./bin/backpass.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "templates",
+    "LICENSE",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\"",
+    "start": "node bin/backpass.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

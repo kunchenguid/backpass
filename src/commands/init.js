@@ -1,0 +1,52 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
+import { CONFIG_FILENAME, STATE_DIRNAME, initialConfig, repoConfigPath } from '../config.js';
+import { color, info, out } from '../logger.js';
+import { loadMemoryFiles } from '../memory.js';
+import { budgetBar, budgetStatus, formatTokens } from '../tokens.js';
+
+const GITIGNORE_LINE = `${STATE_DIRNAME}/`;
+
+export async function cmdInit({ repo, config, flags }) {
+  const target = repoConfigPath(repo.root);
+  const existing = fs.existsSync(target);
+
+  const seed = initialConfig();
+  // Seed memoryFiles with what this repo actually has, so the first run is correct.
+  const present = config.memoryFiles.filter((f) => fs.existsSync(path.join(repo.root, f)));
+  if (present.length) seed.memoryFiles = present;
+
+  if (existing && !flags.force) {
+    info(`${color.yellow('·')} ${CONFIG_FILENAME} already exists - leaving it alone (use --force to overwrite)`);
+  } else {
+    fs.writeFileSync(target, `${JSON.stringify(seed, null, 2)}\n`);
+    info(`${color.green('·')} wrote ${CONFIG_FILENAME}`);
+  }
+
+  const gitignore = path.join(repo.root, '.gitignore');
+  const current = fs.existsSync(gitignore) ? fs.readFileSync(gitignore, 'utf8') : '';
+  if (!current.split('\n').some((l) => l.trim() === GITIGNORE_LINE)) {
+    const separator = current && !current.endsWith('\n') ? '\n' : '';
+    fs.appendFileSync(gitignore, `${separator}${GITIGNORE_LINE}\n`);
+    info(`${color.green('·')} added ${GITIGNORE_LINE} to .gitignore`);
+  }
+
+  const files = loadMemoryFiles(repo.root, seed.memoryFiles);
+  out('');
+  if (!files.length) {
+    out(`No memory file found yet. Create one of ${seed.memoryFiles.join(', ')} and run \`backpass\`.`);
+    return 0;
+  }
+  for (const file of files) {
+    const status = budgetStatus(file.text, null, seed.budgetTokens);
+    out(
+      `${file.path.padEnd(14)} ${budgetBar(status)} ${formatTokens(status.current)} / ${formatTokens(
+        status.capTokens,
+      )} tok · ${file.units.length} instructions`,
+    );
+  }
+  out('');
+  out('Next: `backpass` to run a backward pass, or `backpass scan` to see what it would read.');
+  return 0;
+}
