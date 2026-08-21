@@ -38,7 +38,10 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -eu
-          files=$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}")
+          # --diff-filter=M: only modifications count. The one legitimate human
+          # write to these files is the bootstrap PR that creates them; every
+          # write after that belongs to release-please.
+          files=$(git diff --name-only --diff-filter=M "${BASE_SHA}...${HEAD_SHA}")
 
           violated=""
           for path in CHANGELOG.md .release-please-manifest.json; do
