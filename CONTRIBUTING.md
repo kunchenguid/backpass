@@ -17,6 +17,7 @@ rejects hand-edits to release-please-generated files.
 - Run `pnpm run check` before pushing.
 - Every transcript adapter under `src/discovery/adapters/` is pinned by a golden fixture in `test/fixtures/`; change the adapter and its fixture together, and keep adapters fail-soft.
 - Do not hand-edit `CHANGELOG.md` or `.release-please-manifest.json`.
+- Releases are cut by the maintainer merging a release-please release PR; see [RELEASING.md](RELEASING.md).
 
 ## Questions
 
