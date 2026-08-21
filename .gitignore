@@ -1,5 +1,6 @@
 node_modules/
 .backpass/
-*.log
+.no-mistakes/evidence/
 .DS_Store
-npm-debug.log*
+*.log
+package-lock.json
