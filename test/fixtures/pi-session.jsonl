@@ -1,0 +1,5 @@
+{"type":"session","version":3,"id":"pi-1234","timestamp":"2026-08-03T08:00:00.000Z","cwd":"/repo/demo"}
+{"type":"model_change","id":"m1","parentId":null,"timestamp":"2026-08-03T08:00:00.100Z","provider":"openai-codex","modelId":"gpt-5.6-sol"}
+{"type":"message","id":"e1","parentId":"m1","timestamp":"2026-08-03T08:00:01.000Z","message":{"role":"user","content":[{"type":"text","text":"Add the changelog entry."}]}}
+{"type":"message","id":"e2","parentId":"e1","timestamp":"2026-08-03T08:00:02.000Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"internal reasoning that must be dropped"},{"type":"text","text":"Editing CHANGELOG.md."},{"type":"toolCall","id":"tc1","name":"bash","arguments":{"command":"git status"}}]}}
+{"type":"message","id":"e3","parentId":"e2","timestamp":"2026-08-03T08:00:03.000Z","message":{"role":"toolResult","toolCallId":"tc1","content":[{"type":"text","text":"nothing to commit"}]}}
