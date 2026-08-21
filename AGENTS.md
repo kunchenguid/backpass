@@ -11,7 +11,12 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   `src/analyze.js` -> `src/fold.js` -> `src/synthesize.js` -> `src/proposal.js` -> `src/apply/`.
   Each module's header comment explains its role; read those before changing a stage.
 - Zero runtime dependencies, ESM, no build step. Node >= 22.5 (for `node:sqlite`).
-- `npm test` runs `node --test`; all tests are offline and use fixtures under `test/fixtures/`.
+- pnpm is the package manager; `pnpm run check` runs lint, format:check, typecheck, and
+  tests. All tests are offline and use fixtures under `test/fixtures/`. Supply-chain
+  settings (release-age cooldown, build-script deny) live in `pnpm-workspace.yaml`.
+- Releases are automated by release-please (`.github/workflows/release-please.yml`,
+  npm trusted publishing). Never hand-edit `CHANGELOG.md` or
+  `.release-please-manifest.json`; CI guards reject PRs that touch them.
 
 ## Sharp edges
 

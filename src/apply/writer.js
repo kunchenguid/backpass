@@ -1,10 +1,10 @@
-import fs from 'node:fs';
-import path from 'node:path';
+import fs from "node:fs";
+import path from "node:path";
 
-import { applyEdit } from '../proposal.js';
-import { budgetStatus } from '../tokens.js';
-import { recordRejection } from '../state.js';
-import { writeSkill } from '../skills.js';
+import { applyEdit } from "../proposal.js";
+import { budgetStatus } from "../tokens.js";
+import { recordRejection } from "../state.js";
+import { writeSkill } from "../skills.js";
 
 /**
  * The only place in backpass that writes to the repo.
@@ -14,8 +14,8 @@ import { writeSkill } from '../skills.js';
  * rewritten once, atomically, rather than edit by edit.
  */
 export function applyDecisions({ proposal, decisions, repo, state, config, dryRun = false }) {
-  const accepted = proposal.edits.filter((e) => decisions[e.id] === 'accepted');
-  const rejected = proposal.edits.filter((e) => decisions[e.id] === 'rejected');
+  const accepted = proposal.edits.filter((e) => decisions[e.id] === "accepted");
+  const rejected = proposal.edits.filter((e) => decisions[e.id] === "rejected");
 
   const byFile = new Map();
   const results = { written: [], skills: [], failed: [], accepted: accepted.length, rejected: rejected.length };
@@ -28,11 +28,11 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
   for (const [relative, edits] of byFile) {
     const absolute = path.join(repo.root, relative);
     if (!fs.existsSync(absolute)) {
-      results.failed.push({ file: relative, error: 'file does not exist' });
+      results.failed.push({ file: relative, error: "file does not exist" });
       continue;
     }
 
-    const before = fs.readFileSync(absolute, 'utf8');
+    const before = fs.readFileSync(absolute, "utf8");
     let text = before;
     const applied = [];
 
@@ -47,16 +47,14 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
 
     if (text === before) continue;
 
-    const budget = relative === proposal.memoryFile.path
-      ? budgetStatus(before, text, config.budgetTokens)
-      : null;
+    const budget = relative === proposal.memoryFile.path ? budgetStatus(before, text, config.budgetTokens) : null;
 
     if (!dryRun) fs.writeFileSync(absolute, text);
     results.written.push({ file: relative, edits: applied, budget, dryRun });
   }
 
   for (const edit of accepted) {
-    if (edit.kind !== 'extract' || !edit.skill) continue;
+    if (edit.kind !== "extract" || !edit.skill) continue;
     try {
       if (!dryRun) writeSkill(repo.root, edit.skill);
       results.skills.push({ path: edit.skill.path, dryRun });

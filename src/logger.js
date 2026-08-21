@@ -1,16 +1,16 @@
 const NO_COLOR = process.env.NO_COLOR !== undefined || !process.stderr.isTTY;
-const CSI = '\u001b[';
+const CSI = "\u001b[";
 
 const wrap = (code) => (s) => (NO_COLOR ? String(s) : `${CSI}${code}m${s}${CSI}0m`);
 
 export const color = {
-  dim: wrap('2'),
-  bold: wrap('1'),
-  red: wrap('31'),
-  green: wrap('32'),
-  yellow: wrap('33'),
-  blue: wrap('34'),
-  cyan: wrap('36'),
+  dim: wrap("2"),
+  bold: wrap("1"),
+  red: wrap("31"),
+  green: wrap("32"),
+  yellow: wrap("33"),
+  blue: wrap("34"),
+  cyan: wrap("36"),
 };
 
 let quiet = false;
@@ -24,16 +24,16 @@ export function info(...args) {
   if (!quiet) console.error(...args);
 }
 
-export function step(label, detail = '') {
-  info(`${color.cyan('·')} ${label}${detail ? ` ${color.dim(detail)}` : ''}`);
+export function step(label, detail = "") {
+  info(`${color.cyan("·")} ${label}${detail ? ` ${color.dim(detail)}` : ""}`);
 }
 
 export function warn(message) {
-  console.error(`${color.yellow('warn')} ${message}`);
+  console.error(`${color.yellow("warn")} ${message}`);
 }
 
 export function fail(message) {
-  console.error(`${color.red('error')} ${message}`);
+  console.error(`${color.red("error")} ${message}`);
 }
 
 /** Structured results go to stdout. */
@@ -48,7 +48,7 @@ export function json(value) {
 export class UserError extends Error {
   constructor(message, hint) {
     super(message);
-    this.name = 'UserError';
+    this.name = "UserError";
     this.hint = hint;
   }
 }

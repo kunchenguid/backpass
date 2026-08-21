@@ -1,0 +1,12 @@
+node_modules
+.backpass
+.no-mistakes
+package-lock.json
+CHANGELOG.md
+.claude/settings.local.json
+# Model-facing prompt content; formatting must not alter it.
+src/prompts
+# Golden transcript fixtures pin adapter parsing byte-for-byte.
+test/fixtures
+# Canonical two-line @AGENTS.md pointer; prettier would add a blank line.
+CLAUDE.md

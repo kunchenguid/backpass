@@ -1,16 +1,16 @@
-import { analyzeTranscripts } from '../analyze.js';
-import { UserError, color, info, json, out } from '../logger.js';
-import { loadMemoryFiles, memorySetHash } from '../memory.js';
-import { sumUsage, formatUsage } from '../acpx.js';
-import { discoverForRun } from './scan.js';
+import { analyzeTranscripts } from "../analyze.js";
+import { UserError, color, info, json, out } from "../logger.js";
+import { loadMemoryFiles, memorySetHash } from "../memory.js";
+import { sumUsage, formatUsage } from "../acpx.js";
+import { discoverForRun } from "./scan.js";
 
 /** The memory file a run optimizes: the first configured file that exists. */
 export function primaryMemoryFile(repo, config) {
   const files = loadMemoryFiles(repo.root, config.memoryFiles);
   if (!files.length) {
     throw new UserError(
-      `no memory file found (looked for ${config.memoryFiles.join(', ')})`,
-      'create an AGENTS.md, or set memoryFiles in .backpassrc.json',
+      `no memory file found (looked for ${config.memoryFiles.join(", ")})`,
+      "create an AGENTS.md, or set memoryFiles in .backpassrc.json",
     );
   }
   return { file: files[0], all: files, hash: memorySetHash(files) };
@@ -22,7 +22,7 @@ export async function runAnalysis(ctx) {
   const { transcripts, perHarness } = await discoverForRun(ctx);
 
   if (!transcripts.length) {
-    info(`${color.yellow('·')} no transcripts associated with this repo`);
+    info(`${color.yellow("·")} no transcripts associated with this repo`);
     return { file, hash, transcripts, perHarness, summary: null };
   }
 
@@ -48,7 +48,7 @@ export async function cmdAnalyze(ctx) {
 
   if (!summary) return 0;
 
-  out('');
+  out("");
   out(`analyzed against ${file.path} (${file.units.length} instructions, ${file.tokens} tok)`);
   out(
     `  ${summary.analyzed} newly analyzed · ${summary.cached} cached · ` +
@@ -57,7 +57,7 @@ export async function cmdAnalyze(ctx) {
   const usage = sumUsage(summary.usage);
   out(`  tier-1 tokens: ${formatUsage(usage)}`);
   if (summary.failed) {
-    out(color.dim('  failed transcripts are listed by `backpass status` and retried next run'));
+    out(color.dim("  failed transcripts are listed by `backpass status` and retried next run"));
   }
   return 0;
 }

@@ -1,0 +1,8 @@
+packages:
+  - "."
+
+minimumReleaseAge: 10080
+minimumReleaseAgeStrict: true
+# Zero runtime dependencies; no dev dependency needs a build script either,
+# so nothing is allowlisted and pnpm's default-deny stays fully closed.
+onlyBuiltDependencies: []

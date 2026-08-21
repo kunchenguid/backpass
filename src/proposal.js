@@ -1,4 +1,4 @@
-import { budgetStatus, estimateTokens } from './tokens.js';
+import { budgetStatus, estimateTokens } from "./tokens.js";
 
 /**
  * The proposal model: what a synthesis pass is allowed to produce, and the mechanical
@@ -16,27 +16,27 @@ import { budgetStatus, estimateTokens } from './tokens.js';
  * than guessed at - a memory file is not something to fuzzy-patch.
  */
 
-export const EDIT_KINDS = ['add', 'remove', 'rewrite', 'extract'];
+export const EDIT_KINDS = ["add", "remove", "rewrite", "extract"];
 
 export class ProposalViolation extends Error {
   constructor(message, violations) {
     super(message);
-    this.name = 'ProposalViolation';
+    this.name = "ProposalViolation";
     this.violations = violations;
   }
 }
 
 function normalizeEdit(raw, index, defaults) {
-  const kind = String(raw?.kind || '').toLowerCase();
+  const kind = String(raw?.kind || "").toLowerCase();
   return {
     id: `e${index + 1}`,
     kind,
     file: raw?.file || defaults.memoryPath,
-    title: String(raw?.title || '').trim() || '(untitled edit)',
-    find: typeof raw?.find === 'string' ? raw.find : '',
-    replace: typeof raw?.replace === 'string' ? raw.replace : '',
-    anchor: typeof raw?.anchor === 'string' && raw.anchor.trim() ? raw.anchor : null,
-    rationale: String(raw?.rationale || '').trim(),
+    title: String(raw?.title || "").trim() || "(untitled edit)",
+    find: typeof raw?.find === "string" ? raw.find : "",
+    replace: typeof raw?.replace === "string" ? raw.replace : "",
+    anchor: typeof raw?.anchor === "string" && raw.anchor.trim() ? raw.anchor : null,
+    rationale: String(raw?.rationale || "").trim(),
     instructions: Array.isArray(raw?.instructions) ? raw.instructions.map(String) : [],
     evidence: normalizeEvidence(raw?.evidence),
     transcripts: Number.isFinite(raw?.transcripts) ? Number(raw.transcripts) : countSources(raw?.evidence),
@@ -47,11 +47,11 @@ function normalizeEdit(raw, index, defaults) {
 function normalizeEvidence(evidence) {
   if (!Array.isArray(evidence)) return [];
   return evidence
-    .filter((e) => e && typeof e.text === 'string' && e.text.trim())
+    .filter((e) => e && typeof e.text === "string" && e.text.trim())
     .map((e) => ({
-      polarity: e.polarity === 'positive' ? 'positive' : e.polarity === 'neutral' ? 'neutral' : 'negative',
+      polarity: e.polarity === "positive" ? "positive" : e.polarity === "neutral" ? "neutral" : "negative",
       text: String(e.text).trim().slice(0, 600),
-      source: String(e.source || 'unknown source').slice(0, 120),
+      source: String(e.source || "unknown source").slice(0, 120),
     }));
 }
 
@@ -61,13 +61,13 @@ function countSources(evidence) {
 }
 
 function normalizeSkill(skill) {
-  if (!skill || typeof skill !== 'object') return null;
+  if (!skill || typeof skill !== "object") return null;
   if (!skill.name || !skill.description) return null;
   return {
     name: String(skill.name).trim(),
     path: skill.path ? String(skill.path) : null,
     description: String(skill.description).trim(),
-    body: String(skill.body || '').trim(),
+    body: String(skill.body || "").trim(),
   };
 }
 
@@ -90,20 +90,22 @@ export function applyEdit(text, edit) {
   if (edit.find) {
     const found = occurrences(text, edit.find);
     if (found === 0) throw new Error(`edit ${edit.id}: "find" text does not appear in ${edit.file}`);
-    if (found > 1) throw new Error(`edit ${edit.id}: "find" text appears ${found} times in ${edit.file}; must be unique`);
+    if (found > 1)
+      throw new Error(`edit ${edit.id}: "find" text appears ${found} times in ${edit.file}; must be unique`);
     return text.replace(edit.find, () => edit.replace);
   }
 
   if (!edit.replace) throw new Error(`edit ${edit.id}: nothing to add and nothing to remove`);
 
   if (!edit.anchor) {
-    const separator = text.endsWith('\n') ? '' : '\n';
+    const separator = text.endsWith("\n") ? "" : "\n";
     return `${text}${separator}\n${edit.replace}\n`;
   }
 
   const found = occurrences(text, edit.anchor);
   if (found === 0) throw new Error(`edit ${edit.id}: "anchor" text does not appear in ${edit.file}`);
-  if (found > 1) throw new Error(`edit ${edit.id}: "anchor" text appears ${found} times in ${edit.file}; must be unique`);
+  if (found > 1)
+    throw new Error(`edit ${edit.id}: "anchor" text appears ${found} times in ${edit.file}; must be unique`);
   const at = text.indexOf(edit.anchor) + edit.anchor.length;
   return `${text.slice(0, at)}\n\n${edit.replace}${text.slice(at)}`;
 }
@@ -151,18 +153,18 @@ export function buildProposal(rawResult, context) {
       violations.push(`edit ${edit.id} ("${edit.title}") carries no verbatim evidence quote`);
       continue;
     }
-    if (edit.kind === 'add' && edit.transcripts < config.minGapEvidence) {
+    if (edit.kind === "add" && edit.transcripts < config.minGapEvidence) {
       violations.push(
         `edit ${edit.id} ("${edit.title}") adds a new instruction backed by ${edit.transcripts} session(s); ` +
           `${config.minGapEvidence} are required`,
       );
       continue;
     }
-    if (edit.kind === 'extract' && !edit.skill) {
+    if (edit.kind === "extract" && !edit.skill) {
       violations.push(`edit ${edit.id}: kind "extract" requires a skill draft`);
       continue;
     }
-    if (edit.kind !== 'extract' && edit.skill) {
+    if (edit.kind !== "extract" && edit.skill) {
       violations.push(`edit ${edit.id}: only kind "extract" may carry a skill draft`);
       continue;
     }
@@ -172,11 +174,11 @@ export function buildProposal(rawResult, context) {
     }
 
     edit.targetsMemoryFile = edit.file === memoryFile.path;
-    if (!edit.targetsMemoryFile && !knownSkillPaths.has(edit.file) && edit.kind !== 'extract') {
+    if (!edit.targetsMemoryFile && !knownSkillPaths.has(edit.file) && edit.kind !== "extract") {
       violations.push(`edit ${edit.id}: targets ${edit.file}, which is neither the memory file nor a known skill`);
       continue;
     }
-    if (edit.kind === 'extract' && edit.skill && !edit.skill.path) {
+    if (edit.kind === "extract" && edit.skill && !edit.skill.path) {
       edit.skill.path = `${config.skillsDir}/${slug(edit.skill.name)}/SKILL.md`;
     }
 
@@ -206,7 +208,7 @@ export function buildProposal(rawResult, context) {
   }
 
   const applicableMemoryEdits = memoryEdits.filter((e) => e.applicable);
-  let projectedText = memoryFile.text;
+  let projectedText;
   try {
     projectedText = applyEdits(memoryFile.text, applicableMemoryEdits);
   } catch {
@@ -223,25 +225,25 @@ export function buildProposal(rawResult, context) {
    * every run on exactly the repos that need backpass most. There, the run is a shrink
    * plan and the gate is progress: the edit set must be strictly net-negative.
    */
-  budget.mode = memoryFile.tokens > config.budgetTokens ? 'shrink' : 'cap';
-  budget.startedOverBudget = budget.mode === 'shrink';
+  budget.mode = memoryFile.tokens > config.budgetTokens ? "shrink" : "cap";
+  budget.startedOverBudget = budget.mode === "shrink";
 
-  if (budget.mode === 'cap' && !budget.withinBudget) {
+  if (budget.mode === "cap" && !budget.withinBudget) {
     violations.push(
       `applying every proposed edit leaves ${memoryFile.path} at ${budget.projected} tokens, ` +
         `${budget.over} over the ${config.budgetTokens}-token budget`,
     );
-  } else if (budget.mode === 'shrink' && budget.delta >= 0) {
+  } else if (budget.mode === "shrink" && budget.delta >= 0) {
     violations.push(
       `${memoryFile.path} is already ${budget.current - config.budgetTokens} tokens over the ` +
         `${config.budgetTokens}-token budget, so this run must shrink it, but the proposed edits ` +
-        `change it by ${budget.delta >= 0 ? '+' : ''}${budget.delta} tokens`,
+        `change it by ${budget.delta >= 0 ? "+" : ""}${budget.delta} tokens`,
     );
   }
 
   const proposal = {
     version: 1,
-    tool: 'backpass',
+    tool: "backpass",
     generatedAt: new Date().toISOString(),
     repo: { name: repo.name, root: repo.root },
     memoryFile: { path: memoryFile.path, hash: memoryFile.hash, tokens: memoryFile.tokens },
@@ -260,7 +262,7 @@ export function buildProposal(rawResult, context) {
       positive: summary?.totals?.positive ?? 0,
       negative: summary?.totals?.negative ?? 0,
       gapClusters: summary?.totals?.gapClusters ?? 0,
-      skillExtractions: accepted.filter((e) => e.kind === 'extract').length,
+      skillExtractions: accepted.filter((e) => e.kind === "extract").length,
     },
     edits: accepted,
     verdicts: Array.isArray(rawResult?.verdicts) ? rawResult.verdicts : [],
@@ -271,11 +273,13 @@ export function buildProposal(rawResult, context) {
 }
 
 export function slug(text) {
-  return String(text)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 60) || 'skill';
+  return (
+    String(text)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 60) || "skill"
+  );
 }
 
 /**

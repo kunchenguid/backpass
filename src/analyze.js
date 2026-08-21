@@ -1,13 +1,13 @@
-import fs from 'node:fs';
-import path from 'node:path';
+import fs from "node:fs";
+import path from "node:path";
 
-import { execOneShot, extractJson } from './acpx.js';
-import { distill } from './distill.js';
-import { readTranscript } from './discovery/index.js';
-import { renderInstructionIndex } from './memory.js';
-import { renderPrompt } from './prompts.js';
-import { evidenceKey, isEvidenceFresh, safeFileName } from './state.js';
-import { color, info, warn } from './logger.js';
+import { execOneShot, extractJson } from "./acpx.js";
+import { distill } from "./distill.js";
+import { readTranscript } from "./discovery/index.js";
+import { renderInstructionIndex } from "./memory.js";
+import { renderPrompt } from "./prompts.js";
+import { evidenceKey, isEvidenceFresh, safeFileName } from "./state.js";
+import { color, info, warn } from "./logger.js";
 
 /**
  * Stage 1 of the pipeline (design section 3): one cheap model call per transcript,
@@ -24,28 +24,28 @@ const MIN_TOOL_CALLS = 3;
 /** Evidence items without a verbatim quote are dropped - the rubric's central rule. */
 export function sanitizeEvidence(parsed) {
   const clean = { positive: [], negative: [], gaps: [], usedRawTranscript: Boolean(parsed?.usedRawTranscript) };
-  if (!parsed || typeof parsed !== 'object') return clean;
+  if (!parsed || typeof parsed !== "object") return clean;
 
-  const hasQuote = (item) => typeof item?.quote === 'string' && item.quote.trim().length >= 8;
+  const hasQuote = (item) => typeof item?.quote === "string" && item.quote.trim().length >= 8;
 
-  for (const key of ['positive', 'negative']) {
+  for (const key of ["positive", "negative"]) {
     for (const item of Array.isArray(parsed[key]) ? parsed[key] : []) {
-      if (!hasQuote(item) || typeof item.instruction !== 'string') continue;
+      if (!hasQuote(item) || typeof item.instruction !== "string") continue;
       clean[key].push({
         instruction: item.instruction.trim(),
-        moment: String(item.moment ?? '').slice(0, 80),
-        effect: String(item.effect ?? '').slice(0, 400),
+        moment: String(item.moment ?? "").slice(0, 80),
+        effect: String(item.effect ?? "").slice(0, 400),
         quote: item.quote.trim().slice(0, 600),
       });
     }
   }
 
   for (const item of Array.isArray(parsed.gaps) ? parsed.gaps : []) {
-    if (!hasQuote(item) || typeof item.proposedInstruction !== 'string') continue;
+    if (!hasQuote(item) || typeof item.proposedInstruction !== "string") continue;
     clean.gaps.push({
-      mistake: String(item.mistake ?? '').slice(0, 400),
+      mistake: String(item.mistake ?? "").slice(0, 400),
       proposedInstruction: item.proposedInstruction.trim().slice(0, 400),
-      recurrenceRisk: ['high', 'medium', 'low'].includes(item.recurrenceRisk) ? item.recurrenceRisk : 'medium',
+      recurrenceRisk: ["high", "medium", "low"].includes(item.recurrenceRisk) ? item.recurrenceRisk : "medium",
       quote: item.quote.trim().slice(0, 600),
     });
   }
@@ -54,7 +54,7 @@ export function sanitizeEvidence(parsed) {
 }
 
 function promptPathFor(state, transcript) {
-  return path.join(state.applyDir, '..', 'prompts', `${safeFileName(transcript.id)}.md`);
+  return path.join(state.applyDir, "..", "prompts", `${safeFileName(transcript.id)}.md`);
 }
 
 async function analyzeOne({ transcript, memoryFile, config, repo }) {
@@ -72,13 +72,13 @@ async function analyzeOne({ transcript, memoryFile, config, repo }) {
   const { userTurns, assistantTurns, toolCalls } = distilled.stats;
   if (userTurns < config.discovery.minUserTurns && assistantTurns < MIN_ASSISTANT_TURNS && toolCalls < MIN_TOOL_CALLS) {
     return {
-      status: 'skipped',
+      status: "skipped",
       reason: `trivial session (${userTurns} user turn(s), ${assistantTurns} agent turn(s), ${toolCalls} tool call(s))`,
       distilled,
     };
   }
 
-  const prompt = renderPrompt('analysis', {
+  const prompt = renderPrompt("analysis", {
     MEMORY_PATH: memoryFile.path,
     INSTRUCTION_INDEX: renderInstructionIndex(memoryFile),
     TRACE: distilled.trace,
@@ -99,11 +99,11 @@ async function analyzeOne({ transcript, memoryFile, config, repo }) {
 
   const parsed = extractJson(result.text);
   if (!parsed) {
-    throw new Error('analysis returned no parseable JSON');
+    throw new Error("analysis returned no parseable JSON");
   }
 
   return {
-    status: 'ok',
+    status: "ok",
     evidence: sanitizeEvidence(parsed),
     usage: result.usage,
     distilled,
@@ -143,8 +143,8 @@ export async function analyzeTranscripts({ transcripts, memoryFile, config, repo
   if (!pending.length) return summary;
 
   info(
-    `${color.cyan('·')} analyzing ${pending.length} transcript(s) with ${config.analysis.agent}` +
-      `${config.analysis.model ? ` (${config.analysis.model})` : ''} at jobs=${config.jobs}`,
+    `${color.cyan("·")} analyzing ${pending.length} transcript(s) with ${config.analysis.agent}` +
+      `${config.analysis.model ? ` (${config.analysis.model})` : ""} at jobs=${config.jobs}`,
   );
 
   let done = 0;
@@ -167,15 +167,15 @@ export async function analyzeTranscripts({ transcripts, memoryFile, config, repo
 
     try {
       const result = await analyzeOne({ transcript, memoryFile, config, repo });
-      if (result.status === 'skipped') {
+      if (result.status === "skipped") {
         summary.skipped += 1;
-        state.writeEvidence(transcript.id, { ...base, status: 'skipped', reason: result.reason });
+        state.writeEvidence(transcript.id, { ...base, status: "skipped", reason: result.reason });
       } else {
         summary.analyzed += 1;
         summary.usage.push(result.usage);
         state.writeEvidence(transcript.id, {
           ...base,
-          status: 'ok',
+          status: "ok",
           stats: result.distilled.stats,
           ...result.evidence,
         });
@@ -184,7 +184,7 @@ export async function analyzeTranscripts({ transcripts, memoryFile, config, repo
       // Per-transcript fail-soft: recorded, listed by `backpass status`, retried next run.
       summary.failed += 1;
       warn(`${transcript.harness} ${transcript.nativeId}: ${err.message}`);
-      state.writeEvidence(transcript.id, { ...base, status: 'failed', error: err.message });
+      state.writeEvidence(transcript.id, { ...base, status: "failed", error: err.message });
     } finally {
       done += 1;
       if (done % 10 === 0 || done === pending.length) {

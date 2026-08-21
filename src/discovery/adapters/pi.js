@@ -1,4 +1,4 @@
-import path from 'node:path';
+import path from "node:path";
 
 import {
   attachToolResults,
@@ -10,7 +10,7 @@ import {
   readHeadLines,
   readJsonl,
   statOrNull,
-} from './shared.js';
+} from "./shared.js";
 
 /**
  * pi: ~/.pi/agent/sessions/<escaped-cwd>/<ISO-ts>_<uuid>.jsonl
@@ -20,16 +20,16 @@ import {
  * give the model actually used. No remote is recorded - dead worktrees reach tier 3 only.
  */
 
-export const name = 'pi';
+export const name = "pi";
 
 export function storeRoot() {
-  return home('.pi', 'agent', 'sessions');
+  return home(".pi", "agent", "sessions");
 }
 
 export function enumerate() {
   const out = [];
   for (const dir of listDirs(storeRoot())) {
-    for (const file of listFiles(dir, '.jsonl')) {
+    for (const file of listFiles(dir, ".jsonl")) {
       const stat = statOrNull(file);
       if (!stat) continue;
       out.push({ key: file, path: file, mtimeMs: stat.mtimeMs, bytes: stat.size });
@@ -41,9 +41,9 @@ export function enumerate() {
 export function classify(candidate) {
   const [first] = readHeadLines(candidate.path, 1);
   const entry = first && parseJsonLine(first);
-  if (!entry || entry.type !== 'session' || !entry.cwd) return null;
+  if (!entry || entry.type !== "session" || !entry.cwd) return null;
   return {
-    id: entry.id || path.basename(candidate.path, '.jsonl'),
+    id: entry.id || path.basename(candidate.path, ".jsonl"),
     cwd: entry.cwd,
     gitBranch: null,
     remotes: [],
@@ -58,19 +58,19 @@ export function read(ref) {
   let model = null;
 
   for (const entry of entries) {
-    if (entry.type === 'model_change') {
+    if (entry.type === "model_change") {
       model = entry.modelId || model;
       continue;
     }
-    if (entry.type !== 'message' || !entry.message) continue;
+    if (entry.type !== "message" || !entry.message) continue;
     const message = entry.message;
     const role = message.role;
 
-    if (role === 'toolResult') {
-      events.push({ kind: 'tool-result', id: message.toolCallId ?? message.id, result: textOf(message.content) });
+    if (role === "toolResult") {
+      events.push({ kind: "tool-result", id: message.toolCallId ?? message.id, result: textOf(message.content) });
       continue;
     }
-    if (role !== 'user' && role !== 'assistant') continue;
+    if (role !== "user" && role !== "assistant") continue;
     contentToEvents(role, message.content, events);
   }
 
@@ -78,10 +78,10 @@ export function read(ref) {
 }
 
 function textOf(content) {
-  if (typeof content === 'string') return content;
+  if (typeof content === "string") return content;
   if (!Array.isArray(content)) return content;
   return content
-    .map((b) => (typeof b === 'string' ? b : b?.text ?? ''))
+    .map((b) => (typeof b === "string" ? b : (b?.text ?? "")))
     .filter(Boolean)
-    .join('\n');
+    .join("\n");
 }

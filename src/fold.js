@@ -1,4 +1,4 @@
-import { similarity } from './memory.js';
+import { similarity } from "./memory.js";
 
 /**
  * Stage 2 of the pipeline (design section 3): fold per-transcript evidence into one
@@ -20,12 +20,14 @@ const GAP_SIMILARITY_THRESHOLD = 0.45;
 
 function sourceLabel(evidence) {
   const t = evidence.transcript || {};
-  const date = t.startedAt ? new Date(t.startedAt).toISOString().slice(0, 10) : 'unknown date';
-  return `${t.harness} · ${String(t.id || '').replace(/^[a-z-]+-/, '').slice(0, 8)} · ${date}`;
+  const date = t.startedAt ? new Date(t.startedAt).toISOString().slice(0, 10) : "unknown date";
+  return `${t.harness} · ${String(t.id || "")
+    .replace(/^[a-z-]+-/, "")
+    .slice(0, 8)} · ${date}`;
 }
 
 export function foldEvidence(evidenceRecords, { minGapEvidence = 2, memoryFile = null } = {}) {
-  const usable = evidenceRecords.filter((e) => e && e.status === 'ok');
+  const usable = evidenceRecords.filter((e) => e && e.status === "ok");
   const analyzedSessions = usable.length;
 
   const instructions = new Map();
@@ -51,13 +53,13 @@ export function foldEvidence(evidenceRecords, { minGapEvidence = 2, memoryFile =
     if (record.usedRawTranscript) usedRawCount += 1;
     const source = sourceLabel(record);
 
-    for (const polarity of ['positive', 'negative']) {
+    for (const polarity of ["positive", "negative"]) {
       for (const item of record[polarity] || []) {
         const entry = touch(item.instruction);
         entry[polarity] += 1;
         entry.sessions.add(record.transcript.id);
         entry.quotes.push({ polarity, text: item.quote, effect: item.effect, moment: item.moment, source });
-        if (polarity === 'positive') positiveCount += 1;
+        if (polarity === "positive") positiveCount += 1;
         else negativeCount += 1;
       }
     }
@@ -143,7 +145,7 @@ export function foldEvidence(evidenceRecords, { minGapEvidence = 2, memoryFile =
 
 function highestRisk(items) {
   const order = { high: 3, medium: 2, low: 1 };
-  return items.reduce((best, i) => (order[i.recurrenceRisk] > order[best] ? i.recurrenceRisk : best), 'low');
+  return items.reduce((best, i) => (order[i.recurrenceRisk] > order[best] ? i.recurrenceRisk : best), "low");
 }
 
 /** Compact rendering of the folded evidence for the synthesis prompt. */
@@ -155,24 +157,24 @@ export function renderEvidenceForPrompt(summary) {
     `Totals: ${summary.totals.positive} positive, ${summary.totals.negative} negative, ` +
       `${summary.totals.gapClusters} gap clusters (${summary.totals.droppedGapSingletons} singletons dropped below threshold)`,
   );
-  lines.push('');
-  lines.push('### Per-instruction evidence');
+  lines.push("");
+  lines.push("### Per-instruction evidence");
   for (const row of summary.instructions) {
     const relevance = `${(row.relevance * 100).toFixed(1)}%`;
-    const cost = row.tokens === null ? '' : ` cost=${row.tokens}tok`;
+    const cost = row.tokens === null ? "" : ` cost=${row.tokens}tok`;
     lines.push(
       `- [${row.instruction}] +${row.positive} -${row.negative} sessions=${row.sessions} relevance=${relevance}${cost}` +
-        (row.known ? '' : ' (id not found in current file - stale reference)'),
+        (row.known ? "" : " (id not found in current file - stale reference)"),
     );
     for (const quote of row.quotes.slice(0, 3)) {
-      lines.push(`    ${quote.polarity === 'negative' ? '-' : '+'} "${oneLine(quote.text)}" (${quote.source})`);
+      lines.push(`    ${quote.polarity === "negative" ? "-" : "+"} "${oneLine(quote.text)}" (${quote.source})`);
     }
   }
 
-  lines.push('');
-  lines.push('### Gap clusters (mistakes no current instruction covers)');
+  lines.push("");
+  lines.push("### Gap clusters (mistakes no current instruction covers)");
   if (!summary.gaps.length) {
-    lines.push('- none above the evidence threshold');
+    lines.push("- none above the evidence threshold");
   }
   for (const gap of summary.gaps) {
     lines.push(`- sessions=${gap.sessions} risk=${gap.recurrenceRisk} :: ${gap.proposedInstruction}`);
@@ -181,10 +183,12 @@ export function renderEvidenceForPrompt(summary) {
     }
   }
 
-  return lines.join('\n');
+  return lines.join("\n");
 }
 
 function oneLine(text) {
-  const flat = String(text || '').replace(/\s+/g, ' ').trim();
+  const flat = String(text || "")
+    .replace(/\s+/g, " ")
+    .trim();
   return flat.length > 240 ? `${flat.slice(0, 240)}...` : flat;
 }

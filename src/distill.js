@@ -1,5 +1,5 @@
-import { redact } from './redact.js';
-import { estimateTokens } from './tokens.js';
+import { redact } from "./redact.js";
+import { estimateTokens } from "./tokens.js";
 
 /**
  * Stage 0 of the pipeline (design section 3): turn a raw session log into a distilled
@@ -19,14 +19,14 @@ const TOOL_OUTPUT_CHARS = 200;
 const MESSAGE_CHARS = 6000;
 
 function oneLine(text, limit) {
-  const flat = String(text ?? '')
-    .replace(/\s+/g, ' ')
+  const flat = String(text ?? "")
+    .replace(/\s+/g, " ")
     .trim();
   return flat.length > limit ? `${flat.slice(0, limit)}...` : flat;
 }
 
 function clampMessage(text) {
-  const trimmed = String(text ?? '').trim();
+  const trimmed = String(text ?? "").trim();
   if (trimmed.length <= MESSAGE_CHARS) return trimmed;
   const head = trimmed.slice(0, MESSAGE_CHARS - 1200);
   const tail = trimmed.slice(-1000);
@@ -34,25 +34,25 @@ function clampMessage(text) {
 }
 
 function describeToolInput(input) {
-  if (input === null || input === undefined) return '';
-  if (typeof input === 'string') return oneLine(input, TOOL_INPUT_CHARS);
+  if (input === null || input === undefined) return "";
+  if (typeof input === "string") return oneLine(input, TOOL_INPUT_CHARS);
   // Prefer the field a human would recognise for the common tools.
-  for (const key of ['command', 'cmd', 'file_path', 'path', 'pattern', 'query', 'url', 'description']) {
-    if (typeof input[key] === 'string' && input[key].trim()) {
+  for (const key of ["command", "cmd", "file_path", "path", "pattern", "query", "url", "description"]) {
+    if (typeof input[key] === "string" && input[key].trim()) {
       return oneLine(input[key], TOOL_INPUT_CHARS);
     }
   }
   try {
     return oneLine(JSON.stringify(input), TOOL_INPUT_CHARS);
   } catch {
-    return '';
+    return "";
   }
 }
 
 function describeToolResult(result) {
-  if (result === null || result === undefined) return '';
-  const text = typeof result === 'string' ? result : safeStringify(result);
-  const bytes = Buffer.byteLength(text, 'utf8');
+  if (result === null || result === undefined) return "";
+  const text = typeof result === "string" ? result : safeStringify(result);
+  const bytes = Buffer.byteLength(text, "utf8");
   const summary = oneLine(text, TOOL_OUTPUT_CHARS);
   return bytes > TOOL_OUTPUT_CHARS ? `${summary} (output ${formatBytes(bytes)}, truncated)` : summary;
 }
@@ -86,7 +86,7 @@ const BOILERPLATE = [
 ];
 
 export function isBoilerplate(text) {
-  const trimmed = String(text ?? '').trim();
+  const trimmed = String(text ?? "").trim();
   if (!trimmed) return true;
   return BOILERPLATE.some((re) => re.test(trimmed));
 }
@@ -107,22 +107,22 @@ export function distill(events, meta, options = {}) {
 
   for (const event of events) {
     if (!event) continue;
-    if (event.kind === 'message') {
+    if (event.kind === "message") {
       const text = clampMessage(redact(event.text));
       if (!text || isBoilerplate(text)) continue;
       turn += 1;
-      if (event.role === 'user') userTurns += 1;
+      if (event.role === "user") userTurns += 1;
       else assistantTurns += 1;
       lines.push(`### turn ${turn} · ${event.role}`);
       lines.push(text);
-      lines.push('');
-    } else if (event.kind === 'tool') {
+      lines.push("");
+    } else if (event.kind === "tool") {
       toolCalls += 1;
       const input = redact(describeToolInput(event.input));
       const result = redact(describeToolResult(event.result));
-      const status = event.status && event.status !== 'completed' ? ` [${event.status}]` : '';
-      const arrow = result ? ` -> ${result}` : '';
-      lines.push(`tool: ${event.name || 'unknown'}${input ? ` ${JSON.stringify(input)}` : ''}${status}${arrow}`);
+      const status = event.status && event.status !== "completed" ? ` [${event.status}]` : "";
+      const arrow = result ? ` -> ${result}` : "";
+      lines.push(`tool: ${event.name || "unknown"}${input ? ` ${JSON.stringify(input)}` : ""}${status}${arrow}`);
     }
   }
 
@@ -134,20 +134,20 @@ export function distill(events, meta, options = {}) {
     meta.cwd ? `cwd: ${meta.cwd}` : null,
     meta.gitBranch ? `branch: ${meta.gitBranch}` : null,
     `association: tier ${meta.association?.tier} (${meta.association?.confidence})`,
-    '',
+    "",
   ]
     .filter((l) => l !== null)
-    .join('\n');
+    .join("\n");
 
   const footer = [
-    '',
-    '---',
+    "",
+    "---",
     `raw transcript: ${meta.rawPath}`,
-    'Tool calls above are one-line summaries and tool output is truncated. Open the raw',
-    'transcript only if a specific claim needs the full text.',
-  ].join('\n');
+    "Tool calls above are one-line summaries and tool output is truncated. Open the raw",
+    "transcript only if a specific claim needs the full text.",
+  ].join("\n");
 
-  const { body, elided } = capTrace(lines.join('\n').trim(), maxTraceTokens);
+  const { body, elided } = capTrace(lines.join("\n").trim(), maxTraceTokens);
   const trace = `${header}\n${body}\n${footer}\n`;
 
   return {

@@ -1,7 +1,7 @@
-import fs from 'node:fs';
-import path from 'node:path';
+import fs from "node:fs";
+import path from "node:path";
 
-import { normalizeRemote } from '../repo.js';
+import { normalizeRemote } from "../repo.js";
 
 /**
  * Three-tier repo/worktree association (design section 2.1).
@@ -30,21 +30,19 @@ function isUnder(child, parent) {
 
 /** Glob support is intentionally minimal: `*` (one segment) and `**` (many). */
 export function globToRegExp(glob) {
-  const expanded = glob.startsWith('~/')
-    ? path.join(process.env.HOME || '', glob.slice(2))
-    : glob;
-  let out = '';
+  const expanded = glob.startsWith("~/") ? path.join(process.env.HOME || "", glob.slice(2)) : glob;
+  let out = "";
   for (let i = 0; i < expanded.length; i += 1) {
     const c = expanded[i];
-    if (c === '*') {
-      if (expanded[i + 1] === '*') {
-        out += '.*';
+    if (c === "*") {
+      if (expanded[i + 1] === "*") {
+        out += ".*";
         i += 1;
-        if (expanded[i + 1] === '/') i += 1;
+        if (expanded[i + 1] === "/") i += 1;
       } else {
-        out += '[^/]*';
+        out += "[^/]*";
       }
-    } else if ('\\^$.|?+()[]{}'.includes(c)) {
+    } else if ("\\^$.|?+()[]{}".includes(c)) {
       out += `\\${c}`;
     } else {
       out += c;
@@ -62,10 +60,10 @@ export function associate({ cwd, remotes = [], gitRoot = null }, repo, options =
     const real = realpathOrResolve(candidate);
     for (const worktree of repo.worktrees) {
       if (real === worktree) {
-        return { tier: 1, confidence: 'exact', reason: `cwd is worktree ${worktree}` };
+        return { tier: 1, confidence: "exact", reason: `cwd is worktree ${worktree}` };
       }
       if (isUnder(real, worktree)) {
-        return { tier: 1, confidence: 'nested', reason: `cwd is inside worktree ${worktree}` };
+        return { tier: 1, confidence: "nested", reason: `cwd is inside worktree ${worktree}` };
       }
     }
   }
@@ -75,7 +73,7 @@ export function associate({ cwd, remotes = [], gitRoot = null }, repo, options =
   for (const remote of remotes) {
     const norm = normalizeRemote(remote);
     if (norm && repoRemotes.has(norm)) {
-      return { tier: 2, confidence: 'remote', reason: `recorded remote ${norm}` };
+      return { tier: 2, confidence: "remote", reason: `recorded remote ${norm}` };
     }
   }
 
@@ -83,12 +81,12 @@ export function associate({ cwd, remotes = [], gitRoot = null }, repo, options =
   for (const candidate of candidates) {
     const resolved = path.resolve(candidate);
     if (fs.existsSync(resolved)) continue;
-    if (path.basename(resolved.replace(/\/+$/, '')) === repo.name) {
-      return { tier: 3, confidence: 'path', reason: `dead path ending in /${repo.name}` };
+    if (path.basename(resolved.replace(/\/+$/, "")) === repo.name) {
+      return { tier: 3, confidence: "path", reason: `dead path ending in /${repo.name}` };
     }
     for (const glob of globs) {
       if (globToRegExp(glob).test(resolved)) {
-        return { tier: 3, confidence: 'glob', reason: `dead path matches glob ${glob}` };
+        return { tier: 3, confidence: "glob", reason: `dead path matches glob ${glob}` };
       }
     }
   }
