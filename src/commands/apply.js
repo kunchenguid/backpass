@@ -24,6 +24,12 @@ export async function cmdApply(ctx) {
       "run `backpass propose` again",
     );
   }
+  if (proposal.appliedAt) {
+    throw new UserError(
+      `the last proposal was already applied by ${proposal.appliedBy || "a previous apply"} (${proposal.appliedAt})`,
+      "run `backpass` again to produce a fresh one",
+    );
+  }
   if (!proposal.edits.length) {
     out("The last run proposed no edits. Nothing to apply.");
     return 0;

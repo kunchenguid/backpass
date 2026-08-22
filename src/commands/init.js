@@ -41,7 +41,9 @@ export async function cmdInit({ repo, config, flags }) {
   const files = loadMemoryFiles(repo.root, seed.memoryFiles);
   out("");
   if (!files.length) {
-    out(`No memory file found yet. Create one of ${seed.memoryFiles.join(", ")} and run \`backpass\`.`);
+    out(
+      `No memory file found yet. \`backpass\` will bootstrap ${seed.memoryFiles[0]} (+ a CLAUDE.md pointer) from your transcripts and defaults.`,
+    );
     return 0;
   }
   for (const file of files) {

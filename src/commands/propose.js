@@ -52,7 +52,7 @@ export async function runProposal(ctx, precomputed = null) {
   return { proposal, summary, memoryFile: file };
 }
 
-export function printProposal(proposal) {
+export function printProposal(proposal, { applied = false } = {}) {
   out("");
   out(
     `${color.bold("proposal")} · ${proposal.repo.name} · ${proposal.memoryFile.path} · ` +
@@ -89,6 +89,7 @@ export function printProposal(proposal) {
   const usage = sumUsage(proposal.usage || []);
   out("");
   out(color.dim(`  tier-2 tokens: ${formatUsage(usage)}`));
+  if (applied) return;
   out("");
   out("Review and apply with `backpass apply` (nothing has been written).");
 }

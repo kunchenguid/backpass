@@ -68,7 +68,7 @@ function harnessCountsOf(transcripts) {
   return counts;
 }
 
-export async function synthesizeProposal({ memoryFile, summary, config, repo, transcripts }) {
+export async function synthesizeProposal({ memoryFile, summary, config, repo, transcripts, runNote = "" }) {
   const state = config.state;
   const rejections = state.readRejections();
   const overflow = resolveOverflowTarget(repo.root, config.skillsDir);
@@ -78,6 +78,7 @@ export async function synthesizeProposal({ memoryFile, summary, config, repo, tr
   const values = {
     REPO_NAME: repo.name,
     TRANSCRIPT_COUNT: String(summary.analyzedSessions),
+    RUN_NOTE: runNote,
     HARNESS_SUMMARY:
       Object.entries(harnessCounts)
         .map(([h, n]) => `${h} ${n}`)

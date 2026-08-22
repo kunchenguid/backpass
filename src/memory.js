@@ -194,3 +194,44 @@ export function reanchor(reference, file, threshold = 0.6) {
   if (best && bestScore >= threshold) return { unit: best, match: "fuzzy", score: bestScore };
   return { unit: null, match: "stale", score: bestScore };
 }
+
+/**
+ * Pointer detection. The convention for covering both harness families without
+ * duplicating content is a canonical AGENTS.md plus a CLAUDE.md that only contains the
+ * `@AGENTS.md` import (Claude Code inlines it at load time). Such a file carries no
+ * instructions of its own, so optimizing the target is fully correct and the pointer
+ * stays valid afterwards.
+ *
+ * A file is a pointer to `target` when, ignoring blank lines and HTML comments, its
+ * only content is the import line (`@AGENTS.md` or `@./AGENTS.md`).
+ */
+export function isPointerTo(text, target) {
+  const lines = text
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (lines.length !== 1) return false;
+  const ref = lines[0].replace(/^@\.\//, "@");
+  return ref === `@${target}`;
+}
+
+/**
+ * Resolve the memory file a run optimizes from the configured order.
+ *
+ *   primary   the first configured file that exists (null when none does)
+ *   pointers  other configured files that are pointers to the primary - silently fine
+ *   separate  other configured files with their own content - NOT updated by a run;
+ *             the caller warns so divergence is never silent
+ *
+ * The weights hash still covers every existing file, as before, so cached evidence
+ * survives this resolution unchanged.
+ */
+export function resolveMemoryFiles(repoRoot, memoryFiles) {
+  const files = loadMemoryFiles(repoRoot, memoryFiles);
+  if (!files.length) return { primary: null, all: files, pointers: [], separate: [], hash: null };
+  const [primary, ...others] = files;
+  const pointers = others.filter((f) => isPointerTo(f.text, primary.path));
+  const separate = others.filter((f) => !pointers.includes(f));
+  return { primary, all: files, pointers, separate, hash: memorySetHash(files) };
+}
