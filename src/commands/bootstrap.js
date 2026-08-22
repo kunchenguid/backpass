@@ -121,7 +121,7 @@ export async function bootstrapRun(ctx, deps = {}) {
     if (!(err instanceof ProposalViolation)) throw err;
     // The seed is already on disk, so a bad synthesis degrades to defaults-only.
     for (const violation of err.violations) warn(violation);
-    warn("synthesis failed its gates; the memory file stays defaults-only this run");
+    warn("gradient descent failed its gates; the memory file stays defaults-only this run");
   }
   return result;
 }

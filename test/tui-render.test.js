@@ -198,6 +198,17 @@ test("discovery frame: header gauge, rail, per-harness rows, plain-language labe
   assert.ok(text.includes("2,412 / 5,000 tok"));
   assert.ok(text.includes("63 instructions · budget 48%"));
   assert.ok(text.includes("sessions from this repo so far"));
+  assert.ok(
+    text.includes("── collect samples · local stores only"),
+    "the detail panel carries the training-loop label",
+  );
+  for (const label of ["collect samples", "calculate loss", "aggregate gradients", "gradient descent"]) {
+    assert.ok(
+      lines.some((line) => new RegExp(`^ \\S ${label}( |$)`, "u").test(line)),
+      `the rail shows the stage as "${label}"`,
+    );
+  }
+  assert.ok(!/\b(discover|analyze|fold|synthesize)\b/.test(text), "internal stage keys never reach the screen");
   assert.ok(text.includes("214 sessions · 83 new"));
   assert.ok(text.includes("38 this repo"));
   assert.ok(text.includes("ran in this repo"));
@@ -321,7 +332,7 @@ test("synthesis frame: fold rail line, sparse panel, suppression note - no gates
   assert.ok(text.includes("23 ok · 1 skipped · 1 failed · 33 reused"));
   assert.ok(text.includes("24 instructions scored · 9 gaps → 4 clusters kept (seen in ≥2 sessions)"));
   assert.ok(text.includes("one call · claude · claude-opus-5 · effort high"));
-  assert.ok(text.includes("folded evidence → at most 5 edits"));
+  assert.ok(text.includes("── gradient descent · aggregated gradients → at most 5 edits"));
   assert.ok(text.includes("weighing 4 gap clusters + 24 instruction records against the budget…"));
   assert.ok(text.includes("session backpass-synth-84121"));
   assert.ok(text.includes("1 previously rejected edit(s) suppressed"));

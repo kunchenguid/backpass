@@ -35,6 +35,18 @@ const HARNESS_HUES = {
   "cursor-ide": "blue",
 };
 
+/**
+ * Display names for the four pipeline stages, in the tool's training-loop vocabulary.
+ * Internal stage keys and event names stay as they are; only what the user reads changes.
+ */
+export const STAGE_LABELS = {
+  discover: "collect samples",
+  analyze: "calculate loss",
+  fold: "aggregate gradients",
+  synthesize: "gradient descent",
+};
+const STAGE_LABEL_WIDTH = Math.max(...Object.values(STAGE_LABELS).map((label) => label.length)) + 1;
+
 const TIER_LABELS = { 1: "ran in this repo", 2: "git remote match", 3: "path match (best-effort)" };
 
 // eslint-disable-next-line no-control-regex -- matching ANSI SGR escapes is the point
@@ -106,7 +118,7 @@ export function formatBytes(n) {
   return `${bytes} B`;
 }
 
-/** m:ss for anything from a second up; bare milliseconds below that (fold is instant). */
+/** m:ss for anything from a second up; bare milliseconds below that (aggregating gradients is instant). */
 export function formatElapsed(ms) {
   const value = Math.max(0, Math.round(Number(ms) || 0));
   if (value < 1000) return `${value}ms`;
@@ -185,12 +197,11 @@ function mark(theme, status, spin) {
   return theme.paint("○", "faint");
 }
 
-function railLine(theme, state, name, summary, stage, width, spin) {
+function railLine(theme, state, key, summary, stage, width, spin) {
   const status = stage?.status || "pending";
+  const name = fitPlain(STAGE_LABELS[key], STAGE_LABEL_WIDTH);
   const label =
-    status === "pending"
-      ? theme.paint(fitPlain(name, 11), "faint")
-      : theme.paint(fitPlain(name, 11), "text", { bold: status === "active" });
+    status === "pending" ? theme.paint(name, "faint") : theme.paint(name, "text", { bold: status === "active" });
   const left = ` ${mark(theme, status, spin)} ${label}${summary || ""}`;
   const elapsed = state.narrow ? null : stageElapsed(stage, state.now);
   return lr(left, elapsed ? theme.paint(elapsed, "faint") : null, width);
@@ -255,7 +266,7 @@ function harnessDot(theme, harness) {
 
 function discoverDetail(state, theme, width, spin) {
   const d = state.discover;
-  const lines = [sectionRule(theme, "discover", "local stores only · nothing leaves this machine", width)];
+  const lines = [sectionRule(theme, STAGE_LABELS.discover, "local stores only · nothing leaves this machine", width)];
   const countWidth = 15;
   const howWidth = 25;
   const activityWidth = width - 2 - 2 - 11 - countWidth - (state.narrow ? 0 : howWidth) - 4;
@@ -327,7 +338,7 @@ function countersLine(a, theme, width) {
 function analyzeDetail(state, theme, width, spin) {
   const a = state.analyze;
   const model = [a.agent, a.model].filter(Boolean).join(" · ");
-  const lines = [sectionRule(theme, "analyze", `one cheap call per transcript · ${model}`, width)];
+  const lines = [sectionRule(theme, STAGE_LABELS.analyze, `one cheap call per transcript · ${model}`, width)];
 
   const receiptWidth = 27;
   const timeWidth = 6;
@@ -365,7 +376,9 @@ function analyzeDetail(state, theme, width, spin) {
 
 function synthesizeDetail(state, theme, width, spin) {
   const s = state.synthesize;
-  const lines = [sectionRule(theme, "synthesize", `folded evidence → at most ${state.meta.maxEdits} edits`, width)];
+  const lines = [
+    sectionRule(theme, STAGE_LABELS.synthesize, `aggregated gradients → at most ${state.meta.maxEdits} edits`, width),
+  ];
 
   if (s.attempt > 1 && s.violations.length) {
     lines.push(

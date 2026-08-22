@@ -10,6 +10,11 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
 - The pipeline is one stage per module, in order: `src/discovery/` -> `src/sample.js` (cap) -> `src/distill.js` ->
   `src/analyze.js` -> `src/fold.js` -> `src/synthesize.js` -> `src/proposal.js` -> `src/apply/`.
   Each module's header comment explains its role; read those before changing a stage.
+- **User-facing step names are the training-loop terms**, not the module names: discover =
+  "collect samples", analyze = "calculate loss", fold = "aggregate gradients", synthesize =
+  "gradient descent" (`STAGE_LABELS` in `src/tui/render.js`). Internal keys, event names, and
+  the typed subcommands (`scan`, `analyze`, `propose`) keep their short names; only what the
+  user reads changes. Never introduce a multi-word subcommand.
 - Zero runtime dependencies, ESM, no build step. Node >= 22.5 (for `node:sqlite`).
 - pnpm is the package manager; `pnpm run check` runs lint, format:check, typecheck, and
   tests. All tests are offline and use fixtures under `test/fixtures/`. Supply-chain

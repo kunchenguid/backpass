@@ -85,7 +85,7 @@ export async function cmdStatus(ctx) {
   );
   if (summary) {
     out(
-      `  folded          ${summary.analyzedSessions} session(s) · ${summary.totals.positive}+ ` +
+      `  gradients       ${summary.analyzedSessions} session(s) · ${summary.totals.positive}+ ` +
         `${summary.totals.negative}- · ${summary.totals.gapClusters} gap cluster(s)`,
     );
   }

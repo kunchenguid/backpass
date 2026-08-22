@@ -51,7 +51,7 @@ export async function runProposal(ctx, precomputed = null) {
 
   if (!summary.analyzedSessions) {
     throw new UserError(
-      "no analyzed transcripts to synthesize from",
+      "no loss calculated yet: nothing to run gradient descent on",
       "run `backpass analyze` first, or `backpass` for the full pass",
     );
   }

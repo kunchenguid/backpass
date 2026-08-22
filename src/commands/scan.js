@@ -44,7 +44,7 @@ export async function cmdScan(ctx) {
   }
   out(table(rows));
   const selfTotal = Object.values(perHarness).reduce((n, s) => n + (s.self || 0), 0);
-  if (selfTotal) out(color.dim(`  SELF = backpass's own analysis/synthesis sessions, excluded from the corpus`));
+  if (selfTotal) out(color.dim(`  SELF = backpass's own loss / gradient-descent sessions, excluded from the corpus`));
   out("");
 
   const byTier = { 1: 0, 2: 0, 3: 0 };
