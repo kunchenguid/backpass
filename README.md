@@ -116,6 +116,14 @@ open the original when - and only when - a specific claim needs it.
 
 ### 3. Analysis - one cheap call per transcript
 
+Analysis costs one call per transcript, so the set is capped first: past `maxTranscripts`
+(default 100, `--max-transcripts`) a **recency-weighted sample** is analyzed instead of
+everything. Each transcript's weight halves every `sampleHalfLife` (default 14d), and the
+sample is drawn without replacement, so recent sessions are almost always kept and old
+ones stay represented in proportion. When this happens the run says so on stderr
+(`discovered 340 transcript(s), analyzing a recency-weighted sample of 100`); pass
+`--max-transcripts all` to analyze every transcript, or `--seed <n>` to reproduce a sample.
+
 Each distilled trace goes to a cheap model with the memory file and a rubric. It returns
 strict JSON: which instructions helped, which were violated, and what mistakes no current
 instruction covers.
@@ -299,6 +307,8 @@ CLI flags on top:
   "skillsDir": ".agents/skills",
   "maxEditsPerRun": null,
   "minGapEvidence": 2,
+  "maxTranscripts": 100,
+  "sampleHalfLife": "14d",
   "analysis": { "agent": null, "model": null, "effort": null },
   "synthesis": { "agent": null, "model": null, "effort": null },
   "ladders": {

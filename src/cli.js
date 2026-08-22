@@ -4,7 +4,7 @@ import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 
 import { UserError, fail, setQuiet } from "./logger.js";
-import { loadConfig } from "./config.js";
+import { loadConfig, parseMaxTranscripts } from "./config.js";
 import { resolveRepo } from "./repo.js";
 import { State } from "./state.js";
 import { AgentResolver } from "./agents.js";
@@ -38,6 +38,8 @@ const OPTIONS = {
 
   budget: { type: "string" },
   "max-edits": { type: "string" },
+  "max-transcripts": { type: "string" },
+  seed: { type: "string" },
   "min-gap-evidence": { type: "string" },
   "memory-file": { type: "string", multiple: true },
   "skills-dir": { type: "string" },
@@ -81,7 +83,10 @@ DISCOVERY
                            (claude, codex, pi, opencode, grok, cursor)
   --strict                 deterministic associations only (tiers 1 and 2)
   --include-cursor-ide     also scan the Cursor IDE store (best-effort, v1.1 preview)
-  --limit <n>              analyze at most N transcripts this run
+  --limit <n>              analyze at most N transcripts this run (newest first)
+  --max-transcripts <n>    cap per run; past it a recency-weighted random sample
+                           is analyzed. 0 or "all" disables the cap          [100]
+  --seed <n>               make the transcript sample reproducible
 
 MODELS (two-tier: cheap analysis, smart synthesis - all through acpx)
   By default each pass auto-picks the first harness in its ladder that is installed,
@@ -144,6 +149,10 @@ function overridesFrom(values) {
   if (values.jobs) overrides.jobs = toInt(values.jobs, "--jobs");
   if (values.budget) overrides.budgetTokens = toInt(values.budget, "--budget");
   if (values["max-edits"]) overrides.maxEditsPerRun = toInt(values["max-edits"], "--max-edits");
+  if (values["max-transcripts"] !== undefined) {
+    overrides.maxTranscripts = parseMaxTranscripts(values["max-transcripts"], "--max-transcripts");
+  }
+  if (values.seed !== undefined) overrides.seed = toSeed(values.seed);
   if (values["min-gap-evidence"]) {
     overrides.minGapEvidence = toInt(values["min-gap-evidence"], "--min-gap-evidence");
   }
@@ -168,6 +177,12 @@ function overridesFrom(values) {
 function toInt(value, flag) {
   const n = Number(value);
   if (!Number.isInteger(n) || n <= 0) throw new UserError(`${flag} must be a positive integer (got "${value}")`);
+  return n;
+}
+
+function toSeed(value) {
+  const n = Number(value);
+  if (!Number.isInteger(n)) throw new UserError(`--seed must be an integer (got "${value}")`);
   return n;
 }
 

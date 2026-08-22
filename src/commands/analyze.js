@@ -4,6 +4,7 @@ import { resolveMemoryFiles } from "../memory.js";
 import { emitProgress } from "../progress.js";
 import { discoverForRun } from "./scan.js";
 import { printUsage } from "./usage.js";
+import { capTranscripts } from "../sample.js";
 
 /**
  * The memory file a run optimizes: the first configured file that exists (AGENTS.md by
@@ -43,7 +44,8 @@ export async function runAnalysis(ctx) {
     budget: config.budgetTokens,
     units: file.units.length,
   });
-  const { transcripts, perHarness } = await discoverForRun(ctx);
+  // The cap bounds the expensive per-transcript calls; cached evidence is reused as usual.
+  const { transcripts, perHarness } = capTranscripts(await discoverForRun(ctx), config);
 
   if (!transcripts.length) {
     info(`${color.yellow("·")} no transcripts associated with this repo`);
