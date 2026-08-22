@@ -20,6 +20,7 @@ export const STATE_EXCLUDE_LINE = `${STATE_DIRNAME}/`;
  *   evidence-summary.json  folded evidence (stage 2)
  *   proposal.json          latest tier-2 synthesis (stage 3)
  *   rejections.json        edits the human rejected, and the evidence weight behind them
+ *   gap-ledger.json        gap observations by gap and session, accumulated across runs (src/gap-ledger.js)
  *   agent-probe-cache.json TTL'd availability/auth verdicts per agent|model (src/agents.js)
  *   apply/                 the rendered Lavish apply surface
  */
@@ -32,6 +33,7 @@ export class State {
     this.summaryPath = path.join(this.root, "evidence-summary.json");
     this.proposalPath = path.join(this.root, "proposal.json");
     this.rejectionsPath = path.join(this.root, "rejections.json");
+    this.gapLedgerPath = path.join(this.root, "gap-ledger.json");
     this.probeCachePath = path.join(this.root, "agent-probe-cache.json");
   }
 
@@ -116,6 +118,18 @@ export class State {
 
   writeRejections(rejections) {
     this.writeJsonFile(this.rejectionsPath, rejections);
+  }
+
+  /** Fail-soft: a missing or corrupt ledger starts empty and is rebuilt from this run's evidence. */
+  readGapLedger() {
+    const value = this.readJsonFile(this.gapLedgerPath, null);
+    return value && value.version === 1 && value.entries && typeof value.entries === "object"
+      ? value
+      : { version: 1, entries: {} };
+  }
+
+  writeGapLedger(ledger) {
+    this.writeJsonFile(this.gapLedgerPath, ledger);
   }
 
   readProbeCache() {
