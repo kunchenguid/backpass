@@ -7,7 +7,7 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
 ## Orientation
 
 - `README.md` documents the user-facing surface; `src/cli.js` is the authoritative flag list.
-- The pipeline is one stage per module, in order: `src/discovery/` -> `src/distill.js` ->
+- The pipeline is one stage per module, in order: `src/discovery/` -> `src/sample.js` (cap) -> `src/distill.js` ->
   `src/analyze.js` -> `src/fold.js` -> `src/synthesize.js` -> `src/proposal.js` -> `src/apply/`.
   Each module's header comment explains its role; read those before changing a stage.
 - Zero runtime dependencies, ESM, no build step. Node >= 22.5 (for `node:sqlite`).
