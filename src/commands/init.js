@@ -1,13 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { CONFIG_FILENAME, STATE_DIRNAME, initialConfig, repoConfigPath } from "../config.js";
+import { CONFIG_FILENAME, initialConfig, repoConfigPath } from "../config.js";
 import { color, info, out, warn } from "../logger.js";
 import { loadMemoryFiles } from "../memory.js";
 import { ensureLocalExclude } from "../repo.js";
+import { STATE_EXCLUDE_LINE as EXCLUDE_LINE } from "../state.js";
 import { budgetBar, budgetStatus, formatTokens } from "../tokens.js";
-
-const EXCLUDE_LINE = `${STATE_DIRNAME}/`;
 
 export async function cmdInit({ repo, config, flags }) {
   const target = repoConfigPath(repo.root);
