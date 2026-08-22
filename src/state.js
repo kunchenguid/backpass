@@ -4,10 +4,15 @@ import crypto from "node:crypto";
 
 import { STATE_DIRNAME } from "./config.js";
 import { warn } from "./logger.js";
+import { ensureLocalExclude } from "./repo.js";
+
+/** The line every command writes to the repo's local git exclude for the state dir. */
+export const STATE_EXCLUDE_LINE = `${STATE_DIRNAME}/`;
 
 /**
  * All mutable run state lives in a `.backpass/` directory, kept out of git via the
- * repo's local exclude (`.git/info/exclude`, written by `backpass init`) rather than
+ * repo's local exclude (`.git/info/exclude`, written idempotently by `ensure()` on every
+ * command, so a plain `backpass` run with no prior `init` is excluded too) rather than
  * the tracked `.gitignore`:
  *
  *   scan-cache.json        path+mtime+size -> association verdict (design section 2.2)
@@ -30,9 +35,14 @@ export class State {
     this.probeCachePath = path.join(this.root, "agent-probe-cache.json");
   }
 
+  /**
+   * Creates the state dir and excludes it from git in the same step. The exclude is
+   * local-only and fail-soft: a non-git directory is silently left alone.
+   */
   ensure() {
     fs.mkdirSync(this.evidenceDir, { recursive: true });
     fs.mkdirSync(this.applyDir, { recursive: true });
+    this.exclude = ensureLocalExclude(path.dirname(this.root), STATE_EXCLUDE_LINE);
     return this;
   }
 
