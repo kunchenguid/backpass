@@ -6,6 +6,7 @@ edits - one gradient step on the weights, not a rewrite.
 ## Repository
 
 {{REPO_NAME}} - {{TRANSCRIPT_COUNT}} sessions analyzed across {{HARNESS_SUMMARY}}.
+{{RUN_NOTE}}
 
 ## Current memory file: {{MEMORY_PATH}}
 

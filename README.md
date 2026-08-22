@@ -203,6 +203,25 @@ backpass apply --no-ui     # same decision, in the terminal
 backpass apply --dry-run   # show what would be written
 ```
 
+### 9. Which file is the weights
+
+`memoryFiles` is an ordered list (default `["AGENTS.md", "CLAUDE.md"]`); the first one
+that exists is the file a run optimizes, so **AGENTS.md is canonical**. Resolution is
+pointer-aware:
+
+- `CLAUDE.md` containing only `@AGENTS.md` (the standard import) is a pointer: optimizing
+  AGENTS.md covers both harness families and the pointer stays valid. Nothing to report.
+- Two separate full files are a divergence hazard. backpass optimizes AGENTS.md, leaves
+  CLAUDE.md untouched, and warns each run until you consolidate: move CLAUDE.md's content
+  into AGENTS.md and make CLAUDE.md the one-line pointer.
+- A repo with **no memory file** is bootstrapped on the first `backpass` run: a starter
+  AGENTS.md (purpose, detected orientation such as the package manager and check
+  commands, baseline conventions, a `## Maintaining this file` section) plus a CLAUDE.md
+  pointer. The starter is then run through the ordinary backward pass, so recurring gaps
+  from your real transcripts become its first evidence-backed instructions. With no
+  transcripts it is seeded from defaults alone and says so. Bootstrap only ever creates
+  files; review it with `git diff`.
+
 ## CLI Reference
 
 | Command            | What it does                                                  |

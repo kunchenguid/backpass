@@ -32,6 +32,11 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   (`src/tui/render.js`) so it is testable as text.
 - **`src/apply/writer.js` is the only module that writes to the repo.** Keep it that way -
   every other stage is read-only analysis, which is what makes a run safe to interrupt.
+  Bootstrap (`src/commands/bootstrap.js`, a repo with no memory file) is the one run that
+  writes without the apply gate, and it only ever creates files, never overwrites.
+- **Memory resolution is pointer-aware** (`resolveMemoryFiles` in `src/memory.js`): the
+  first configured file is canonical, a `@AGENTS.md`-only CLAUDE.md is a pointer, and a
+  second full file is warned about, never silently ignored or double-written.
 - **Never trust model-reported numbers.** Token deltas and budget projections are measured
   in `src/proposal.js` from the actual text; the synthesis model's own figures are ignored.
 - **acpx is alpha.** All model invocation is isolated behind `src/acpx.js` so an upstream

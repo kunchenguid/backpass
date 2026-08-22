@@ -72,3 +72,22 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
 
   return results;
 }
+
+/**
+ * Seed a repo that has no memory file: the canonical file plus the pointer. Each file
+ * is created only if absent - bootstrap never overwrites, so a pre-existing file (say a
+ * CLAUDE.md the user wrote while a run was in flight) is reported, not replaced.
+ */
+export function writeBootstrapFiles(repoRoot, files) {
+  const results = { written: [], skipped: [] };
+  for (const { path: relative, text } of files) {
+    const absolute = path.join(repoRoot, relative);
+    if (fs.existsSync(absolute)) {
+      results.skipped.push({ file: relative, reason: "already exists" });
+      continue;
+    }
+    fs.writeFileSync(absolute, text, { flag: "wx" });
+    results.written.push({ file: relative, bytes: Buffer.byteLength(text, "utf8") });
+  }
+  return results;
+}

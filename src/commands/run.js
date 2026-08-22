@@ -2,16 +2,20 @@ import { UserError, color, info, json, out } from "../logger.js";
 import { formatUsage, sumUsage } from "../acpx.js";
 import { ProposalViolation } from "../proposal.js";
 import { runAnalysis } from "./analyze.js";
+import { bootstrapJson, bootstrapRun, printBootstrap } from "./bootstrap.js";
 import { printProposal, runProposal } from "./propose.js";
 import { budgetBar, formatTokens } from "../tokens.js";
 import { startTui } from "../tui/index.js";
+import { resolveMemoryFiles } from "../memory.js";
 
 /**
  * The default command: one full backward pass.
  *
  *   discover -> distill -> analyze (cheap, fanned out) -> fold -> synthesize (one big call)
  *
- * It never writes. Applying is a separate, human-gated step.
+ * It never writes - with one exception: a repo with no memory file at all is
+ * bootstrapped (`./bootstrap.js`), which only ever creates files. Otherwise applying
+ * is a separate, human-gated step.
  *
  * On an eligible terminal a live progress view renders the run on stderr; it
  * collapses back into the plain lines below before anything is printed to
@@ -27,6 +31,14 @@ export async function cmdRun(ctx) {
         `v${ctx.version} · ${repo.name} · budget ${formatTokens(config.budgetTokens)} tok · since ${config.discovery.since}`,
       )}`,
     );
+
+    if (!resolveMemoryFiles(repo.root, config.memoryFiles).primary) {
+      const result = await bootstrapRun(ctx);
+      tui?.stop();
+      if (ctx.flags.json) bootstrapJson(result);
+      else printBootstrap(result, config);
+      return 0;
+    }
 
     const analysis = await runAnalysis(ctx);
 

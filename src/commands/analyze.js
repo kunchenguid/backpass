@@ -1,20 +1,36 @@
 import { analyzeTranscripts } from "../analyze.js";
-import { UserError, color, info, json, out } from "../logger.js";
-import { loadMemoryFiles, memorySetHash } from "../memory.js";
+import { UserError, color, info, json, out, warn } from "../logger.js";
+import { resolveMemoryFiles } from "../memory.js";
 import { sumUsage, formatUsage } from "../acpx.js";
 import { emitProgress } from "../progress.js";
 import { discoverForRun } from "./scan.js";
 
-/** The memory file a run optimizes: the first configured file that exists. */
+/**
+ * The memory file a run optimizes: the first configured file that exists (AGENTS.md by
+ * default - canonical). Resolution is pointer-aware: a CLAUDE.md that is just
+ * `@AGENTS.md` is covered by optimizing AGENTS.md and needs no mention. A second file
+ * with its own content is NOT updated - that would either be ignored silently or
+ * double-written into divergence - so the run says so and recommends consolidating.
+ *
+ * When no configured file exists, `backpass` (the default run) bootstraps one; every
+ * other command fails with a pointer to that.
+ */
 export function primaryMemoryFile(repo, config) {
-  const files = loadMemoryFiles(repo.root, config.memoryFiles);
-  if (!files.length) {
+  const resolved = resolveMemoryFiles(repo.root, config.memoryFiles);
+  if (!resolved.primary) {
     throw new UserError(
       `no memory file found (looked for ${config.memoryFiles.join(", ")})`,
-      "create an AGENTS.md, or set memoryFiles in .backpassrc.json",
+      "run `backpass` to bootstrap an AGENTS.md, or set memoryFiles in .backpassrc.json",
     );
   }
-  return { file: files[0], all: files, hash: memorySetHash(files) };
+  for (const other of resolved.separate) {
+    warn(
+      `${other.path} is a separate memory file and will NOT be updated - only ${resolved.primary.path} is optimized. ` +
+        `To cover both, consolidate: move its content into ${resolved.primary.path} and make ${other.path} a pointer ` +
+        `(a single line: @${resolved.primary.path}).`,
+    );
+  }
+  return { file: resolved.primary, all: resolved.all, hash: resolved.hash, resolved };
 }
 
 export async function runAnalysis(ctx) {
