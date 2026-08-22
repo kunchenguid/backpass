@@ -6,6 +6,8 @@ import { loadMemoryFiles } from "../memory.js";
 import { loadSkills, resolveOverflowTarget } from "../skills.js";
 import { budgetBar, budgetStatus, formatTokens } from "../tokens.js";
 import { table } from "./scan.js";
+import { DEFAULT_EFFORT } from "../config.js";
+import { candidateKey, isProbeEntryFresh } from "../agents.js";
 
 export async function cmdStatus(ctx) {
   const { repo, config } = ctx;
@@ -105,12 +107,28 @@ export async function cmdStatus(ctx) {
   }
 
   out("");
-  out(
-    color.dim(
-      `models: analysis ${config.analysis.agent}${config.analysis.model ? `/${config.analysis.model}` : ""} · ` +
-        `synthesis ${config.synthesis.agent}${config.synthesis.model ? `/${config.synthesis.model}` : ""}` +
-        `${config.synthesis.effort ? ` (effort ${config.synthesis.effort})` : ""}`,
-    ),
-  );
+  out(color.dim("MODELS"));
+  for (const role of ["analysis", "synthesis"]) out(`  ${role.padEnd(10)}      ${describeRole(config, role)}`);
   return 0;
+}
+
+/**
+ * The pick for a role without probing: a pinned agent as configured, otherwise the
+ * ladder with whatever the probe cache already knows. `status` must stay instant.
+ */
+function describeRole(config, role) {
+  const pinned = config.agents.pinned(role);
+  const effort = config[role].effort || DEFAULT_EFFORT[role];
+  if (pinned) {
+    return `${pinned.agent}${pinned.model ? `/${pinned.model}` : ""} (effort ${effort}, ${pinned.reason})`;
+  }
+  const cache = config.state.readProbeCache();
+  for (const candidate of config.agents.ladder(role)) {
+    const entry = cache.entries[candidateKey(candidate)];
+    if (!isProbeEntryFresh(entry)) continue;
+    if (entry.verdict === "ok") {
+      return `${candidate.agent}/${entry.resolvedModel || candidate.model} (effort ${effort}, auto - probed ${entry.checkedAt.slice(0, 16).replace("T", " ")})`;
+    }
+  }
+  return color.dim(`auto - ${config.agents.ladder(role).length} candidates, none probed yet (effort ${effort})`);
 }

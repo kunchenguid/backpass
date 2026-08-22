@@ -11,14 +11,48 @@ export const ALL_HARNESSES = ["claude", "codex", "pi", "opencode", "grok", "curs
 /** Cursor IDE is deferred to v1.1 and only ever runs behind --include-cursor-ide. */
 export const OPT_IN_HARNESSES = ["cursor-ide"];
 
+/**
+ * The ordered candidate ladders behind the auto-pick (ordered-defaults design, section 8.2).
+ * Each rung is one model id served by several harnesses in preference order; rungs are
+ * flattened model-outer / harness-inner, and the first candidate that is installed,
+ * authenticated, and serves the model wins. Model ids are the bare ids the vendors use;
+ * per-harness spellings (`openai-codex/...`, `openai/...`, `xai/...`) are resolved at
+ * probe time against what the adapter advertises - never hard-coded. Ladders live in
+ * config so a user can reorder or shorten them in `.backpassrc.json` without a release.
+ */
+export const DEFAULT_LADDERS = {
+  analysis: [
+    { model: "gpt-5.6-luna", agents: ["pi", "opencode", "codex"] },
+    { model: "claude-sonnet-5", agents: ["claude"] },
+    { model: "grok-4.6", agents: ["pi", "opencode", "grok"] },
+  ],
+  synthesis: [
+    { model: "gpt-5.6-sol", agents: ["pi", "opencode", "codex"] },
+    { model: "claude-opus-5", agents: ["claude"] },
+    { model: "grok-4.6", agents: ["pi", "opencode", "grok"] },
+  ],
+};
+
+/** Applied to a role whenever no layer set an effort, auto-picked or pinned. */
+export const DEFAULT_EFFORT = { analysis: "medium", synthesis: "high" };
+
+/** What `--no-auto-agent` pins: the pre-ladder fixed defaults. */
+export const LEGACY_DEFAULT_AGENTS = { analysis: "codex", synthesis: "claude" };
+
 export const DEFAULT_CONFIG = {
   memoryFiles: ["AGENTS.md", "CLAUDE.md"],
   budgetTokens: 5000,
   skillsDir: ".claude/skills",
   maxEditsPerRun: 5,
   minGapEvidence: 2,
-  analysis: { agent: "codex", model: null, effort: null },
-  synthesis: { agent: "claude", model: null, effort: "high" },
+  /**
+   * `agent: null` means auto-pick from `ladders[role]`; `effort: null` means
+   * `DEFAULT_EFFORT[role]`. Setting `agent` pins the role and skips the ladder.
+   */
+  analysis: { agent: null, model: null, effort: null },
+  synthesis: { agent: null, model: null, effort: null },
+  autoAgent: true,
+  ladders: DEFAULT_LADDERS,
   discovery: {
     harnesses: ALL_HARNESSES,
     since: "30d",
@@ -105,6 +139,23 @@ function validate(config) {
   if (!Number.isInteger(config.jobs) || config.jobs < 1) {
     throw new UserError("config.jobs must be an integer >= 1");
   }
+  for (const role of ["analysis", "synthesis"]) {
+    if (config[role].model && !config[role].agent) {
+      throw new UserError(
+        `config.${role}.model is set but config.${role}.agent is not`,
+        `set --${role}-agent too, or leave both unset to auto-pick from the ladder`,
+      );
+    }
+    const ladder = config.ladders?.[role];
+    if (!Array.isArray(ladder) || ladder.length === 0) {
+      throw new UserError(`config.ladders.${role} must be a non-empty array of { model, agents } rungs`);
+    }
+    for (const rung of ladder) {
+      if (!rung || typeof rung.model !== "string" || !Array.isArray(rung.agents) || !rung.agents.length) {
+        throw new UserError(`config.ladders.${role} rungs must look like { "model": "<id>", "agents": ["<harness>"] }`);
+      }
+    }
+  }
   if (!["auto", "dark", "light"].includes(config.theme)) {
     throw new UserError(`config.theme must be "auto", "dark", or "light" (got "${config.theme}")`);
   }
@@ -148,8 +199,9 @@ export function initialConfig() {
     skillsDir: DEFAULT_CONFIG.skillsDir,
     maxEditsPerRun: DEFAULT_CONFIG.maxEditsPerRun,
     minGapEvidence: DEFAULT_CONFIG.minGapEvidence,
-    analysis: { agent: "codex", model: null, effort: "low" },
-    synthesis: { agent: "claude", model: null, effort: "high" },
+    // Agents stay unset so the ladder auto-pick keeps applying to initialized repos.
+    analysis: { agent: null, model: null, effort: null },
+    synthesis: { agent: null, model: null, effort: null },
     discovery: { harnesses: ALL_HARNESSES, since: "30d", worktreeGlobs: [], minUserTurns: 2 },
     jobs: DEFAULT_CONFIG.jobs,
   };

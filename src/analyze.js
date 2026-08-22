@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { execOneShot, extractJson } from "./acpx.js";
+import { execOneShot, extractJson, sessionPrompt } from "./acpx.js";
 import { distill } from "./distill.js";
 import { readTranscript } from "./discovery/index.js";
 import { renderInstructionIndex } from "./memory.js";
@@ -21,6 +21,16 @@ import { color, info, warn } from "./logger.js";
 
 const MIN_ASSISTANT_TURNS = 4;
 const MIN_TOOL_CALLS = 3;
+
+let callCounter = 0;
+const seenNotes = new Set();
+
+/** The same adapter limitation would repeat once per transcript; say it once per run. */
+function noteOnce(note) {
+  if (seenNotes.has(note)) return;
+  seenNotes.add(note);
+  warn(note);
+}
 
 /** Evidence items without a verbatim quote are dropped - the rubric's central rule. */
 export function sanitizeEvidence(parsed) {
@@ -99,14 +109,26 @@ async function analyzeOne({ transcript, memoryFile, config, repo, slot = 0 }) {
   fs.mkdirSync(path.dirname(promptFile), { recursive: true });
   fs.writeFileSync(promptFile, prompt);
 
-  const result = await execOneShot({
-    agent: config.analysis.agent,
-    model: config.analysis.model,
-    promptFile,
-    cwd: repo.root,
-    timeoutSeconds: config.timeoutSeconds,
-    promptRetries: config.promptRetries,
+  const result = await config.agents.withFallthrough("analysis", async (pick) => {
+    const call = {
+      agent: pick.agent,
+      model: pick.model,
+      promptFile,
+      cwd: repo.root,
+      timeoutSeconds: config.timeoutSeconds,
+      promptRetries: config.promptRetries,
+    };
+    // Effort is a session config option, so an effortful analysis call needs a
+    // (fresh, per-transcript) session; without effort the plain one-shot is cheaper.
+    if (!pick.effort) return execOneShot(call);
+    callCounter += 1;
+    return sessionPrompt({
+      ...call,
+      effort: pick.effort,
+      sessionName: `backpass-analysis-${process.pid}-${slot}-${callCounter}`,
+    });
   });
+  for (const note of result.notes || []) noteOnce(note);
 
   const parsed = extractJson(result.text);
   if (!parsed) {
@@ -155,23 +177,26 @@ export async function analyzeTranscripts({ transcripts, memoryFile, config, repo
     pending.push(transcript);
   }
 
+  if (!pending.length) {
+    emitProgress("analyze:start", { pending: 0, cached: summary.cached, total: transcripts.length, jobs: config.jobs });
+    emitProgress("analyze:done", summary);
+    return summary;
+  }
+
+  // Resolve (and, on the first run, probe) before the fan-out so the pick is announced once.
+  const pick = await config.agents.resolve("analysis");
   emitProgress("analyze:start", {
     pending: pending.length,
     cached: summary.cached,
     total: transcripts.length,
     jobs: config.jobs,
-    agent: config.analysis.agent,
-    model: config.analysis.model,
+    agent: pick.agent,
+    model: pick.model,
   });
 
-  if (!pending.length) {
-    emitProgress("analyze:done", summary);
-    return summary;
-  }
-
   info(
-    `${color.cyan("·")} analyzing ${pending.length} transcript(s) with ${config.analysis.agent}` +
-      `${config.analysis.model ? ` (${config.analysis.model})` : ""} at jobs=${config.jobs}`,
+    `${color.cyan("·")} analyzing ${pending.length} transcript(s) with ${pick.agent}` +
+      `${pick.model ? ` (${pick.model})` : ""}${pick.effort ? ` effort=${pick.effort}` : ""} at jobs=${config.jobs}`,
   );
 
   let done = 0;

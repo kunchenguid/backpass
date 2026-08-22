@@ -1,6 +1,5 @@
-import { spawn } from "node:child_process";
-
 import { warn } from "./logger.js";
+import { runCapture } from "./subprocess.js";
 
 /**
  * The acpx execution layer (design section 4).
@@ -16,13 +15,40 @@ import { warn } from "./logger.js";
 
 export const ACPX_BIN = process.env.BACKPASS_ACPX_BIN || "acpx";
 
+/**
+ * backpass's user-facing harness names versus acpx's agent registry. The only
+ * mismatch today is grok: backpass calls the harness `grok` everywhere (config,
+ * discovery, --harness) while acpx registers it as `grok-build`. Translate at this
+ * boundary only, so the user never has to know.
+ */
+const ACPX_AGENT_NAMES = { grok: "grok-build" };
+
+export function acpxAgentName(agent) {
+  return ACPX_AGENT_NAMES[agent] || agent;
+}
+
+/**
+ * The session config-option id each adapter uses for reasoning effort. There is no
+ * shared ACP name for it and `acpx status` does not expose config options, so this
+ * small table is measured (see the ordered-defaults design report) rather than
+ * derived. Adapters absent here (grok, opencode) advertise no effort option at all;
+ * effort is then skipped with a report note, never silently.
+ */
+export const EFFORT_OPTION_KEYS = { codex: "reasoning_effort", claude: "effort", pi: "thought_level" };
+
+export function effortOptionKey(agent) {
+  return EFFORT_OPTION_KEYS[agent] || null;
+}
+
 export class AcpxError extends Error {
-  constructor(message, { stdout = "", stderr = "", code = null } = {}) {
+  constructor(message, { stdout = "", stderr = "", code = null, timedOut = false, spawnError = null } = {}) {
     super(message);
     this.name = "AcpxError";
     this.stdout = stdout;
     this.stderr = stderr;
     this.code = code;
+    this.timedOut = timedOut;
+    this.spawnError = spawnError;
   }
 }
 
@@ -30,39 +56,36 @@ export class AcpxError extends Error {
  * @param {string[]} args
  * @param {{ timeoutMs?: number, cwd?: string, input?: string }} [options]
  */
-function run(args, { timeoutMs, cwd, input } = {}) {
-  return new Promise((resolve) => {
-    const child = spawn(ACPX_BIN, args, { cwd, stdio: ["pipe", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    let timedOut = false;
+function run(args, options = {}) {
+  return runCapture(ACPX_BIN, args, options);
+}
 
-    const timer = timeoutMs
-      ? setTimeout(() => {
-          timedOut = true;
-          child.kill("SIGTERM");
-          setTimeout(() => child.kill("SIGKILL"), 5000).unref();
-        }, timeoutMs)
-      : null;
+function notFoundError(result) {
+  return new AcpxError(`acpx not found on PATH (looked for "${ACPX_BIN}")`, result);
+}
 
-    child.stdout.on("data", (d) => {
-      stdout += d;
-    });
-    child.stderr.on("data", (d) => {
-      stderr += d;
-    });
-    child.on("error", (err) => {
-      if (timer) clearTimeout(timer);
-      resolve({ code: null, stdout, stderr: `${stderr}${err.message}`, spawnError: err });
-    });
-    child.on("close", (code) => {
-      if (timer) clearTimeout(timer);
-      resolve({ code, stdout, stderr, timedOut });
-    });
-
-    if (input !== undefined) child.stdin.end(input);
-    else child.stdin.end();
-  });
+/**
+ * Availability verdicts for a failed acpx call. Only a *classifiable* failure is a
+ * reason to drop a candidate and fall through to the next one; anything else (a
+ * timeout on a long prompt, garbage output) stays a plain error so a run never
+ * silently switches models after real work has started.
+ *
+ * acpx reports these on stderr as `[acpx] error: RUNTIME AUTH_REQUIRED ...` and
+ * `Cannot apply --model "x": the ACP agent did not advertise that model`.
+ *
+ * @param {{ stderr?: string, spawnError?: { code?: string } | null, timedOut?: boolean }} failure
+ * @returns {"unauthenticated" | "model-unavailable" | "unreachable" | null}
+ */
+export function classifyAcpxFailure(failure) {
+  if (!failure) return null;
+  if (failure.spawnError?.code === "ENOENT") return "unreachable";
+  const text = failure.stderr || "";
+  if (/AUTH_REQUIRED|authentication required/i.test(text)) return "unauthenticated";
+  if (/did not advertise that model/i.test(text)) return "model-unavailable";
+  if (/\b(ENOENT|command not found|not found on PATH|failed to spawn|spawn .* ENOENT)\b/i.test(text)) {
+    return "unreachable";
+  }
+  return null;
 }
 
 /** acpx prints a per-run accounting line: `[acpx] tokens: input=10 output=47 ... total=34194`. */
@@ -130,6 +153,57 @@ function baseArgs({ cwd, model, timeoutSeconds, approveReads, suppressReads }) {
   return args;
 }
 
+/** `acpx --version`, used to key the probe cache. Null when acpx is missing. */
+export async function acpxVersion({ timeoutMs = 10_000 } = {}) {
+  const result = await run(["--version"], { timeoutMs });
+  if (result.code !== 0) return null;
+  const line = firstLine(result.stdout);
+  return line || null;
+}
+
+/**
+ * Zero-token availability probe: spawn the adapter, handshake, create a session,
+ * read what it advertises, close it. For codex / pi / grok, `sessions new` is a
+ * real auth gate (ACP -32000); for claude it is not, which is why `src/agents.js`
+ * checks `claude auth status` before ever calling this.
+ *
+ * @returns {Promise<{ verdict: "ok" | "unauthenticated" | "model-unavailable" | "unreachable" | "timeout",
+ *   detail: string, availableModels: string[] }>}
+ */
+export async function probeSession({ agent, sessionName, cwd = undefined, timeoutMs = 20_000 }) {
+  const acpxAgent = acpxAgentName(agent);
+  const created = await run([acpxAgent, "sessions", "new", "--name", sessionName], { timeoutMs, cwd });
+  if (created.spawnError?.code === "ENOENT") throw notFoundError(created);
+  if (created.timedOut) {
+    return {
+      verdict: "timeout",
+      detail: `probe timed out after ${Math.round(timeoutMs / 1000)}s`,
+      availableModels: [],
+    };
+  }
+  if (created.code !== 0) {
+    const verdict = classifyAcpxFailure(created) || "unreachable";
+    return { verdict, detail: firstLine(created.stderr) || `exit ${created.code}`, availableModels: [] };
+  }
+
+  try {
+    const status = await run(["--format", "json", acpxAgent, "status", "-s", sessionName], { timeoutMs, cwd });
+    let availableModels = [];
+    if (status.code === 0) {
+      try {
+        const parsed = JSON.parse(status.stdout.trim().split("\n").at(-1) || "{}");
+        if (Array.isArray(parsed.availableModels)) availableModels = parsed.availableModels.map(String);
+      } catch {
+        // Leave the list empty; the caller decides whether it needs one.
+      }
+    }
+    return { verdict: "ok", detail: "", availableModels };
+  } finally {
+    const closed = await run([acpxAgent, "sessions", "close", sessionName], { timeoutMs, cwd });
+    if (closed.code !== 0) warn(`could not close acpx probe session ${sessionName}`);
+  }
+}
+
 /**
  * Tier 1 - one-shot analysis call (design section 5).
  *
@@ -150,16 +224,14 @@ export async function execOneShot({
     ...baseArgs({ cwd, model, timeoutSeconds, approveReads, suppressReads }),
     "--prompt-retries",
     String(promptRetries),
-    agent,
+    acpxAgentName(agent),
     "exec",
     "--file",
     promptFile,
   ];
 
   const result = await run(args, { timeoutMs: (timeoutSeconds + 30) * 1000, cwd });
-  if (result.spawnError && result.spawnError.code === "ENOENT") {
-    throw new AcpxError(`acpx not found on PATH (looked for "${ACPX_BIN}")`, { stderr: result.stderr });
-  }
+  if (result.spawnError && result.spawnError.code === "ENOENT") throw notFoundError(result);
   if (result.timedOut) {
     throw new AcpxError(`acpx ${agent} exec timed out after ${timeoutSeconds}s`, result);
   }
@@ -172,11 +244,13 @@ export async function execOneShot({
 }
 
 /**
- * Tier 2 - synthesis through a named session (design section 5).
+ * A prompt through a short-lived named session (design section 5).
  *
- * acpx documents both `set model` and `set reasoning_effort` on sessions, so the big
- * high-reasoning pass runs there. Adapters that do not advertise a reasoning-effort
- * config option skip that step with a report line - never silently.
+ * Reasoning effort is a session config option on every adapter that has one, and
+ * `exec` cannot set it - so any call that wants effort applied goes through here:
+ * the synthesis pass always, and the analysis pass whenever an effort is configured.
+ * Adapters that do not advertise an effort option skip that step with a report line -
+ * never silently.
  */
 export async function sessionPrompt({
   agent,
@@ -186,23 +260,29 @@ export async function sessionPrompt({
   promptFile,
   cwd,
   timeoutSeconds = 900,
+  promptRetries = 1,
   approveReads = true,
   suppressReads = true,
 }) {
   const notes = [];
-  const created = await run([agent, "sessions", "new", "--name", sessionName], { timeoutMs: 60_000, cwd });
-  if (created.spawnError && created.spawnError.code === "ENOENT") {
-    throw new AcpxError(`acpx not found on PATH (looked for "${ACPX_BIN}")`, created);
-  }
+  const acpxAgent = acpxAgentName(agent);
+  const created = await run([acpxAgent, "sessions", "new", "--name", sessionName], { timeoutMs: 60_000, cwd });
+  if (created.spawnError && created.spawnError.code === "ENOENT") throw notFoundError(created);
   if (created.code !== 0) {
+    // An auth or spawn failure must surface as such so the caller can fall through.
+    if (classifyAcpxFailure(created)) {
+      throw new AcpxError(`acpx ${agent} session create failed: ${firstLine(created.stderr)}`, created);
+    }
     // No session support for this adapter: fall back to a one-shot, and say so.
     notes.push(`session unsupported for ${agent}; fell back to exec one-shot`);
+    if (effort) notes.push(`${agent} cannot set effort without a session; ran without effort=${effort}`);
     const fallback = await execOneShot({
       agent,
       model,
       promptFile,
       cwd,
       timeoutSeconds,
+      promptRetries,
       approveReads,
       suppressReads,
     });
@@ -211,22 +291,29 @@ export async function sessionPrompt({
 
   try {
     if (model) {
-      const set = await run([agent, "-s", sessionName, "set", "model", model], { timeoutMs: 60_000, cwd });
-      if (set.code !== 0) notes.push(`could not set model=${model} on ${agent}: ${firstLine(set.stderr)}`);
+      const set = await run([acpxAgent, "-s", sessionName, "set", "model", model], { timeoutMs: 60_000, cwd });
+      if (set.code !== 0) {
+        if (classifyAcpxFailure(set) === "model-unavailable") {
+          throw new AcpxError(`acpx ${agent} rejected model ${model}: ${firstLine(set.stderr)}`, set);
+        }
+        notes.push(`could not set model=${model} on ${agent}: ${firstLine(set.stderr)}`);
+      }
     }
     if (effort) {
-      const set = await run([agent, "-s", sessionName, "set", "reasoning_effort", effort], {
-        timeoutMs: 60_000,
-        cwd,
-      });
-      if (set.code !== 0) {
-        notes.push(`${agent} does not advertise reasoning_effort; ran without effort=${effort}`);
+      const key = effortOptionKey(agent);
+      const set = key
+        ? await run([acpxAgent, "-s", sessionName, "set", key, effort], { timeoutMs: 60_000, cwd })
+        : null;
+      if (!set || set.code !== 0) {
+        notes.push(`${agent} does not advertise a reasoning-effort option; ran without effort=${effort}`);
       }
     }
 
     const args = [
       ...baseArgs({ cwd, model: null, timeoutSeconds, approveReads, suppressReads }),
-      agent,
+      "--prompt-retries",
+      String(promptRetries),
+      acpxAgent,
       "-s",
       sessionName,
       "--file",
@@ -239,7 +326,7 @@ export async function sessionPrompt({
     const combined = `${result.stdout}\n${result.stderr}`;
     return { text: stripAcpxNoise(result.stdout), usage: parseTokenLine(combined), raw: result.stdout, notes };
   } finally {
-    const closed = await run([agent, "sessions", "close", sessionName], { timeoutMs: 30_000, cwd });
+    const closed = await run([acpxAgent, "sessions", "close", sessionName], { timeoutMs: 30_000, cwd });
     if (closed.code !== 0) warn(`could not close acpx session ${sessionName}`);
   }
 }
