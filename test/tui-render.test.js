@@ -266,8 +266,33 @@ test("analyze frame: pool bar, lanes with distill receipts, counters, evidence t
   assert.ok(text.includes("✓ 61 helped"));
   assert.ok(text.includes("✗ 14 violated"));
   assert.ok(text.includes("◆ 22 gaps"));
-  assert.ok(text.includes("claims without a verbatim quote are dropped"));
+  assert.ok(!text.includes("claims without a verbatim quote are dropped"));
   assert.ok(text.includes("53 sessions from this repo"));
+});
+
+test("analyze frame: lane rows show the human title and never the transcript id", () => {
+  const lines = render(stateAfter(ANALYZE_SCRIPT));
+  const text = lines.join("\n");
+
+  assert.ok(text.includes("refactor wallet sync engine"));
+  assert.ok(text.includes("add csv export"));
+  assert.ok(!text.includes("7c1f39aa"));
+  assert.ok(!text.includes("51a7ff08"));
+});
+
+test("analyze frame: a lane whose title is a clean fallback still carries no id", () => {
+  const uuid = "0f3b6a2e-9d1c-4e7a-b8c5-1d2e3f4a5b6c";
+  const script = [
+    ...ANALYZE_SCRIPT,
+    ["analyze:lane", { slot: 2, harness: "codex", id: uuid, title: "session 2026-08-21 14:03", phase: "distill" }],
+    ["analyze:lane", { slot: 3, harness: "codex", id: uuid, title: "(untitled)", phase: "distill" }],
+  ];
+  const text = render(stateAfter(script)).join("\n");
+
+  assert.ok(text.includes("session 2026-08-21 14:03"));
+  assert.ok(text.includes("(untitled)"));
+  assert.ok(!text.includes(uuid));
+  assert.ok(!text.includes(uuid.slice(0, 8)));
 });
 
 const SYNTH_SCRIPT = [

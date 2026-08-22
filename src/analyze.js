@@ -64,6 +64,21 @@ export function sanitizeEvidence(parsed) {
   return clean;
 }
 
+/**
+ * Human-facing label for a transcript in progress output. Never a raw session ID: a
+ * transcript with no title falls back to its session date/time, then to "(untitled)".
+ */
+export function transcriptLabel(transcript) {
+  if (transcript.title) return transcript.title;
+  const at = Number(transcript.startedAt);
+  if (Number.isFinite(at) && at > 0) {
+    const d = new Date(at);
+    const pad = (n) => String(n).padStart(2, "0");
+    return `session ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+  return "(untitled)";
+}
+
 function promptPathFor(state, transcript) {
   return path.join(state.applyDir, "..", "prompts", `${safeFileName(transcript.id)}.md`);
 }
@@ -80,9 +95,11 @@ async function analyzeOne({ transcript, memoryFile, config, repo, slot = 0 }) {
     slot,
     harness: transcript.harness,
     id: transcript.nativeId,
-    title: transcript.title || transcript.nativeId,
+    title: transcriptLabel(transcript),
     phase: "model",
-    rawBytes: transcript.bytes,
+    // Measure the input distill actually consumed, not `transcript.bytes`: that is a
+    // discovery stat() size, which is a directory or 0 for several harnesses.
+    rawBytes: Buffer.byteLength(JSON.stringify(raw.events), "utf8"),
     distilledBytes: Buffer.byteLength(distilled.trace, "utf8"),
   });
 
@@ -222,7 +239,7 @@ export async function analyzeTranscripts({ transcripts, memoryFile, config, repo
       slot,
       harness: transcript.harness,
       id: transcript.nativeId,
-      title: transcript.title || transcript.nativeId,
+      title: transcriptLabel(transcript),
       phase: "distill",
     });
 
@@ -248,7 +265,7 @@ export async function analyzeTranscripts({ transcripts, memoryFile, config, repo
     } catch (err) {
       // Per-transcript fail-soft: recorded, listed by `backpass status`, retried next run.
       summary.failed += 1;
-      warn(`${transcript.harness} ${transcript.nativeId}: ${err.message}`);
+      warn(`${transcript.harness} ${transcriptLabel(transcript)}: ${err.message}`);
       state.writeEvidence(transcript.id, { ...base, status: "failed", error: err.message });
     } finally {
       done += 1;

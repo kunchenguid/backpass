@@ -330,7 +330,7 @@ function analyzeDetail(state, theme, width, spin) {
 
   const receiptWidth = 27;
   const timeWidth = 6;
-  const titleWidth = Math.max(width - 2 - 2 - 2 - 11 - 10 - receiptWidth - (state.narrow ? 0 : timeWidth) - 7, 10);
+  const titleWidth = Math.max(width - 2 - 2 - 2 - 11 - receiptWidth - (state.narrow ? 0 : timeWidth) - 7, 10);
 
   a.lanes.forEach((lane, index) => {
     if (!lane) return;
@@ -347,19 +347,17 @@ function analyzeDetail(state, theme, width, spin) {
       : theme.paint(fitPlain(formatElapsed(state.now - lane.startedAt), timeWidth, "right"), "faint");
     lines.push(
       ` ${theme.paint(spin, "mint")} ${theme.paint(String(index + 1), "faint")} ${harnessDot(theme, lane.harness)} ` +
-        `${theme.paint(fitPlain(lane.harness, 9), "text")}${theme.paint(fitPlain(lane.id, 10), "faint")} ` +
+        `${theme.paint(fitPlain(lane.harness, 9), "text")} ` +
         `${theme.paint(fitPlain(lane.title, titleWidth), "dim")} ${receipt}${elapsed}`,
     );
   });
 
   lines.push("");
   lines.push(countersLine(a, theme, width));
-  const evidence =
-    ` ${theme.paint("evidence so far", "dim")}   ${theme.paint(`✓ ${a.evidence.positive}`, "mint")} ${theme.paint("helped", "faint")}` +
-    `   ${theme.paint(`✗ ${a.evidence.negative}`, "red")} ${theme.paint("violated", "faint")}` +
-    `   ${theme.paint(`◆ ${a.evidence.gaps}`, "yellow")} ${theme.paint("gaps", "faint")}`;
   lines.push(
-    lr(evidence, state.narrow ? null : theme.paint("claims without a verbatim quote are dropped", "faint"), width),
+    ` ${theme.paint("evidence so far", "dim")}   ${theme.paint(`✓ ${a.evidence.positive}`, "mint")} ${theme.paint("helped", "faint")}` +
+      `   ${theme.paint(`✗ ${a.evidence.negative}`, "red")} ${theme.paint("violated", "faint")}` +
+      `   ${theme.paint(`◆ ${a.evidence.gaps}`, "yellow")} ${theme.paint("gaps", "faint")}`,
   );
   return lines;
 }
