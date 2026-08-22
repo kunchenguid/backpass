@@ -47,6 +47,14 @@ export const DEFAULT_CONFIG = {
   maxEditsPerRun: null,
   minGapEvidence: 2,
   /**
+   * Cap on transcripts analyzed per run; past it a recency-weighted sample is drawn
+   * (`src/sample.js`). `0` or "all" disables the cap. `sampleHalfLife` is the age at
+   * which a transcript's sampling weight halves; `seed` makes the sample reproducible.
+   */
+  maxTranscripts: 100,
+  sampleHalfLife: "14d",
+  seed: null,
+  /**
    * `agent: null` means auto-pick from `ladders[role]`; `effort: null` means
    * `DEFAULT_EFFORT[role]`. Setting `agent` pins the role and skips the ladder.
    */
@@ -119,6 +127,19 @@ export function parseSince(since) {
   return n * ms;
 }
 
+/** Normalize a user-facing cap: `0`, `all`, null, or undefined disables it. */
+export function parseMaxTranscripts(value, flag = "maxTranscripts") {
+  if (value === null || value === undefined || value === "all" || value === "0" || value === 0) return null;
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 0) {
+    throw new UserError(
+      `${flag} must be a non-negative integer or "all" (got "${value}")`,
+      'use a positive integer, or 0 / "all" to analyze every transcript',
+    );
+  }
+  return n;
+}
+
 export function sinceCutoff(since, now = Date.now()) {
   const window = parseSince(since);
   return window === null ? null : now - window;
@@ -136,6 +157,13 @@ function validate(config) {
   }
   if (!Number.isInteger(config.minGapEvidence) || config.minGapEvidence < 1) {
     throw new UserError("config.minGapEvidence must be an integer >= 1");
+  }
+  config.maxTranscripts = parseMaxTranscripts(config.maxTranscripts, "config.maxTranscripts");
+  if (parseSince(config.sampleHalfLife) === null) {
+    throw new UserError(`config.sampleHalfLife must be a duration like 14d (got "${config.sampleHalfLife}")`);
+  }
+  if (config.seed !== null && !Number.isInteger(config.seed)) {
+    throw new UserError("config.seed must be an integer or null");
   }
   if (!Number.isInteger(config.jobs) || config.jobs < 1) {
     throw new UserError("config.jobs must be an integer >= 1");
@@ -200,6 +228,7 @@ export function initialConfig() {
     skillsDir: DEFAULT_CONFIG.skillsDir,
     // maxEditsPerRun stays unset so the adaptive cap applies; set it to pin a number.
     minGapEvidence: DEFAULT_CONFIG.minGapEvidence,
+    maxTranscripts: DEFAULT_CONFIG.maxTranscripts,
     // Agents stay unset so the ladder auto-pick keeps applying to initialized repos.
     analysis: { agent: null, model: null, effort: null },
     synthesis: { agent: null, model: null, effort: null },
