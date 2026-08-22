@@ -1,9 +1,9 @@
 import { analyzeTranscripts } from "../analyze.js";
 import { UserError, color, info, json, out, warn } from "../logger.js";
 import { resolveMemoryFiles } from "../memory.js";
-import { sumUsage, formatUsage } from "../acpx.js";
 import { emitProgress } from "../progress.js";
 import { discoverForRun } from "./scan.js";
+import { printUsage } from "./usage.js";
 
 /**
  * The memory file a run optimizes: the first configured file that exists (AGENTS.md by
@@ -78,10 +78,9 @@ export async function cmdAnalyze(ctx) {
     `  ${summary.analyzed} newly analyzed · ${summary.cached} cached · ` +
       `${summary.skipped} skipped (too short) · ${summary.failed} failed`,
   );
-  const usage = sumUsage(summary.usage);
-  out(`  tier-1 tokens: ${formatUsage(usage)}`);
   if (summary.failed) {
     out(color.dim("  failed transcripts are listed by `backpass status` and retried next run"));
   }
+  printUsage({ tier1: summary.usage });
   return 0;
 }

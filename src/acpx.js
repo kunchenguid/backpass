@@ -335,12 +335,32 @@ function firstLine(text) {
   return (text || "").split("\n").find((l) => l.trim()) || "";
 }
 
-/** Sum acpx usage records for cost visibility (design section 9). */
+/**
+ * Per-call usage accounting (design section 9).
+ *
+ * acpx prints its `[acpx] tokens:` line only when the ACP adapter returns `usage` in
+ * the `session/prompt` result. codex and claude do; pi does not (its result is a bare
+ * `{ stopReason }`), so a pi-backed pass legitimately has nothing to report. A record
+ * therefore keeps the harness next to the (possibly null) usage, so the report can say
+ * *who* stayed silent instead of printing a meaningless "n/a".
+ *
+ * @typedef {{ agent: string, usage: Record<string, number> | null }} UsageRecord
+ */
+
+/** @returns {UsageRecord} */
+export function usageRecord(agent, result) {
+  return { agent, usage: result?.usage || null };
+}
+
+/** Sum the usage maps of the records that reported one. */
 export function sumUsage(records) {
   const total = {};
-  for (const usage of records) {
-    if (!usage) continue;
-    for (const [key, value] of Object.entries(usage)) total[key] = (total[key] || 0) + value;
+  for (const record of records) {
+    const usage = record?.usage ?? record;
+    if (!usage || typeof usage !== "object") continue;
+    for (const [key, value] of Object.entries(usage)) {
+      if (Number.isFinite(value)) total[key] = (total[key] || 0) + value;
+    }
   }
   return total;
 }
@@ -350,4 +370,24 @@ export function formatUsage(usage) {
   return Object.entries(usage)
     .map(([k, v]) => `${k}=${v.toLocaleString("en-US")}`)
     .join(" ");
+}
+
+/**
+ * Describe a pass's usage for the report, or null when the pass made no model calls
+ * (everything cached, or a different command ran it) - the caller then prints nothing.
+ *
+ * @param {(UsageRecord | null | undefined)[]} records
+ * @returns {string | null}
+ */
+export function describeUsage(records) {
+  const calls = (records || []).filter((r) => r && typeof r === "object" && "agent" in r);
+  if (!calls.length) return null;
+  const reported = calls.filter((r) => r.usage && Object.keys(r.usage).length);
+  if (!reported.length) {
+    const agents = [...new Set(calls.map((r) => r.agent))].join(", ");
+    return `not reported by ${agents}`;
+  }
+  const text = formatUsage(sumUsage(reported));
+  if (reported.length === calls.length) return text;
+  return `${text} (${reported.length} of ${calls.length} calls reported)`;
 }

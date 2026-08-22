@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { execOneShot, extractJson, sessionPrompt } from "./acpx.js";
+import { execOneShot, extractJson, sessionPrompt, usageRecord } from "./acpx.js";
 import { distill } from "./distill.js";
 import { readTranscript } from "./discovery/index.js";
 import { renderInstructionIndex } from "./memory.js";
@@ -126,7 +126,9 @@ async function analyzeOne({ transcript, memoryFile, config, repo, slot = 0 }) {
   fs.mkdirSync(path.dirname(promptFile), { recursive: true });
   fs.writeFileSync(promptFile, prompt);
 
+  let ranWith = null;
   const result = await config.agents.withFallthrough("analysis", async (pick) => {
+    ranWith = pick.agent;
     const call = {
       agent: pick.agent,
       model: pick.model,
@@ -155,7 +157,7 @@ async function analyzeOne({ transcript, memoryFile, config, repo, slot = 0 }) {
   return {
     status: "ok",
     evidence: sanitizeEvidence(parsed),
-    usage: result.usage,
+    usage: usageRecord(ranWith, result),
     distilled,
   };
 }

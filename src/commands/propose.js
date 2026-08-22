@@ -3,9 +3,9 @@ import { synthesizeProposal } from "../synthesize.js";
 import { ProposalViolation } from "../proposal.js";
 import { UserError, color, info, json, out } from "../logger.js";
 import { budgetBar, formatTokens } from "../tokens.js";
-import { formatUsage, sumUsage } from "../acpx.js";
 import { emitProgress } from "../progress.js";
 import { primaryMemoryFile } from "./analyze.js";
+import { printUsage } from "./usage.js";
 import { discoverForRun } from "./scan.js";
 
 export async function foldForRun(ctx, memoryFile) {
@@ -52,7 +52,12 @@ export async function runProposal(ctx, precomputed = null) {
   return { proposal, summary, memoryFile: file };
 }
 
-export function printProposal(proposal, { applied = false } = {}) {
+/**
+ * @param {object} proposal
+ * @param {{ applied?: boolean, analysisUsage?: import("../acpx.js").UsageRecord[] }} [options]
+ *   `analysisUsage` is the tier-1 accounting of the same run, when the caller ran it.
+ */
+export function printProposal(proposal, { applied = false, analysisUsage = [] } = {}) {
   out("");
   out(
     `${color.bold("proposal")} · ${proposal.repo.name} · ${proposal.memoryFile.path} · ` +
@@ -86,9 +91,7 @@ export function printProposal(proposal, { applied = false } = {}) {
 
   for (const note of proposal.notes || []) out(color.dim(`  note: ${note}`));
 
-  const usage = sumUsage(proposal.usage || []);
-  out("");
-  out(color.dim(`  tier-2 tokens: ${formatUsage(usage)}`));
+  printUsage({ tier1: analysisUsage, tier2: proposal.usage || [] });
   if (applied) return;
   out("");
   out("Review and apply with `backpass apply` (nothing has been written).");
