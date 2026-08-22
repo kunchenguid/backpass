@@ -266,7 +266,7 @@ test("analyze frame: pool bar, lanes with distill receipts, counters, evidence t
   assert.ok(text.includes("✓ 61 helped"));
   assert.ok(text.includes("✗ 14 violated"));
   assert.ok(text.includes("◆ 22 gaps"));
-  assert.ok(text.includes("claims without a verbatim quote are dropped"));
+  assert.ok(!text.includes("claims without a verbatim quote are dropped"));
   assert.ok(text.includes("53 sessions from this repo"));
 });
 

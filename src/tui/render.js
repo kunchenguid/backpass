@@ -354,12 +354,10 @@ function analyzeDetail(state, theme, width, spin) {
 
   lines.push("");
   lines.push(countersLine(a, theme, width));
-  const evidence =
-    ` ${theme.paint("evidence so far", "dim")}   ${theme.paint(`✓ ${a.evidence.positive}`, "mint")} ${theme.paint("helped", "faint")}` +
-    `   ${theme.paint(`✗ ${a.evidence.negative}`, "red")} ${theme.paint("violated", "faint")}` +
-    `   ${theme.paint(`◆ ${a.evidence.gaps}`, "yellow")} ${theme.paint("gaps", "faint")}`;
   lines.push(
-    lr(evidence, state.narrow ? null : theme.paint("claims without a verbatim quote are dropped", "faint"), width),
+    ` ${theme.paint("evidence so far", "dim")}   ${theme.paint(`✓ ${a.evidence.positive}`, "mint")} ${theme.paint("helped", "faint")}` +
+      `   ${theme.paint(`✗ ${a.evidence.negative}`, "red")} ${theme.paint("violated", "faint")}` +
+      `   ${theme.paint(`◆ ${a.evidence.gaps}`, "yellow")} ${theme.paint("gaps", "faint")}`,
   );
   return lines;
 }

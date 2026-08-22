@@ -97,7 +97,9 @@ async function analyzeOne({ transcript, memoryFile, config, repo, slot = 0 }) {
     id: transcript.nativeId,
     title: transcriptLabel(transcript),
     phase: "model",
-    rawBytes: transcript.bytes,
+    // Measure the input distill actually consumed, not `transcript.bytes`: that is a
+    // discovery stat() size, which is a directory or 0 for several harnesses.
+    rawBytes: Buffer.byteLength(JSON.stringify(raw.events), "utf8"),
     distilledBytes: Buffer.byteLength(distilled.trace, "utf8"),
   });
 
