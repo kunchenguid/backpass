@@ -18,6 +18,26 @@ import { budgetStatus, estimateTokens } from "./tokens.js";
 
 export const EDIT_KINDS = ["add", "remove", "rewrite", "extract"];
 
+/**
+ * The per-run edit cap is adaptive (design section 6). Near or under budget it is the
+ * gentle learning rate: DEFAULT_MAX_EDITS small, reviewable steps. A file that is over
+ * budget needs a shrink plan, and a flat cap would stretch that plan across many runs,
+ * so the allowance scales with the overage: one edit per SHRINK_EDIT_TOKENS of overage,
+ * never below the default and never above SHRINK_MAX_EDITS, which keeps a single apply
+ * review manageable. An explicit `maxEditsPerRun` (flag or config) always wins.
+ */
+export const DEFAULT_MAX_EDITS = 5;
+export const SHRINK_MAX_EDITS = 20;
+/** A typical memory-file instruction removal or tightening trims about this many tokens. */
+export const SHRINK_EDIT_TOKENS = 40;
+
+export function effectiveMaxEdits(memoryFile, config) {
+  if (Number.isInteger(config.maxEditsPerRun) && config.maxEditsPerRun > 0) return config.maxEditsPerRun;
+  const overage = memoryFile.tokens - config.budgetTokens;
+  if (overage <= 0) return DEFAULT_MAX_EDITS;
+  return Math.min(SHRINK_MAX_EDITS, Math.max(DEFAULT_MAX_EDITS, Math.ceil(overage / SHRINK_EDIT_TOKENS)));
+}
+
 export class ProposalViolation extends Error {
   constructor(message, violations) {
     super(message);
@@ -135,10 +155,9 @@ export function buildProposal(rawResult, context) {
   const rawEdits = Array.isArray(rawResult?.edits) ? rawResult.edits : [];
   const edits = rawEdits.map((raw, i) => normalizeEdit(raw, i, { memoryPath: memoryFile.path }));
 
-  if (edits.length > config.maxEditsPerRun) {
-    violations.push(
-      `proposed ${edits.length} edits but the per-run cap is ${config.maxEditsPerRun} (the learning rate)`,
-    );
+  const maxEdits = effectiveMaxEdits(memoryFile, config);
+  if (edits.length > maxEdits) {
+    violations.push(`proposed ${edits.length} edits but the per-run cap is ${maxEdits} (the learning rate)`);
   }
 
   const accepted = [];
@@ -250,7 +269,7 @@ export function buildProposal(rawResult, context) {
     budget,
     config: {
       budgetTokens: config.budgetTokens,
-      maxEditsPerRun: config.maxEditsPerRun,
+      maxEditsPerRun: maxEdits,
       minGapEvidence: config.minGapEvidence,
       skillsDir: config.skillsDir,
       analysis: config.analysis,

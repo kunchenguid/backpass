@@ -12,6 +12,7 @@
  *  - all motion stops and the region is erased the moment the run ends
  */
 
+import { DEFAULT_MAX_EDITS } from "../proposal.js";
 import { clearProgressSink, setProgressSink } from "../progress.js";
 import { setLoggerSink } from "../logger.js";
 import { colorDepth, detectBackground, tuiEligible } from "./term.js";
@@ -38,7 +39,7 @@ export async function startTui(ctx, { stderr = process.stderr } = {}) {
       repoName: ctx.repo.name,
       worktrees: ctx.repo.worktrees?.length || 1,
       since: ctx.config.discovery.since,
-      maxEdits: ctx.config.maxEditsPerRun,
+      maxEdits: ctx.config.maxEditsPerRun ?? DEFAULT_MAX_EDITS,
     },
   });
   tui.start();
@@ -219,6 +220,7 @@ export function reduceEvent(state, event, data, now = Date.now()) {
       s.model = data.model;
       s.effort = data.effort;
       s.attempt = data.attempt;
+      if (data.maxEdits) state.meta.maxEdits = data.maxEdits;
       s.sessionName = data.sessionName;
       s.gapClusters = data.gapClusters;
       s.instructions = data.instructions;

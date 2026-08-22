@@ -5,7 +5,7 @@ import { extractJson, sessionPrompt } from "./acpx.js";
 import { renderEvidenceForPrompt } from "./fold.js";
 import { renderInstructionIndex } from "./memory.js";
 import { renderPrompt } from "./prompts.js";
-import { buildProposal, ProposalViolation } from "./proposal.js";
+import { buildProposal, effectiveMaxEdits, ProposalViolation } from "./proposal.js";
 import { loadSkills, renderSkillIndex, resolveOverflowTarget } from "./skills.js";
 import { isSuppressedByRejection } from "./state.js";
 import { emitProgress } from "./progress.js";
@@ -21,13 +21,13 @@ import { color, info, warn } from "./logger.js";
  * saves the rejected proposal rather than quietly trimming it (design section 6).
  */
 
-function budgetRule(memoryFile, config) {
+function budgetRule(memoryFile, config, maxEdits) {
   const remaining = config.budgetTokens - memoryFile.tokens;
   if (remaining <= 0) {
     return (
       `This file is ALREADY ${Math.abs(remaining)} tokens OVER budget, so this run is a SHRINK ` +
       `PLAN. You are NOT expected to reach ${config.budgetTokens} tokens in one run - the ` +
-      `${config.maxEditsPerRun}-edit cap makes that impossible and later runs continue the work. ` +
+      `${maxEdits}-edit cap for this run makes that impossible and later runs continue the work. ` +
       `What is required is real progress: the edit set MUST be net-negative, so lead with the ` +
       `highest-cost instructions that have no positive evidence, and with skill extractions of ` +
       `long narrow sections. Any addition must name the removal that pays for it. Make the ` +
@@ -75,6 +75,7 @@ export async function synthesizeProposal({ memoryFile, summary, config, repo, tr
   for (const w of overflow.warnings) warn(w);
   const skillFiles = loadSkills(repo.root, overflow.dir);
   const harnessCounts = harnessCountsOf(transcripts);
+  const maxEdits = effectiveMaxEdits(memoryFile, config);
 
   const values = {
     REPO_NAME: repo.name,
@@ -88,13 +89,13 @@ export async function synthesizeProposal({ memoryFile, summary, config, repo, tr
     CURRENT_TOKENS: String(memoryFile.tokens),
     BUDGET_TOKENS: String(config.budgetTokens),
     BUDGET_STATE: budgetState(memoryFile, config),
-    BUDGET_RULE: budgetRule(memoryFile, config),
+    BUDGET_RULE: budgetRule(memoryFile, config, maxEdits),
     INSTRUCTION_INDEX: renderInstructionIndex(memoryFile),
     SKILLS_DIR: overflow.dir,
     SKILL_INDEX: renderSkillIndex(skillFiles),
     EVIDENCE: renderEvidenceForPrompt(summary),
     REJECTIONS: renderRejections(rejections),
-    MAX_EDITS: String(config.maxEditsPerRun),
+    MAX_EDITS: String(maxEdits),
     MIN_GAP_EVIDENCE: String(config.minGapEvidence),
   };
 
@@ -133,6 +134,7 @@ export async function synthesizeProposal({ memoryFile, summary, config, repo, tr
       model: pick.model,
       effort: pick.effort,
       attempt,
+      maxEdits,
       sessionName: `backpass-synth-${process.pid}`,
       gapClusters: summary.totals.gapClusters,
       instructions: summary.instructions.length,

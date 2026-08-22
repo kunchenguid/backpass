@@ -4,7 +4,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { applyEdit, buildProposal, projectWithDecisions } from "../src/proposal.js";
+import {
+  applyEdit,
+  buildProposal,
+  DEFAULT_MAX_EDITS,
+  effectiveMaxEdits,
+  projectWithDecisions,
+  SHRINK_EDIT_TOKENS,
+  SHRINK_MAX_EDITS,
+} from "../src/proposal.js";
 import { parseMemoryUnits } from "../src/memory.js";
 import { estimateTokens } from "../src/tokens.js";
 import { isSuppressedByRejection, recordRejection, State } from "../src/state.js";
@@ -539,4 +547,68 @@ test("a file within budget keeps the strict cap gate", () => {
   );
   assert.equal(proposal.budget.mode, "cap");
   assert.equal(proposal.budget.startedOverBudget, false);
+});
+
+function rawEdits(count) {
+  return Array.from({ length: count }, (_, i) => ({
+    kind: "remove",
+    title: `remove rule ${i + 1}`,
+    find: `- rule ${i + 1}`,
+    replace: "",
+    rationale: "no positive evidence",
+    evidence: QUOTE,
+    transcripts: 3,
+  }));
+}
+
+function overBudgetFile(overage, budgetTokens = 200) {
+  const rules = [];
+  let text = "";
+  let i = 0;
+  while (estimateTokens(text) < budgetTokens + overage) {
+    i += 1;
+    rules.push(`- rule ${i} keeps the file long enough to sit over the budget line`);
+    text = `# Long memory\n\n${rules.join("\n")}\n`;
+  }
+  return memoryFile(text);
+}
+
+test("cap mode keeps the gentle default edit cap", () => {
+  const ctx = context({ config: { ...context().config, maxEditsPerRun: null } });
+  assert.equal(effectiveMaxEdits(ctx.memoryFile, ctx.config), DEFAULT_MAX_EDITS);
+});
+
+test("shrink mode scales the edit cap to the overage, up to the ceiling", () => {
+  const config = { ...context().config, budgetTokens: 200, maxEditsPerRun: null };
+  const modest = overBudgetFile(400, 200);
+  const modestCap = effectiveMaxEdits(modest, config);
+  assert.ok(modestCap > DEFAULT_MAX_EDITS, `a 400-token overage should allow more than ${DEFAULT_MAX_EDITS} edits`);
+  assert.ok(modestCap < SHRINK_MAX_EDITS, "a modest overage should not hit the ceiling");
+  assert.equal(modestCap, Math.ceil((modest.tokens - 200) / SHRINK_EDIT_TOKENS));
+
+  const large = overBudgetFile(5000, 200);
+  assert.equal(effectiveMaxEdits(large, config), SHRINK_MAX_EDITS);
+});
+
+test("an explicit maxEditsPerRun wins over the adaptive cap in both modes", () => {
+  const config = { ...context().config, budgetTokens: 200, maxEditsPerRun: 3 };
+  assert.equal(effectiveMaxEdits(overBudgetFile(5000, 200), config), 3);
+  assert.equal(effectiveMaxEdits(memoryFile(), config), 3);
+});
+
+test("the cap-exceeded violation fires above the effective adaptive cap, not the flat default", () => {
+  const file = overBudgetFile(400, 200);
+  const config = { ...context().config, budgetTokens: 200, maxEditsPerRun: null };
+  const cap = effectiveMaxEdits(file, config);
+  assert.ok(cap > DEFAULT_MAX_EDITS);
+
+  const within = buildProposal({ edits: rawEdits(cap) }, context({ memoryFile: file, config }));
+  assert.ok(!within.violations.some((v) => v.includes("per-run cap")), within.violations.join("\n"));
+  assert.equal(within.proposal.config.maxEditsPerRun, cap, "the proposal records the effective cap");
+
+  const above = buildProposal({ edits: rawEdits(cap + 1) }, context({ memoryFile: file, config }));
+  assert.ok(
+    above.violations.some((v) => v.includes(`per-run cap is ${cap}`)),
+    above.violations.join("\n"),
+  );
 });
