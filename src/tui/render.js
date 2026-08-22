@@ -330,7 +330,7 @@ function analyzeDetail(state, theme, width, spin) {
 
   const receiptWidth = 27;
   const timeWidth = 6;
-  const titleWidth = Math.max(width - 2 - 2 - 2 - 11 - 10 - receiptWidth - (state.narrow ? 0 : timeWidth) - 7, 10);
+  const titleWidth = Math.max(width - 2 - 2 - 2 - 11 - receiptWidth - (state.narrow ? 0 : timeWidth) - 7, 10);
 
   a.lanes.forEach((lane, index) => {
     if (!lane) return;
@@ -347,7 +347,7 @@ function analyzeDetail(state, theme, width, spin) {
       : theme.paint(fitPlain(formatElapsed(state.now - lane.startedAt), timeWidth, "right"), "faint");
     lines.push(
       ` ${theme.paint(spin, "mint")} ${theme.paint(String(index + 1), "faint")} ${harnessDot(theme, lane.harness)} ` +
-        `${theme.paint(fitPlain(lane.harness, 9), "text")}${theme.paint(fitPlain(lane.id, 10), "faint")} ` +
+        `${theme.paint(fitPlain(lane.harness, 9), "text")} ` +
         `${theme.paint(fitPlain(lane.title, titleWidth), "dim")} ${receipt}${elapsed}`,
     );
   });
