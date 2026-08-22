@@ -153,6 +153,7 @@ export function reduceEvent(state, event, data, now = Date.now()) {
         h.scanned = data.scanned;
         h.matched = data.matched;
         h.newCount = Math.max(data.scanned - (data.cached || 0), 0);
+        h.self = data.self || 0;
         h.tiers = data.tiers || {};
         d.storesOk += 1;
         d.files += data.scanned;

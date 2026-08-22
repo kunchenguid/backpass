@@ -31,17 +31,20 @@ export async function cmdScan(ctx) {
   out(`${ctx.repo.name} · ${ctx.repo.worktrees.length} worktree(s) · since ${ctx.config.discovery.since}`);
   out("");
 
-  const rows = [["HARNESS", "SCANNED", "MATCHED", "CACHED", "NOTE"]];
+  const rows = [["HARNESS", "SCANNED", "MATCHED", "SELF", "CACHED", "NOTE"]];
   for (const [harness, stats] of Object.entries(perHarness)) {
     rows.push([
       harness,
       String(stats.scanned),
       String(stats.matched),
+      String(stats.self || 0),
       String(stats.cached),
       stats.error ? `unreadable: ${stats.error}` : "",
     ]);
   }
   out(table(rows));
+  const selfTotal = Object.values(perHarness).reduce((n, s) => n + (s.self || 0), 0);
+  if (selfTotal) out(color.dim(`  SELF = backpass's own analysis/synthesis sessions, excluded from the corpus`));
   out("");
 
   const byTier = { 1: 0, 2: 0, 3: 0 };

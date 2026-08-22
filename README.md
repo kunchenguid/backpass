@@ -97,7 +97,9 @@ Association runs in three tiers:
 Discovery is incremental. Codex alone can hold 10,000+ rollouts, so verdicts are cached in
 `.backpass/scan-cache.json` by path, mtime and size - re-scans cost only the new files.
 A harness whose store is missing or has drifted into an unrecognised shape produces a
-warning and is skipped; the run continues.
+warning and is skipped; the run continues. backpass's own analysis and synthesis calls land
+in these same stores under the repo's cwd; every prompt it sends is tagged, and tagged
+sessions are excluded from the corpus (the `SELF` column in `backpass scan`).
 
 ```sh
 backpass scan --since 7d --strict

@@ -5,24 +5,66 @@ import os from "node:os";
 import path from "node:path";
 
 /**
- * A stand-in acpx: answers on stdout and prints the per-run accounting line on stderr
- * exactly as the real `--format quiet` does for a harness that reports usage (codex,
- * claude). With FAKE_ACPX_SILENT set it behaves like pi, whose ACP result carries no
- * usage, so acpx prints no line at all.
+ * A stand-in acpx that reproduces what each harness really leaves behind for backpass
+ * to account from. codex answers and prints the per-run `[acpx] tokens:` line on
+ * stderr, exactly as the real `--format quiet` does when the ACP adapter returns
+ * usage. pi answers and prints no line at all (pi-acp returns a bare `{ stopReason }`),
+ * but - like the real pi - files the session under `~/.pi/agent/sessions/<escaped-cwd>/`
+ * with the prompt as its first user message and per-turn `usage` on every assistant
+ * turn. The usage numbers live only in that file; backpass has to go and read them.
  */
+const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-usage-home-"));
+process.env.HOME = fakeHome;
+
 const fakeAcpxDir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-fake-acpx-"));
 const fakeAcpx = path.join(fakeAcpxDir, "acpx");
+const workDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-usage-cwd-")));
+const piSessionDir = path.join(fakeHome, ".pi", "agent", "sessions", `-${workDir.replace(/\//g, "-")}--`);
+
+/** The per-turn usage the fake pi writes; shape copied from a real pi 0.82 session. */
+const PI_TURNS = [
+  { input: 9608, output: 158, cacheRead: 0, cacheWrite: 0, reasoning: 106, totalTokens: 9766 },
+  { input: 1170, output: 50, cacheRead: 8704, cacheWrite: 0, reasoning: 13, totalTokens: 9924 },
+];
+
 fs.writeFileSync(
   fakeAcpx,
-  [
-    "#!/bin/sh",
-    "printf '{\"ok\":true}\\n'",
-    'if [ -z "$FAKE_ACPX_SILENT" ]; then',
-    '  echo "[acpx] tokens: input=14585 output=5 cache_read=11008 total=25598" >&2',
-    "fi",
-    "exit 0",
-    "",
-  ].join("\n"),
+  `#!${process.execPath}
+const fs = require("node:fs");
+const path = require("node:path");
+const argv = process.argv.slice(2);
+const agent = argv.find((a) => a === "codex" || a === "pi");
+const cwd = argv[argv.indexOf("--cwd") + 1];
+const promptFile = argv[argv.indexOf("--file") + 1];
+process.stdout.write('{"ok":true}\\n');
+if (agent === "codex") {
+  process.stderr.write("[acpx] tokens: input=14585 output=5 cache_read=11008 total=25598\\n");
+} else if (agent === "pi" && !process.env.FAKE_PI_NO_STORE) {
+  const prompt = fs.readFileSync(promptFile, "utf8");
+  const dir = ${JSON.stringify(piSessionDir)};
+  fs.mkdirSync(dir, { recursive: true });
+  const id = "01a02b65-" + Date.now().toString(16) + "-" + process.pid;
+  const turns = ${JSON.stringify(PI_TURNS)};
+  const lines = [
+    { type: "session", version: 3, id, timestamp: new Date().toISOString(), cwd },
+    { type: "model_change", id: "b7e9dc92", parentId: null, provider: "openai-codex", modelId: "gpt-5.6-sol" },
+    { type: "thinking_level_change", id: "72a6aaad", parentId: "b7e9dc92", thinkingLevel: "high" },
+    { type: "message", id: "9a9e48f3", parentId: "72a6aaad", message: { role: "user", content: [{ type: "text", text: prompt }] } },
+  ];
+  let parent = "9a9e48f3";
+  turns.forEach((usage, i) => {
+    const mid = "turn" + i;
+    lines.push({
+      type: "message", id: mid, parentId: parent,
+      message: { role: "assistant", content: [{ type: "thinking", thinking: "..." }, { type: "text", text: i === 0 ? "Working." : '{"ok":true}' }],
+        api: "openai-codex-responses", provider: "openai-codex", model: "gpt-5.6-sol", usage: { ...usage, cost: { total: 0.002 } }, stopReason: "stop" },
+    });
+    parent = mid;
+  });
+  fs.writeFileSync(path.join(dir, new Date().toISOString().replace(/[:.]/g, "-") + "_" + id + ".jsonl"),
+    lines.map((l) => JSON.stringify(l)).join("\\n") + "\\n");
+}
+`,
 );
 fs.chmodSync(fakeAcpx, 0o755);
 process.env.BACKPASS_ACPX_BIN = fakeAcpx;
@@ -56,25 +98,68 @@ function proposalWith(usage) {
 }
 
 const promptFile = path.join(fakeAcpxDir, "prompt.md");
-fs.writeFileSync(promptFile, "hello");
+fs.writeFileSync(promptFile, "<!-- backpass:self-session -->\nAudit this session.\n\n- a list item\n");
 
 test("a harness that reports usage through acpx yields a numeric record", async () => {
-  delete process.env.FAKE_ACPX_SILENT;
-  const result = await execOneShot({ agent: "codex", promptFile, cwd: fakeAcpxDir, timeoutSeconds: 5 });
+  const result = await execOneShot({ agent: "codex", promptFile, cwd: workDir, timeoutSeconds: 5 });
   const record = usageRecord("codex", result);
   assert.deepEqual(record, { agent: "codex", usage: { input: 14585, output: 5, cache_read: 11008, total: 25598 } });
   assert.equal(describeUsage([record, record]), "input=29,170 output=10 cache_read=22,016 total=51,196");
 });
 
-test("a harness that reports nothing (pi) is named instead of printing n/a", async () => {
-  process.env.FAKE_ACPX_SILENT = "1";
+test("pi usage is recovered from pi's own session file when acpx prints no tokens line", async () => {
+  // An older pi session in the same cwd with a different prompt must not be mistaken for ours.
+  fs.mkdirSync(piSessionDir, { recursive: true });
+  const decoy = path.join(piSessionDir, "2026-08-01T00-00-00-000Z_decoy.jsonl");
+  fs.writeFileSync(
+    decoy,
+    [
+      JSON.stringify({ type: "session", version: 3, id: "decoy", timestamp: "2026-08-01T00:00:00.000Z", cwd: workDir }),
+      JSON.stringify({
+        type: "message",
+        id: "u",
+        parentId: null,
+        message: { role: "user", content: [{ type: "text", text: "something else" }] },
+      }),
+      JSON.stringify({
+        type: "message",
+        id: "a",
+        parentId: "u",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "no" }],
+          usage: { input: 1, output: 1, totalTokens: 2 },
+        },
+      }),
+      "",
+    ].join("\n"),
+  );
+  const old = new Date(Date.now() - 3_600_000);
+  fs.utimesSync(decoy, old, old);
+
+  const result = await execOneShot({ agent: "pi", promptFile, cwd: workDir, timeoutSeconds: 5 });
+  const record = usageRecord("pi", result);
+  assert.deepEqual(record, {
+    agent: "pi",
+    usage: { input: 10778, output: 208, cache_read: 8704, cache_write: 0, reasoning: 119, total: 19690 },
+  });
+  assert.equal(
+    describeUsage([record]),
+    "input=10,778 output=208 cache_read=8,704 cache_write=0 reasoning=119 total=19,690",
+  );
+});
+
+test("a pi call that leaves no session file stays honest: named, never n/a", async () => {
+  process.env.FAKE_PI_NO_STORE = "1";
+  const silentPrompt = path.join(fakeAcpxDir, "prompt-silent.md");
+  fs.writeFileSync(silentPrompt, "<!-- backpass:self-session -->\nA prompt no session file answers.\n");
   try {
-    const result = await execOneShot({ agent: "pi", promptFile, cwd: fakeAcpxDir, timeoutSeconds: 5 });
+    const result = await execOneShot({ agent: "pi", promptFile: silentPrompt, cwd: workDir, timeoutSeconds: 5 });
     const record = usageRecord("pi", result);
     assert.deepEqual(record, { agent: "pi", usage: null });
     assert.equal(describeUsage([record]), "not reported by pi");
   } finally {
-    delete process.env.FAKE_ACPX_SILENT;
+    delete process.env.FAKE_PI_NO_STORE;
   }
 });
 

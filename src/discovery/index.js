@@ -7,6 +7,7 @@ import * as cursorCli from "./adapters/cursor-cli.js";
 import * as cursorIde from "./adapters/cursor-ide.js";
 
 import { associate, passesStrict } from "./association.js";
+import { isSelfSession } from "./self.js";
 import { sinceCutoff } from "../config.js";
 import { emitProgress } from "../progress.js";
 import { warn } from "../logger.js";
@@ -38,6 +39,10 @@ export function getAdapter(harness) {
  *
  * Every harness is fail-soft: a store that is missing, unreadable, or has drifted into
  * an unrecognised format produces a named warning and is skipped, never a failed run.
+ *
+ * Sessions backpass itself created (its analysis and synthesis calls, which the harness
+ * files under this repo's cwd) are excluded after association and counted in
+ * `perHarness[h].self` - see `./self.js`.
  */
 export async function discoverTranscripts({ repo, config, strict = false, harnesses = null, now = Date.now() }) {
   const cutoffMs = sinceCutoff(config.discovery.since, now);
@@ -57,7 +62,7 @@ export async function discoverTranscripts({ repo, config, strict = false, harnes
       continue;
     }
 
-    const stats = { scanned: 0, matched: 0, cached: 0, skipped: 0, error: null };
+    const stats = { scanned: 0, matched: 0, cached: 0, skipped: 0, self: 0, error: null };
     perHarness[harness] = stats;
     emitProgress("discover:harness:start", { harness });
 
@@ -82,6 +87,7 @@ export async function discoverTranscripts({ repo, config, strict = false, harnes
         scanned: stats.scanned,
         cached: stats.cached,
         matched: stats.matched,
+        self: stats.self,
         tiers: tierCounts(found),
       });
     } catch (err) {
@@ -119,7 +125,12 @@ async function discoverDirect(adapter, { repo, config, cutoffMs, strict, stats }
       stats.skipped += 1;
       continue;
     }
-    out.push(toTranscript(adapter, row, association, row.id));
+    const transcript = toTranscript(adapter, row, association, row.id);
+    if (isSelfSession(transcript)) {
+      stats.self += 1;
+      continue;
+    }
+    out.push(transcript);
   }
   return out;
 }
@@ -170,7 +181,14 @@ function discoverFiles(adapter, { repo, config, cutoffMs, strict, stats, cache, 
       continue;
     }
 
-    out.push(toTranscript(adapter, { ...candidate, ...descriptor }, association, descriptor.id));
+    const transcript = toTranscript(adapter, { ...candidate, ...descriptor }, association, descriptor.id);
+    // backpass's own acpx runs land in this store under this cwd; drop them here so
+    // they never reach sampling or analysis (see ./self.js).
+    if (isSelfSession(transcript)) {
+      stats.self += 1;
+      continue;
+    }
+    out.push(transcript);
   }
 
   return out;

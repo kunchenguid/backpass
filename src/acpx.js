@@ -1,5 +1,9 @@
+import fs from "node:fs";
+
 import { warn } from "./logger.js";
 import { runCapture } from "./subprocess.js";
+import * as piStore from "./discovery/adapters/pi.js";
+import { readJsonl } from "./discovery/adapters/shared.js";
 
 /**
  * The acpx execution layer (design section 4).
@@ -230,6 +234,7 @@ export async function execOneShot({
     promptFile,
   ];
 
+  const startedAt = Date.now();
   const result = await run(args, { timeoutMs: (timeoutSeconds + 30) * 1000, cwd });
   if (result.spawnError && result.spawnError.code === "ENOENT") throw notFoundError(result);
   if (result.timedOut) {
@@ -240,7 +245,8 @@ export async function execOneShot({
   }
 
   const combined = `${result.stdout}\n${result.stderr}`;
-  return { text: stripAcpxNoise(result.stdout), usage: parseTokenLine(combined), raw: result.stdout };
+  const usage = parseTokenLine(combined) ?? recoverUsageFromStore({ agent, promptFile, cwd, startedAt });
+  return { text: stripAcpxNoise(result.stdout), usage, raw: result.stdout };
 }
 
 /**
@@ -319,12 +325,14 @@ export async function sessionPrompt({
       "--file",
       promptFile,
     ];
+    const startedAt = Date.now();
     const result = await run(args, { timeoutMs: (timeoutSeconds + 30) * 1000, cwd });
     if (result.timedOut) throw new AcpxError(`acpx ${agent} session prompt timed out after ${timeoutSeconds}s`, result);
     if (result.code !== 0) throw new AcpxError(`acpx ${agent} session prompt failed (exit ${result.code})`, result);
 
     const combined = `${result.stdout}\n${result.stderr}`;
-    return { text: stripAcpxNoise(result.stdout), usage: parseTokenLine(combined), raw: result.stdout, notes };
+    const usage = parseTokenLine(combined) ?? recoverUsageFromStore({ agent, promptFile, cwd, startedAt });
+    return { text: stripAcpxNoise(result.stdout), usage, raw: result.stdout, notes };
   } finally {
     const closed = await run([acpxAgent, "sessions", "close", sessionName], { timeoutMs: 30_000, cwd });
     if (closed.code !== 0) warn(`could not close acpx session ${sessionName}`);
@@ -336,13 +344,100 @@ function firstLine(text) {
 }
 
 /**
- * Per-call usage accounting (design section 9).
+ * Harness-store usage fallback.
  *
  * acpx prints its `[acpx] tokens:` line only when the ACP adapter returns `usage` in
- * the `session/prompt` result. codex and claude do; pi does not (its result is a bare
- * `{ stopReason }`), so a pi-backed pass legitimately has nothing to report. A record
- * therefore keeps the harness next to the (possibly null) usage, so the report can say
- * *who* stayed silent instead of printing a meaningless "n/a".
+ * the `session/prompt` result. codex and claude do; pi-acp (0.0.31) answers with a bare
+ * `{ stopReason }` - but pi itself records per-turn usage in its own session file
+ * (`~/.pi/agent/sessions/<escaped-cwd>/<ts>_<id>.jsonl`), the same store discovery
+ * reads. A plain `exec` leaves no session id to look the file up by, so the handle is
+ * the prompt text itself: pi stores it verbatim as the session's first user message.
+ * The newest file under this cwd, modified during the call, whose first user message
+ * equals the prompt we sent, is ours; its assistant turns' `usage` sum is the answer,
+ * mapped onto acpx's key names so the two sources add up in one table.
+ *
+ * Strictly fail-soft: any miss (no store, no match, no usage fields) is null, which the
+ * report prints as "not reported by pi" exactly as before.
+ */
+const STORE_USAGE_RECOVERY = { pi: recoverPiUsage };
+
+/** Slack for a harness that stamps the session timestamp slightly before we spawned it. */
+const STORE_MTIME_SLACK_MS = 5_000;
+
+export function recoverUsageFromStore({ agent, promptFile, cwd, startedAt }) {
+  const recover = STORE_USAGE_RECOVERY[agent];
+  if (!recover) return null;
+  try {
+    return recover({ promptFile, cwd, startedAt }) || null;
+  } catch {
+    return null;
+  }
+}
+
+const PI_USAGE_KEYS = {
+  input: "input",
+  output: "output",
+  cacheRead: "cache_read",
+  cacheWrite: "cache_write",
+  reasoning: "reasoning",
+  totalTokens: "total",
+};
+
+function recoverPiUsage({ promptFile, cwd, startedAt }) {
+  const prompt = fs.readFileSync(promptFile, "utf8").trim();
+  if (!prompt) return null;
+  const wanted = new Set([cwd, realpathOrNull(cwd)].filter(Boolean));
+  const since = (startedAt || 0) - STORE_MTIME_SLACK_MS;
+
+  const candidates = piStore
+    .enumerate()
+    .filter((c) => c.mtimeMs >= since)
+    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+  for (const candidate of candidates) {
+    const descriptor = piStore.classify(candidate);
+    if (!descriptor || !wanted.has(descriptor.cwd)) continue;
+    const entries = readJsonl(candidate.path);
+    const firstUser = entries.find((e) => e.type === "message" && e.message?.role === "user");
+    if (!firstUser || piMessageText(firstUser.message.content).trim() !== prompt) continue;
+
+    const usage = {};
+    for (const entry of entries) {
+      if (entry.type !== "message" || entry.message?.role !== "assistant") continue;
+      const turn = entry.message.usage;
+      if (!turn || typeof turn !== "object") continue;
+      for (const [piKey, key] of Object.entries(PI_USAGE_KEYS)) {
+        if (Number.isFinite(turn[piKey])) usage[key] = (usage[key] || 0) + turn[piKey];
+      }
+    }
+    return Object.keys(usage).length ? usage : null;
+  }
+  return null;
+}
+
+function piMessageText(content) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((b) => (typeof b === "string" ? b : b?.type === "text" ? (b.text ?? "") : ""))
+    .filter(Boolean)
+    .join("\n");
+}
+
+function realpathOrNull(p) {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Per-call usage accounting (design section 9).
+ *
+ * A record keeps the harness next to the (possibly null) usage, so when neither acpx
+ * nor the harness store yielded numbers the report can say *who* stayed silent instead
+ * of printing a meaningless "n/a".
  *
  * @typedef {{ agent: string, usage: Record<string, number> | null }} UsageRecord
  */
