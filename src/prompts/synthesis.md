@@ -28,6 +28,9 @@ analyzed sessions in which an instruction drew any evidence at all.
 
 {{EVIDENCE}}
 
+You are running inside the repository with read access, so you can open its files to
+ground or verify an edit against the real code when that would help - your call.
+
 ## Previously rejected edits - do not re-propose these
 
 {{REJECTIONS}}

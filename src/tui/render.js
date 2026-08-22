@@ -287,7 +287,8 @@ function discoverDetail(state, theme, width, spin) {
     } else {
       const scanned = `${formatCount(h.scanned)} sessions`;
       const fresh = h.newCount > 0 || h.scanned > 0 ? ` · ${formatCount(h.newCount)} new` : "";
-      const query = harness === "opencode" ? "1 sqlite query" : `${scanned}${fresh}`;
+      const self = h.self > 0 ? ` · ${formatCount(h.self)} self` : "";
+      const query = harness === "opencode" ? "1 sqlite query" : `${scanned}${fresh}${self}`;
       activity = theme.paint(fitPlain(query, activityWidth), "dim");
       count = padVis(
         `${theme.paint(formatCount(h.matched), "text", { bold: true })} ${theme.paint("this repo", "faint")}`,

@@ -20,6 +20,17 @@ export function render(template, values) {
   );
 }
 
+/**
+ * Every prompt backpass sends to a harness starts with this line. The harness records
+ * the prompt as the session's first user message in its own store - the very store
+ * discovery reads - so without a marker backpass's analysis and synthesis runs would
+ * be discovered as ordinary sessions on the next pass and the loop would analyze
+ * itself. Discovery (`src/discovery/self.js`) drops any transcript whose first user
+ * message begins with it. It keys on content backpass owns, so it survives harness
+ * format drift and needs nothing from acpx.
+ */
+export const SELF_SESSION_SENTINEL = "<!-- backpass:self-session -->";
+
 export function renderPrompt(name, values) {
-  return render(loadPrompt(name), values);
+  return `${SELF_SESSION_SENTINEL}\n${render(loadPrompt(name), values)}`;
 }
