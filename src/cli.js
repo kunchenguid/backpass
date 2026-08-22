@@ -103,7 +103,7 @@ BUDGET AND SHAPE
   --max-edits <n>          edits per run - the learning rate            [5]
   --min-gap-evidence <n>   sessions needed before a new instruction     [2]
   --memory-file <path>     memory file to optimize (repeatable)
-  --skills-dir <path>      where skill extractions are written          [.claude/skills]
+  --skills-dir <path>      where skill extractions are written          [.agents/skills]
 
 APPLY
   --no-ui                  terminal accept/reject instead of the Lavish surface

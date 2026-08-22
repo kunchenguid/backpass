@@ -90,7 +90,17 @@ export function renderSkillIndex(skills) {
 /** Serialize a skill draft to the common SKILL.md shape. */
 export function renderSkillFile(skill) {
   const description = skill.description.replace(/\n+/g, " ").trim();
-  return `---\nname: ${skill.name}\ndescription: ${description}\n---\n\n${skill.body.trim()}\n`;
+  // Generated skills are reference material that fires on its description, never a
+  // slash-command: mark them non-invocable and internal so harnesses keep them out of
+  // the user-facing command list.
+  const frontmatter = [
+    `name: ${skill.name}`,
+    `description: ${description}`,
+    "user-invocable: false",
+    "metadata:",
+    "  internal: true",
+  ].join("\n");
+  return `---\n${frontmatter}\n---\n\n${skill.body.trim()}\n`;
 }
 
 /**
@@ -109,24 +119,88 @@ export function extractionBudgetEffect(edit) {
   };
 }
 
+/** Where agents actually auto-load skills from: the AGENTS.md convention. */
+export const CANONICAL_SKILLS_DIR = ".agents/skills";
+/** Claude reads this path; it is kept as a symlink into the canonical dir, never a copy. */
+export const CLAUDE_SKILLS_LINK = ".claude/skills";
+export const CLAUDE_SKILLS_LINK_TARGET = path.posix.join("..", CANONICAL_SKILLS_DIR);
+
 /**
- * Repos with no skills convention get `docs/` extraction plus a pointer line instead
- * (design section 7, format note). Detected rather than configured so the common case
- * needs no setup.
+ * Pick the directory skill extractions target.
+ *
+ * Skills only pay off if the harness loads them, so the answer is the canonical
+ * `.agents/skills` (mirrored to `.claude/skills` by symlink) unless the user explicitly
+ * configured another directory that already exists. The bare `skills/` dir is an
+ * installer/public convention that no harness auto-loads, so it is never auto-detected -
+ * it is only honored when named in the config. Resolution is read-only; the layout is
+ * created at write time (`ensureSkillsLayout`), which keeps every pre-apply stage
+ * side-effect free.
  */
-export function resolveOverflowTarget(repoRoot, skillsDir) {
-  if (fs.existsSync(path.join(repoRoot, skillsDir))) return { kind: "skills", dir: skillsDir };
-  for (const candidate of [".claude/skills", ".agents/skills", "skills"]) {
-    if (fs.existsSync(path.join(repoRoot, candidate))) return { kind: "skills", dir: candidate };
+export function resolveOverflowTarget(repoRoot, skillsDir = CANONICAL_SKILLS_DIR) {
+  const warnings = [];
+  const claude = inspectClaudeSkillsLink(repoRoot);
+  if (claude.state === "dir") warnings.push(claudeSkillsDirWarning());
+
+  const explicit = skillsDir && skillsDir !== CANONICAL_SKILLS_DIR && skillsDir !== CLAUDE_SKILLS_LINK;
+  if (explicit && fs.existsSync(path.join(repoRoot, skillsDir))) {
+    return { kind: "skills", dir: skillsDir, warnings };
   }
-  if (fs.existsSync(path.join(repoRoot, "docs"))) return { kind: "docs", dir: "docs" };
-  return { kind: "skills", dir: skillsDir };
+  return { kind: "skills", dir: CANONICAL_SKILLS_DIR, warnings };
 }
 
-/** Write an accepted skill extraction to disk. */
+function claudeSkillsDirWarning() {
+  return (
+    `${CLAUDE_SKILLS_LINK} is a real directory, not a symlink to ${CLAUDE_SKILLS_LINK_TARGET}; ` +
+    `left untouched. Claude will not see skills written to ${CANONICAL_SKILLS_DIR} until you ` +
+    `merge it in and replace it with the symlink (ln -s ${CLAUDE_SKILLS_LINK_TARGET} ${CLAUDE_SKILLS_LINK}).`
+  );
+}
+
+function inspectClaudeSkillsLink(repoRoot) {
+  let stat;
+  try {
+    stat = fs.lstatSync(path.join(repoRoot, CLAUDE_SKILLS_LINK));
+  } catch {
+    return { state: "missing" };
+  }
+  if (stat.isSymbolicLink()) return { state: "symlink" };
+  if (stat.isDirectory()) return { state: "dir" };
+  return { state: "other" };
+}
+
+/**
+ * Create the canonical skills dir and the `.claude/skills -> ../.agents/skills` symlink
+ * so both harness families load the same files with no duplication. An existing
+ * `.claude/skills` is never clobbered: a symlink (to anywhere) is left as is, and a real
+ * directory is reported so the user can merge it by hand.
+ */
+export function ensureSkillsLayout(repoRoot) {
+  const created = [];
+  const warnings = [];
+  const canonical = path.join(repoRoot, CANONICAL_SKILLS_DIR);
+  if (!fs.existsSync(canonical)) {
+    fs.mkdirSync(canonical, { recursive: true });
+    created.push(CANONICAL_SKILLS_DIR);
+  }
+
+  const claude = inspectClaudeSkillsLink(repoRoot);
+  if (claude.state === "missing") {
+    const link = path.join(repoRoot, CLAUDE_SKILLS_LINK);
+    fs.mkdirSync(path.dirname(link), { recursive: true });
+    fs.symlinkSync(CLAUDE_SKILLS_LINK_TARGET, link, "dir");
+    created.push(`${CLAUDE_SKILLS_LINK} -> ${CLAUDE_SKILLS_LINK_TARGET}`);
+  } else if (claude.state === "dir") {
+    warnings.push(claudeSkillsDirWarning());
+  }
+  return { created, warnings };
+}
+
+/** Write an accepted skill extraction to disk, setting up the load layout on first use. */
 export function writeSkill(repoRoot, skill) {
+  const inCanonical = skill.path === CANONICAL_SKILLS_DIR || skill.path.startsWith(`${CANONICAL_SKILLS_DIR}/`);
+  const layout = inCanonical ? ensureSkillsLayout(repoRoot) : { created: [], warnings: [] };
   const target = path.join(repoRoot, skill.path);
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.writeFileSync(target, renderSkillFile(skill));
-  return target;
+  return { target, ...layout };
 }

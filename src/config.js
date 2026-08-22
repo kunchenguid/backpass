@@ -42,7 +42,7 @@ export const LEGACY_DEFAULT_AGENTS = { analysis: "codex", synthesis: "claude" };
 export const DEFAULT_CONFIG = {
   memoryFiles: ["AGENTS.md", "CLAUDE.md"],
   budgetTokens: 5000,
-  skillsDir: ".claude/skills",
+  skillsDir: ".agents/skills",
   maxEditsPerRun: 5,
   minGapEvidence: 2,
   /**
