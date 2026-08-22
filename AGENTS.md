@@ -36,7 +36,15 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   in `src/proposal.js` from the actual text; the synthesis model's own figures are ignored.
 - **acpx is alpha.** All model invocation is isolated behind `src/acpx.js` so an upstream
   CLI change has one blast radius. v1 uses plain `exec` and named sessions only; acpx flows
-  are deferred until they are stable upstream.
+  are deferred until they are stable upstream. The one sanctioned exception is the
+  per-harness native status table in `src/agents.js` (`claude auth status`, `opencode models`).
+- **Agent auto-pick is probe-then-verify, never probe-only.** `src/agents.js` walks each
+  role's ladder with a zero-token probe, but the claude adapter cannot be pre-verified by
+  acpx (sessions succeed while logged out), so every real call runs under
+  `AgentResolver.withFallthrough`, which demotes a candidate on a classifiable failure
+  (`classifyAcpxFailure`). Reasoning effort is a per-adapter session option
+  (`EFFORT_OPTION_KEYS`), so effortful calls always go through `sessionPrompt`. Verdicts
+  cache in `.backpass/agent-probe-cache.json`.
 - Cursor IDE support is deliberately deferred to v1.1 (`--include-cursor-ide`, best effort);
   see the header of `src/discovery/adapters/cursor-ide.js` for why.
 

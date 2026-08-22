@@ -15,6 +15,7 @@ import { warn } from "./logger.js";
  *   evidence-summary.json  folded evidence (stage 2)
  *   proposal.json          latest tier-2 synthesis (stage 3)
  *   rejections.json        edits the human rejected, and the evidence weight behind them
+ *   agent-probe-cache.json TTL'd availability/auth verdicts per agent|model (src/agents.js)
  *   apply/                 the rendered Lavish apply surface
  */
 export class State {
@@ -26,6 +27,7 @@ export class State {
     this.summaryPath = path.join(this.root, "evidence-summary.json");
     this.proposalPath = path.join(this.root, "proposal.json");
     this.rejectionsPath = path.join(this.root, "rejections.json");
+    this.probeCachePath = path.join(this.root, "agent-probe-cache.json");
   }
 
   ensure() {
@@ -104,6 +106,15 @@ export class State {
 
   writeRejections(rejections) {
     this.writeJsonFile(this.rejectionsPath, rejections);
+  }
+
+  readProbeCache() {
+    const value = this.readJsonFile(this.probeCachePath, null);
+    return value && value.version === 1 ? value : { version: 1, acpxVersion: null, entries: {} };
+  }
+
+  writeProbeCache(cache) {
+    this.writeJsonFile(this.probeCachePath, cache);
   }
 }
 

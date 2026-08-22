@@ -233,18 +233,38 @@ with `--theme dark|light` or `"theme"` in `.backpassrc.json`.
 
 ### Two-tier models
 
-Cheap analysis, smart synthesis. Both go through acpx, so you pick from the harnesses you
-already have.
+Cheap analysis, smart synthesis. Both go through acpx, so backpass uses the harnesses you
+already have - and by default it works out which ones those are. Each pass has an ordered
+ladder of candidates, and the first one that is installed, logged in, and serves the model
+wins:
+
+| pass      | effort | 1st                                    | 2nd                          | 3rd                               |
+| --------- | ------ | -------------------------------------- | ---------------------------- | --------------------------------- |
+| analysis  | medium | `gpt-5.6-luna` via pi, opencode, codex | `claude-sonnet-5` via claude | `grok-4.6` via pi, opencode, grok |
+| synthesis | high   | `gpt-5.6-sol` via pi, opencode, codex  | `claude-opus-5` via claude   | `grok-4.6` via pi, opencode, grok |
+
+Each candidate is checked with a ~1.5s zero-token acpx probe (claude via `claude auth status`,
+because its adapter accepts sessions while logged out); verdicts are cached in
+`.backpass/agent-probe-cache.json` for 12h (30min for negatives) and re-probed with `--force`.
+The probe is a filter, not a promise: if the chosen harness answers `AUTH_REQUIRED` or rejects
+the model mid-run, backpass falls through to the next candidate and says so. When a whole
+ladder is exhausted the error lists every candidate with what to run to fix it.
+
+Bare model ids are resolved against what each adapter advertises (`openai-codex/gpt-5.6-luna`
+on pi, `openai/gpt-5.6-luna` on opencode, `gpt-5.6-luna` on codex), so nothing is hardcoded
+per harness. Ladders are ordinary config - reorder or shorten them under `"ladders"`.
+
+Pinning an agent skips its ladder entirely:
 
 ```sh
 backpass \
-  --analysis-agent codex  --analysis-model gpt-5.2       --analysis-effort low \
+  --analysis-agent codex  --analysis-model gpt-5.5        --analysis-effort low \
   --synthesis-agent claude --synthesis-model claude-opus-5 --synthesis-effort high
 ```
 
-Model ids pass straight through to acpx - there is no hardcoded model list to go stale.
-If an adapter does not advertise reasoning effort, backpass says so in the run report
-rather than pretending it applied.
+`--no-auto-agent` pins the pre-ladder defaults (codex / claude). If an adapter does not
+advertise reasoning effort, backpass says so in the run report rather than pretending it
+applied.
 
 ### Configuration
 
@@ -258,8 +278,20 @@ CLI flags on top:
   "skillsDir": ".claude/skills",
   "maxEditsPerRun": 5,
   "minGapEvidence": 2,
-  "analysis": { "agent": "codex", "model": "gpt-5.2", "effort": "low" },
-  "synthesis": { "agent": "claude", "model": "claude-opus-5", "effort": "high" },
+  "analysis": { "agent": null, "model": null, "effort": null },
+  "synthesis": { "agent": null, "model": null, "effort": null },
+  "ladders": {
+    "analysis": [
+      { "model": "gpt-5.6-luna", "agents": ["pi", "opencode", "codex"] },
+      { "model": "claude-sonnet-5", "agents": ["claude"] },
+      { "model": "grok-4.6", "agents": ["pi", "opencode", "grok"] }
+    ],
+    "synthesis": [
+      { "model": "gpt-5.6-sol", "agents": ["pi", "opencode", "codex"] },
+      { "model": "claude-opus-5", "agents": ["claude"] },
+      { "model": "grok-4.6", "agents": ["pi", "opencode", "grok"] }
+    ]
+  },
   "discovery": {
     "harnesses": ["claude", "codex", "pi", "opencode", "grok", "cursor"],
     "since": "30d",
@@ -281,6 +313,7 @@ Everything mutable lives in `.backpass/`, kept out of git via the repo's local e
   evidence/<id>.json     per-transcript analysis
   evidence-summary.json  folded evidence
   proposal.json          the latest synthesis
+  agent-probe-cache.json which harnesses were available and logged in, and when
   rejections.json        edits you turned down, and the evidence behind them
   apply/apply.html       the rendered review surface
 ```

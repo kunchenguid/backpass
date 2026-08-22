@@ -25,6 +25,31 @@ test("the defaults match the approved design", () => {
   assert.equal(config.discovery.since, "30d");
   assert.deepEqual(config.discovery.harnesses, ["claude", "codex", "pi", "opencode", "grok", "cursor"]);
   assert.ok(!config.discovery.harnesses.includes("cursor-ide"), "Cursor IDE is deferred to v1.1");
+  assert.deepEqual(config.analysis, { agent: null, model: null, effort: null }, "agents are auto-picked by default");
+  assert.deepEqual(config.synthesis, { agent: null, model: null, effort: null });
+  assert.equal(config.autoAgent, true);
+  assert.deepEqual(
+    config.ladders.analysis.map((r) => r.model),
+    ["gpt-5.6-luna", "claude-sonnet-5", "grok-4.6"],
+  );
+  assert.deepEqual(
+    config.ladders.synthesis.map((r) => r.model),
+    ["gpt-5.6-sol", "claude-opus-5", "grok-4.6"],
+  );
+});
+
+test("a model without an agent is rejected rather than half-auto-picked", () => {
+  assert.throws(() => loadConfig(tempRepo({ synthesis: { model: "claude-opus-5" } })), UserError);
+  const ok = loadConfig(tempRepo({ synthesis: { agent: "claude", model: "claude-opus-5" } }));
+  assert.equal(ok.synthesis.agent, "claude");
+});
+
+test("ladders are user-editable and validated", () => {
+  const config = loadConfig(tempRepo({ ladders: { analysis: [{ model: "gpt-5.5", agents: ["codex"] }] } }));
+  assert.deepEqual(config.ladders.analysis, [{ model: "gpt-5.5", agents: ["codex"] }]);
+  assert.equal(config.ladders.synthesis.length, 3, "the other role keeps its default ladder");
+  assert.throws(() => loadConfig(tempRepo({ ladders: { analysis: [] } })), UserError);
+  assert.throws(() => loadConfig(tempRepo({ ladders: { synthesis: [{ model: "x" }] } })), UserError);
 });
 
 test("repo config overrides defaults, and CLI flags override both", () => {
@@ -33,7 +58,7 @@ test("repo config overrides defaults, and CLI flags override both", () => {
   const fromFile = loadConfig(dir);
   assert.equal(fromFile.budgetTokens, 3000);
   assert.equal(fromFile.analysis.agent, "pi");
-  assert.equal(fromFile.synthesis.agent, "claude", "untouched defaults survive a partial override");
+  assert.equal(fromFile.synthesis.agent, null, "untouched defaults survive a partial override (null = auto-pick)");
 
   const withFlags = loadConfig(dir, { budgetTokens: 8000, analysis: { model: "gpt-5.2" } });
   assert.equal(withFlags.budgetTokens, 8000);

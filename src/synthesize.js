@@ -119,16 +119,17 @@ export async function synthesizeProposal({ memoryFile, summary, config, repo, tr
     const promptFile = path.join(promptDir, `synthesis-${attempt}.md`);
     fs.writeFileSync(promptFile, prompt);
 
+    const pick = await config.agents.resolve("synthesis");
     info(
-      `${color.cyan("·")} synthesizing with ${config.synthesis.agent}` +
-        `${config.synthesis.model ? ` (${config.synthesis.model})` : ""}` +
-        `${config.synthesis.effort ? ` effort=${config.synthesis.effort}` : ""}` +
+      `${color.cyan("·")} synthesizing with ${pick.agent}` +
+        `${pick.model ? ` (${pick.model})` : ""}` +
+        `${pick.effort ? ` effort=${pick.effort}` : ""}` +
         `${attempt > 1 ? " [re-prompt]" : ""}`,
     );
     emitProgress("synth:start", {
-      agent: config.synthesis.agent,
-      model: config.synthesis.model,
-      effort: config.synthesis.effort,
+      agent: pick.agent,
+      model: pick.model,
+      effort: pick.effort,
       attempt,
       sessionName: `backpass-synth-${process.pid}`,
       gapClusters: summary.totals.gapClusters,
@@ -136,14 +137,20 @@ export async function synthesizeProposal({ memoryFile, summary, config, repo, tr
       suppressed: Object.keys(rejections.entries || {}).length,
     });
 
-    const result = await sessionPrompt({
-      agent: config.synthesis.agent,
-      model: config.synthesis.model,
-      effort: config.synthesis.effort,
-      sessionName: `backpass-synth-${process.pid}`,
-      promptFile,
-      cwd: repo.root,
-      timeoutSeconds: Math.max(config.timeoutSeconds, 900),
+    // A classifiable failure (not logged in, model rejected, adapter missing) falls
+    // through to the next ladder candidate; the switch is recorded in the notes so the
+    // proposal's provenance is visible.
+    const result = await config.agents.withFallthrough("synthesis", async (current) => {
+      if (current !== pick) notes.push(`synthesis fell through to ${current.agent} (${current.model})`);
+      return sessionPrompt({
+        agent: current.agent,
+        model: current.model,
+        effort: current.effort,
+        sessionName: `backpass-synth-${process.pid}`,
+        promptFile,
+        cwd: repo.root,
+        timeoutSeconds: Math.max(config.timeoutSeconds, 900),
+      });
     });
 
     if (result.usage) usage.push(result.usage);

@@ -7,6 +7,7 @@ import { UserError, fail, setQuiet } from "./logger.js";
 import { loadConfig } from "./config.js";
 import { resolveRepo } from "./repo.js";
 import { State } from "./state.js";
+import { AgentResolver } from "./agents.js";
 
 import { cmdInit } from "./commands/init.js";
 import { cmdScan } from "./commands/scan.js";
@@ -50,6 +51,7 @@ const OPTIONS = {
 
   "dry-run": { type: "boolean" },
   "no-ui": { type: "boolean" },
+  "no-auto-agent": { type: "boolean" },
   force: { type: "boolean" },
   limit: { type: "string" },
   theme: { type: "string" },
@@ -82,12 +84,18 @@ DISCOVERY
   --limit <n>              analyze at most N transcripts this run
 
 MODELS (two-tier: cheap analysis, smart synthesis - all through acpx)
-  --analysis-agent <a>     acpx agent for the per-transcript pass       [codex]
-  --analysis-model <id>    model id for the analysis pass
-  --analysis-effort <e>    reasoning effort, when the adapter advertises it
-  --synthesis-agent <a>    acpx agent for the final proposal pass       [claude]
-  --synthesis-model <id>   model id for the synthesis pass
+  By default each pass auto-picks the first harness in its ladder that is installed,
+  logged in, and serves the model (a ~1.5s zero-token probe per candidate, cached):
+    analysis   gpt-5.6-luna via pi, opencode, codex  >  claude-sonnet-5 via claude  >  grok-4.6 via pi, opencode, grok
+    synthesis  gpt-5.6-sol  via pi, opencode, codex  >  claude-opus-5  via claude  >  grok-4.6 via pi, opencode, grok
+  Setting an agent pins that pass and skips its ladder.
+  --analysis-agent <a>     acpx agent for the per-transcript pass       [auto]
+  --analysis-model <id>    model id for the analysis pass (needs --analysis-agent)
+  --analysis-effort <e>    reasoning effort, when the adapter advertises it  [medium]
+  --synthesis-agent <a>    acpx agent for the final proposal pass       [auto]
+  --synthesis-model <id>   model id for the synthesis pass (needs --synthesis-agent)
   --synthesis-effort <e>   reasoning effort for synthesis               [high]
+  --no-auto-agent          skip the ladders and pin codex / claude (the pre-0.2 defaults)
   --jobs <n>               parallel analysis calls                      [4]
 
 BUDGET AND SHAPE
@@ -100,7 +108,8 @@ BUDGET AND SHAPE
 APPLY
   --no-ui                  terminal accept/reject instead of the Lavish surface
   --dry-run                show what would be written, write nothing
-  --force                  re-analyze transcripts that already have fresh evidence
+  --force                  re-analyze transcripts that already have fresh evidence,
+                           and re-probe agents instead of trusting the probe cache
 
 OTHER
   --theme <mode>           live progress ink set: auto, dark, or light    [auto]
@@ -116,7 +125,7 @@ or below 60 columns - stdout and --json output are identical either way.
 EXAMPLES
   backpass                                  a full run, ending with a proposal
   backpass scan --since 7d --strict         what would be analyzed, deterministic only
-  backpass --analysis-model gpt-5.2 --synthesis-model claude-opus-5
+  backpass --synthesis-agent claude --synthesis-model claude-opus-5
   backpass apply --no-ui                    review and write from the terminal
 `;
 
@@ -148,6 +157,7 @@ function overridesFrom(values) {
   if (values["synthesis-agent"]) overrides.synthesis.agent = values["synthesis-agent"];
   if (values["synthesis-model"]) overrides.synthesis.model = values["synthesis-model"];
   if (values["synthesis-effort"]) overrides.synthesis.effort = values["synthesis-effort"];
+  if (values["no-auto-agent"]) overrides.autoAgent = false;
 
   for (const key of ["discovery", "analysis", "synthesis"]) {
     if (!Object.keys(overrides[key]).length) delete overrides[key];
@@ -205,6 +215,11 @@ export async function main(argv) {
     const repo = resolveRepo(process.cwd());
     const config = loadConfig(repo.root, overridesFrom(values));
     config.state = new State(repo.root).ensure();
+    config.agents = new AgentResolver(config, {
+      state: config.state,
+      cwd: repo.root,
+      bypassCache: Boolean(values.force),
+    });
 
     const ctx = {
       repo,
