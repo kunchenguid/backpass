@@ -17,7 +17,10 @@ function tempDir(prefix) {
 
 function initRepo() {
   const dir = tempDir("backpass-repo-");
-  git(["init", "-q"], dir);
+  git(["init", "-q", "-b", "main"], dir);
+  // CI runners have no global git identity - configure one locally so the commit below works.
+  git(["config", "user.email", "test@example.com"], dir);
+  git(["config", "user.name", "test"], dir);
   git(["commit", "--allow-empty", "-q", "-m", "init"], dir);
   return dir;
 }

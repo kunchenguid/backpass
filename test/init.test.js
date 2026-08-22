@@ -14,7 +14,10 @@ function git(args, cwd) {
 
 function initRepo() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-init-"));
-  git(["init", "-q"], dir);
+  git(["init", "-q", "-b", "main"], dir);
+  // CI runners have no global git identity - configure one locally so the commit below works.
+  git(["config", "user.email", "test@example.com"], dir);
+  git(["config", "user.name", "test"], dir);
   git(["commit", "--allow-empty", "-q", "-m", "init"], dir);
   return dir;
 }
