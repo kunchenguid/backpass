@@ -72,6 +72,7 @@ export async function synthesizeProposal({ memoryFile, summary, config, repo, tr
   const state = config.state;
   const rejections = state.readRejections();
   const overflow = resolveOverflowTarget(repo.root, config.skillsDir);
+  for (const w of overflow.warnings) warn(w);
   const skillFiles = loadSkills(repo.root, overflow.dir);
   const harnessCounts = harnessCountsOf(transcripts);
 

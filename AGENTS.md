@@ -34,6 +34,10 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   every other stage is read-only analysis, which is what makes a run safe to interrupt.
   Bootstrap (`src/commands/bootstrap.js`, a repo with no memory file) is the one run that
   writes without the apply gate, and it only ever creates files, never overwrites.
+- **Skills only count if a harness loads them.** Extractions target `.agents/skills` with
+  `.claude/skills -> ../.agents/skills` as a symlink (`ensureSkillsLayout` in
+  `src/skills.js`, run at write time); a bare `skills/` dir is never auto-detected and a
+  real `.claude/skills` directory is warned about, never replaced.
 - **Memory resolution is pointer-aware** (`resolveMemoryFiles` in `src/memory.js`): the
   first configured file is canonical, a `@AGENTS.md`-only CLAUDE.md is a pointer, and a
   second full file is warned about, never silently ignored or double-written.

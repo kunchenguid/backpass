@@ -293,7 +293,7 @@ CLI flags on top:
 {
   "memoryFiles": ["AGENTS.md"],
   "budgetTokens": 5000,
-  "skillsDir": ".claude/skills",
+  "skillsDir": ".agents/skills",
   "maxEditsPerRun": 5,
   "minGapEvidence": 2,
   "analysis": { "agent": null, "model": null, "effort": null },

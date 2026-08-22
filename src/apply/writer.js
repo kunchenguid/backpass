@@ -18,7 +18,14 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
   const rejected = proposal.edits.filter((e) => decisions[e.id] === "rejected");
 
   const byFile = new Map();
-  const results = { written: [], skills: [], failed: [], accepted: accepted.length, rejected: rejected.length };
+  const results = {
+    written: [],
+    skills: [],
+    failed: [],
+    warnings: [],
+    accepted: accepted.length,
+    rejected: rejected.length,
+  };
 
   for (const edit of accepted) {
     if (!byFile.has(edit.file)) byFile.set(edit.file, []);
@@ -56,8 +63,9 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
   for (const edit of accepted) {
     if (edit.kind !== "extract" || !edit.skill) continue;
     try {
-      if (!dryRun) writeSkill(repo.root, edit.skill);
-      results.skills.push({ path: edit.skill.path, dryRun });
+      const layout = dryRun ? { created: [], warnings: [] } : writeSkill(repo.root, edit.skill);
+      results.skills.push({ path: edit.skill.path, dryRun, created: layout.created });
+      for (const w of layout.warnings) if (!results.warnings.includes(w)) results.warnings.push(w);
     } catch (err) {
       results.failed.push({ file: edit.skill.path, edit: edit.id, error: err.message });
     }

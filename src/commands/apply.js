@@ -1,4 +1,4 @@
-import { UserError, color, info, json, out } from "../logger.js";
+import { UserError, color, info, json, out, warn } from "../logger.js";
 import { applyDecisions } from "../apply/writer.js";
 import { closeApplySurface, openApplySurface, pollDecisions, renderApplySurface } from "../apply/lavish.js";
 import { reviewInTerminal } from "../apply/terminal.js";
@@ -85,7 +85,11 @@ export async function cmdApply(ctx) {
       );
     }
   }
-  for (const skill of results.skills) out(`  ${color.green("wrote")} ${skill.path} (new skill)`);
+  for (const skill of results.skills) {
+    out(`  ${color.green("wrote")} ${skill.path} (new skill)`);
+    for (const created of skill.created || []) out(color.dim(`    created ${created}`));
+  }
+  for (const warning of results.warnings || []) warn(warning);
   for (const failure of results.failed) {
     out(`  ${color.red("failed")} ${failure.file}${failure.edit ? ` (${failure.edit})` : ""}: ${failure.error}`);
   }
