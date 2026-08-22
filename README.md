@@ -40,8 +40,8 @@ token budget, gated by you.
 AGENTS.md / CLAUDE.md          (the weights)
   → agent session               (forward pass)
   → transcript on disk          (loss signal)
-  → backpass: discover, distill, analyze, fold
-  → backpass: synthesize        (diffs + skill extractions)
+  → backpass: collect samples, distill, calculate loss, aggregate gradients
+  → backpass: gradient descent  (diffs + skill extractions)
   → you accept or reject        (the human gate)
   → back to the weights
 ```
@@ -65,13 +65,13 @@ you have already authenticated.
 ```sh
 cd your-repo
 backpass init      # write .backpassrc.json, exclude .backpass/ via .git/info/exclude
-backpass           # scan → analyze → propose (never writes)
+backpass           # collect samples → calculate loss → aggregate gradients → gradient descent (never writes)
 backpass apply     # review each edit, accept or reject, then write
 ```
 
 ## How It Works
 
-### 1. Discovery - which sessions belong to this repo
+### 1. Collect samples - which sessions belong to this repo
 
 backpass reads the local transcript stores of six harnesses directly. No API, no upload.
 
@@ -94,10 +94,10 @@ Association runs in three tiers:
 3. **Tier 3 - best-effort.** A dead path whose last segment is the repo's directory name,
    or one matching a glob you configured. Labelled as such, and excluded by `--strict`.
 
-Discovery is incremental. Codex alone can hold 10,000+ rollouts, so verdicts are cached in
+Collection is incremental. Codex alone can hold 10,000+ rollouts, so verdicts are cached in
 `.backpass/scan-cache.json` by path, mtime and size - re-scans cost only the new files.
 A harness whose store is missing or has drifted into an unrecognised shape produces a
-warning and is skipped; the run continues. backpass's own analysis and synthesis calls land
+warning and is skipped; the run continues. backpass's own loss and gradient-descent calls land
 in these same stores under the repo's cwd; every prompt it sends is tagged, and tagged
 sessions are excluded from the corpus (the `SELF` column in `backpass scan`).
 
@@ -116,9 +116,9 @@ dropped, secrets redacted. Typical reduction is **96-99%**.
 The distilled trace ends with the path to the raw transcript, so the analysis agent can
 open the original when - and only when - a specific claim needs it.
 
-### 3. Analysis - one cheap call per transcript
+### 3. Calculate loss - one cheap call per transcript
 
-Analysis costs one call per transcript, so the set is capped first: past `maxTranscripts`
+Calculating loss costs one call per transcript, so the set is capped first: past `maxTranscripts`
 (default 100, `--max-transcripts`) a **recency-weighted sample** is analyzed instead of
 everything. Each transcript's weight halves every `sampleHalfLife` (default 14d), and the
 sample is drawn without replacement, so recent sessions are almost always kept and old
@@ -138,7 +138,7 @@ Results are cached per transcript, keyed to both the transcript's content _and_ 
 file's hash: edit the weights and the evidence correctly re-computes; change nothing and
 the next run is free.
 
-### 4. Folding - deterministic, no model
+### 4. Aggregate gradients - deterministic, no model
 
 Evidence is grouped by instruction, giving each one a positive/negative count and a
 **relevance** figure: the share of analyzed sessions in which it mattered at all. Duplicate
@@ -152,9 +152,9 @@ a sighting retires once the memory file gains an instruction that covers it, and
 sightings expire after `gapLedgerMaxAge` (default 90d). Until a gap corroborates it stays
 out of the proposal entirely.
 
-### 5. Synthesis - one big call
+### 5. Gradient descent - one big call
 
-A single high-reasoning call turns the folded evidence into concrete edits: ADD, REMOVE,
+A single high-reasoning call turns the aggregated gradients into concrete edits: ADD, REMOVE,
 REWRITE, or EXTRACT→SKILL. Then mechanical gates run, and they are not negotiable:
 
 - at most `maxEditsPerRun` edits (the learning rate). By default the cap is adaptive: 5
@@ -198,8 +198,8 @@ valve for the budget.
 | **Broad** (≥20% of sessions, or safety-critical) | memory file                       | memory file            |
 | **Conditional / narrow**                         | **skill**                         | deletion candidate     |
 
-"Matters in N% of sessions" is measured, not guessed - it falls straight out of the fold
-stage. A 640-token procedure relevant to 4% of sessions becomes a 35-token description
+"Matters in N% of sessions" is measured, not guessed - it falls straight out of the
+aggregate-gradients stage. A 640-token procedure relevant to 4% of sessions becomes a 35-token description
 line, and backpass reports the arithmetic: `−611 tok always-loaded, +35 tok description`.
 
 Skill descriptions are weights too. If the evidence shows an agent lacked knowledge a
@@ -243,22 +243,23 @@ pointer-aware:
 
 ## CLI Reference
 
-| Command            | What it does                                                  |
-| ------------------ | ------------------------------------------------------------- |
-| `backpass`         | scan → analyze what is new → propose. Never writes.           |
-| `backpass scan`    | discovery only: the transcript table with a confidence column |
-| `backpass analyze` | tier-1 pass over pending transcripts                          |
-| `backpass propose` | tier-2 synthesis from cached evidence                         |
-| `backpass apply`   | review and write the accepted edits                           |
-| `backpass status`  | cache state, failed transcripts, budget bars                  |
-| `backpass init`    | write `.backpassrc.json`, exclude `.backpass/` locally        |
+| Command            | What it does                                                                             |
+| ------------------ | ---------------------------------------------------------------------------------------- |
+| `backpass`         | collect samples → calculate loss → aggregate gradients → gradient descent. Never writes. |
+| `backpass scan`    | collect samples only: the transcript table with a confidence column                      |
+| `backpass analyze` | calculate loss: the tier-1 pass over pending transcripts                                 |
+| `backpass propose` | aggregate gradients + gradient descent: the tier-2 pass from cached evidence             |
+| `backpass apply`   | review and write the accepted edits                                                      |
+| `backpass status`  | cache state, failed transcripts, budget bars                                             |
+| `backpass init`    | write `.backpassrc.json`, exclude `.backpass/` locally                                   |
 
 Run `backpass --help` for the full flag list.
 
 ### Live progress
 
 On an interactive terminal the default run renders a live progress view: the budget gauge,
-a stage rail (discover → analyze → fold → synthesize), per-store discovery counts, one lane
+a stage rail (collect samples → calculate loss → aggregate gradients → gradient descent),
+per-store collection counts, one lane
 per analysis job with its distillation receipt, and a running evidence tally. It draws to
 stderr only and collapses into the plain line summary when the run ends, so scrollback and
 piped output are identical to a run without it.
@@ -350,10 +351,10 @@ Everything mutable lives in `.backpass/`, kept out of git via the repo's local e
 
 ```
 .backpass/
-  scan-cache.json        discovery verdicts by path + mtime + size
-  evidence/<id>.json     per-transcript analysis
-  evidence-summary.json  folded evidence
-  proposal.json          the latest synthesis
+  scan-cache.json        collect-samples verdicts by path + mtime + size
+  evidence/<id>.json     per-transcript loss
+  evidence-summary.json  aggregated gradients
+  proposal.json          the latest gradient-descent step
   agent-probe-cache.json which harnesses were available and logged in, and when
   rejections.json        edits you turned down, and the evidence behind them
   gap-ledger.json        gap sightings by gap and session, accumulated across runs

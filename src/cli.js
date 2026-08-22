@@ -69,15 +69,17 @@ USAGE
   backpass [command] [options]
 
 COMMANDS
-  (none)     scan, analyze what is new, and propose. Never writes.
-  scan       discovery only: which transcripts belong to this repo, and how we know
-  analyze    tier-1 pass: one cheap model call per new transcript
-  propose    tier-2 pass: one high-reasoning call turning folded evidence into edits
+  (none)     the full pass: collect samples → calculate loss → aggregate gradients →
+             gradient descent. Never writes.
+  scan       collect samples only: which transcripts belong to this repo, and how we know
+  analyze    calculate loss: one cheap model call per new transcript (tier 1)
+  propose    aggregate gradients, then gradient descent: one high-reasoning call
+             turning the aggregated evidence into edits (tier 2)
   apply      review the proposal and write the accepted edits (the only writer)
   status     cache state, evidence counts, and the budget bar
   init       write .backpassrc.json and exclude .backpass/ via .git/info/exclude
 
-DISCOVERY
+COLLECT SAMPLES
   --since <dur>            only sessions newer than this (30d, 12h, 2w, all)  [30d]
   --harness <a,b>          limit to these harnesses
                            (claude, codex, pi, opencode, grok, cursor)
@@ -129,7 +131,7 @@ or below 60 columns - stdout and --json output are identical either way.
 
 EXAMPLES
   backpass                                  a full run, ending with a proposal
-  backpass scan --since 7d --strict         what would be analyzed, deterministic only
+  backpass scan --since 7d --strict         what would be collected, deterministic only
   backpass --synthesis-agent claude --synthesis-model claude-opus-5
   backpass apply --no-ui                    review and write from the terminal
 `;
