@@ -12,7 +12,7 @@ import { foldForRun, printProposal } from "./propose.js";
 /**
  * Bootstrap: the default run when the repo has no memory file at all.
  *
- * Instead of failing, backpass seeds a starter AGENTS.md (sensible defaults, see
+ * Instead of failing, backpass seeds a starter AGENTS.md (a minimal skeleton, see
  * `src/bootstrap.js`) plus a CLAUDE.md pointer, then runs the ordinary backward pass with
  * the starter as the current weights: the transcripts' gaps and recurring mistakes
  * become the first evidence-backed instructions. Every edit of that first proposal is
@@ -27,8 +27,8 @@ import { foldForRun, printProposal } from "./propose.js";
 const BOOTSTRAP_RUN_NOTE =
   "This memory file was just seeded from generic defaults and has never steered a session, " +
   "so the evidence is gaps and mistakes only. Turn recurring gaps into concrete instructions " +
-  "(`add` under the matching section, `## Sharp edges` for project-specific traps, replacing " +
-  "the placeholder bullet there) and `rewrite` any default the evidence contradicts. " +
+  "(`add` under `## Learnings`, replacing the placeholder bullet there; never create a new " +
+  "section for them) and `rewrite` any default the evidence contradicts. " +
   "Skip anything a single session suggests.";
 
 /**
