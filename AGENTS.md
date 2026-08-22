@@ -50,6 +50,12 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   `{ agent, usage|null }` (`usageRecord` in `src/acpx.js`) and `src/commands/usage.js` is
   the one place that prints them - never `n/a`: nothing when no call ran, the harness by
   name when it stayed silent.
+- **Gap corroboration is counted across runs through `.backpass/gap-ledger.json`**
+  (`src/gap-ledger.js`, wired in `foldForRun`): one sighting per (gap, transcript id), so a
+  session never counts twice and a gap seen once per run still graduates at `minGapEvidence`.
+  Record this run's evidence _before_ pruning - old evidence files stay on disk and would
+  re-add an expired or covered sighting otherwise. Uncorroborated gaps stay hidden; never
+  surface singletons to the prompt or report.
 - **backpass must never analyze itself.** Its own acpx calls are filed by each harness
   under the repo's cwd, a tier-1 match. Every prompt starts with `SELF_SESSION_SENTINEL`
   (`src/prompts.js`) and discovery drops transcripts whose first user message begins with

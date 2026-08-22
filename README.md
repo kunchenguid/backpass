@@ -145,6 +145,13 @@ Evidence is grouped by instruction, giving each one a positive/negative count an
 gaps across sessions are clustered, and clusters seen in fewer than `minGapEvidence`
 sessions (default 2) are dropped. One bad session never rewrites the weights.
 
+Those sessions are counted across runs, not per run: every gap sighting is kept in
+`.backpass/gap-ledger.json` by gap and session, so a gap seen in one session today and in
+another session next week graduates on the later run. The same session never counts twice,
+a sighting retires once the memory file gains an instruction that covers it, and a session's
+sightings expire after `gapLedgerMaxAge` (default 90d). Until a gap corroborates it stays
+out of the proposal entirely.
+
 ### 5. Synthesis - one big call
 
 A single high-reasoning call turns the folded evidence into concrete edits: ADD, REMOVE,
@@ -309,6 +316,7 @@ CLI flags on top:
   "skillsDir": ".agents/skills",
   "maxEditsPerRun": null,
   "minGapEvidence": 2,
+  "gapLedgerMaxAge": "90d",
   "maxTranscripts": 100,
   "sampleHalfLife": "14d",
   "analysis": { "agent": null, "model": null, "effort": null },
@@ -348,6 +356,7 @@ Everything mutable lives in `.backpass/`, kept out of git via the repo's local e
   proposal.json          the latest synthesis
   agent-probe-cache.json which harnesses were available and logged in, and when
   rejections.json        edits you turned down, and the evidence behind them
+  gap-ledger.json        gap sightings by gap and session, accumulated across runs
   apply/apply.html       the rendered review surface
 ```
 

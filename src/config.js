@@ -47,6 +47,12 @@ export const DEFAULT_CONFIG = {
   maxEditsPerRun: null,
   minGapEvidence: 2,
   /**
+   * Gap observations accumulate across runs in `.backpass/gap-ledger.json` so the
+   * `minGapEvidence` bar counts distinct sessions over time, not per run. A session's
+   * observations retire past this age (a duration like 90d, `all` to never expire).
+   */
+  gapLedgerMaxAge: "90d",
+  /**
    * Cap on transcripts analyzed per run; past it a recency-weighted sample is drawn
    * (`src/sample.js`). `0` or "all" disables the cap. `sampleHalfLife` is the age at
    * which a transcript's sampling weight halves; `seed` makes the sample reproducible.
@@ -159,6 +165,11 @@ function validate(config) {
     throw new UserError("config.minGapEvidence must be an integer >= 1");
   }
   config.maxTranscripts = parseMaxTranscripts(config.maxTranscripts, "config.maxTranscripts");
+  try {
+    parseSince(config.gapLedgerMaxAge);
+  } catch {
+    throw new UserError(`config.gapLedgerMaxAge must be a duration like 90d or all (got "${config.gapLedgerMaxAge}")`);
+  }
   if (parseSince(config.sampleHalfLife) === null) {
     throw new UserError(`config.sampleHalfLife must be a duration like 14d (got "${config.sampleHalfLife}")`);
   }

@@ -1,4 +1,5 @@
 import { foldEvidence } from "../fold.js";
+import { ledgerGapObservations, pruneGapLedger, recordGapObservations } from "../gap-ledger.js";
 import { synthesizeProposal } from "../synthesize.js";
 import { ProposalViolation } from "../proposal.js";
 import { UserError, color, info, json, out } from "../logger.js";
@@ -8,12 +9,27 @@ import { primaryMemoryFile } from "./analyze.js";
 import { printUsage } from "./usage.js";
 import { discoverForRun } from "./scan.js";
 
+/**
+ * Fold on-disk evidence for the memory file. Gap corroboration is counted through the
+ * persisted ledger so sessions accumulate across runs: record this run's observations,
+ * prune what the current file now covers or what aged out (after recording, because the
+ * evidence files that fed an expired sighting are still on disk and would re-add it),
+ * then cluster from the ledger.
+ */
 export async function foldForRun(ctx, memoryFile) {
-  const evidence = ctx.config.state.listEvidence();
+  const { state, minGapEvidence, gapLedgerMaxAge } = ctx.config;
+  const evidence = state.listEvidence();
   const relevant = evidence.filter((e) => e.memoryPath === memoryFile.path);
+
+  const ledger = state.readGapLedger();
+  recordGapObservations(ledger, relevant);
+  pruneGapLedger(ledger, { memoryFile, memoryPath: memoryFile.path, maxAge: gapLedgerMaxAge });
+  state.writeGapLedger(ledger);
+
   return foldEvidence(relevant, {
-    minGapEvidence: ctx.config.minGapEvidence,
+    minGapEvidence,
     memoryFile,
+    gapObservations: ledgerGapObservations(ledger, memoryFile.path),
   });
 }
 
