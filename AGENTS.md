@@ -24,6 +24,12 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   `src/discovery/adapters/` is pinned by a golden fixture in `test/fixtures/`. When a
   harness changes its on-disk shape, fix the adapter and update its fixture together.
   Adapters must stay fail-soft: an unreadable store warns and is skipped, never throws.
+- **The live progress view is an enhancement layer, never a dependency.** Pipeline stages
+  emit events through `src/progress.js`; `src/tui/` renders them on stderr during the
+  default run and buffers/replays the plain logger lines on teardown. Every path must
+  behave identically when it is inactive (non-TTY, CI, NO_COLOR, --quiet, --json) - plain
+  line output on stderr and clean stdout are the contract. Rendering logic stays pure
+  (`src/tui/render.js`) so it is testable as text.
 - **`src/apply/writer.js` is the only module that writes to the repo.** Keep it that way -
   every other stage is read-only analysis, which is what makes a run safe to interrupt.
 - **Never trust model-reported numbers.** Token deltas and budget projections are measured

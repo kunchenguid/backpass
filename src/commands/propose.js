@@ -4,6 +4,7 @@ import { ProposalViolation } from "../proposal.js";
 import { UserError, color, info, json, out } from "../logger.js";
 import { budgetBar, formatTokens } from "../tokens.js";
 import { formatUsage, sumUsage } from "../acpx.js";
+import { emitProgress } from "../progress.js";
 import { primaryMemoryFile } from "./analyze.js";
 import { discoverForRun } from "./scan.js";
 
@@ -21,8 +22,16 @@ export async function runProposal(ctx, precomputed = null) {
   const { file } = precomputed || primaryMemoryFile(repo, config);
   const transcripts = precomputed?.transcripts || (await discoverForRun(ctx)).transcripts;
 
+  const foldStarted = Date.now();
   const summary = await foldForRun(ctx, file);
   config.state.writeSummary(summary);
+  emitProgress("fold:done", {
+    instructions: summary.instructions.length,
+    clustersFound: summary.totals.gapClusters + summary.totals.droppedGapSingletons,
+    clustersKept: summary.totals.gapClusters,
+    minGapEvidence: config.minGapEvidence,
+    ms: Date.now() - foldStarted,
+  });
 
   if (!summary.analyzedSessions) {
     throw new UserError(

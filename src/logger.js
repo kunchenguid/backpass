@@ -14,14 +14,29 @@ export const color = {
 };
 
 let quiet = false;
+let sink = null;
 
 export function setQuiet(value) {
   quiet = Boolean(value);
 }
 
+/**
+ * While the live progress view owns stderr, progress lines are diverted here,
+ * buffered, and replayed verbatim on teardown - so scrollback after a TUI run
+ * is byte-identical to a run without one. Pass null to restore direct output.
+ */
+export function setLoggerSink(fn) {
+  sink = fn;
+}
+
 /** Human-facing progress and diagnostics go to stderr so stdout stays pipeable. */
 export function info(...args) {
-  if (!quiet) console.error(...args);
+  if (quiet) return;
+  if (sink) {
+    sink(args.join(" "));
+    return;
+  }
+  console.error(...args);
 }
 
 export function step(label, detail = "") {
@@ -29,7 +44,12 @@ export function step(label, detail = "") {
 }
 
 export function warn(message) {
-  console.error(`${color.yellow("warn")} ${message}`);
+  const line = `${color.yellow("warn")} ${message}`;
+  if (sink) {
+    sink(line);
+    return;
+  }
+  console.error(line);
 }
 
 export function fail(message) {

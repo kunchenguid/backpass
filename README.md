@@ -217,6 +217,20 @@ backpass apply --dry-run   # show what would be written
 
 Run `backpass --help` for the full flag list.
 
+### Live progress
+
+On an interactive terminal the default run renders a live progress view: the budget gauge,
+a stage rail (discover → analyze → fold → synthesize), per-store discovery counts, one lane
+per analysis job with its distillation receipt, and a running evidence tally. It draws to
+stderr only and collapses into the plain line summary when the run ends, so scrollback and
+piped output are identical to a run without it.
+
+The view never gets in the way of automation: no TTY, `NO_COLOR`, `CI`, `--quiet`, `--json`,
+or a terminal under 60 columns all mean plain lines, unchanged. Truecolor terminals get the
+backpass theme; everything else falls back to the nearest ANSI-16 colors. The ink set adapts
+to light backgrounds automatically (queried via OSC 11, `COLORFGBG` as fallback); force one
+with `--theme dark|light` or `"theme"` in `.backpassrc.json`.
+
 ### Two-tier models
 
 Cheap analysis, smart synthesis. Both go through acpx, so you pick from the harnesses you
