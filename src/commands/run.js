@@ -1,5 +1,4 @@
 import { UserError, color, info, json, out } from "../logger.js";
-import { formatUsage, sumUsage } from "../acpx.js";
 import { ProposalViolation } from "../proposal.js";
 import { runAnalysis } from "./analyze.js";
 import { bootstrapJson, bootstrapRun, printBootstrap } from "./bootstrap.js";
@@ -78,12 +77,7 @@ export async function cmdRun(ctx) {
       return 0;
     }
 
-    printProposal(proposal);
-
-    const tier1 = sumUsage(analysis.summary?.usage || []);
-    const tier2 = sumUsage(proposal.usage || []);
-    out(color.dim(`  tier-1 tokens: ${formatUsage(tier1)}`));
-    out(color.dim(`  tier-2 tokens: ${formatUsage(tier2)}`));
+    printProposal(proposal, { analysisUsage: analysis.summary?.usage || [] });
     return 0;
   } catch (err) {
     tui?.stop();

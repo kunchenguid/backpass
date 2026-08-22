@@ -43,6 +43,11 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   second full file is warned about, never silently ignored or double-written.
 - **Never trust model-reported numbers.** Token deltas and budget projections are measured
   in `src/proposal.js` from the actual text; the synthesis model's own figures are ignored.
+  Usage accounting comes only from acpx's `[acpx] tokens:` stderr line, which acpx prints
+  when the ACP adapter returns usage (codex, claude do; pi does not). Records are
+  `{ agent, usage|null }` (`usageRecord` in `src/acpx.js`) and `src/commands/usage.js` is
+  the one place that prints them - never `n/a`: nothing when no call ran, the harness by
+  name when it stayed silent.
 - **acpx is alpha.** All model invocation is isolated behind `src/acpx.js` so an upstream
   CLI change has one blast radius. v1 uses plain `exec` and named sessions only; acpx flows
   are deferred until they are stable upstream. The one sanctioned exception is the

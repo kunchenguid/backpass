@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { extractJson, sessionPrompt } from "./acpx.js";
+import { extractJson, sessionPrompt, usageRecord } from "./acpx.js";
 import { renderEvidenceForPrompt } from "./fold.js";
 import { renderInstructionIndex } from "./memory.js";
 import { renderPrompt } from "./prompts.js";
@@ -144,7 +144,9 @@ export async function synthesizeProposal({ memoryFile, summary, config, repo, tr
     // A classifiable failure (not logged in, model rejected, adapter missing) falls
     // through to the next ladder candidate; the switch is recorded in the notes so the
     // proposal's provenance is visible.
+    let ranWith = pick.agent;
     const result = await config.agents.withFallthrough("synthesis", async (current) => {
+      ranWith = current.agent;
       if (current !== pick) notes.push(`synthesis fell through to ${current.agent} (${current.model})`);
       return sessionPrompt({
         agent: current.agent,
@@ -157,7 +159,7 @@ export async function synthesizeProposal({ memoryFile, summary, config, repo, tr
       });
     });
 
-    if (result.usage) usage.push(result.usage);
+    usage.push(usageRecord(ranWith, result));
     // The same adapter limitation is reported on every attempt; say it once.
     for (const note of result.notes || []) {
       if (notes.includes(note)) continue;
