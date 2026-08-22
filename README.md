@@ -64,7 +64,7 @@ you have already authenticated.
 
 ```sh
 cd your-repo
-backpass init      # write .backpassrc.json, gitignore .backpass/
+backpass init      # write .backpassrc.json, exclude .backpass/ via .git/info/exclude
 backpass           # scan → analyze → propose (never writes)
 backpass apply     # review each edit, accept or reject, then write
 ```
@@ -213,7 +213,7 @@ backpass apply --dry-run   # show what would be written
 | `backpass propose` | tier-2 synthesis from cached evidence                         |
 | `backpass apply`   | review and write the accepted edits                           |
 | `backpass status`  | cache state, failed transcripts, budget bars                  |
-| `backpass init`    | write `.backpassrc.json`, gitignore `.backpass/`              |
+| `backpass init`    | write `.backpassrc.json`, exclude `.backpass/` locally        |
 
 Run `backpass --help` for the full flag list.
 
@@ -272,7 +272,8 @@ CLI flags on top:
 
 ### State
 
-Everything mutable lives in a gitignored `.backpass/`:
+Everything mutable lives in `.backpass/`, kept out of git via the repo's local exclude
+(`.git/info/exclude`, written by `backpass init`) rather than the tracked `.gitignore`:
 
 ```
 .backpass/
