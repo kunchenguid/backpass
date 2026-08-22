@@ -53,6 +53,8 @@ export class AcpxError extends Error {
     this.code = code;
     this.timedOut = timedOut;
     this.spawnError = spawnError;
+    /** Set when the adapter has no session support at all (not an availability verdict). */
+    this.unsupported = false;
   }
 }
 
@@ -92,10 +94,14 @@ export function classifyAcpxFailure(failure) {
   return null;
 }
 
-/** acpx prints a per-run accounting line: `[acpx] tokens: input=10 output=47 ... total=34194`. */
+/**
+ * acpx prints a per-run accounting line: `[acpx] tokens: input=10 output=47 ... total=34194`.
+ * @returns {Record<string, number> | null}
+ */
 export function parseTokenLine(text) {
   const match = /\[acpx\]\s+tokens:\s+(.+)/.exec(text || "");
   if (!match) return null;
+  /** @type {Record<string, number>} */
   const usage = {};
   for (const pair of match[1].trim().split(/\s+/)) {
     const [key, value] = pair.split("=");
@@ -144,10 +150,17 @@ export function extractJson(text) {
   return null;
 }
 
-function baseArgs({ cwd, model, timeoutSeconds, approveReads, suppressReads }) {
+/**
+ * Permission modes. `approveAll` is what native editing needs: the harness's own
+ * `edit`/`write` tools are approved, which is why every call that sets it runs with a
+ * staging workspace as `cwd` (`src/workspace.js`), never the repo. acpx's policy rules
+ * match tool kinds, not paths, so the workspace is the blast-radius boundary.
+ */
+function baseArgs({ cwd, model, timeoutSeconds, approveReads, approveAll = false, suppressReads }) {
   const args = [];
   if (cwd) args.push("--cwd", cwd);
-  if (approveReads) args.push("--approve-reads");
+  if (approveAll) args.push("--approve-all");
+  else if (approveReads) args.push("--approve-reads");
   else args.push("--deny-all");
   if (suppressReads) args.push("--suppress-reads");
   args.push("--non-interactive-permissions", "deny");
@@ -250,26 +263,24 @@ export async function execOneShot({
 }
 
 /**
- * A prompt through a short-lived named session (design section 5).
+ * A named session that stays open across turns (design section 5).
  *
  * Reasoning effort is a session config option on every adapter that has one, and
- * `exec` cannot set it - so any call that wants effort applied goes through here:
- * the synthesis pass always, and the analysis pass whenever an effort is configured.
- * Adapters that do not advertise an effort option skip that step with a report line -
- * never silently.
+ * `exec` cannot set it - so any call that wants effort applied goes through a session.
+ * Synthesis also needs more than one turn in the same context: the agent edits the
+ * staging copy, then annotates the changes backpass measured. Adapters that do not
+ * advertise an effort option skip that step with a report line - never silently.
+ *
+ * Resolves to the handle, or throws an `AcpxError` (`unsupported: true` when the adapter
+ * has no session support at all, which `sessionPrompt` turns into an exec fallback).
+ *
+ * @returns {Promise<{ notes: string[],
+ *   prompt: (options: { promptFile: string, timeoutSeconds?: number, promptRetries?: number,
+ *     approveReads?: boolean, approveAll?: boolean, suppressReads?: boolean }) =>
+ *     Promise<{ text: string, usage: Record<string, number> | null, raw: string, notes: string[] }>,
+ *   close: () => Promise<void> }>}
  */
-export async function sessionPrompt({
-  agent,
-  model = null,
-  effort = null,
-  sessionName,
-  promptFile,
-  cwd,
-  timeoutSeconds = 900,
-  promptRetries = 1,
-  approveReads = true,
-  suppressReads = true,
-}) {
+export async function openSession({ agent, model = null, effort = null, sessionName, cwd }) {
   const notes = [];
   const acpxAgent = acpxAgentName(agent);
   const created = await run([acpxAgent, "sessions", "new", "--name", sessionName], { timeoutMs: 60_000, cwd });
@@ -279,21 +290,25 @@ export async function sessionPrompt({
     if (classifyAcpxFailure(created)) {
       throw new AcpxError(`acpx ${agent} session create failed: ${firstLine(created.stderr)}`, created);
     }
-    // No session support for this adapter: fall back to a one-shot, and say so.
-    notes.push(`session unsupported for ${agent}; fell back to exec one-shot`);
-    if (effort) notes.push(`${agent} cannot set effort without a session; ran without effort=${effort}`);
-    const fallback = await execOneShot({
-      agent,
-      model,
-      promptFile,
-      cwd,
-      timeoutSeconds,
-      promptRetries,
-      approveReads,
-      suppressReads,
-    });
-    return { ...fallback, notes };
+    const err = new AcpxError(
+      `acpx ${agent} has no session support: ${firstLine(created.stderr) || `exit ${created.code}`}`,
+      created,
+    );
+    err.unsupported = true;
+    throw err;
   }
+
+  const startedAt = Date.now();
+  let closed = false;
+  let firstPromptFile = null;
+  let storeUsageSeen = null;
+
+  const close = async () => {
+    if (closed) return;
+    closed = true;
+    const result = await run([acpxAgent, "sessions", "close", sessionName], { timeoutMs: 30_000, cwd });
+    if (result.code !== 0) warn(`could not close acpx session ${sessionName}`);
+  };
 
   try {
     if (model) {
@@ -314,9 +329,23 @@ export async function sessionPrompt({
         notes.push(`${agent} does not advertise a reasoning-effort option; ran without effort=${effort}`);
       }
     }
+  } catch (err) {
+    await close();
+    throw err;
+  }
 
+  const prompt = async ({
+    promptFile,
+    timeoutSeconds = 900,
+    promptRetries = 1,
+    approveReads = true,
+    approveAll = false,
+    suppressReads = true,
+  }) => {
+    if (closed) throw new AcpxError(`acpx ${agent} session ${sessionName} is closed`);
+    firstPromptFile = firstPromptFile || promptFile;
     const args = [
-      ...baseArgs({ cwd, model: null, timeoutSeconds, approveReads, suppressReads }),
+      ...baseArgs({ cwd, model: null, timeoutSeconds, approveReads, approveAll, suppressReads }),
       "--prompt-retries",
       String(promptRetries),
       acpxAgent,
@@ -325,17 +354,75 @@ export async function sessionPrompt({
       "--file",
       promptFile,
     ];
-    const startedAt = Date.now();
     const result = await run(args, { timeoutMs: (timeoutSeconds + 30) * 1000, cwd });
     if (result.timedOut) throw new AcpxError(`acpx ${agent} session prompt timed out after ${timeoutSeconds}s`, result);
     if (result.code !== 0) throw new AcpxError(`acpx ${agent} session prompt failed (exit ${result.code})`, result);
 
     const combined = `${result.stdout}\n${result.stderr}`;
-    const usage = parseTokenLine(combined) ?? recoverUsageFromStore({ agent, promptFile, cwd, startedAt });
+    /** @type {Record<string, number> | null} */
+    let usage = parseTokenLine(combined);
+    if (!usage) {
+      // The harness store holds the whole session's usage; this turn is the increase.
+      const cumulative = recoverUsageFromStore({ agent, promptFile: firstPromptFile, cwd, startedAt });
+      usage = cumulative ? subtractUsage(cumulative, storeUsageSeen) : null;
+      if (cumulative) storeUsageSeen = cumulative;
+    }
     return { text: stripAcpxNoise(result.stdout), usage, raw: result.stdout, notes };
+  };
+
+  return { notes, prompt, close };
+}
+
+/** @returns {Record<string, number>} */
+function subtractUsage(current, previous) {
+  if (!previous) return current;
+  /** @type {Record<string, number>} */
+  const out = {};
+  for (const [key, value] of Object.entries(current)) out[key] = value - (previous[key] || 0);
+  return out;
+}
+
+/**
+ * One prompt through a short-lived named session: open, prompt, close. The analysis
+ * pass uses this whenever an effort is configured. An adapter without session support
+ * falls back to a one-shot `exec`, and says so.
+ */
+export async function sessionPrompt({
+  agent,
+  model = null,
+  effort = null,
+  sessionName,
+  promptFile,
+  cwd,
+  timeoutSeconds = 900,
+  promptRetries = 1,
+  approveReads = true,
+  suppressReads = true,
+}) {
+  let session;
+  try {
+    session = await openSession({ agent, model, effort, sessionName, cwd });
+  } catch (err) {
+    if (!(err instanceof AcpxError) || !err.unsupported) throw err;
+    const notes = [`session unsupported for ${agent}; fell back to exec one-shot`];
+    if (effort) notes.push(`${agent} cannot set effort without a session; ran without effort=${effort}`);
+    const fallback = await execOneShot({
+      agent,
+      model,
+      promptFile,
+      cwd,
+      timeoutSeconds,
+      promptRetries,
+      approveReads,
+      suppressReads,
+    });
+    return { ...fallback, notes };
+  }
+
+  try {
+    return await session.prompt({ promptFile, timeoutSeconds, promptRetries, approveReads, suppressReads });
   } finally {
-    const closed = await run([acpxAgent, "sessions", "close", sessionName], { timeoutMs: 30_000, cwd });
-    if (closed.code !== 0) warn(`could not close acpx session ${sessionName}`);
+    await session.close();
   }
 }
 
@@ -364,6 +451,7 @@ const STORE_USAGE_RECOVERY = { pi: recoverPiUsage };
 /** Slack for a harness that stamps the session timestamp slightly before we spawned it. */
 const STORE_MTIME_SLACK_MS = 5_000;
 
+/** @returns {Record<string, number> | null} */
 export function recoverUsageFromStore({ agent, promptFile, cwd, startedAt }) {
   const recover = STORE_USAGE_RECOVERY[agent];
   if (!recover) return null;

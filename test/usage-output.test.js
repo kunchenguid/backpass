@@ -34,11 +34,21 @@ const fs = require("node:fs");
 const path = require("node:path");
 const argv = process.argv.slice(2);
 const agent = argv.find((a) => a === "codex" || a === "pi");
+// Session management calls (new / set / close) succeed silently, as acpx's do.
+if (argv.includes("sessions") || argv.includes("set")) process.exit(0);
 const cwd = argv[argv.indexOf("--cwd") + 1];
 const promptFile = argv[argv.indexOf("--file") + 1];
 process.stdout.write('{"ok":true}\\n');
 if (agent === "codex") {
   process.stderr.write("[acpx] tokens: input=14585 output=5 cache_read=11008 total=25598\\n");
+} else if (agent === "pi" && process.env.FAKE_PI_SESSION_FILE) {
+  // A follow-up turn in a named session: pi appends to the session's own file.
+  const file = process.env.FAKE_PI_SESSION_FILE;
+  const usage = { input: 300, output: 40, cacheRead: 9000, cacheWrite: 0, reasoning: 20, totalTokens: 9360 };
+  fs.appendFileSync(file, JSON.stringify({
+    type: "message", id: "turn-followup-" + Date.now(), parentId: "turn1",
+    message: { role: "assistant", content: [{ type: "text", text: '{"ok":true}' }], usage, stopReason: "stop" },
+  }) + "\\n");
 } else if (agent === "pi" && !process.env.FAKE_PI_NO_STORE) {
   const prompt = fs.readFileSync(promptFile, "utf8");
   const dir = ${JSON.stringify(piSessionDir)};
@@ -61,15 +71,16 @@ if (agent === "codex") {
     });
     parent = mid;
   });
-  fs.writeFileSync(path.join(dir, new Date().toISOString().replace(/[:.]/g, "-") + "_" + id + ".jsonl"),
-    lines.map((l) => JSON.stringify(l)).join("\\n") + "\\n");
+  const file = path.join(dir, new Date().toISOString().replace(/[:.]/g, "-") + "_" + id + ".jsonl");
+  fs.writeFileSync(file, lines.map((l) => JSON.stringify(l)).join("\\n") + "\\n");
+  if (process.env.FAKE_PI_SESSION_FILE_OUT) fs.writeFileSync(process.env.FAKE_PI_SESSION_FILE_OUT, file);
 }
 `,
 );
 fs.chmodSync(fakeAcpx, 0o755);
 process.env.BACKPASS_ACPX_BIN = fakeAcpx;
 
-const { execOneShot, describeUsage, usageRecord, sumUsage } = await import("../src/acpx.js");
+const { execOneShot, openSession, describeUsage, usageRecord, sumUsage } = await import("../src/acpx.js");
 const { printProposal } = await import("../src/commands/propose.js");
 const { printUsage } = await import("../src/commands/usage.js");
 
@@ -147,6 +158,46 @@ test("pi usage is recovered from pi's own session file when acpx prints no token
     describeUsage([record]),
     "input=10,778 output=208 cache_read=8,704 cache_write=0 reasoning=119 total=19,690",
   );
+});
+
+test("across the turns of one pi session, each turn is accounted as its own increase", async () => {
+  const sessionPrompt = path.join(fakeAcpxDir, "prompt-session.md");
+  fs.writeFileSync(sessionPrompt, "<!-- backpass:self-session -->\nEdit the staging copy.\n");
+  const followUp = path.join(fakeAcpxDir, "prompt-annotate.md");
+  fs.writeFileSync(followUp, "<!-- backpass:self-session -->\nAnnotate the measured changes.\n");
+  const fileOut = path.join(fakeAcpxDir, "pi-session-file.txt");
+  process.env.FAKE_PI_SESSION_FILE_OUT = fileOut;
+  try {
+    const session = await openSession({ agent: "pi", effort: "high", sessionName: "bp-test", cwd: workDir });
+    const first = await session.prompt({ promptFile: sessionPrompt, approveAll: true, timeoutSeconds: 5 });
+    assert.deepEqual(first.usage, {
+      input: 10778,
+      output: 208,
+      cache_read: 8704,
+      cache_write: 0,
+      reasoning: 119,
+      total: 19690,
+    });
+
+    // The second turn appends to the same session file; only the increase is this turn's.
+    process.env.FAKE_PI_SESSION_FILE = fs.readFileSync(fileOut, "utf8");
+    const second = await session.prompt({ promptFile: followUp, approveAll: true, timeoutSeconds: 5 });
+    assert.deepEqual(second.usage, {
+      input: 300,
+      output: 40,
+      cache_read: 9000,
+      cache_write: 0,
+      reasoning: 20,
+      total: 9360,
+    });
+    await session.close();
+
+    const total = sumUsage([usageRecord("pi", first), usageRecord("pi", second)]);
+    assert.equal(total.total, 19690 + 9360);
+  } finally {
+    delete process.env.FAKE_PI_SESSION_FILE;
+    delete process.env.FAKE_PI_SESSION_FILE_OUT;
+  }
 });
 
 test("a pi call that leaves no session file stays honest: named, never n/a", async () => {

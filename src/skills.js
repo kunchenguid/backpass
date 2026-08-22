@@ -109,7 +109,8 @@ export function renderSkillFile(skill) {
  */
 export function extractionBudgetEffect(edit) {
   if (edit.kind !== "extract" || !edit.skill) return null;
-  const removedFromMemory = estimateTokens(edit.find) - estimateTokens(edit.replace);
+  const pairs = Array.isArray(edit.hunks) ? edit.hunks : [edit];
+  const removedFromMemory = pairs.reduce((sum, p) => sum + estimateTokens(p.find) - estimateTokens(p.replace), 0);
   const descriptionCost = estimateTokens(edit.skill.description);
   return {
     alwaysLoadedDelta: -removedFromMemory,

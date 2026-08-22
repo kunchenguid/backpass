@@ -246,12 +246,15 @@ function synthSummary(theme, s) {
   const model = [s.agent, s.model].filter(Boolean).join(" · ");
   const effort = s.effort ? ` · effort ${s.effort}` : "";
   if (s.status === "done") return theme.paint(`${s.edits} edit(s) · passed validation`, "dim");
-  if (s.attempt > 1) {
+  if (s.phase === "annotate" && s.attempt > 1) {
     return (
-      theme.paint("re-prompt ", "dim") + theme.paint("1 of 1", "yellow") + theme.paint(` · ${model}${effort}`, "dim")
+      theme.paint("re-prompt ", "dim") +
+      theme.paint(`${s.attempt - 1}`, "yellow") +
+      theme.paint(` · ${model}${effort}`, "dim")
     );
   }
-  return theme.paint(`one call · ${model}${effort}`, "dim");
+  const phase = s.phase === "annotate" ? "annotating" : "editing";
+  return theme.paint(`${phase} · ${model}${effort}`, "dim");
 }
 
 function sectionRule(theme, name, description, width) {
@@ -380,18 +383,22 @@ function synthesizeDetail(state, theme, width, spin) {
     sectionRule(theme, STAGE_LABELS.synthesize, `aggregated gradients → at most ${state.meta.maxEdits} edits`, width),
   ];
 
-  if (s.attempt > 1 && s.violations.length) {
+  if (s.phase === "annotate" && s.attempt > 1 && s.violations.length) {
     lines.push(
-      ` ${theme.paint("!", "yellow")} ${theme.paint(`synthesis violated ${s.violations.length} gate(s)`, "text")} ${theme.paint("· re-prompting once with the exact breaches", "dim")}`,
+      ` ${theme.paint("!", "yellow")} ${theme.paint(`synthesis violated ${s.violations.length} gate(s)`, "text")} ${theme.paint("· re-prompting with the exact breaches", "dim")}`,
     );
     for (const violation of s.violations.slice(0, 4)) {
       lines.push(`    ${theme.paint("✗", "red")} ${theme.paint(clipPlain(violation, width - 8), "dim")}`);
     }
   }
 
+  const doing =
+    s.phase === "annotate"
+      ? `annotating ${s.changes ?? 0} measured change(s) with evidence…`
+      : `weighing ${s.gapClusters} gap clusters + ${s.instructions} instruction records against the budget…`;
   lines.push(
     lr(
-      ` ${theme.paint(spin, "mint")} weighing ${s.gapClusters} gap clusters + ${s.instructions} instruction records against the budget…`,
+      ` ${theme.paint(spin, "mint")} ${doing}`,
       state.narrow || !s.sessionName ? null : theme.paint(`session ${s.sessionName}`, "faint"),
       width,
     ),

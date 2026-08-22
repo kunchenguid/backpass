@@ -53,20 +53,34 @@ function fakeAnalyze({ transcripts, memoryFile, config, memoryHash }) {
   return { total: transcripts.length, analyzed: transcripts.length, cached: 0, skipped: 0, failed: 0, usage: [] };
 }
 
+/**
+ * Stands in for the synthesis harness: edits the staging copy the way a harness's own
+ * file tools would, then annotates the measured change.
+ */
 function fakeSynthesize(captured) {
   return async ({ memoryFile, summary, runNote }) => {
     captured.runNote = runNote;
     captured.gapClusters = summary.totals.gapClusters;
     const { buildProposal } = await import("../src/proposal.js");
+    const { stageAndMeasure, writeIn } = await import("./helpers/staging.js");
+    const { measured } = stageAndMeasure({
+      repo: captured.repo,
+      memoryPath: memoryFile.path,
+      edit: (root) =>
+        writeIn(root, memoryFile.path, (t) =>
+          t.replace(
+            "- None recorded yet. backpass adds evidence-backed entries here from real sessions.",
+            "- Run migrations only against a scratch database, never the shared one.",
+          ),
+        ),
+    });
     const { proposal, violations } = buildProposal(
       {
         edits: [
           {
+            changes: ["H1"],
             kind: "rewrite",
-            file: memoryFile.path,
             title: "record the migration trap",
-            find: "- None recorded yet. backpass adds evidence-backed entries here from real sessions.",
-            replace: "- Run migrations only against a scratch database, never the shared one.",
             evidence: [
               { polarity: "negative", text: "applied the migration to prod-db", source: "claude · s1" },
               { polarity: "negative", text: "applied the migration to prod-db", source: "claude · s2" },
@@ -75,7 +89,7 @@ function fakeSynthesize(captured) {
           },
         ],
       },
-      { memoryFile, config: captured.config, repo: captured.repo, summary },
+      { memoryFile, config: captured.config, repo: captured.repo, summary, measured },
     );
     assert.deepEqual(violations, []);
     return { proposal, violations };

@@ -10,8 +10,8 @@ import { loadConfig } from "../src/config.js";
 import { setLoggerSink } from "../src/logger.js";
 import { isPointerTo, resolveMemoryFiles } from "../src/memory.js";
 import { buildProposal } from "../src/proposal.js";
-import { State } from "../src/state.js";
 import { renderPointer } from "../src/bootstrap.js";
+import { stageAndMeasure, writeIn } from "./helpers/staging.js";
 
 const AGENTS = "# Memory\n\n## Rules\n\n- Run the tests before pushing.\n- Never edit generated files.\n";
 const SEPARATE_CLAUDE = "# Claude notes\n\n- Prefer bun over npm.\n";
@@ -32,7 +32,7 @@ function captureWarnings(fn) {
   }
 }
 
-/** One evidence-backed edit against AGENTS.md, pushed through the real writer. */
+/** One evidence-backed edit against AGENTS.md, staged like synthesis and pushed through the real writer. */
 function applyOneEdit(repo, config) {
   const { file } = primaryMemoryFile(repo, config);
   const summary = {
@@ -41,24 +41,30 @@ function applyOneEdit(repo, config) {
     gaps: [],
     totals: { positive: 0, negative: 2, gapClusters: 0 },
   };
+  const { measured, state } = stageAndMeasure({
+    repo,
+    memoryPath: file.path,
+    skillsDir: config.skillsDir,
+    edit: (root) =>
+      writeIn(root, file.path, (t) =>
+        t.replace("- Run the tests before pushing.", "- Run the full test suite before pushing."),
+      ),
+  });
   const { proposal, violations } = buildProposal(
     {
       edits: [
         {
+          changes: ["H1"],
           kind: "rewrite",
-          file: file.path,
           title: "tighten",
-          find: "- Run the tests before pushing.",
-          replace: "- Run the full test suite before pushing.",
           evidence: [{ polarity: "negative", text: "skipped tests", source: "claude · s1 · turn 2" }],
           transcripts: 2,
         },
       ],
     },
-    { memoryFile: file, config, repo, summary },
+    { memoryFile: file, config, repo, summary, measured },
   );
   assert.deepEqual(violations, []);
-  const state = new State(repo.root).ensure();
   return applyDecisions({ proposal, decisions: { e1: "accepted" }, repo, state, config });
 }
 

@@ -96,6 +96,8 @@ export function initialState(meta) {
       model: null,
       effort: null,
       attempt: 0,
+      phase: "edit",
+      changes: null,
       sessionName: null,
       gapClusters: 0,
       instructions: 0,
@@ -221,6 +223,8 @@ export function reduceEvent(state, event, data, now = Date.now()) {
       s.model = data.model;
       s.effort = data.effort;
       s.attempt = data.attempt;
+      s.phase = data.phase || "edit";
+      s.changes = data.changes ?? null;
       if (data.maxEdits) state.meta.maxEdits = data.maxEdits;
       s.sessionName = data.sessionName;
       s.gapClusters = data.gapClusters;

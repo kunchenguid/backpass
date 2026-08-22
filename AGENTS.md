@@ -8,8 +8,9 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
 
 - `README.md` documents the user-facing surface; `src/cli.js` is the authoritative flag list.
 - The pipeline is one stage per module, in order: `src/discovery/` -> `src/sample.js` (cap) -> `src/distill.js` ->
-  `src/analyze.js` -> `src/fold.js` -> `src/synthesize.js` -> `src/proposal.js` -> `src/apply/`.
-  Each module's header comment explains its role; read those before changing a stage.
+  `src/analyze.js` -> `src/fold.js` -> `src/synthesize.js` (with `src/workspace.js` + `src/diff.js`) ->
+  `src/proposal.js` -> `src/apply/`. Each module's header comment explains its role; read those
+  before changing a stage.
 - **User-facing step names are the training-loop terms**, not the module names: discover =
   "collect samples", analyze = "calculate loss", fold = "aggregate gradients", synthesize =
   "gradient descent" (`STAGE_LABELS` in `src/tui/render.js`). Internal keys, event names, and
@@ -39,6 +40,14 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   every other stage is read-only analysis, which is what makes a run safe to interrupt.
   Bootstrap (`src/commands/bootstrap.js`, a repo with no memory file) is the one run that
   writes without the apply gate, and it only ever creates files, never overwrites.
+- **Synthesis edits natively, in a staging copy, never by describing text.** The agent
+  gets `--approve-all` with `cwd` = `.backpass/synthesis/` (`prepareWorkspace`), which holds
+  only the memory file and the skills dir; backpass measures the copy (`measureWorkspace`,
+  `anchoredHunks`) and the agent annotates the measured changes by id in a second turn of
+  the same session. The model never supplies `find` text - every hunk is cut from the raw
+  file, widened until unique, so "find text does not appear" cannot recur. Never pass
+  `approveAll` with the repo as `cwd`; the repo is fingerprinted and a harness that
+  writes there fails the run loudly.
 - **Skills only count if a harness loads them.** Extractions target `.agents/skills` with
   `.claude/skills -> ../.agents/skills` as a symlink (`ensureSkillsLayout` in
   `src/skills.js`, run at write time); a bare `skills/` dir is never auto-detected and a

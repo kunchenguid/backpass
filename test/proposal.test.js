@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import {
@@ -13,12 +12,12 @@ import {
   SHRINK_EDIT_TOKENS,
   SHRINK_MAX_EDITS,
 } from "../src/proposal.js";
-import { parseMemoryUnits } from "../src/memory.js";
 import { estimateTokens } from "../src/tokens.js";
-import { isSuppressedByRejection, recordRejection, State } from "../src/state.js";
+import { isSuppressedByRejection, recordRejection } from "../src/state.js";
 import { applyDecisions } from "../src/apply/writer.js";
 import { injectPayload, parseDecisions } from "../src/apply/lavish.js";
 import { extractJson, parseTokenLine, stripAcpxNoise } from "../src/acpx.js";
+import { makeRepo, stageAndMeasure, writeIn } from "./helpers/staging.js";
 
 const MEMORY_TEXT = [
   "# Demo agent instructions",
@@ -26,41 +25,57 @@ const MEMORY_TEXT = [
   "## Rules",
   "",
   "- Whenever a PR is mentioned, include its URL.",
+  "- Prefer small commits.",
   "- Use Node 18 via nvm before running any script.",
   "",
 ].join("\n");
 
-function memoryFile(text = MEMORY_TEXT) {
-  return {
-    path: "AGENTS.md",
-    text,
-    hash: "sha256:test",
-    tokens: estimateTokens(text),
-    units: parseMemoryUnits(text),
-  };
-}
+const QUOTE = [{ polarity: "negative", text: "it used a bare #2731 reference", source: "claude · abc · turn 3" }];
 
-function context(overrides = {}) {
+function config(overrides = {}) {
   return {
-    memoryFile: memoryFile(),
-    repo: { name: "demo", root: "/repo/demo" },
-    summary: { analyzedSessions: 4, totals: { positive: 3, negative: 2, gapClusters: 1 } },
-    config: {
-      budgetTokens: 5000,
-      maxEditsPerRun: 5,
-      minGapEvidence: 2,
-      skillsDir: ".claude/skills",
-      analysis: { agent: "codex" },
-      synthesis: { agent: "claude" },
-    },
-    skillFiles: [],
+    budgetTokens: 5000,
+    maxEditsPerRun: 5,
+    minGapEvidence: 2,
+    skillsDir: ".agents/skills",
+    analysis: { agent: "codex" },
+    synthesis: { agent: "claude" },
     ...overrides,
   };
 }
 
-const QUOTE = [{ polarity: "negative", text: "it used a bare #2731 reference", source: "claude · abc · turn 3" }];
+/**
+ * Stage `text`, let `edit` change the staging copy, and run the gate over `annotation`
+ * (the model's answer to the annotate turn). Returns everything a test may inspect.
+ */
+function gate({ text = MEMORY_TEXT, files = {}, edit, annotation, config: cfg = config(), context = {} }) {
+  const repo = makeRepo({ "AGENTS.md": text, ...files });
+  const staged = stageAndMeasure({ repo, skillsDir: cfg.skillsDir, edit });
+  const summary = { analyzedSessions: 4, totals: { positive: 3, negative: 2, gapClusters: 1 } };
+  const result = buildProposal(annotation, {
+    memoryFile: staged.memoryFile,
+    config: cfg,
+    repo,
+    summary,
+    measured: staged.measured,
+    ...context,
+  });
+  return { ...result, ...staged, repo };
+}
 
-test("a rewrite edit replaces exactly the text it names", () => {
+const memoryEdit = (fn) => (root) => writeIn(root, "AGENTS.md", fn);
+const claim = (changes, extra = {}) => ({
+  changes,
+  kind: "rewrite",
+  title: "t",
+  evidence: QUOTE,
+  transcripts: 3,
+  ...extra,
+});
+
+// ---------- the mechanical applier ----------
+
+test("a legacy rewrite edit replaces exactly the text it names", () => {
   const next = applyEdit(MEMORY_TEXT, {
     id: "e1",
     file: "AGENTS.md",
@@ -71,7 +86,7 @@ test("a rewrite edit replaces exactly the text it names", () => {
   assert.ok(!next.includes("include its URL."));
 });
 
-test("an add edit inserts after its anchor, and appends when there is none", () => {
+test("a legacy add edit inserts after its anchor, and appends when there is none", () => {
   const anchored = applyEdit(MEMORY_TEXT, {
     id: "e1",
     file: "AGENTS.md",
@@ -86,16 +101,6 @@ test("an add edit inserts after its anchor, and appends when there is none", () 
 
   const appended = applyEdit(MEMORY_TEXT, { id: "e2", file: "AGENTS.md", find: "", replace: "- Appended rule." });
   assert.ok(appended.trimEnd().endsWith("- Appended rule."));
-});
-
-test("a remove edit deletes its text", () => {
-  const next = applyEdit(MEMORY_TEXT, {
-    id: "e1",
-    file: "AGENTS.md",
-    find: "- Use Node 18 via nvm before running any script.\n",
-    replace: "",
-  });
-  assert.ok(!next.includes("Node 18"));
 });
 
 test("an edit whose find text is missing or ambiguous is refused, never guessed at", () => {
@@ -115,227 +120,267 @@ test("an edit whose find text is missing or ambiguous is refused, never guessed 
       }),
     /appears 2 times/,
   );
+
+  // Overlapping occurrences count too: a run of identical lines is not unique.
+  assert.throws(
+    () => applyEdit("- a\n- a\n- a\n", { id: "e1", file: "AGENTS.md", find: "- a\n- a\n", replace: "" }),
+    /appears 2 times/,
+  );
 });
 
-test("the per-run edit cap is enforced - it is the learning rate", () => {
-  const edits = Array.from({ length: 6 }, (_, i) => ({
-    kind: "rewrite",
-    file: "AGENTS.md",
-    title: `edit ${i}`,
-    find: "- Use Node 18 via nvm before running any script.",
-    replace: `- Rule ${i}.`,
-    evidence: QUOTE,
-    transcripts: 3,
-  }));
+test("a measured edit applies each of its hunks, and refuses once the file has drifted", () => {
+  const { proposal, violations } = gate({
+    edit: memoryEdit((t) => t.replace("include its URL.", "include its full URL.").replace("Node 18", "Node 22")),
+    annotation: { edits: [claim(["H1", "H2"], { title: "both" })] },
+  });
+  assert.deepEqual(violations, []);
+  assert.equal(proposal.edits[0].hunks.length, 2);
+  const applied = applyEdit(MEMORY_TEXT, proposal.edits[0]);
+  assert.ok(applied.includes("full URL") && applied.includes("Node 22"));
 
-  const { violations } = buildProposal({ edits }, context());
+  const drifted = MEMORY_TEXT.replace("Node 18", "Node 20");
+  assert.throws(() => applyEdit(drifted, proposal.edits[0]), /\(H2\): "find" text does not appear/);
+});
+
+// ---------- the skew that motivated native editing ----------
+
+test("an edit spanning several single-newline list items lands: find is measured from the raw file", () => {
+  // The report's failing shape: adjacent list items the instruction index shows with a
+  // blank line between them. The agent edits the raw copy; nothing is copied by hand.
+  const text = [
+    "# Memory",
+    "",
+    "## Sharp edges",
+    "",
+    "- Transcript formats drift; adapters are pinned by golden fixtures.",
+    "- The live progress view is an enhancement layer, never a dependency.",
+    "- Only src/apply/writer.js writes to the repo.",
+    "- Skills only count if a harness loads them.",
+    "",
+    "## Other",
+    "",
+    "- Keep this file short.",
+    "",
+  ].join("\n");
+  const { proposal, violations, measured, memoryFile, repo } = gate({
+    text,
+    edit: memoryEdit((t) =>
+      t
+        .replace(
+          "- Transcript formats drift; adapters are pinned by golden fixtures.\n- The live progress view is an enhancement layer, never a dependency.\n",
+          "",
+        )
+        .replace("- Keep this file short.", "- Keep this file short; point at files instead of copying them."),
+    ),
+    annotation: {
+      edits: [
+        { ...claim(["H1"]), kind: "remove", title: "drop two dead sharp edges" },
+        { ...claim(["H2"]), kind: "rewrite", title: "sharpen the brevity rule" },
+      ],
+    },
+  });
+
+  assert.deepEqual(violations, []);
+  assert.equal(measured.changes.length, 2);
+  for (const edit of proposal.edits) {
+    for (const hunk of edit.hunks) {
+      assert.equal(text.split(hunk.find).length, 2, `${hunk.id} find text occurs exactly once in the raw file`);
+      assert.ok(!hunk.find.includes("[AG-"), "no index headers leak into the find text");
+    }
+  }
+  const applied = applyEdit(memoryFile.text, proposal.edits[0]);
+  const both = applyEdit(applied, proposal.edits[1]);
+  assert.equal(both, fs.readFileSync(path.join(repo.root, ".backpass", "synthesis", "AGENTS.md"), "utf8"));
+  assert.ok(proposal.edits[0].deltaTokens < 0);
+});
+
+// ---------- evidence gates ----------
+
+test("the per-run edit cap is enforced - it is the learning rate", () => {
+  const lines = Array.from({ length: 6 }, (_, i) => `- Rule number ${i}.`);
+  const text = `# T\n\n${lines.join("\n")}\n`;
+  const { violations } = gate({
+    text,
+    edit: memoryEdit((t) => lines.reduce((acc, line, i) => acc.replace(line, `- Rule ${i} rewritten.`), t)),
+    annotation: { edits: Array.from({ length: 6 }, (_, i) => claim([`H${i + 1}`], { title: `edit ${i}` })) },
+  });
   assert.ok(violations.some((v) => /per-run cap is 5/.test(v)));
 });
 
-test("a new instruction backed by too few sessions is rejected", () => {
-  const { proposal, violations } = buildProposal(
-    {
-      edits: [
-        {
-          kind: "add",
-          file: "AGENTS.md",
-          title: "new rule from one session",
-          find: "",
-          anchor: "## Rules",
-          replace: "- Speculative rule.",
-          evidence: QUOTE,
-          transcripts: 1,
-        },
-      ],
-    },
-    context(),
-  );
-
-  assert.equal(proposal.edits.length, 0);
-  assert.ok(violations.some((v) => /backed by 1 session/.test(v)));
+test("a new instruction backed by too few sessions is rejected, whatever kind the model declares", () => {
+  const insert = memoryEdit((t) => t.replace("## Rules\n\n", "## Rules\n\n- Speculative rule.\n"));
+  for (const kind of ["add", "rewrite"]) {
+    const { proposal, violations } = gate({
+      edit: insert,
+      annotation: { edits: [claim(["H1"], { kind, title: "new rule from one session", transcripts: 1 })] },
+    });
+    assert.equal(proposal.edits.length, 0, `${kind}: measured as an addition`);
+    assert.ok(violations.some((v) => /backed by 1 session/.test(v)));
+  }
 });
 
 test("an edit with no verbatim quote is rejected", () => {
-  const { proposal, violations } = buildProposal(
-    {
-      edits: [
-        {
-          kind: "remove",
-          file: "AGENTS.md",
-          title: "unsupported",
-          find: "- Use Node 18 via nvm before running any script.\n",
-          replace: "",
-          evidence: [],
-        },
-      ],
-    },
-    context(),
-  );
-
+  const { proposal, violations } = gate({
+    edit: memoryEdit((t) => t.replace("- Use Node 18 via nvm before running any script.\n", "")),
+    annotation: { edits: [claim(["H1"], { kind: "remove", title: "unsupported", evidence: [] })] },
+  });
   assert.equal(proposal.edits.length, 0);
   assert.ok(violations.some((v) => /no verbatim evidence quote/.test(v)));
 });
 
-test("token deltas are measured by backpass, not taken from the model", () => {
-  const { proposal, violations } = buildProposal(
-    {
-      edits: [
-        {
-          kind: "remove",
-          file: "AGENTS.md",
-          title: "drop the stale Node pin",
-          find: "- Use Node 18 via nvm before running any script.\n",
-          replace: "",
-          evidence: QUOTE,
-          transcripts: 3,
-          deltaTokens: 9999,
-        },
-      ],
-    },
-    context(),
+test("every measured change must be claimed by exactly one edit", () => {
+  const twoChanges = memoryEdit((t) =>
+    t.replace("include its URL.", "include its full URL.").replace("Node 18", "Node 22"),
   );
+
+  const unclaimed = gate({ edit: twoChanges, annotation: { edits: [claim(["H1"])] } });
+  assert.ok(unclaimed.violations.some((v) => /H2: AGENTS\.md line 7 \(-1\/\+1\) is not part of any edit/.test(v)));
+
+  const doubled = gate({ edit: twoChanges, annotation: { edits: [claim(["H1", "H2"]), claim(["H2"])] } });
+  assert.ok(doubled.violations.some((v) => /H2 is claimed by both edit e1 and edit e2/.test(v)));
+
+  const phantom = gate({ edit: twoChanges, annotation: { edits: [claim(["H1", "H2", "H9"])] } });
+  assert.ok(phantom.violations.some((v) => /H9, which is not a measured change/.test(v)));
+
+  const nothing = gate({ edit: () => {}, annotation: { edits: [] } });
+  assert.deepEqual(nothing.violations, []);
+  assert.equal(nothing.proposal.edits.length, 0);
+});
+
+test("token deltas and the projected budget are measured by backpass, not taken from the model", () => {
+  const { proposal, violations } = gate({
+    edit: memoryEdit((t) => t.replace("- Use Node 18 via nvm before running any script.\n", "")),
+    annotation: { edits: [claim(["H1"], { kind: "remove", title: "drop the stale Node pin", deltaTokens: 9999 })] },
+  });
 
   assert.deepEqual(violations, []);
   assert.equal(proposal.edits.length, 1);
   assert.ok(proposal.edits[0].deltaTokens < 0, "a removal must reduce the always-loaded cost");
   assert.notEqual(proposal.edits[0].deltaTokens, 9999);
   assert.equal(proposal.budget.projected, proposal.budget.current + proposal.edits[0].deltaTokens);
+  assert.equal(
+    proposal.budget.projected,
+    estimateTokens(MEMORY_TEXT.replace("- Use Node 18 via nvm before running any script.\n", "")),
+  );
 });
 
 test("a proposal that would exceed the budget fails the gate", () => {
   const big = "x".repeat(4800); // ~1,200 tok, over a tiny cap
-  const { violations } = buildProposal(
-    {
-      edits: [
-        {
-          kind: "add",
-          file: "AGENTS.md",
-          title: "bloat",
-          find: "",
-          anchor: "## Rules",
-          replace: big,
-          evidence: QUOTE,
-          transcripts: 3,
-        },
-      ],
-    },
-    context({ config: { ...context().config, budgetTokens: 100 } }),
-  );
-
+  const { violations } = gate({
+    edit: memoryEdit((t) => t.replace("## Rules\n\n", `## Rules\n\n${big}\n`)),
+    annotation: { edits: [claim(["H1"], { kind: "add", title: "bloat" })] },
+    config: config({ budgetTokens: 100 }),
+  });
   assert.ok(violations.some((v) => /over the 100-token budget/.test(v)));
 });
 
-test("an extract edit requires a skill draft, and a non-extract must not carry one", () => {
-  const skill = { name: "release-signing", description: "Load before tagging a release.", body: "steps" };
+test("an extract is one created SKILL.md grouped with the memory change that pays for it", () => {
+  const skillText =
+    "---\nname: release-signing\ndescription: Load before tagging a release.\n---\n\n## Steps\n\n1. sign\n";
+  const extractEdit = (root) => {
+    writeIn(root, "AGENTS.md", (t) =>
+      t.replace("- Use Node 18 via nvm before running any script.", "- See the release-signing skill."),
+    );
+    writeIn(root, ".agents/skills/release-signing/SKILL.md", skillText);
+  };
 
-  const missing = buildProposal(
-    {
-      edits: [
-        {
-          kind: "extract",
-          file: "AGENTS.md",
-          title: "x",
-          find: "- Use Node 18 via nvm before running any script.",
-          replace: "see skill",
-          evidence: QUOTE,
-          transcripts: 2,
-        },
-      ],
-    },
-    context(),
-  );
-  assert.ok(missing.violations.some((v) => /requires a skill draft/.test(v)));
-
-  const stray = buildProposal(
-    {
-      edits: [
-        {
-          kind: "rewrite",
-          file: "AGENTS.md",
-          title: "x",
-          find: "- Use Node 18 via nvm before running any script.",
-          replace: "y",
-          evidence: QUOTE,
-          transcripts: 2,
-          skill,
-        },
-      ],
-    },
-    context(),
-  );
-  assert.ok(stray.violations.some((v) => /only kind "extract"/.test(v)));
-
-  const good = buildProposal(
-    {
-      edits: [
-        {
-          kind: "extract",
-          file: "AGENTS.md",
-          title: "x",
-          find: "- Use Node 18 via nvm before running any script.",
-          replace: "- See the release-signing skill.",
-          evidence: QUOTE,
-          transcripts: 2,
-          skill,
-        },
-      ],
-    },
-    context(),
-  );
+  const good = gate({
+    edit: extractEdit,
+    annotation: { edits: [claim(["H1", "H2"], { kind: "extract", title: "x" })] },
+  });
   assert.deepEqual(good.violations, []);
-  assert.equal(good.proposal.edits[0].skill.path, ".claude/skills/release-signing/SKILL.md");
+  assert.equal(good.proposal.edits[0].skill.path, ".agents/skills/release-signing/SKILL.md");
+  assert.equal(good.proposal.edits[0].skill.name, "release-signing");
+  assert.equal(good.proposal.edits[0].skill.body, "## Steps\n\n1. sign");
   assert.equal(good.proposal.stats.skillExtractions, 1);
+
+  const split = gate({
+    edit: extractEdit,
+    annotation: { edits: [claim(["H1"], { kind: "extract", title: "x" }), claim(["H2"], { kind: "add", title: "y" })] },
+  });
+  assert.ok(split.violations.some((v) => /kind "extract" must group exactly one created SKILL\.md/.test(v)));
+  assert.ok(split.violations.some((v) => /only kind "extract" may include a created file \(H2\)/.test(v)));
+
+  const headless = gate({
+    edit: (root) => {
+      extractEdit(root);
+      writeIn(root, ".agents/skills/release-signing/SKILL.md", "no frontmatter here\n");
+    },
+    annotation: { edits: [claim(["H1", "H2"], { kind: "extract", title: "x" })] },
+  });
+  assert.ok(headless.violations.some((v) => /needs YAML frontmatter/.test(v)));
+});
+
+test("a skill's description can be rewritten in place; deletions and stray files are refused or ignored", () => {
+  const skill = "---\nname: db\ndescription: old trigger\n---\n\nbody\n";
+  const rewritten = gate({
+    files: { ".agents/skills/db/SKILL.md": skill },
+    edit: (root) =>
+      writeIn(root, ".agents/skills/db/SKILL.md", (t) =>
+        t.replace("old trigger", "Load before touching the database."),
+      ),
+    annotation: { edits: [claim(["H1"], { title: "fix the trigger" })] },
+  });
+  assert.deepEqual(rewritten.violations, []);
+  assert.equal(rewritten.proposal.edits[0].file, ".agents/skills/db/SKILL.md");
+  assert.equal(rewritten.proposal.edits[0].targetsMemoryFile, false);
+  assert.equal(rewritten.proposal.budget.delta, 0, "skill files are not always-loaded");
+
+  const deleted = gate({
+    files: { ".agents/skills/db/SKILL.md": skill },
+    edit: (root) => fs.rmSync(path.join(root, ".agents/skills/db"), { recursive: true }),
+    annotation: { edits: [claim(["H1"], { kind: "remove", title: "drop the skill" })] },
+  });
+  assert.ok(
+    deleted.violations.some((v) =>
+      /H1: deletes \.agents\/skills\/db\/SKILL\.md; backpass cannot propose deletions/.test(v),
+    ),
+  );
+
+  const stray = gate({
+    edit: (root) => {
+      writeIn(root, "notes.md", "scratch");
+      writeIn(root, "AGENTS.md", (t) => t.replace("Node 18", "Node 22"));
+    },
+    annotation: { edits: [claim(["H1"])] },
+  });
+  assert.deepEqual(stray.violations, []);
+  assert.ok(stray.proposal.notes.some((n) => /ignored notes\.md/.test(n)));
 });
 
 test("a previously rejected edit is suppressed until new evidence arrives", () => {
-  const edit = {
-    kind: "remove",
-    file: "AGENTS.md",
-    title: "drop the stale Node pin",
-    find: "- Use Node 18 via nvm before running any script.\n",
-    replace: "",
-    evidence: QUOTE,
-    transcripts: 3,
-  };
+  const edit = memoryEdit((t) => t.replace("- Use Node 18 via nvm before running any script.\n", ""));
+  const first = gate({
+    edit,
+    annotation: { edits: [claim(["H1"], { kind: "remove", title: "drop the stale Node pin" })] },
+  });
+  const rejections = recordRejection(first.proposal.edits[0], { version: 1, entries: {} });
 
-  const rejections = recordRejection({ ...edit, id: "e1" }, { version: 1, entries: {} });
-
-  const suppressed = buildProposal({ edits: [edit] }, context({ rejections, isSuppressed: isSuppressedByRejection }));
+  const suppressed = gate({
+    edit,
+    annotation: { edits: [claim(["H1"], { kind: "remove", title: "drop the stale Node pin" })] },
+    context: { rejections, isSuppressed: isSuppressedByRejection },
+  });
   assert.equal(suppressed.proposal.edits.length, 0, "same evidence weight stays rejected");
+  assert.deepEqual(suppressed.violations, [], "a suppressed edit is dropped, not a violation");
 
-  const revived = buildProposal(
-    { edits: [{ ...edit, transcripts: 9 }] },
-    context({ rejections, isSuppressed: isSuppressedByRejection }),
-  );
+  const revived = gate({
+    edit,
+    annotation: { edits: [claim(["H1"], { kind: "remove", title: "drop the stale Node pin", transcripts: 9 })] },
+    context: { rejections, isSuppressed: isSuppressedByRejection },
+  });
   assert.equal(revived.proposal.edits.length, 1, "materially new evidence revives the edit");
 });
 
 test("projectWithDecisions tracks the budget for the subset the human accepted", () => {
-  const { proposal } = buildProposal(
-    {
-      edits: [
-        {
-          kind: "remove",
-          file: "AGENTS.md",
-          title: "a",
-          find: "- Use Node 18 via nvm before running any script.\n",
-          replace: "",
-          evidence: QUOTE,
-          transcripts: 3,
-        },
-        {
-          kind: "rewrite",
-          file: "AGENTS.md",
-          title: "b",
-          find: "- Whenever a PR is mentioned, include its URL.",
-          replace: "- Whenever a PR is mentioned, include its full https:// URL before any shorthand.",
-          evidence: QUOTE,
-          transcripts: 3,
-        },
-      ],
-    },
-    context(),
-  );
+  const { proposal } = gate({
+    edit: memoryEdit((t) =>
+      t
+        .replace("- Use Node 18 via nvm before running any script.\n", "")
+        .replace("include its URL.", "include its full https:// URL before any shorthand."),
+    ),
+    annotation: { edits: [claim(["H2"], { kind: "remove", title: "a" }), claim(["H1"], { title: "b" })] },
+  });
 
   const none = projectWithDecisions(MEMORY_TEXT, proposal.edits, [], 5000);
   assert.equal(none.budget.delta, 0);
@@ -349,46 +394,34 @@ test("projectWithDecisions tracks the budget for the subset the human accepted",
   assert.ok(onlyFirst.text.includes("include its URL."), "the unaccepted edit is not applied");
 });
 
-test("applying decisions writes accepted edits, skips rejected ones, and remembers rejections", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-apply-"));
-  fs.writeFileSync(path.join(dir, "AGENTS.md"), MEMORY_TEXT);
-  const state = new State(dir).ensure();
+// ---------- the human gate ----------
 
-  const { proposal } = buildProposal(
-    {
-      edits: [
-        {
-          kind: "remove",
-          file: "AGENTS.md",
-          title: "drop node pin",
-          find: "- Use Node 18 via nvm before running any script.\n",
-          replace: "",
-          evidence: QUOTE,
-          transcripts: 3,
-        },
-        {
-          kind: "rewrite",
-          file: "AGENTS.md",
-          title: "pr url",
-          find: "- Whenever a PR is mentioned, include its URL.",
-          replace: "- Always include the full PR URL.",
-          evidence: QUOTE,
-          transcripts: 3,
-        },
-      ],
+test("applying decisions writes accepted edits, skips rejected ones, and remembers rejections", () => {
+  const { proposal, repo, state } = gate({
+    edit: memoryEdit((t) =>
+      t
+        .replace("- Use Node 18 via nvm before running any script.\n", "")
+        .replace("- Whenever a PR is mentioned, include its URL.", "- Always include the full PR URL."),
+    ),
+    annotation: {
+      edits: [claim(["H2"], { kind: "remove", title: "drop node pin" }), claim(["H1"], { title: "pr url" })],
     },
-    context({ repo: { name: "demo", root: dir } }),
+  });
+  assert.equal(
+    fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8"),
+    MEMORY_TEXT,
+    "synthesis never writes the repo",
   );
 
   const results = applyDecisions({
     proposal,
     decisions: { e1: "accepted", e2: "rejected" },
-    repo: { root: dir },
+    repo,
     state,
     config: { budgetTokens: 5000 },
   });
 
-  const written = fs.readFileSync(path.join(dir, "AGENTS.md"), "utf8");
+  const written = fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8");
   assert.ok(!written.includes("Node 18"), "the accepted removal is applied");
   assert.ok(written.includes("include its URL."), "the rejected rewrite is not applied");
   assert.equal(results.accepted, 1);
@@ -400,39 +433,52 @@ test("applying decisions writes accepted edits, skips rejected ones, and remembe
   assert.equal(Object.keys(remembered.entries).length, 1);
 });
 
-test("a dry run reports what it would write without touching the file", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-dry-"));
-  fs.writeFileSync(path.join(dir, "AGENTS.md"), MEMORY_TEXT);
-  const state = new State(dir).ensure();
-
-  const { proposal } = buildProposal(
-    {
-      edits: [
-        {
-          kind: "remove",
-          file: "AGENTS.md",
-          title: "drop node pin",
-          find: "- Use Node 18 via nvm before running any script.\n",
-          replace: "",
-          evidence: QUOTE,
-          transcripts: 3,
-        },
-      ],
+test("an accepted extract writes the skill the agent drafted, in the canonical layout", () => {
+  const skillText =
+    "---\nname: release-signing\ndescription: Load before tagging a release.\n---\n\n## Steps\n\n1. sign\n";
+  const { proposal, repo, state } = gate({
+    edit: (root) => {
+      writeIn(root, "AGENTS.md", (t) =>
+        t.replace("- Use Node 18 via nvm before running any script.", "- See the release-signing skill."),
+      );
+      writeIn(root, ".agents/skills/release-signing/SKILL.md", skillText);
     },
-    context({ repo: { name: "demo", root: dir } }),
+    annotation: { edits: [claim(["H1", "H2"], { kind: "extract", title: "x" })] },
+  });
+  const results = applyDecisions({
+    proposal,
+    decisions: { e1: "accepted" },
+    repo,
+    state,
+    config: { budgetTokens: 5000 },
+  });
+  assert.equal(results.failed.length, 0);
+  const written = fs.readFileSync(path.join(repo.root, ".agents/skills/release-signing/SKILL.md"), "utf8");
+  assert.match(
+    written,
+    /^---\nname: release-signing\ndescription: Load before tagging a release\.\nuser-invocable: false/,
   );
+  assert.ok(written.endsWith("## Steps\n\n1. sign\n"));
+  assert.ok(fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8").includes("See the release-signing skill."));
+});
+
+test("a dry run reports what it would write without touching the file", () => {
+  const { proposal, repo, state } = gate({
+    edit: memoryEdit((t) => t.replace("- Use Node 18 via nvm before running any script.\n", "")),
+    annotation: { edits: [claim(["H1"], { kind: "remove", title: "drop node pin" })] },
+  });
 
   const results = applyDecisions({
     proposal,
     decisions: { e1: "accepted" },
-    repo: { root: dir },
+    repo,
     state,
     config: { budgetTokens: 5000 },
     dryRun: true,
   });
 
   assert.equal(results.written.length, 1);
-  assert.equal(fs.readFileSync(path.join(dir, "AGENTS.md"), "utf8"), MEMORY_TEXT, "dry run must not write");
+  assert.equal(fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8"), MEMORY_TEXT, "dry run must not write");
 });
 
 test("the apply surface receives one payload, with markup in the data neutralised", () => {
@@ -474,27 +520,16 @@ test("JSON is recovered from a fenced or prose-wrapped model reply", () => {
   assert.equal(extractJson("no json at all"), null);
 });
 
-test('an over-budget file switches the gate from "fit the cap" to "make progress"', () => {
-  // 30,000 bytes ~= 7,500 tok against a 5,000 cap: unreachable in one capped run.
-  const overBudget = `${MEMORY_TEXT}\n${"padding text. ".repeat(2000)}`;
-  const ctx = context({ memoryFile: memoryFile(overBudget) });
+// ---------- the budget gate's two modes ----------
 
-  const shrinking = buildProposal(
-    {
-      edits: [
-        {
-          kind: "remove",
-          file: "AGENTS.md",
-          title: "drop the stale Node pin",
-          find: "- Use Node 18 via nvm before running any script.\n",
-          replace: "",
-          evidence: QUOTE,
-          transcripts: 3,
-        },
-      ],
-    },
-    ctx,
-  );
+const OVER_BUDGET = `${MEMORY_TEXT}\n${"padding text. ".repeat(2000)}`; // ~7,500 tok against a 5,000 cap
+
+test('an over-budget file switches the gate from "fit the cap" to "make progress"', () => {
+  const shrinking = gate({
+    text: OVER_BUDGET,
+    edit: memoryEdit((t) => t.replace("- Use Node 18 via nvm before running any script.\n", "")),
+    annotation: { edits: [claim(["H1"], { kind: "remove", title: "drop the stale Node pin" })] },
+  });
 
   assert.deepEqual(shrinking.violations, [], "a net-negative step passes even though the cap is not reached");
   assert.equal(shrinking.proposal.budget.mode, "shrink");
@@ -504,109 +539,70 @@ test('an over-budget file switches the gate from "fit the cap" to "make progress
 });
 
 test("an over-budget file still refuses an edit set that grows it", () => {
-  const overBudget = `${MEMORY_TEXT}\n${"padding text. ".repeat(2000)}`;
-  const ctx = context({ memoryFile: memoryFile(overBudget) });
-
-  const { violations } = buildProposal(
-    {
-      edits: [
-        {
-          kind: "add",
-          file: "AGENTS.md",
-          title: "more rules on an already bloated file",
-          find: "",
-          anchor: "## Rules",
-          replace: "- Yet another rule.",
-          evidence: QUOTE,
-          transcripts: 3,
-        },
-      ],
-    },
-    ctx,
-  );
-
-  assert.ok(violations.some((v) => /must shrink it/.test(v)));
+  const { violations } = gate({
+    text: OVER_BUDGET,
+    edit: memoryEdit((t) => t.replace("## Rules\n\n", "## Rules\n\n- Yet another rule.\n")),
+    annotation: { edits: [claim(["H1"], { kind: "add", title: "more rules on an already bloated file" })] },
+  });
+  assert.ok(violations.some((v) => /must shrink it, but the proposed edits change it by \+/.test(v)));
 });
 
-test("a file within budget keeps the strict cap gate", () => {
-  const { proposal } = buildProposal(
-    {
-      edits: [
-        {
-          kind: "remove",
-          file: "AGENTS.md",
-          title: "x",
-          find: "- Use Node 18 via nvm before running any script.\n",
-          replace: "",
-          evidence: QUOTE,
-          transcripts: 3,
-        },
-      ],
-    },
-    context(),
-  );
+test("a file within budget keeps the fit-the-cap gate", () => {
+  const { proposal, violations } = gate({
+    edit: memoryEdit((t) => t.replace("## Rules\n\n", "## Rules\n\n- A small new rule.\n")),
+    annotation: { edits: [claim(["H1"], { kind: "add", title: "small" })] },
+  });
+  assert.deepEqual(violations, []);
   assert.equal(proposal.budget.mode, "cap");
   assert.equal(proposal.budget.startedOverBudget, false);
 });
 
-function rawEdits(count) {
-  return Array.from({ length: count }, (_, i) => ({
-    kind: "remove",
-    title: `remove rule ${i + 1}`,
-    find: `- rule ${i + 1}`,
-    replace: "",
-    rationale: "no positive evidence",
-    evidence: QUOTE,
-    transcripts: 3,
-  }));
-}
-
-function overBudgetFile(overage, budgetTokens = 200) {
-  const rules = [];
-  let text = "";
-  let i = 0;
-  while (estimateTokens(text) < budgetTokens + overage) {
-    i += 1;
-    rules.push(`- rule ${i} keeps the file long enough to sit over the budget line`);
-    text = `# Long memory\n\n${rules.join("\n")}\n`;
-  }
-  return memoryFile(text);
-}
-
-test("cap mode keeps the gentle default edit cap", () => {
-  const ctx = context({ config: { ...context().config, maxEditsPerRun: null } });
-  assert.equal(effectiveMaxEdits(ctx.memoryFile, ctx.config), DEFAULT_MAX_EDITS);
-});
-
-test("shrink mode scales the edit cap to the overage, up to the ceiling", () => {
-  const config = { ...context().config, budgetTokens: 200, maxEditsPerRun: null };
-  const modest = overBudgetFile(400, 200);
-  const modestCap = effectiveMaxEdits(modest, config);
-  assert.ok(modestCap > DEFAULT_MAX_EDITS, `a 400-token overage should allow more than ${DEFAULT_MAX_EDITS} edits`);
-  assert.ok(modestCap < SHRINK_MAX_EDITS, "a modest overage should not hit the ceiling");
-  assert.equal(modestCap, Math.ceil((modest.tokens - 200) / SHRINK_EDIT_TOKENS));
-
-  const large = overBudgetFile(5000, 200);
-  assert.equal(effectiveMaxEdits(large, config), SHRINK_MAX_EDITS);
-});
-
-test("an explicit maxEditsPerRun wins over the adaptive cap in both modes", () => {
-  const config = { ...context().config, budgetTokens: 200, maxEditsPerRun: 3 };
-  assert.equal(effectiveMaxEdits(overBudgetFile(5000, 200), config), 3);
-  assert.equal(effectiveMaxEdits(memoryFile(), config), 3);
+test("the edit cap scales with the overage in shrink mode and stays at the default otherwise", () => {
+  const base = { budgetTokens: 5000, maxEditsPerRun: null };
+  const tokens = (t) => ({ tokens: t });
+  assert.equal(effectiveMaxEdits(tokens(4000), base), DEFAULT_MAX_EDITS);
+  assert.equal(effectiveMaxEdits(tokens(5000), base), DEFAULT_MAX_EDITS);
+  assert.equal(
+    effectiveMaxEdits(tokens(5000 + SHRINK_EDIT_TOKENS * 2), base),
+    DEFAULT_MAX_EDITS,
+    "tiny overage keeps the floor",
+  );
+  assert.equal(effectiveMaxEdits(tokens(5000 + SHRINK_EDIT_TOKENS * 12), base), 12);
+  assert.equal(effectiveMaxEdits(tokens(5000 + SHRINK_EDIT_TOKENS * 12 - 1), base), 12, "partial steps round up");
+  assert.equal(effectiveMaxEdits(tokens(19259), base), SHRINK_MAX_EDITS, "a 4x-over file hits the ceiling");
+  assert.equal(effectiveMaxEdits(tokens(19259), { ...base, maxEditsPerRun: 3 }), 3, "an explicit cap always wins");
 });
 
 test("the cap-exceeded violation fires above the effective adaptive cap, not the flat default", () => {
-  const file = overBudgetFile(400, 200);
-  const config = { ...context().config, budgetTokens: 200, maxEditsPerRun: null };
-  const cap = effectiveMaxEdits(file, config);
+  const cfg = config({ budgetTokens: 200, maxEditsPerRun: null });
+  const rules = [];
+  let text = "";
+  while (estimateTokens(text) < 200 + 400) {
+    rules.push(`- rule ${rules.length + 1} keeps the file long enough to sit over the budget line`);
+    text = `# Long memory\n\n${rules.join("\n")}\n`;
+  }
+  const cap = effectiveMaxEdits({ tokens: estimateTokens(text) }, cfg);
   assert.ok(cap > DEFAULT_MAX_EDITS);
 
-  const within = buildProposal({ edits: rawEdits(cap) }, context({ memoryFile: file, config }));
+  // Every other rule goes, so each removal is its own measured change.
+  const removeEveryOther = (count) =>
+    memoryEdit((t) => {
+      let out = t;
+      for (let i = 0; i < count; i += 1) out = out.replace(`${rules[i * 2]}\n`, "");
+      return out;
+    });
+  const annotate = (count) => ({
+    edits: Array.from({ length: count }, (_, i) =>
+      claim([`H${i + 1}`], { kind: "remove", title: `remove rule ${i * 2 + 1}` }),
+    ),
+  });
+
+  const within = gate({ text, edit: removeEveryOther(cap), annotation: annotate(cap), config: cfg });
+  assert.equal(within.measured.changes.length, cap);
   assert.ok(!within.violations.some((v) => v.includes("per-run cap")), within.violations.join("\n"));
   assert.equal(within.proposal.config.maxEditsPerRun, cap, "the proposal records the effective cap");
 
-  const above = buildProposal({ edits: rawEdits(cap + 1) }, context({ memoryFile: file, config }));
+  const above = gate({ text, edit: removeEveryOther(cap + 1), annotation: annotate(cap + 1), config: cfg });
   assert.ok(
     above.violations.some((v) => v.includes(`per-run cap is ${cap}`)),
     above.violations.join("\n"),

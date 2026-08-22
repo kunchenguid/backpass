@@ -22,6 +22,8 @@ export const STATE_EXCLUDE_LINE = `${STATE_DIRNAME}/`;
  *   rejections.json        edits the human rejected, and the evidence weight behind them
  *   gap-ledger.json        gap observations by gap and session, accumulated across runs (src/gap-ledger.js)
  *   agent-probe-cache.json TTL'd availability/auth verdicts per agent|model (src/agents.js)
+ *   prompts/               the exact prompts of the last run, one file per model turn
+ *   synthesis/             the staging copy the synthesis agent edits natively (src/workspace.js)
  *   apply/                 the rendered Lavish apply surface
  */
 export class State {
@@ -176,7 +178,10 @@ export function isEvidenceFresh(evidence, transcript, memoryHash) {
  * backed by strictly more transcripts than when it was turned down.
  */
 export function rejectionKey(edit) {
-  return sha256([edit.kind, edit.file, edit.find || "", edit.replace || ""].join(" ")).slice(0, 16);
+  const body = Array.isArray(edit.hunks)
+    ? edit.hunks.map((h) => `${h.find}\u0000${h.replace}`).join("\u0001")
+    : `${edit.find || ""}\u0000${edit.replace || ""}`;
+  return sha256([edit.kind, edit.file, body].join(" ")).slice(0, 16);
 }
 
 export function isSuppressedByRejection(edit, rejections) {

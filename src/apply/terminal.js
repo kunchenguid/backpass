@@ -9,14 +9,30 @@ import { formatTokens } from "../tokens.js";
  * machines with no browser (or reviewers who would rather stay in the terminal).
  */
 
+/** Measured edits carry display lines per hunk; a legacy edit shows its find/replace. */
+export function diffLinesOf(edit) {
+  if (Array.isArray(edit.hunks)) {
+    return edit.hunks.flatMap((hunk, i) => [...(i > 0 ? [{ type: "gap", text: "" }] : []), ...(hunk.lines || [])]);
+  }
+  return [
+    ...(edit.find || "")
+      .split("\n")
+      .filter(Boolean)
+      .map((text) => ({ type: "del", text })),
+    ...(edit.replace || "")
+      .split("\n")
+      .filter(Boolean)
+      .map((text) => ({ type: "ins", text })),
+  ];
+}
+
 function renderDiff(edit) {
   const lines = [];
-  if (edit.context) lines.push(color.dim(`  ${edit.context}`));
-  for (const line of (edit.find || "").split("\n")) {
-    if (line) lines.push(color.red(`  - ${line}`));
-  }
-  for (const line of (edit.replace || "").split("\n")) {
-    if (line) lines.push(color.green(`  + ${line}`));
+  for (const line of diffLinesOf(edit)) {
+    if (line.type === "del") lines.push(color.red(`  - ${line.text}`));
+    else if (line.type === "ins") lines.push(color.green(`  + ${line.text}`));
+    else if (line.type === "gap") lines.push(color.dim("  ..."));
+    else lines.push(color.dim(`    ${line.text}`));
   }
   return lines.join("\n");
 }

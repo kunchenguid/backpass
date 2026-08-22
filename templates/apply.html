@@ -364,6 +364,15 @@
         color: var(--faint);
         padding: 1px 8px;
       }
+      .diff .ctx::before {
+        content: "  ";
+      }
+      .diff .gap {
+        display: block;
+        color: var(--faint);
+        padding: 1px 8px;
+        border-top: 1px dashed var(--line-soft);
+      }
 
       .evidence {
         border-top: 1px dashed var(--line-soft);
@@ -740,19 +749,9 @@
           }
 
           var diff = el("div", "diff");
-          if (edit.context) diff.appendChild(el("span", "ctx", edit.context));
-          (edit.find || "")
-            .split("\n")
-            .filter(nonEmpty)
-            .forEach(function (line) {
-              diff.appendChild(el("span", "del", line));
-            });
-          (edit.replace || "")
-            .split("\n")
-            .filter(nonEmpty)
-            .forEach(function (line) {
-              diff.appendChild(el("span", "ins", line));
-            });
+          diffLines(edit).forEach(function (line) {
+            diff.appendChild(el("span", line.type, line.text));
+          });
           body.appendChild(diff);
 
           if ((edit.evidence || []).length) {
@@ -808,6 +807,35 @@
 
         function nonEmpty(line) {
           return line.length > 0;
+        }
+
+        // Measured edits carry display lines per hunk (ctx/del/ins); a legacy
+        // find/replace edit is shown as removed then added lines.
+        function diffLines(edit) {
+          if (Array.isArray(edit.hunks)) {
+            var out = [];
+            edit.hunks.forEach(function (hunk, i) {
+              if (i > 0) out.push({ type: "gap", text: "\u2026" });
+              (hunk.lines || []).forEach(function (line) {
+                out.push(line);
+              });
+            });
+            return out;
+          }
+          return (edit.find || "")
+            .split("\n")
+            .filter(nonEmpty)
+            .map(function (text) {
+              return { type: "del", text: text };
+            })
+            .concat(
+              (edit.replace || "")
+                .split("\n")
+                .filter(nonEmpty)
+                .map(function (text) {
+                  return { type: "ins", text: text };
+                }),
+            );
         }
 
         // ---- notes ----

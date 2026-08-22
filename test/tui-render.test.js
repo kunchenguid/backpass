@@ -331,7 +331,7 @@ test("synthesis frame: fold rail line, sparse panel, suppression note - no gates
 
   assert.ok(text.includes("23 ok · 1 skipped · 1 failed · 33 reused"));
   assert.ok(text.includes("24 instructions scored · 9 gaps → 4 clusters kept (seen in ≥2 sessions)"));
-  assert.ok(text.includes("one call · claude · claude-opus-5 · effort high"));
+  assert.ok(text.includes("editing · claude · claude-opus-5 · effort high"));
   assert.ok(text.includes("── gradient descent · aggregated gradients → at most 5 edits"));
   assert.ok(text.includes("weighing 4 gap clusters + 24 instruction records against the budget…"));
   assert.ok(text.includes("session backpass-synth-84121"));
@@ -347,16 +347,25 @@ test("a gate violation renders the exact breaches and the re-prompt marker", () 
       ["synth:violations", { attempt: 1, violations: ["E2 adds an instruction with evidence from 1 session"] }],
       [
         "synth:start",
-        { agent: "claude", model: "claude-opus-5", effort: "high", attempt: 2, sessionName: "backpass-synth-84121" },
+        {
+          agent: "claude",
+          model: "claude-opus-5",
+          effort: "high",
+          phase: "annotate",
+          attempt: 2,
+          changes: 3,
+          sessionName: "backpass-synth-84121",
+        },
       ],
     ]),
   );
   const text = lines.join("\n");
 
   assert.ok(text.includes("synthesis violated 1 gate(s)"));
-  assert.ok(text.includes("re-prompting once with the exact breaches"));
+  assert.ok(text.includes("re-prompting with the exact breaches"));
   assert.ok(text.includes("✗ E2 adds an instruction with evidence from 1 session"));
-  assert.ok(text.includes("re-prompt 1 of 1"));
+  assert.ok(text.includes("re-prompt 1"));
+  assert.ok(text.includes("annotating 3 measured change(s) with evidence…"));
 });
 
 test("an over-budget file flips the header gauge into shrink-plan mode", () => {

@@ -152,21 +152,33 @@ a sighting retires once the memory file gains an instruction that covers it, and
 sightings expire after `gapLedgerMaxAge` (default 90d). Until a gap corroborates it stays
 out of the proposal entirely.
 
-### 5. Gradient descent - one big call
+### 5. Gradient descent - one session, native edits
 
-A single high-reasoning call turns the aggregated gradients into concrete edits: ADD, REMOVE,
-REWRITE, or EXTRACT→SKILL. Then mechanical gates run, and they are not negotiable:
+A single high-reasoning session turns the aggregated gradients into concrete edits: ADD,
+REMOVE, REWRITE, or EXTRACT→SKILL. The agent does not describe edits for backpass to
+splice in - it makes them, with its harness's own file tools, in a **staging copy** of the
+memory file under `.backpass/synthesis/` (the repo itself is read-only to it, for
+grounding). backpass then diffs the copy against the original and shows the agent the
+measured changes by id; the agent annotates each one with a title, rationale, and the
+verbatim evidence behind it. Nothing textual is ever taken from the model: every hunk's
+text is copied out of your file by construction, so an edit can never "not appear" in it.
+Then mechanical gates run, and they are not negotiable:
 
 - at most `maxEditsPerRun` edits (the learning rate). By default the cap is adaptive: 5
   when the file is near or under budget, and in a shrink plan (file over budget) one edit
   per ~40 tokens of overage, capped at 20, so badly overgrown files recover in fewer runs.
   An explicit `--max-edits` or config value always pins it.
-- new instructions need evidence from `minGapEvidence` distinct sessions
+- every measured change belongs to exactly one annotated edit - an unexplained change
+  is a violation, so is an edit that names no change
+- new instructions need evidence from `minGapEvidence` distinct sessions (an edit that
+  only adds text is a new instruction, whatever the model calls it)
 - every edit carries a verbatim quote
-- the post-edit file must fit the budget
+- the post-edit file must fit the budget, measured on the staged file
 
-A violation triggers exactly one re-prompt naming the exact breach. If that also fails,
-backpass **fails loudly** and saves the rejected proposal. It never silently truncates.
+A violation triggers a re-prompt naming the exact breach (at most two). If those also
+fail, backpass **fails loudly** and saves the rejected proposal. It never silently
+truncates. A harness that writes past the staging copy into the repo is an error, never
+an apply.
 
 Token deltas shown to you are measured by backpass from the actual text - never taken from
 the model's own arithmetic.
@@ -355,6 +367,8 @@ Everything mutable lives in `.backpass/`, kept out of git via the repo's local e
   evidence/<id>.json     per-transcript loss
   evidence-summary.json  aggregated gradients
   proposal.json          the latest gradient-descent step
+  synthesis/             the staging copy the gradient-descent agent edited (memory file + skills)
+  prompts/               the exact prompts of the last run
   agent-probe-cache.json which harnesses were available and logged in, and when
   rejections.json        edits you turned down, and the evidence behind them
   gap-ledger.json        gap sightings by gap and session, accumulated across runs

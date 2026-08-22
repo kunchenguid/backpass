@@ -140,10 +140,17 @@ export function memorySetHash(files) {
   return `sha256:${sha256(files.map((f) => `${f.path}:${f.hash}`).join("|")).slice(0, 16)}`;
 }
 
-/** Render the instruction index that both prompt tiers see. */
+/**
+ * Render the instruction index that both prompt tiers see. It is a lookup table keyed
+ * by alias, never a stand-in for the file: units are listed with the lines they occupy
+ * so the synthesis agent can find them in the raw file it edits.
+ */
 export function renderInstructionIndex(file) {
   return file.units
-    .map((u) => `[${u.id}] (${u.tokens} tok)${u.section ? ` <${u.section}>` : ""}\n${u.text}`)
+    .map((u) => {
+      const lines = u.startLine === u.endLine ? `L${u.startLine}` : `L${u.startLine}-${u.endLine}`;
+      return `[${u.id}] (${u.tokens} tok, ${lines})${u.section ? ` <${u.section}>` : ""}\n${u.text}`;
+    })
     .join("\n\n");
 }
 

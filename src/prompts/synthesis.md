@@ -1,12 +1,23 @@
 You are performing the synthesis step of a backward pass over a repository's agent
 memory file. Evidence from many past agent sessions has already been gathered and
 folded. Your job is to turn that evidence into a small set of concrete, budget-aware
-edits - one gradient step on the weights, not a rewrite.
+edits - one gradient step on the weights, not a rewrite - by editing the file directly.
 
 ## Repository
 
 {{REPO_NAME}} - {{TRANSCRIPT_COUNT}} sessions analyzed across {{HARNESS_SUMMARY}}.
 {{RUN_NOTE}}
+
+## Where you are
+
+Your working directory is a staging copy, not the repository. It holds exactly two
+things: the memory file at `./{{MEMORY_PATH}}` and the skills directory at
+`./{{SKILLS_DIR}}/`. The repository itself is at `{{REPO_ROOT}}` - open any file there
+to ground or verify an edit against the real code, but NEVER write there. Nothing you
+change in the staging copy reaches the repository until a human reviews each change.
+
+**Make your edits by editing `./{{MEMORY_PATH}}` in place with your file tools.** Do not
+paste the edited text into your reply; backpass measures what you changed in the file.
 
 ## Current memory file: {{MEMORY_PATH}}
 
@@ -15,11 +26,30 @@ Budget: {{CURRENT_TOKENS}} / {{BUDGET_TOKENS}} estimated tokens ({{BUDGET_STATE}
 Every token in this file is paid on every future session, forever, and instruction
 following dilutes as the file grows. The budget is the constraint you optimize under.
 
+The index below is a lookup table, not the file: it names each instruction (`AG-nnn`),
+its always-loaded cost, and the lines it occupies in `./{{MEMORY_PATH}}`. The evidence
+refers to instructions by these ids.
+
 {{INSTRUCTION_INDEX}}
 
 ## Existing skills (load-on-trigger, in {{SKILLS_DIR}})
 
 {{SKILL_INDEX}}
+
+To extract a section into a skill, create `./{{SKILLS_DIR}}/<skill-name>/SKILL.md` with
+this exact shape, then remove the extracted detail from `./{{MEMORY_PATH}}`
+(optionally leaving a one-line pointer):
+
+```
+---
+name: <skill-name>
+description: <one line - this IS the trigger condition>
+---
+
+<the full markdown body of the skill>
+```
+
+To tune an existing skill's trigger, edit its `description:` line under `./{{SKILLS_DIR}}/`.
 
 ## Folded evidence
 
@@ -28,62 +58,24 @@ analyzed sessions in which an instruction drew any evidence at all.
 
 {{EVIDENCE}}
 
-You are running inside the repository with read access, so you can open its files to
-ground or verify an edit against the real code when that would help - your call.
-
 ## Previously rejected edits - do not re-propose these
 
 {{REJECTIONS}}
 
-## What to produce
+## Hard rules - a violation fails the whole proposal
 
-Return ONE JSON object and nothing else. No prose, no markdown fence.
-
-```
-{
-  "edits": [
-    {
-      "kind": "add" | "remove" | "rewrite" | "extract",
-      "file": "{{MEMORY_PATH}}",
-      "title": "one line a human can decide on",
-      "find": "exact existing text to replace, copied character-for-character from the memory file above; empty string for a pure addition",
-      "replace": "the new text; empty string for a pure removal",
-      "anchor": "when find is empty, the exact existing text this should be inserted AFTER (a heading line is ideal)",
-      "rationale": "why the evidence supports this",
-      "instructions": ["AG-017"],
-      "evidence": [{"polarity": "negative", "text": "the verbatim quote", "source": "claude · abc123 · turn 12"}],
-      "transcripts": 3,
-      "skill": {
-        "name": "release-signing",
-        "path": "{{SKILLS_DIR}}/release-signing/SKILL.md",
-        "description": "the frontmatter description - this IS the trigger condition",
-        "body": "the full markdown body of the extracted skill"
-      }
-    }
-  ],
-  "verdicts": [
-    {"instruction": "AG-042", "verdict": "keep" | "strengthen" | "weaken" | "remove", "positive": 6, "negative": 1, "note": "one line"}
-  ],
-  "notes": ["anything a human should know that is not an edit"]
-}
-```
-
-Hard rules - a violation fails the whole proposal:
-
-1. **At most {{MAX_EDITS}} edits.** This is the learning rate. Pick the highest-signal
-   changes; a small correct step beats a large speculative one.
-2. **`find` must be copied exactly from the memory file shown above**, including
-   punctuation and leading list markers. It must appear exactly once in the file. If you
-   cannot reproduce it exactly, use a shorter unique fragment.
-3. **New instructions need evidence from at least {{MIN_GAP_EVIDENCE}} distinct
+1. **At most {{MAX_EDITS}} edits.** This is the learning rate. An edit is one change a
+   human can decide on; pick the highest-signal ones. A small correct step beats a large
+   speculative one.
+2. **New instructions need evidence from at least {{MIN_GAP_EVIDENCE}} distinct
    sessions.** One bad session never rewrites the weights.
-4. **Every edit carries at least one verbatim quote in `evidence`.**
-5. **Budget:** {{BUDGET_RULE}}
-6. `skill` is required for `kind: "extract"` and forbidden otherwise. An extract must
-   also set `find`/`replace` to remove the extracted detail from the memory file,
-   optionally leaving a one-line pointer.
-7. Prefer removing a dead instruction over adding a new one. Instructions with high
+3. **Every edit must be backed by at least one verbatim quote** from the evidence. You
+   will attach the quotes in the next step, so only make changes you can back.
+4. **Budget:** {{BUDGET_RULE}}
+5. Prefer removing a dead instruction over adding a new one. Instructions with high
    token cost and zero positive evidence across many sessions are the best removals.
+6. Change only `./{{MEMORY_PATH}}` and files under `./{{SKILLS_DIR}}/`. Never delete a
+   file. Do not create notes, scripts, or scratch files.
 
 ## Where an instruction belongs
 
@@ -96,5 +88,11 @@ A skill's description is always loaded and its body is free until triggered, so 
 long, narrow, crisply-triggered section into a skill is nearly pure budget profit.
 
 **Skill descriptions are weights too.** If the evidence shows an agent lacked knowledge
-an existing skill already contains, that is a failed trigger: propose a `rewrite` of that
-skill's description line, not duplicate content in the memory file.
+an existing skill already contains, that is a failed trigger: rewrite that skill's
+description line instead of duplicating content in the memory file.
+
+## When you are done
+
+Reply with a short plain-text summary of what you changed and why (a few lines). No
+JSON yet - backpass will measure the changes and ask you to annotate each one next.
+If the evidence does not justify any change, change nothing and say so.
