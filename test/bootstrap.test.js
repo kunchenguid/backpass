@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { bootstrapRun } from "../src/commands/bootstrap.js";
-import { detectRepoFacts, renderPointer, renderStarterMemory } from "../src/bootstrap.js";
+import { renderPointer, renderStarterMemory } from "../src/bootstrap.js";
 import { loadConfig } from "../src/config.js";
 import { setLoggerSink } from "../src/logger.js";
 import { isPointerTo, parseMemoryUnits } from "../src/memory.js";
@@ -97,26 +97,26 @@ function withSink(fn) {
   );
 }
 
-test("starter memory is a real file: purpose, detected facts, conventions, and self-governance", () => {
+test("starter memory is the minimal skeleton: purpose, an empty Learnings section, self-governance", () => {
   const repo = makeRepo({
     "package.json": JSON.stringify({ name: "demo", scripts: { check: "x", test: "y" } }),
     "pnpm-lock.yaml": "",
     "README.md": "# demo",
   });
-  const facts = detectRepoFacts(repo.root);
-  assert.equal(facts.packageManager, "pnpm");
-  const text = renderStarterMemory({ repo, facts });
+  const text = renderStarterMemory({ repo });
   assert.match(text, /^# Project agent memory/);
   assert.match(text, /demo-repo/);
-  assert.match(text, /`pnpm run check` runs the full local gate/);
-  assert.match(text, /`README.md` documents/);
-  assert.match(text, /## Conventions/);
-  assert.match(text, /## Maintaining this file/);
-  assert.ok(parseMemoryUnits(text).length >= 8, "the starter is not a stub");
+  const headings = text.split("\n").filter((l) => l.startsWith("## "));
+  assert.deepEqual(headings, ["## Learnings", "## Maintaining this file"]);
+  assert.match(
+    text,
+    /## Learnings\n\n- None recorded yet\. backpass adds evidence-backed entries here from real sessions\./,
+  );
+  assert.doesNotMatch(text, /Sharp edges|Orientation|Conventions|pnpm|README/);
+  assert.ok(parseMemoryUnits(text).length >= 3, "the starter parses into memory units");
 
-  const bare = renderStarterMemory({ repo: makeRepo(), facts: detectRepoFacts(makeRepo().root) });
-  assert.match(bare, /Read the top-level README/);
-  assert.match(bare, /## Maintaining this file/);
+  // Deterministic: the checkout's contents no longer change the starter.
+  assert.equal(renderStarterMemory({ repo: makeRepo() }), text);
 });
 
 test("no memory file and no transcripts: seeds AGENTS.md from defaults plus a CLAUDE.md pointer", async () => {
@@ -157,10 +157,20 @@ test("with transcripts: analysis gaps become the first evidence-backed instructi
     ["AGENTS.md"],
   );
 
+  assert.match(captured.runNote, /`## Learnings`/);
+  assert.doesNotMatch(captured.runNote, /Sharp edges/);
+
   const agents = fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8");
   assert.match(agents, /scratch database/);
   assert.doesNotMatch(agents, /None recorded yet/);
   assert.match(agents, /## Maintaining this file/);
+  // The entry landed inside ## Learnings, not in a new or renamed section.
+  const learnings = agents.slice(agents.indexOf("## Learnings"), agents.indexOf("## Maintaining this file"));
+  assert.match(learnings, /^- Run migrations only against a scratch database/m);
+  assert.deepEqual(
+    agents.split("\n").filter((l) => l.startsWith("## ")),
+    ["## Learnings", "## Maintaining this file"],
+  );
   assert.equal(fs.readFileSync(path.join(repo.root, "CLAUDE.md"), "utf8"), renderPointer("AGENTS.md"));
 
   // The applied proposal is marked so `backpass apply` cannot replay it onto the new file.

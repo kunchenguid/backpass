@@ -215,9 +215,8 @@ pointer-aware:
   CLAUDE.md untouched, and warns each run until you consolidate: move CLAUDE.md's content
   into AGENTS.md and make CLAUDE.md the one-line pointer.
 - A repo with **no memory file** is bootstrapped on the first `backpass` run: a starter
-  AGENTS.md (purpose, detected orientation such as the package manager and check
-  commands, baseline conventions, a `## Maintaining this file` section) plus a CLAUDE.md
-  pointer. The starter is then run through the ordinary backward pass, so recurring gaps
+  AGENTS.md (purpose, an empty `## Learnings` section, a `## Maintaining this file`
+  section) plus a CLAUDE.md pointer. The starter is then run through the ordinary backward pass, so recurring gaps
   from your real transcripts become its first evidence-backed instructions. With no
   transcripts it is seeded from defaults alone and says so. Bootstrap only ever creates
   files; review it with `git diff`.
