@@ -7,6 +7,7 @@ import { readTranscript } from "./discovery/index.js";
 import { renderInstructionIndex } from "./memory.js";
 import { renderPrompt } from "./prompts.js";
 import { evidenceKey, isEvidenceFresh, safeFileName } from "./state.js";
+import { emitProgress } from "./progress.js";
 import { color, info, warn } from "./logger.js";
 
 /**
@@ -57,12 +58,22 @@ function promptPathFor(state, transcript) {
   return path.join(state.applyDir, "..", "prompts", `${safeFileName(transcript.id)}.md`);
 }
 
-async function analyzeOne({ transcript, memoryFile, config, repo }) {
+async function analyzeOne({ transcript, memoryFile, config, repo, slot = 0 }) {
   const raw = await readTranscript(transcript);
   const distilled = distill(raw.events, {
     ...transcript,
     model: raw.model,
     rawPath: raw.rawPath,
+  });
+
+  emitProgress("analyze:lane", {
+    slot,
+    harness: transcript.harness,
+    id: transcript.nativeId,
+    title: transcript.title || transcript.nativeId,
+    phase: "model",
+    rawBytes: transcript.bytes,
+    distilledBytes: Buffer.byteLength(distilled.trace, "utf8"),
   });
 
   // Triviality filter. `minUserTurns` is the knob, but a session is only truly trivial
@@ -110,16 +121,20 @@ async function analyzeOne({ transcript, memoryFile, config, repo }) {
   };
 }
 
-/** Bounded-concurrency worker pool - the design's `--jobs N` fan-out. */
+/**
+ * Bounded-concurrency worker pool - the design's `--jobs N` fan-out.
+ * The worker also receives its runner slot so the progress view can show one
+ * lane per job.
+ */
 async function pool(items, limit, worker) {
   const results = new Array(items.length);
   let cursor = 0;
-  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async (_, slot) => {
     for (;;) {
       const index = cursor;
       cursor += 1;
       if (index >= items.length) return;
-      results[index] = await worker(items[index], index);
+      results[index] = await worker(items[index], index, slot);
     }
   });
   await Promise.all(runners);
@@ -140,7 +155,19 @@ export async function analyzeTranscripts({ transcripts, memoryFile, config, repo
     pending.push(transcript);
   }
 
-  if (!pending.length) return summary;
+  emitProgress("analyze:start", {
+    pending: pending.length,
+    cached: summary.cached,
+    total: transcripts.length,
+    jobs: config.jobs,
+    agent: config.analysis.agent,
+    model: config.analysis.model,
+  });
+
+  if (!pending.length) {
+    emitProgress("analyze:done", summary);
+    return summary;
+  }
 
   info(
     `${color.cyan("·")} analyzing ${pending.length} transcript(s) with ${config.analysis.agent}` +
@@ -148,7 +175,8 @@ export async function analyzeTranscripts({ transcripts, memoryFile, config, repo
   );
 
   let done = 0;
-  await pool(pending, config.jobs, async (transcript) => {
+  const evidenceTotals = { positive: 0, negative: 0, gaps: 0 };
+  await pool(pending, config.jobs, async (transcript, _index, slot) => {
     const base = {
       transcript: {
         harness: transcript.harness,
@@ -165,8 +193,16 @@ export async function analyzeTranscripts({ transcripts, memoryFile, config, repo
       analyzedAt: new Date().toISOString(),
     };
 
+    emitProgress("analyze:lane", {
+      slot,
+      harness: transcript.harness,
+      id: transcript.nativeId,
+      title: transcript.title || transcript.nativeId,
+      phase: "distill",
+    });
+
     try {
-      const result = await analyzeOne({ transcript, memoryFile, config, repo });
+      const result = await analyzeOne({ transcript, memoryFile, config, repo, slot });
       if (result.status === "skipped") {
         summary.skipped += 1;
         state.writeEvidence(transcript.id, { ...base, status: "skipped", reason: result.reason });
@@ -179,6 +215,10 @@ export async function analyzeTranscripts({ transcripts, memoryFile, config, repo
           stats: result.distilled.stats,
           ...result.evidence,
         });
+        evidenceTotals.positive += result.evidence.positive.length;
+        evidenceTotals.negative += result.evidence.negative.length;
+        evidenceTotals.gaps += result.evidence.gaps.length;
+        emitProgress("analyze:evidence", { ...evidenceTotals });
       }
     } catch (err) {
       // Per-transcript fail-soft: recorded, listed by `backpass status`, retried next run.
@@ -187,11 +227,19 @@ export async function analyzeTranscripts({ transcripts, memoryFile, config, repo
       state.writeEvidence(transcript.id, { ...base, status: "failed", error: err.message });
     } finally {
       done += 1;
+      emitProgress("analyze:tick", {
+        slot,
+        done,
+        ok: summary.analyzed,
+        skipped: summary.skipped,
+        failed: summary.failed,
+      });
       if (done % 10 === 0 || done === pending.length) {
         info(`${color.dim(`  ${done}/${pending.length} analyzed`)}`);
       }
     }
   });
 
+  emitProgress("analyze:done", summary);
   return summary;
 }

@@ -8,6 +8,7 @@ import * as cursorIde from "./adapters/cursor-ide.js";
 
 import { associate, passesStrict } from "./association.js";
 import { sinceCutoff } from "../config.js";
+import { emitProgress } from "../progress.js";
 import { warn } from "../logger.js";
 
 export const ADAPTERS = {
@@ -47,6 +48,8 @@ export async function discoverTranscripts({ repo, config, strict = false, harnes
   const perHarness = {};
   let cacheDirty = false;
 
+  emitProgress("discover:start", { harnesses: selected.filter((h) => getAdapter(h)) });
+
   for (const harness of selected) {
     const adapter = getAdapter(harness);
     if (!adapter) {
@@ -56,6 +59,7 @@ export async function discoverTranscripts({ repo, config, strict = false, harnes
 
     const stats = { scanned: 0, matched: 0, cached: 0, skipped: 0, error: null };
     perHarness[harness] = stats;
+    emitProgress("discover:harness:start", { harness });
 
     try {
       const found = adapter.discover
@@ -73,16 +77,34 @@ export async function discoverTranscripts({ repo, config, strict = false, harnes
           });
       transcripts.push(...found);
       stats.matched = found.length;
+      emitProgress("discover:harness:done", {
+        harness,
+        scanned: stats.scanned,
+        cached: stats.cached,
+        matched: stats.matched,
+        tiers: tierCounts(found),
+      });
     } catch (err) {
       stats.error = err.message;
       warn(`${harness}: transcript store unreadable (${err.message}) - harness skipped`);
+      emitProgress("discover:harness:done", { harness, error: err.message });
     }
   }
 
   if (cacheDirty) config.state.writeScanCache(cache);
 
   transcripts.sort((a, b) => (b.mtimeMs || 0) - (a.mtimeMs || 0));
+  emitProgress("discover:done", { total: transcripts.length });
   return { transcripts, perHarness, cutoffMs };
+}
+
+function tierCounts(found) {
+  const tiers = {};
+  for (const transcript of found) {
+    const tier = transcript.association?.tier;
+    if (tier) tiers[tier] = (tiers[tier] || 0) + 1;
+  }
+  return tiers;
 }
 
 async function discoverDirect(adapter, { repo, config, cutoffMs, strict, stats }) {
@@ -109,6 +131,16 @@ function discoverFiles(adapter, { repo, config, cutoffMs, strict, stats, cache, 
   for (const candidate of candidates) {
     if (cutoffMs && candidate.mtimeMs < cutoffMs) continue;
     stats.scanned += 1;
+    // Large stores (codex holds 10k+ session files) get a live scan tick; the
+    // classify loop is synchronous, so this is the only paint opportunity.
+    if (stats.scanned % 25 === 0) {
+      emitProgress("discover:harness:tick", {
+        harness: adapter.name,
+        scanned: stats.scanned,
+        total: candidates.length,
+        matched: out.length,
+      });
+    }
 
     const cacheKey = `${adapter.name}:${candidate.key}`;
     const cached = cache.entries[cacheKey];

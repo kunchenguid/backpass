@@ -8,6 +8,7 @@ import { renderPrompt } from "./prompts.js";
 import { buildProposal, ProposalViolation } from "./proposal.js";
 import { loadSkills, renderSkillIndex, resolveOverflowTarget } from "./skills.js";
 import { isSuppressedByRejection } from "./state.js";
+import { emitProgress } from "./progress.js";
 import { color, info, warn } from "./logger.js";
 
 /**
@@ -124,6 +125,16 @@ export async function synthesizeProposal({ memoryFile, summary, config, repo, tr
         `${config.synthesis.effort ? ` effort=${config.synthesis.effort}` : ""}` +
         `${attempt > 1 ? " [re-prompt]" : ""}`,
     );
+    emitProgress("synth:start", {
+      agent: config.synthesis.agent,
+      model: config.synthesis.model,
+      effort: config.synthesis.effort,
+      attempt,
+      sessionName: `backpass-synth-${process.pid}`,
+      gapClusters: summary.totals.gapClusters,
+      instructions: summary.instructions.length,
+      suppressed: Object.keys(rejections.entries || {}).length,
+    });
 
     const result = await sessionPrompt({
       agent: config.synthesis.agent,
@@ -152,6 +163,7 @@ export async function synthesizeProposal({ memoryFile, summary, config, repo, tr
         proposal.notes = [...proposal.notes, ...notes];
         proposal.usage = usage;
         proposal.overflowTarget = overflow;
+        emitProgress("synth:done", { edits: proposal.edits.length, attempt });
         return { proposal, violations: [] };
       }
       lastViolations = violations;
@@ -165,6 +177,7 @@ export async function synthesizeProposal({ memoryFile, summary, config, repo, tr
 
     if (attempt === 1) {
       warn(`synthesis violated ${lastViolations.length} gate(s); re-prompting once with the exact violations`);
+      emitProgress("synth:violations", { attempt, violations: lastViolations });
       prompt = `${renderPrompt("synthesis", values)}\n\n## Your previous answer was rejected\n\nIt violated these hard rules. Fix every one of them and return the corrected JSON object only.\n\n${lastViolations
         .map((v) => `- ${v}`)
         .join("\n")}\n`;

@@ -29,6 +29,8 @@ export const DEFAULT_CONFIG = {
   jobs: 4,
   timeoutSeconds: 300,
   promptRetries: 1,
+  /** Live progress ink set: "auto" queries the terminal background, or force "dark" / "light". */
+  theme: "auto",
 };
 
 function userConfigPath() {
@@ -102,6 +104,9 @@ function validate(config) {
   }
   if (!Number.isInteger(config.jobs) || config.jobs < 1) {
     throw new UserError("config.jobs must be an integer >= 1");
+  }
+  if (!["auto", "dark", "light"].includes(config.theme)) {
+    throw new UserError(`config.theme must be "auto", "dark", or "light" (got "${config.theme}")`);
   }
   const known = new Set([...ALL_HARNESSES, ...OPT_IN_HARNESSES]);
   for (const h of config.discovery.harnesses) {

@@ -52,6 +52,7 @@ const OPTIONS = {
   "no-ui": { type: "boolean" },
   force: { type: "boolean" },
   limit: { type: "string" },
+  theme: { type: "string" },
 };
 
 const HELP = `backpass v${VERSION} - gradient descent for your agent memory
@@ -102,10 +103,15 @@ APPLY
   --force                  re-analyze transcripts that already have fresh evidence
 
 OTHER
+  --theme <mode>           live progress ink set: auto, dark, or light    [auto]
   --json                   machine-readable output on stdout
-  -q, --quiet              suppress progress output
+  -q, --quiet              suppress progress output (also disables the live view)
   -h, --help               this help
   -v, --version            print version
+
+The default run renders a live progress view on an interactive terminal. It draws
+to stderr only and falls back to plain lines when piped, in CI, under NO_COLOR,
+or below 60 columns - stdout and --json output are identical either way.
 
 EXAMPLES
   backpass                                  a full run, ending with a proposal
@@ -134,6 +140,7 @@ function overridesFrom(values) {
   }
   if (values["memory-file"]?.length) overrides.memoryFiles = values["memory-file"];
   if (values["skills-dir"]) overrides.skillsDir = values["skills-dir"];
+  if (values.theme) overrides.theme = values.theme;
 
   if (values["analysis-agent"]) overrides.analysis.agent = values["analysis-agent"];
   if (values["analysis-model"]) overrides.analysis.model = values["analysis-model"];

@@ -2,6 +2,7 @@ import { analyzeTranscripts } from "../analyze.js";
 import { UserError, color, info, json, out } from "../logger.js";
 import { loadMemoryFiles, memorySetHash } from "../memory.js";
 import { sumUsage, formatUsage } from "../acpx.js";
+import { emitProgress } from "../progress.js";
 import { discoverForRun } from "./scan.js";
 
 /** The memory file a run optimizes: the first configured file that exists. */
@@ -19,6 +20,13 @@ export function primaryMemoryFile(repo, config) {
 export async function runAnalysis(ctx) {
   const { repo, config } = ctx;
   const { file, hash } = primaryMemoryFile(repo, config);
+  // Deterministic by design: tokens and units come from parsing the file, no model.
+  emitProgress("memory", {
+    path: file.path,
+    tokens: file.tokens,
+    budget: config.budgetTokens,
+    units: file.units.length,
+  });
   const { transcripts, perHarness } = await discoverForRun(ctx);
 
   if (!transcripts.length) {
