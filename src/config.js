@@ -43,7 +43,8 @@ export const DEFAULT_CONFIG = {
   memoryFiles: ["AGENTS.md", "CLAUDE.md"],
   budgetTokens: 5000,
   skillsDir: ".agents/skills",
-  maxEditsPerRun: 5,
+  /** `null` means adaptive: see `effectiveMaxEdits` in proposal.js. An integer pins it. */
+  maxEditsPerRun: null,
   minGapEvidence: 2,
   /**
    * `agent: null` means auto-pick from `ladders[role]`; `effort: null` means
@@ -130,8 +131,8 @@ function validate(config) {
   if (!Number.isFinite(config.budgetTokens) || config.budgetTokens <= 0) {
     throw new UserError("config.budgetTokens must be a positive number");
   }
-  if (!Number.isInteger(config.maxEditsPerRun) || config.maxEditsPerRun <= 0) {
-    throw new UserError("config.maxEditsPerRun must be a positive integer");
+  if (config.maxEditsPerRun !== null && (!Number.isInteger(config.maxEditsPerRun) || config.maxEditsPerRun <= 0)) {
+    throw new UserError("config.maxEditsPerRun must be a positive integer, or null for the adaptive cap");
   }
   if (!Number.isInteger(config.minGapEvidence) || config.minGapEvidence < 1) {
     throw new UserError("config.minGapEvidence must be an integer >= 1");
@@ -197,7 +198,7 @@ export function initialConfig() {
     memoryFiles: ["AGENTS.md"],
     budgetTokens: DEFAULT_CONFIG.budgetTokens,
     skillsDir: DEFAULT_CONFIG.skillsDir,
-    maxEditsPerRun: DEFAULT_CONFIG.maxEditsPerRun,
+    // maxEditsPerRun stays unset so the adaptive cap applies; set it to pin a number.
     minGapEvidence: DEFAULT_CONFIG.minGapEvidence,
     // Agents stay unset so the ladder auto-pick keeps applying to initialized repos.
     analysis: { agent: null, model: null, effort: null },

@@ -140,7 +140,10 @@ sessions (default 2) are dropped. One bad session never rewrites the weights.
 A single high-reasoning call turns the folded evidence into concrete edits: ADD, REMOVE,
 REWRITE, or EXTRACT→SKILL. Then mechanical gates run, and they are not negotiable:
 
-- at most `maxEditsPerRun` edits (the learning rate)
+- at most `maxEditsPerRun` edits (the learning rate). By default the cap is adaptive: 5
+  when the file is near or under budget, and in a shrink plan (file over budget) one edit
+  per ~40 tokens of overage, capped at 20, so badly overgrown files recover in fewer runs.
+  An explicit `--max-edits` or config value always pins it.
 - new instructions need evidence from `minGapEvidence` distinct sessions
 - every edit carries a verbatim quote
 - the post-edit file must fit the budget
@@ -294,7 +297,7 @@ CLI flags on top:
   "memoryFiles": ["AGENTS.md"],
   "budgetTokens": 5000,
   "skillsDir": ".agents/skills",
-  "maxEditsPerRun": 5,
+  "maxEditsPerRun": null,
   "minGapEvidence": 2,
   "analysis": { "agent": null, "model": null, "effort": null },
   "synthesis": { "agent": null, "model": null, "effort": null },

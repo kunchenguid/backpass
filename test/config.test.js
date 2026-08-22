@@ -19,7 +19,7 @@ function tempRepo(config) {
 test("the defaults match the approved design", () => {
   const config = loadConfig(tempRepo());
   assert.equal(config.budgetTokens, 5000);
-  assert.equal(config.maxEditsPerRun, 5);
+  assert.equal(config.maxEditsPerRun, null, "the edit cap is adaptive unless pinned");
   assert.equal(config.minGapEvidence, 2);
   assert.equal(config.jobs, 4);
   assert.equal(config.discovery.since, "30d");
