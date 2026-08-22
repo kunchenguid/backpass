@@ -6,7 +6,9 @@ import { STATE_DIRNAME } from "./config.js";
 import { warn } from "./logger.js";
 
 /**
- * All mutable run state lives in a gitignored `.backpass/` directory:
+ * All mutable run state lives in a `.backpass/` directory, kept out of git via the
+ * repo's local exclude (`.git/info/exclude`, written by `backpass init`) rather than
+ * the tracked `.gitignore`:
  *
  *   scan-cache.json        path+mtime+size -> association verdict (design section 2.2)
  *   evidence/<id>.json     per-transcript tier-1 analysis output (design section 3)

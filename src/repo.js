@@ -68,6 +68,35 @@ function listRemotes(root) {
 }
 
 /**
+ * Ensure `line` is present in this repo's *local* git exclude file
+ * (`.git/info/exclude`) - never a tracked file the user owns. The path is
+ * resolved via `git rev-parse --git-path info/exclude` rather than assumed,
+ * since in a worktree or submodule `.git` is a file, not a directory, and
+ * `info/exclude` lives in the shared common git dir. Idempotent: a line
+ * already present is left alone.
+ *
+ * Returns `{ status: "added" | "present" | "no-git", path? }`.
+ */
+export function ensureLocalExclude(root, line) {
+  let excludePath;
+  try {
+    excludePath = git(["rev-parse", "--git-path", "info/exclude"], root);
+  } catch {
+    return { status: "no-git" };
+  }
+  const resolved = path.isAbsolute(excludePath) ? excludePath : path.join(root, excludePath);
+
+  fs.mkdirSync(path.dirname(resolved), { recursive: true });
+  const current = fs.existsSync(resolved) ? fs.readFileSync(resolved, "utf8") : "";
+  if (current.split("\n").some((l) => l.trim() === line)) {
+    return { status: "present", path: resolved };
+  }
+  const separator = current && !current.endsWith("\n") ? "\n" : "";
+  fs.appendFileSync(resolved, `${separator}${line}\n`);
+  return { status: "added", path: resolved };
+}
+
+/**
  * Repo identity used by every discovery adapter.
  * `commonDir` distinguishes worktrees of the same repository.
  */

@@ -71,7 +71,7 @@ COMMANDS
   propose    tier-2 pass: one high-reasoning call turning folded evidence into edits
   apply      review the proposal and write the accepted edits (the only writer)
   status     cache state, evidence counts, and the budget bar
-  init       write .backpassrc.json and gitignore .backpass/
+  init       write .backpassrc.json and exclude .backpass/ via .git/info/exclude
 
 DISCOVERY
   --since <dur>            only sessions newer than this (30d, 12h, 2w, all)  [30d]
