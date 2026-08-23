@@ -1,0 +1,8 @@
+· review surface: http://127.0.0.1:4387/session/no-open-review
+waiting for your decisions in the browser (Ctrl-C to abort; nothing is written until you send)
+
+1 accepted · 0 rejected
+  wrote AGENTS.md (e1)
+    budget [................................] 11 -> 12 / 5,000 tok
+
+Verified: --no-open printed the clean URL and did not invoke the browser opener.
