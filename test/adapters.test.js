@@ -174,7 +174,8 @@ function writeHermesDb(dir, { sessions = [], messages = [], schema } = {}) {
         content TEXT,
         tool_call_id TEXT,
         tool_calls TEXT,
-        tool_name TEXT
+        tool_name TEXT,
+        timestamp REAL NOT NULL
       );
     `);
     const insertSession = db.prepare(
@@ -194,8 +195,9 @@ function writeHermesDb(dir, { sessions = [], messages = [], schema } = {}) {
       );
     }
     const insertMessage = db.prepare(
-      `INSERT INTO messages (id, session_id, role, content, tool_call_id, tool_calls, tool_name)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO messages
+         (id, session_id, role, content, tool_call_id, tool_calls, tool_name, timestamp)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     for (const m of messages) {
       insertMessage.run(
@@ -206,6 +208,7 @@ function writeHermesDb(dir, { sessions = [], messages = [], schema } = {}) {
         m.tool_call_id ?? null,
         m.tool_calls ?? null,
         m.tool_name ?? null,
+        m.timestamp ?? 1_700_000_000 + m.id,
       );
     }
   } finally {
@@ -270,8 +273,21 @@ test("hermes adapter recovers cli/acp cwd, skips gateway, converts seconds to ms
       {
         id: "cli-nocwd",
         source: "cli",
+        model_config: JSON.stringify({ cwd: "/repo/wrong-source" }),
         system_prompt: "no directory line here",
         started_at: 1_700_000_400,
+      },
+      {
+        id: "acp-nocwd",
+        source: "acp",
+        system_prompt: prompt,
+        started_at: 1_700_000_450,
+      },
+      {
+        id: "cli-resumed",
+        source: "cli",
+        system_prompt: prompt,
+        started_at: 1_600_000_000,
       },
     ],
     messages: [
@@ -303,6 +319,13 @@ test("hermes adapter recovers cli/acp cwd, skips gateway, converts seconds to ms
         role: "session_meta",
         content: "session-meta-must-not-surface",
       },
+      {
+        id: 6,
+        session_id: "cli-resumed",
+        role: "user",
+        content: "Continue this old session.",
+        timestamp: 1_700_000_600,
+      },
     ],
   });
 
@@ -310,17 +333,24 @@ test("hermes adapter recovers cli/acp cwd, skips gateway, converts seconds to ms
     const found = await hermes.discover();
     assert.deepEqual(
       found.map((row) => row.id).sort(),
-      ["acp-1", "cli-1"],
-      "cli and acp are kept; gateway, cron, and cwd-less cli are skipped",
+      ["acp-1", "cli-1", "cli-resumed"],
+      "cli and acp are kept; disallowed sources and source-invalid cwd fields are skipped",
     );
 
     const cli = found.find((row) => row.id === "cli-1");
     const acp = found.find((row) => row.id === "acp-1");
+    const resumed = found.find((row) => row.id === "cli-resumed");
     assert.equal(cli.cwd, "/repo/demo");
     assert.equal(acp.cwd, "/repo/demo");
     assert.equal(cli.startedAt, 1_700_000_000_000, "epoch seconds become milliseconds");
     assert.equal(cli.mtimeMs, 1_700_000_060_000);
-    assert.equal(acp.mtimeMs, 1_700_000_100_000, "ended_at falls back to started_at");
+    assert.equal(acp.mtimeMs, 1_700_000_100_000, "activity falls back to started_at");
+    assert.equal(resumed.mtimeMs, 1_700_000_600_000, "latest message determines resumed-session activity");
+    assert.deepEqual(
+      (await hermes.discover({ cutoffMs: 1_700_000_500_000 })).map((row) => row.id),
+      ["cli-resumed"],
+      "a recently resumed old session passes the activity cutoff",
+    );
     assert.equal(cli.extra.source, "cli");
     assert.equal(acp.extra.source, "acp");
     assert.deepEqual(cli.remotes, []);

@@ -61,8 +61,10 @@ function cwdFromPrompt(prompt) {
   return looksAbsolute(cwd) ? cwd : null;
 }
 
-function recoverCwd(row) {
-  return cwdFromConfig(row.model_config) || cwdFromPrompt(row.system_prompt);
+function recoverCwd(row, source) {
+  if (source === "acp") return cwdFromConfig(row.model_config);
+  if (source === "cli") return cwdFromPrompt(row.system_prompt);
+  return null;
 }
 
 /**
@@ -78,11 +80,22 @@ export async function discover({ cutoffMs } = {}) {
   try {
     const rows = db
       .prepare(
-        `SELECT id, source, model, model_config, system_prompt, title,
-                started_at, ended_at
-           FROM sessions
-          WHERE (? IS NULL OR COALESCE(ended_at, started_at) >= ?)
-            AND lower(source) IN ('cli', 'acp')`,
+        `SELECT s.id, s.source, s.model, s.model_config, s.system_prompt, s.title,
+                s.started_at, s.ended_at,
+                MAX(s.started_at,
+                    COALESCE(s.ended_at, s.started_at),
+                    COALESCE(activity.last_message_at, s.started_at)) AS activity_at
+           FROM sessions s
+           LEFT JOIN (
+             SELECT session_id, MAX(timestamp) AS last_message_at
+               FROM messages
+              GROUP BY session_id
+           ) activity ON activity.session_id = s.id
+          WHERE (? IS NULL OR
+                 MAX(s.started_at,
+                     COALESCE(s.ended_at, s.started_at),
+                     COALESCE(activity.last_message_at, s.started_at)) >= ?)
+            AND lower(s.source) IN ('cli', 'acp')`,
       )
       .all(cutoffSec, cutoffSec ?? 0);
 
@@ -90,10 +103,10 @@ export async function discover({ cutoffMs } = {}) {
     for (const row of rows) {
       const source = String(row.source || "").toLowerCase();
       if (!CLI_ACP.has(source)) continue;
-      const cwd = recoverCwd(row);
+      const cwd = recoverCwd(row, source);
       if (!cwd) continue;
       const startedAt = toMs(row.started_at);
-      const endedAt = toMs(row.ended_at);
+      const activityAt = toMs(row.activity_at);
       out.push({
         key: `hermes:${row.id}`,
         id: row.id,
@@ -104,7 +117,7 @@ export async function discover({ cutoffMs } = {}) {
         remotes: [],
         title: row.title || null,
         startedAt,
-        mtimeMs: endedAt || startedAt || 0,
+        mtimeMs: activityAt || startedAt || 0,
         bytes: 0,
         model: row.model || null,
         extra: { sessionId: row.id, source },
