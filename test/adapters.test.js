@@ -326,6 +326,20 @@ test("hermes adapter recovers cli/acp cwd, skips gateway, converts seconds to ms
         content: "Continue this old session.",
         timestamp: 1_700_000_600,
       },
+      {
+        id: 7,
+        session_id: "cli-1",
+        role: "assistant",
+        content: "Imported later message.",
+        timestamp: 1_700_000_050,
+      },
+      {
+        id: 8,
+        session_id: "cli-1",
+        role: "user",
+        content: "Imported earlier message.",
+        timestamp: 1_700_000_040,
+      },
     ],
   });
 
@@ -364,6 +378,8 @@ test("hermes adapter recovers cli/acp cwd, skips gateway, converts seconds to ms
         "user: Please open a PR for the parser fix.",
         "assistant: I'll run the tests first.",
         "assistant: Opened PR #2731.",
+        "user: Imported earlier message.",
+        "assistant: Imported later message.",
       ],
     );
     assert.ok(!JSON.stringify(events).includes("session-meta-must-not-surface"), "session_meta rows are dropped");

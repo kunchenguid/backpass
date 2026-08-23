@@ -181,7 +181,7 @@ export async function read(ref) {
         `SELECT role, CAST(content AS BLOB) AS content, tool_call_id, tool_calls, tool_name
            FROM messages
           WHERE session_id = ?
-          ORDER BY id`,
+          ORDER BY timestamp, id`,
       )
       .all(sessionId);
 
