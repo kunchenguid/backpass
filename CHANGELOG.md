@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.2...backpass-v0.1.3) (2026-08-23)
+
+
+### Bug Fixes
+
+* **discovery:** recover Hermes v26 CLI sessions ([#28](https://github.com/kunchenguid/backpass/issues/28)) ([37457f9](https://github.com/kunchenguid/backpass/commit/37457f96c0907c746b983c511f0b4ba158834c7b))
+
 ## [0.1.2](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.1...backpass-v0.1.2) (2026-08-23)
 
 
