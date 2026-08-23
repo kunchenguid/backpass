@@ -80,15 +80,15 @@ backpass apply     # review each edit, accept or reject, then write
 
 backpass reads the local transcript stores of seven harnesses directly. No API, no upload.
 
-| Harness        | Store                                          | Repo tie                                |
-| -------------- | ---------------------------------------------- | --------------------------------------- |
-| **claude**     | `~/.claude/projects/<munged-cwd>/<uuid>.jsonl` | per-line `cwd`                          |
-| **codex**      | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | `cwd` + recorded `git.repository_url`   |
-| **pi**         | `~/.pi/agent/sessions/<escaped-cwd>/*.jsonl`   | session-header `cwd`                    |
-| **opencode**   | `~/.local/share/opencode/opencode.db` (sqlite) | `session.directory`                     |
-| **grok**       | `~/.grok/sessions/<encoded-cwd>/<uuid>/`       | `summary.json` `cwd` + `git_remotes`    |
-| **cursor CLI** | `~/.cursor/chats/<md5(cwd)>/<uuid>/`           | `meta.json` `cwd`                       |
-| **hermes**     | `~/.hermes/state.db` (sqlite)                  | CLI prompt cwd / ACP `model_config.cwd` |
+| Harness        | Store                                          | Repo tie                                            |
+| -------------- | ---------------------------------------------- | --------------------------------------------------- |
+| **claude**     | `~/.claude/projects/<munged-cwd>/<uuid>.jsonl` | per-line `cwd`                                      |
+| **codex**      | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | `cwd` + recorded `git.repository_url`               |
+| **pi**         | `~/.pi/agent/sessions/<escaped-cwd>/*.jsonl`   | session-header `cwd`                                |
+| **opencode**   | `~/.local/share/opencode/opencode.db` (sqlite) | `session.directory`                                 |
+| **grok**       | `~/.grok/sessions/<encoded-cwd>/<uuid>/`       | `summary.json` `cwd` + `git_remotes`                |
+| **cursor CLI** | `~/.cursor/chats/<md5(cwd)>/<uuid>/`           | `meta.json` `cwd`                                   |
+| **hermes**     | `~/.hermes/state.db` (sqlite)                  | session cwd, with CLI prompt / ACP config fallbacks |
 
 Hermes collection includes CLI and ACP sessions only. Gateway, cron, and WhatsApp sessions
 are excluded because their recorded cwd belongs to the shared gateway process, not a project.
