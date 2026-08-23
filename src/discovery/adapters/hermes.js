@@ -84,18 +84,19 @@ export async function discover({ cutoffMs } = {}) {
                 s.started_at, s.ended_at,
                 MAX(s.started_at,
                     COALESCE(s.ended_at, s.started_at),
-                    COALESCE(activity.last_message_at, s.started_at)) AS activity_at
+                    COALESCE((SELECT MAX(m.timestamp)
+                                FROM messages m
+                               WHERE m.session_id = s.id),
+                             s.started_at)) AS activity_at
            FROM sessions s
-           LEFT JOIN (
-             SELECT session_id, MAX(timestamp) AS last_message_at
-               FROM messages
-              GROUP BY session_id
-           ) activity ON activity.session_id = s.id
-          WHERE (? IS NULL OR
+          WHERE lower(s.source) IN ('cli', 'acp')
+            AND (? IS NULL OR
                  MAX(s.started_at,
                      COALESCE(s.ended_at, s.started_at),
-                     COALESCE(activity.last_message_at, s.started_at)) >= ?)
-            AND lower(s.source) IN ('cli', 'acp')`,
+                     COALESCE((SELECT MAX(m.timestamp)
+                                 FROM messages m
+                                WHERE m.session_id = s.id),
+                              s.started_at)) >= ?)`,
       )
       .all(cutoffSec, cutoffSec ?? 0);
 
