@@ -6,7 +6,11 @@ Thanks for wanting to contribute.
 
 1. Fork the repo and create a branch.
 2. Make your changes and run `pnpm run check` until it is green.
-3. Push your branch and open a pull request against `main`.
+3. Configure the [no-mistakes](https://github.com/kunchenguid/no-mistakes) push target.
+4. Submit the branch with `git push no-mistakes`; the pipeline creates or updates the pull request against `main`.
+
+Do not open the pull request manually. The repository gate requires the signature and
+head-SHA-bound pipeline attestation that no-mistakes writes to the pull request body.
 
 CI runs lint, format:check, typecheck, and the test suite on every PR; a guard also
 rejects hand-edits to release-please-generated files.
