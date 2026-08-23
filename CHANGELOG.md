@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.1...backpass-v0.1.2) (2026-08-23)
+
+
+### Features
+
+* **discovery:** add Hermes transcript support ([#26](https://github.com/kunchenguid/backpass/issues/26)) ([0445c33](https://github.com/kunchenguid/backpass/commit/0445c330701fc82686c1113483ea35c9226da1e1))
+
 ## [0.1.1](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.0...backpass-v0.1.1) (2026-08-23)
 
 
