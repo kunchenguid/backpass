@@ -1,0 +1,32 @@
+{
+  "workflow_name": "Require no-mistakes",
+  "pull_request": {
+    "types": [
+      "opened",
+      "edited",
+      "reopened"
+    ],
+    "branches": [
+      "main"
+    ]
+  },
+  "permissions": {
+    "contents": "read"
+  },
+  "concurrency": {
+    "group": "no-mistakes-required-${{ github.event.pull_request.number }}-${{ (github.event.action == 'opened' || github.event.action == 'edited') && github.run_id || 'head-change' }}",
+    "cancel-in-progress": true
+  },
+  "job": {
+    "id": "check",
+    "check_name": "PR must be raised via no-mistakes",
+    "runner": "ubuntu-latest",
+    "condition": "github.event.pull_request.user.login != 'github-actions[bot]' && github.event.pull_request.user.login != 'dependabot[bot]'",
+    "action_steps": [
+      {
+        "name": "Verify no-mistakes signature and pipeline attestation in PR body",
+        "uses": "kunchenguid/no-mistakes/.github/actions/require-no-mistakes@32d396ac0f29135daf7fcb9964aba9d5f4e796d6"
+      }
+    ]
+  }
+}

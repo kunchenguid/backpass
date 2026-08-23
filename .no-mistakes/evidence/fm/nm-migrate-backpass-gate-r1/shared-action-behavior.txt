@@ -1,0 +1,37 @@
+Pinned shared action behavior at 32d396ac0f29135daf7fcb9964aba9d5f4e796d6
+
+=== matching head and completed steps passes ===
+Found no-mistakes signature in PR #42 body.
+Found structurally compliant pipeline step attestation.
+::warning::PR-body attestation is author-editable and is not cryptographic proof that no-mistakes produced it.
+exit=0 expected=0
+outputs:
+exempt=false
+compliant=true
+
+=== stale head attestation fails ===
+::error::Pipeline attestation head_sha does not match the current PR head.
+
+attestation.head_sha: old456
+PR head: abc123
+
+A later push must not pass on an older attestation. Re-run 'git push no-mistakes' so the PR body attestation binds to the current head.
+
+See CONTRIBUTING.md for setup and the full workflow.
+
+PR author: contributor
+Found no-mistakes signature in PR #42 body.
+exit=1 expected=1
+outputs:
+exempt=false
+compliant=false
+exempt=false
+
+=== duplicate step uses last verdict ===
+Found no-mistakes signature in PR #42 body.
+Found structurally compliant pipeline step attestation.
+::warning::PR-body attestation is author-editable and is not cryptographic proof that no-mistakes produced it.
+exit=0 expected=0
+outputs:
+exempt=false
+compliant=true
