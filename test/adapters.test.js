@@ -146,9 +146,9 @@ function withHermesHome(dir, fn) {
 
 /**
  * @param {string} dir
- * @param {{ sessions?: object[], messages?: object[], schema?: string }} [spec]
+ * @param {{ sessions?: object[], messages?: object[], schema?: string, activeColumn?: boolean }} [spec]
  */
-function writeHermesDb(dir, { sessions = [], messages = [], schema } = {}) {
+function writeHermesDb(dir, { sessions = [], messages = [], schema, activeColumn = false } = {}) {
   fs.mkdirSync(dir, { recursive: true });
   const db = new DatabaseSync(path.join(dir, "state.db"));
   try {
@@ -176,6 +176,7 @@ function writeHermesDb(dir, { sessions = [], messages = [], schema } = {}) {
         tool_calls TEXT,
         tool_name TEXT,
         timestamp REAL NOT NULL
+        ${activeColumn ? ", active INTEGER NOT NULL DEFAULT 1" : ""}
       );
     `);
     const insertSession = db.prepare(
@@ -196,11 +197,11 @@ function writeHermesDb(dir, { sessions = [], messages = [], schema } = {}) {
     }
     const insertMessage = db.prepare(
       `INSERT INTO messages
-         (id, session_id, role, content, tool_call_id, tool_calls, tool_name, timestamp)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, session_id, role, content, tool_call_id, tool_calls, tool_name, timestamp${activeColumn ? ", active" : ""})
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?${activeColumn ? ", ?" : ""})`,
     );
     for (const m of messages) {
-      insertMessage.run(
+      const values = [
         m.id,
         m.session_id,
         m.role,
@@ -209,7 +210,9 @@ function writeHermesDb(dir, { sessions = [], messages = [], schema } = {}) {
         m.tool_calls ?? null,
         m.tool_name ?? null,
         m.timestamp ?? 1_700_000_000 + m.id,
-      );
+      ];
+      if (activeColumn) values.push(m.active ?? 1);
+      insertMessage.run(...values);
     }
   } finally {
     db.close();
@@ -227,7 +230,45 @@ test("hermes adapter recovers cli/acp cwd, skips gateway, converts seconds to ms
   const junk = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-hermes-junk-"));
   writeHermesDb(junk, { schema: "CREATE TABLE dummy (id INTEGER)" });
   await withHermesHome(junk, async () => {
-    assert.deepEqual(await hermes.discover(), [], "a db without sessions fails soft");
+    await assert.rejects(hermes.discover(), /no such table: sessions/);
+  });
+
+  const current = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-hermes-current-"));
+  writeHermesDb(current, {
+    activeColumn: true,
+    sessions: [
+      {
+        id: "cli-rewound",
+        source: "cli",
+        system_prompt: "Working directory: /repo/demo",
+        started_at: 1_600_000_000,
+      },
+    ],
+    messages: [
+      {
+        id: 1,
+        session_id: "cli-rewound",
+        role: "user",
+        content: "Active turn",
+        timestamp: 1_600_000_100,
+      },
+      {
+        id: 2,
+        session_id: "cli-rewound",
+        role: "user",
+        content: "Rewound turn",
+        timestamp: 1_700_000_000,
+        active: 0,
+      },
+    ],
+  });
+  await withHermesHome(current, async () => {
+    assert.deepEqual(await hermes.discover({ cutoffMs: 1_700_000_000_000 }), []);
+    const [rewound] = await hermes.discover();
+    assert.deepEqual(
+      messages((await hermes.read(rewound)).events).map((message) => message.text),
+      ["Active turn"],
+    );
   });
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-hermes-"));

@@ -67,9 +67,17 @@ function recoverCwd(row, source) {
   return null;
 }
 
+function activeMessageFilter(db, alias = "") {
+  const hasActive = db
+    .prepare("PRAGMA table_info(messages)")
+    .all()
+    .some((column) => column.name === "active");
+  return hasActive ? ` AND ${alias}active = 1` : "";
+}
+
 /**
  * Discovery is one indexed query. The caller applies the shared association
- * tiers. Missing DB or schema surprises yield an empty list, never a throw.
+ * tiers and handles schema errors per harness. A missing DB yields an empty list.
  * @param {{ cutoffMs?: number }} [options]
  */
 export async function discover({ cutoffMs } = {}) {
@@ -78,6 +86,7 @@ export async function discover({ cutoffMs } = {}) {
 
   const cutoffSec = cutoffMs == null ? null : cutoffMs / 1000;
   try {
+    const activeFilter = activeMessageFilter(db, "m.");
     const rows = db
       .prepare(
         `SELECT s.id, s.source, s.model, s.model_config, s.system_prompt, s.title,
@@ -86,7 +95,7 @@ export async function discover({ cutoffMs } = {}) {
                     COALESCE(s.ended_at, s.started_at),
                     COALESCE((SELECT MAX(m.timestamp)
                                 FROM messages m
-                               WHERE m.session_id = s.id),
+                               WHERE m.session_id = s.id${activeFilter}),
                              s.started_at)) AS activity_at
            FROM sessions s
           WHERE lower(s.source) IN ('cli', 'acp')
@@ -95,7 +104,7 @@ export async function discover({ cutoffMs } = {}) {
                      COALESCE(s.ended_at, s.started_at),
                      COALESCE((SELECT MAX(m.timestamp)
                                  FROM messages m
-                                WHERE m.session_id = s.id),
+                                WHERE m.session_id = s.id${activeFilter}),
                               s.started_at)) >= ?)`,
       )
       .all(cutoffSec, cutoffSec ?? 0);
@@ -125,8 +134,6 @@ export async function discover({ cutoffMs } = {}) {
       });
     }
     return out;
-  } catch {
-    return [];
   } finally {
     db.close();
   }
@@ -176,11 +183,12 @@ export async function read(ref) {
 
   try {
     const sessionId = ref.extra?.sessionId || ref.id;
+    const activeFilter = activeMessageFilter(db);
     const rows = db
       .prepare(
         `SELECT role, CAST(content AS BLOB) AS content, tool_call_id, tool_calls, tool_name
            FROM messages
-          WHERE session_id = ?
+          WHERE session_id = ?${activeFilter}
           ORDER BY timestamp, id`,
       )
       .all(sessionId);
