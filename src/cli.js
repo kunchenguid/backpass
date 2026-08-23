@@ -53,6 +53,7 @@ const OPTIONS = {
 
   "dry-run": { type: "boolean" },
   "no-ui": { type: "boolean" },
+  "no-open": { type: "boolean" },
   "no-auto-agent": { type: "boolean" },
   force: { type: "boolean" },
   limit: { type: "string" },
@@ -114,6 +115,7 @@ BUDGET AND SHAPE
 
 APPLY
   --no-ui                  terminal accept/reject instead of the Lavish surface
+  --no-open                print the review surface URL without opening a browser
   --dry-run                show what would be written, write nothing
   --force                  re-analyze transcripts that already have fresh evidence,
                            and re-probe agents instead of trusting the probe cache

@@ -15,6 +15,11 @@
   <a href="https://x.com/kunchenguid"
     ><img alt="X" src="https://img.shields.io/badge/X-@kunchenguid-black?style=flat-square"
   /></a>
+  <a href="https://discord.gg/Wsy2NpnZDu"
+    ><img
+      alt="Discord"
+      src="https://img.shields.io/discord/1439901831038763092?style=flat-square&label=discord"
+  /></a>
 </p>
 
 <h3 align="center">Gradient descent for your agent memory.</h3>
@@ -226,12 +231,15 @@ the evidence quotes and their sources, a live budget gauge, and ACCEPT / REJECT.
 
 The surface is a static template shipped in the package - the CLI injects one JSON payload,
 so it is instant, deterministic, and identical every run. Nothing there is model-generated.
+It opens in your default browser when one is available; the URL is always printed too, so
+a headless box or `--no-open` just hands you the link.
 
 There is no DEFER button, and it isn't missing: **rejections are remembered.** A rejected
 edit is not proposed again unless materially new evidence arrives.
 
 ```sh
 backpass apply --no-ui     # same decision, in the terminal
+backpass apply --no-open   # print the surface URL, don't launch a browser
 backpass apply --dry-run   # show what would be written
 ```
 

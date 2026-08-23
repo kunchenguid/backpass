@@ -1,0 +1,25 @@
+#!/usr/bin/env node
+// Stand-in for `lavish-axi`, shaped like the real CLI's output: the open command prints
+// the session URL YAML-quoted, and `poll` returns whatever the scenario file queues,
+// one entry per call, so tests can script a chatty review surface.
+import fs from "node:fs";
+
+const [cmd, file] = process.argv.slice(2);
+const scenarioPath = process.env.FAKE_LAVISH_SCENARIO;
+const scenario = scenarioPath && fs.existsSync(scenarioPath) ? JSON.parse(fs.readFileSync(scenarioPath, "utf8")) : {};
+
+if (cmd === "poll") {
+  const next = scenario.polls?.shift();
+  if (scenarioPath) fs.writeFileSync(scenarioPath, JSON.stringify(scenario));
+  if (!next) {
+    console.error("fake lavish-axi: poll queue exhausted");
+    process.exit(2);
+  }
+  process.stdout.write(`session:\n  file: ${file}\n  status: feedback\n${next}\n`);
+} else if (cmd === "end") {
+  process.stdout.write(`session:\n  file: ${file}\n  status: ended\n`);
+} else {
+  process.stdout.write(
+    `session:\n  file: ${cmd}\n  url: "${scenario.url || "http://127.0.0.1:4387/session/51233fdaf6389690"}"\n  status: opened\n`,
+  );
+}

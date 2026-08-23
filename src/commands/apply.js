@@ -2,6 +2,7 @@ import { UserError, color, info, json, out, warn } from "../logger.js";
 import { applyDecisions } from "../apply/writer.js";
 import { closeApplySurface, openApplySurface, pollDecisions, renderApplySurface } from "../apply/lavish.js";
 import { reviewInTerminal } from "../apply/terminal.js";
+import { openInBrowser } from "../apply/browser.js";
 import { budgetBar, formatTokens } from "../tokens.js";
 
 /**
@@ -45,6 +46,8 @@ export async function cmdApply(ctx) {
     surfaceFile = renderApplySurface(proposal, config.state, ctx.version);
     const url = await openApplySurface(surfaceFile);
     info(`${color.cyan("·")} review surface: ${url || surfaceFile}`);
+    // Best effort: the printed URL above is the fallback when nothing opens.
+    if (!ctx.flags["no-open"]) openInBrowser(url);
     decisions = await pollDecisions(surfaceFile, editIds);
   }
 

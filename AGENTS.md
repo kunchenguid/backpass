@@ -86,6 +86,13 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   (`classifyAcpxFailure`). Reasoning effort is a per-adapter session option
   (`EFFORT_OPTION_KEYS`), so effortful calls always go through `sessionPrompt`. Verdicts
   cache in `.backpass/agent-probe-cache.json`.
+- **The Lavish apply surface is chatty and its output is YAML-quoted.** `lavish-axi poll`
+  can return feedback that is not a decision vector (a comment, a queued layout report) any
+  number of times before the real one; `pollDecisions` in `src/apply/lavish.js` announces
+  each wait state once and never per cycle. Session URLs are printed as `url: "http://..."`,
+  so parse them with `extractUrl`, never a bare `\S+`. Browser launch is best effort
+  (`src/apply/browser.js`): the printed URL is the contract. `test/fixtures/fake-lavish/`
+  stands in for the CLI via `BACKPASS_LAVISH_BIN` in tests.
 - Cursor IDE support is deliberately deferred to v1.1 (`--include-cursor-ide`, best effort);
   see the header of `src/discovery/adapters/cursor-ide.js` for why.
 
