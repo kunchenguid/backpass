@@ -16,7 +16,7 @@ import { SELF_SESSION_SENTINEL } from "../prompts.js";
  *
  * The check reads only the head of the file and keys on the JSON-encoded user text as
  * every file-backed harness records it (`"text":"..."` / `"content":"..."` /
- * `"message":"..."`). SQLite-backed stores (opencode, cursor IDE) have no file to
+ * `"message":"..."`). SQLite-backed stores (opencode, hermes, cursor IDE) have no file to
  * inspect and acpx does not drive them, so they are passed through.
  */
 

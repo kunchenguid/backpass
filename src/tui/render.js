@@ -33,6 +33,7 @@ const HARNESS_HUES = {
   grok: "magenta",
   cursor: "blue",
   "cursor-ide": "blue",
+  hermes: "yellow",
 };
 
 /**
@@ -302,7 +303,7 @@ function discoverDetail(state, theme, width, spin) {
       const scanned = `${formatCount(h.scanned)} sessions`;
       const fresh = h.newCount > 0 || h.scanned > 0 ? ` · ${formatCount(h.newCount)} new` : "";
       const self = h.self > 0 ? ` · ${formatCount(h.self)} self` : "";
-      const query = harness === "opencode" ? "1 sqlite query" : `${scanned}${fresh}${self}`;
+      const query = harness === "opencode" || harness === "hermes" ? "1 sqlite query" : `${scanned}${fresh}${self}`;
       activity = theme.paint(fitPlain(query, activityWidth), "dim");
       count = padVis(
         `${theme.paint(formatCount(h.matched), "text", { bold: true })} ${theme.paint("this repo", "faint")}`,

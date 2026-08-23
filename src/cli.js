@@ -83,7 +83,7 @@ COMMANDS
 COLLECT SAMPLES
   --since <dur>            only sessions newer than this (30d, 12h, 2w, all)  [30d]
   --harness <a,b>          limit to these harnesses
-                           (claude, codex, pi, opencode, grok, cursor)
+                           (claude, codex, pi, opencode, grok, cursor, hermes)
   --strict                 deterministic associations only (tiers 1 and 2)
   --include-cursor-ide     also scan the Cursor IDE store (best-effort, v1.1 preview)
   --limit <n>              analyze at most N transcripts this run (newest first)

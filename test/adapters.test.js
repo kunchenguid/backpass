@@ -1,13 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { DatabaseSync } from "node:sqlite";
 
 import * as claude from "../src/discovery/adapters/claude.js";
 import * as codex from "../src/discovery/adapters/codex.js";
 import * as pi from "../src/discovery/adapters/pi.js";
 import * as grok from "../src/discovery/adapters/grok.js";
 import * as cursorCli from "../src/discovery/adapters/cursor-cli.js";
+import * as hermes from "../src/discovery/adapters/hermes.js";
 import { statOrNull } from "../src/discovery/adapters/shared.js";
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
@@ -120,4 +124,223 @@ test("cursor CLI chat directories are addressed by md5 of the cwd", () => {
     cursorCli.cwdHash("/Users/kunchen/.treehouse/sshhip-b697bb/9/sshhip"),
     "43ed8ea0825f9a5321fbe6d772769411",
   );
+});
+
+function withHermesHome(dir, fn) {
+  const prev = process.env.HERMES_HOME;
+  process.env.HERMES_HOME = dir;
+  const restore = () => {
+    if (prev === undefined) delete process.env.HERMES_HOME;
+    else process.env.HERMES_HOME = prev;
+  };
+  try {
+    const result = fn();
+    if (result && typeof result.then === "function") return result.finally(restore);
+    restore();
+    return result;
+  } catch (err) {
+    restore();
+    throw err;
+  }
+}
+
+/**
+ * @param {string} dir
+ * @param {{ sessions?: object[], messages?: object[], schema?: string }} [spec]
+ */
+function writeHermesDb(dir, { sessions = [], messages = [], schema } = {}) {
+  fs.mkdirSync(dir, { recursive: true });
+  const db = new DatabaseSync(path.join(dir, "state.db"));
+  try {
+    if (schema) {
+      db.exec(schema);
+      return;
+    }
+    db.exec(`
+      CREATE TABLE sessions (
+        id TEXT PRIMARY KEY,
+        source TEXT,
+        model TEXT,
+        model_config TEXT,
+        system_prompt TEXT,
+        title TEXT,
+        started_at REAL,
+        ended_at REAL
+      );
+      CREATE TABLE messages (
+        id INTEGER PRIMARY KEY,
+        session_id TEXT,
+        role TEXT,
+        content TEXT,
+        tool_call_id TEXT,
+        tool_calls TEXT,
+        tool_name TEXT
+      );
+    `);
+    const insertSession = db.prepare(
+      `INSERT INTO sessions (id, source, model, model_config, system_prompt, title, started_at, ended_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const s of sessions) {
+      insertSession.run(
+        s.id,
+        s.source,
+        s.model ?? null,
+        s.model_config ?? null,
+        s.system_prompt ?? null,
+        s.title ?? null,
+        s.started_at,
+        s.ended_at ?? null,
+      );
+    }
+    const insertMessage = db.prepare(
+      `INSERT INTO messages (id, session_id, role, content, tool_call_id, tool_calls, tool_name)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const m of messages) {
+      insertMessage.run(
+        m.id,
+        m.session_id,
+        m.role,
+        m.content ?? null,
+        m.tool_call_id ?? null,
+        m.tool_calls ?? null,
+        m.tool_name ?? null,
+      );
+    }
+  } finally {
+    db.close();
+  }
+}
+
+test("hermes adapter recovers cli/acp cwd, skips gateway, converts seconds to ms, and folds tools", async () => {
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-hermes-empty-"));
+  await withHermesHome(empty, async () => {
+    assert.deepEqual(await hermes.discover(), []);
+    const emptyRead = await hermes.read({ id: "missing", extra: { sessionId: "missing" } });
+    assert.deepEqual(emptyRead.events, []);
+  });
+
+  const junk = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-hermes-junk-"));
+  writeHermesDb(junk, { schema: "CREATE TABLE dummy (id INTEGER)" });
+  await withHermesHome(junk, async () => {
+    assert.deepEqual(await hermes.discover(), [], "a db without sessions fails soft");
+  });
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-hermes-"));
+  const prompt = "You are Hermes.\nCurrent working directory: /repo/demo\n";
+  const toolCalls = JSON.stringify([
+    {
+      id: "call_1",
+      type: "function",
+      function: { name: "Bash", arguments: JSON.stringify({ command: "npm test" }) },
+    },
+  ]);
+  writeHermesDb(dir, {
+    sessions: [
+      {
+        id: "cli-1",
+        source: "cli",
+        model: "claude-sonnet-4",
+        system_prompt: prompt,
+        title: "CLI session",
+        started_at: 1_700_000_000,
+        ended_at: 1_700_000_060,
+      },
+      {
+        id: "acp-1",
+        source: "acp",
+        model: "claude-sonnet-4",
+        model_config: JSON.stringify({ cwd: "/repo/demo" }),
+        title: "ACP session",
+        started_at: 1_700_000_100,
+      },
+      {
+        id: "wa-1",
+        source: "whatsapp",
+        system_prompt: prompt,
+        started_at: 1_700_000_200,
+      },
+      {
+        id: "cron-1",
+        source: "cron",
+        system_prompt: prompt,
+        started_at: 1_700_000_300,
+      },
+      {
+        id: "cli-nocwd",
+        source: "cli",
+        system_prompt: "no directory line here",
+        started_at: 1_700_000_400,
+      },
+    ],
+    messages: [
+      { id: 1, session_id: "cli-1", role: "user", content: "Please open a PR for the parser fix." },
+      {
+        id: 2,
+        session_id: "cli-1",
+        role: "assistant",
+        content: "I'll run the tests first.",
+        tool_calls: toolCalls,
+      },
+      {
+        id: 3,
+        session_id: "cli-1",
+        role: "tool",
+        tool_call_id: "call_1",
+        tool_name: null,
+        content: "2 passing",
+      },
+      {
+        id: 4,
+        session_id: "cli-1",
+        role: "assistant",
+        content: `\x00json:${JSON.stringify([{ type: "text", text: "Opened PR #2731." }])}`,
+      },
+      {
+        id: 5,
+        session_id: "cli-1",
+        role: "session_meta",
+        content: "session-meta-must-not-surface",
+      },
+    ],
+  });
+
+  await withHermesHome(dir, async () => {
+    const found = await hermes.discover();
+    assert.deepEqual(
+      found.map((row) => row.id).sort(),
+      ["acp-1", "cli-1"],
+      "cli and acp are kept; gateway, cron, and cwd-less cli are skipped",
+    );
+
+    const cli = found.find((row) => row.id === "cli-1");
+    const acp = found.find((row) => row.id === "acp-1");
+    assert.equal(cli.cwd, "/repo/demo");
+    assert.equal(acp.cwd, "/repo/demo");
+    assert.equal(cli.startedAt, 1_700_000_000_000, "epoch seconds become milliseconds");
+    assert.equal(cli.mtimeMs, 1_700_000_060_000);
+    assert.equal(acp.mtimeMs, 1_700_000_100_000, "ended_at falls back to started_at");
+    assert.equal(cli.extra.source, "cli");
+    assert.equal(acp.extra.source, "acp");
+    assert.deepEqual(cli.remotes, []);
+    assert.equal(cli.gitBranch, null);
+
+    const { events, model } = await hermes.read(cli);
+    assert.equal(model, "claude-sonnet-4");
+    assert.deepEqual(
+      messages(events).map((m) => `${m.role}: ${m.text}`),
+      [
+        "user: Please open a PR for the parser fix.",
+        "assistant: I'll run the tests first.",
+        "assistant: Opened PR #2731.",
+      ],
+    );
+    assert.ok(!JSON.stringify(events).includes("session-meta-must-not-surface"), "session_meta rows are dropped");
+
+    const [toolCall] = tools(events);
+    assert.equal(toolCall.name, "Bash", "tool name comes from the matching call when tool_name is null");
+    assert.equal(toolCall.input.command, "npm test");
+    assert.equal(toolCall.result, "2 passing");
+  });
 });

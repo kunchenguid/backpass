@@ -34,10 +34,16 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
 
 ## Sharp edges
 
-- **Transcript formats are undocumented and drift.** Every adapter in
-  `src/discovery/adapters/` is pinned by a golden fixture in `test/fixtures/`. When a
-  harness changes its on-disk shape, fix the adapter and update its fixture together.
-  Adapters must stay fail-soft: an unreadable store warns and is skipped, never throws.
+- **Transcript formats are undocumented and drift.** File adapters in
+  `src/discovery/adapters/` are pinned by golden fixtures in `test/fixtures/`; SQLite
+  adapters (opencode, hermes) build tiny temp databases in tests. When a harness changes
+  its on-disk shape, fix the adapter and its fixture/test together. Adapters must stay
+  fail-soft: an unreadable store warns and is skipped, never throws.
+- **Hermes is first-class but source-filtered.** `src/discovery/adapters/hermes.js` reads
+  `~/.hermes/state.db` (`HERMES_HOME`). Only `cli` and `acp` sessions are ingested;
+  gateway/cron rows share a process cwd and would pollute association. Timestamps are
+  epoch seconds and must be converted to ms. Message content is read as BLOB because
+  node:sqlite truncates TEXT at the `\x00json:` NUL. There is no JSONL fallback.
 - **The live progress view is an enhancement layer, never a dependency.** Pipeline stages
   emit events through `src/progress.js`; `src/tui/` renders them on stderr during the
   default run and buffers/replays the plain logger lines on teardown. Every path must

@@ -11,7 +11,7 @@ import { openReadOnly, safeJsonParse } from "./sqlite.js";
  *   message(id, session_id, data)     - data is JSON: {role, model, time, ...}
  *   part(id, message_id, session_id, data) - data is JSON: {type: text|tool|reasoning|...}
  *
- * This is the best-behaved store of the six: association is a SQL predicate on
+ * This is the best-behaved store: association is a SQL predicate on
  * `session.directory`, deleted worktrees included, and both listing and reading are
  * indexed. Older opencode versions used file storage under `storage/`; that layout is
  * handled as a fallback so long-lived machines still yield transcripts.

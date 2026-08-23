@@ -23,7 +23,7 @@ test("the defaults match the approved design", () => {
   assert.equal(config.minGapEvidence, 2);
   assert.equal(config.jobs, 4);
   assert.equal(config.discovery.since, "30d");
-  assert.deepEqual(config.discovery.harnesses, ["claude", "codex", "pi", "opencode", "grok", "cursor"]);
+  assert.deepEqual(config.discovery.harnesses, ["claude", "codex", "pi", "opencode", "grok", "cursor", "hermes"]);
   assert.ok(!config.discovery.harnesses.includes("cursor-ide"), "Cursor IDE is deferred to v1.1");
   assert.deepEqual(config.analysis, { agent: null, model: null, effort: null }, "agents are auto-picked by default");
   assert.deepEqual(config.synthesis, { agent: null, model: null, effort: null });

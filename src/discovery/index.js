@@ -3,6 +3,7 @@ import * as codex from "./adapters/codex.js";
 import * as pi from "./adapters/pi.js";
 import * as grok from "./adapters/grok.js";
 import * as opencode from "./adapters/opencode.js";
+import * as hermes from "./adapters/hermes.js";
 import * as cursorCli from "./adapters/cursor-cli.js";
 import * as cursorIde from "./adapters/cursor-ide.js";
 
@@ -18,6 +19,7 @@ export const ADAPTERS = {
   pi,
   grok,
   opencode,
+  hermes,
   cursor: cursorCli,
   "cursor-ide": cursorIde,
 };
@@ -34,8 +36,8 @@ export function getAdapter(harness) {
  * Re-scans are then O(new files) - which matters: codex alone had 10,317 rollouts on
  * the machine this was designed against.
  *
- * SQLite-backed stores (opencode, cursor IDE) answer the same question with one indexed
- * query, so they skip the cache entirely.
+ * SQLite-backed stores (opencode, hermes, cursor IDE) answer the same question with one
+ * indexed query, so they skip the cache entirely.
  *
  * Every harness is fail-soft: a store that is missing, unreadable, or has drifted into
  * an unrecognised format produces a named warning and is skipped, never a failed run.
