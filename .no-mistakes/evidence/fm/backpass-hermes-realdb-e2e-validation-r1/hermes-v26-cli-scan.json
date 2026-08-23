@@ -1,0 +1,61 @@
+{
+  "repo": "01M0R86PXM7RDBB71JQ4S21MCE",
+  "perHarness": {
+    "hermes": {
+      "scanned": 2,
+      "matched": 2,
+      "cached": 0,
+      "skipped": 0,
+      "self": 0,
+      "error": null
+    }
+  },
+  "transcripts": [
+    {
+      "harness": "hermes",
+      "id": "hermes-real-acp-v26",
+      "nativeId": "real-acp-v26",
+      "path": "/var/folders/5x/4nqprlbx0518k3ybcb1sz6gr0000gn/T/backpass-hermes-v26-e2e.bGswjY/state.db",
+      "cwd": "/Users/kunchen/.no-mistakes/worktrees/eed9cd424644/01M0R86PXM7RDBB71JQ4S21MCE",
+      "gitBranch": null,
+      "title": "Real Hermes ACP session",
+      "model": "test/acp-model",
+      "startedAt": 1787520366000,
+      "mtimeMs": 1787520376000,
+      "bytes": 0,
+      "experimental": false,
+      "association": {
+        "tier": 1,
+        "confidence": "exact",
+        "reason": "cwd is worktree /Users/kunchen/.no-mistakes/worktrees/eed9cd424644/01M0R86PXM7RDBB71JQ4S21MCE"
+      },
+      "extra": {
+        "sessionId": "real-acp-v26",
+        "source": "acp"
+      }
+    },
+    {
+      "harness": "hermes",
+      "id": "hermes-real-cli-v26",
+      "nativeId": "real-cli-v26",
+      "path": "/var/folders/5x/4nqprlbx0518k3ybcb1sz6gr0000gn/T/backpass-hermes-v26-e2e.bGswjY/state.db",
+      "cwd": "/Users/kunchen/.no-mistakes/worktrees/eed9cd424644/01M0R86PXM7RDBB71JQ4S21MCE",
+      "gitBranch": null,
+      "title": "Real Hermes CLI session",
+      "model": "test/cli-model",
+      "startedAt": 1787520356000,
+      "mtimeMs": 1787520366000,
+      "bytes": 0,
+      "experimental": false,
+      "association": {
+        "tier": 1,
+        "confidence": "exact",
+        "reason": "cwd is worktree /Users/kunchen/.no-mistakes/worktrees/eed9cd424644/01M0R86PXM7RDBB71JQ4S21MCE"
+      },
+      "extra": {
+        "sessionId": "real-cli-v26",
+        "source": "cli"
+      }
+    }
+  ]
+}
