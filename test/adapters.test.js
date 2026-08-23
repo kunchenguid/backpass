@@ -146,9 +146,9 @@ function withHermesHome(dir, fn) {
 
 /**
  * @param {string} dir
- * @param {{ sessions?: object[], messages?: object[], schema?: string, activeColumn?: boolean }} [spec]
+ * @param {{ sessions?: object[], messages?: object[], schema?: string, activeColumn?: boolean, cwdColumn?: boolean }} [spec]
  */
-function writeHermesDb(dir, { sessions = [], messages = [], schema, activeColumn = false } = {}) {
+function writeHermesDb(dir, { sessions = [], messages = [], schema, activeColumn = false, cwdColumn = false } = {}) {
   fs.mkdirSync(dir, { recursive: true });
   const db = new DatabaseSync(path.join(dir, "state.db"));
   try {
@@ -166,6 +166,7 @@ function writeHermesDb(dir, { sessions = [], messages = [], schema, activeColumn
         title TEXT,
         started_at REAL,
         ended_at REAL
+        ${cwdColumn ? ", cwd TEXT" : ""}
       );
       CREATE TABLE messages (
         id INTEGER PRIMARY KEY,
@@ -180,11 +181,11 @@ function writeHermesDb(dir, { sessions = [], messages = [], schema, activeColumn
       );
     `);
     const insertSession = db.prepare(
-      `INSERT INTO sessions (id, source, model, model_config, system_prompt, title, started_at, ended_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO sessions (id, source, model, model_config, system_prompt, title, started_at, ended_at${cwdColumn ? ", cwd" : ""})
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?${cwdColumn ? ", ?" : ""})`,
     );
     for (const s of sessions) {
-      insertSession.run(
+      const values = [
         s.id,
         s.source,
         s.model ?? null,
@@ -193,7 +194,9 @@ function writeHermesDb(dir, { sessions = [], messages = [], schema, activeColumn
         s.title ?? null,
         s.started_at,
         s.ended_at ?? null,
-      );
+      ];
+      if (cwdColumn) values.push(s.cwd ?? null);
+      insertSession.run(...values);
     }
     const insertMessage = db.prepare(
       `INSERT INTO messages
@@ -429,5 +432,84 @@ test("hermes adapter recovers cli/acp cwd, skips gateway, converts seconds to ms
     assert.equal(toolCall.name, "Bash", "tool name comes from the matching call when tool_name is null");
     assert.equal(toolCall.input.command, "npm test");
     assert.equal(toolCall.result, "2 passing");
+  });
+});
+
+test("hermes adapter recovers v26 cli cwd from sessions.cwd when system_prompt is null, and still skips cron", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-hermes-v26-"));
+  writeHermesDb(dir, {
+    cwdColumn: true,
+    sessions: [
+      {
+        id: "cli-v26",
+        source: "cli",
+        model: "openai/gpt-4o-mini",
+        cwd: "/repo/demo",
+        started_at: 1_700_000_000,
+      },
+      {
+        id: "acp-v26",
+        source: "acp",
+        model: "openai/gpt-4o-mini",
+        model_config: JSON.stringify({ cwd: "/repo/demo" }),
+        started_at: 1_700_000_100,
+      },
+      {
+        id: "cron-v26",
+        source: "cron",
+        cwd: "/repo/demo",
+        system_prompt: "Current working directory: /repo/demo\n",
+        started_at: 1_700_000_200,
+      },
+    ],
+    messages: [
+      { id: 1, session_id: "cli-v26", role: "user", content: "hello from v26 cli" },
+      {
+        id: 2,
+        session_id: "cli-v26",
+        role: "assistant",
+        content: "running pwd",
+        tool_calls: JSON.stringify([
+          {
+            id: "call_pwd",
+            type: "function",
+            function: { name: "terminal", arguments: JSON.stringify({ command: "pwd" }) },
+          },
+        ]),
+      },
+      {
+        id: 3,
+        session_id: "cli-v26",
+        role: "tool",
+        tool_call_id: "call_pwd",
+        tool_name: null,
+        content: "/repo/demo",
+      },
+    ],
+  });
+
+  await withHermesHome(dir, async () => {
+    const found = await hermes.discover();
+    assert.deepEqual(
+      found.map((row) => row.id).sort(),
+      ["acp-v26", "cli-v26"],
+      "v26 cli/acp are kept; cron is skipped even when sessions.cwd is set",
+    );
+    const cli = found.find((row) => row.id === "cli-v26");
+    const acp = found.find((row) => row.id === "acp-v26");
+    assert.equal(cli.cwd, "/repo/demo");
+    assert.equal(acp.cwd, "/repo/demo");
+    assert.equal(cli.startedAt, 1_700_000_000_000);
+
+    const { events, model } = await hermes.read(cli);
+    assert.equal(model, "openai/gpt-4o-mini");
+    assert.deepEqual(
+      messages(events).map((m) => `${m.role}: ${m.text}`),
+      ["user: hello from v26 cli", "assistant: running pwd"],
+    );
+    const [toolCall] = tools(events);
+    assert.equal(toolCall.name, "terminal");
+    assert.equal(toolCall.input.command, "pwd");
+    assert.equal(toolCall.result, "/repo/demo");
   });
 });

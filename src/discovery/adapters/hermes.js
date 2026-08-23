@@ -7,15 +7,15 @@ import { openReadOnly, safeJsonParse } from "./sqlite.js";
  * hermes: ~/.hermes/state.db (sqlite)
  *
  * Observed schema version 13 (upstream is 26; SELECT named columns so additive
- * columns are tolerated). Hermes has no cwd, git branch, or git remote column.
- *
- * Association is recovered only for source in ('cli', 'acp'):
+ * columns are tolerated). v26 adds sessions.cwd; CLI rows leave system_prompt
+ * NULL and store the project path there. ACP still snapshots cwd on
+ * model_config. Prefer the cwd column when present, then the v13 paths:
  *   acp - model_config.cwd when it is an absolute path
  *   cli - first `Current working directory:` / `Working directory:` line in
  *         system_prompt
- * Gateway / cron / whatsapp sessions are skipped: their prompt cwd is the
- * gateway process cwd, not a project, and would pin unrelated sessions to one
- * repo. Sessions with no recoverable cwd are skipped.
+ * Gateway / cron / whatsapp sessions are skipped even if sessions.cwd is set:
+ * their path is the gateway process cwd, not a project, and would pin
+ * unrelated sessions to one repo. Sessions with no recoverable cwd are skipped.
  *
  * Timestamps are epoch seconds; backpass uses milliseconds (x1000).
  * Structured content uses a `\x00json:` prefix; node:sqlite truncates TEXT at
@@ -62,17 +62,25 @@ function cwdFromPrompt(prompt) {
 }
 
 function recoverCwd(row, source) {
+  if (looksAbsolute(row.cwd)) return row.cwd;
   if (source === "acp") return cwdFromConfig(row.model_config);
   if (source === "cli") return cwdFromPrompt(row.system_prompt);
   return null;
 }
 
-function activeMessageFilter(db, alias = "") {
-  const hasActive = db
-    .prepare("PRAGMA table_info(messages)")
+function tableHasColumn(db, table, column) {
+  return db
+    .prepare(`PRAGMA table_info(${table})`)
     .all()
-    .some((column) => column.name === "active");
-  return hasActive ? ` AND ${alias}active = 1` : "";
+    .some((entry) => entry.name === column);
+}
+
+function activeMessageFilter(db, alias = "") {
+  return tableHasColumn(db, "messages", "active") ? ` AND ${alias}active = 1` : "";
+}
+
+function sessionCwdSelect(db) {
+  return tableHasColumn(db, "sessions", "cwd") ? ", s.cwd" : "";
 }
 
 /**
@@ -87,10 +95,11 @@ export async function discover({ cutoffMs } = {}) {
   const cutoffSec = cutoffMs == null ? null : cutoffMs / 1000;
   try {
     const activeFilter = activeMessageFilter(db, "m.");
+    const cwdSelect = sessionCwdSelect(db);
     const rows = db
       .prepare(
         `SELECT s.id, s.source, s.model, s.model_config, s.system_prompt, s.title,
-                s.started_at, s.ended_at,
+                s.started_at, s.ended_at${cwdSelect},
                 MAX(s.started_at,
                     COALESCE(s.ended_at, s.started_at),
                     COALESCE((SELECT MAX(m.timestamp)

@@ -41,9 +41,10 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   fail-soft: an unreadable store warns and is skipped, never throws.
 - **Hermes is first-class but source-filtered.** `src/discovery/adapters/hermes.js` reads
   `~/.hermes/state.db` (`HERMES_HOME`). Only `cli` and `acp` sessions are ingested;
-  gateway/cron rows share a process cwd and would pollute association. Timestamps are
-  epoch seconds and must be converted to ms. Message content is read as BLOB because
-  node:sqlite truncates TEXT at the `\x00json:` NUL. There is no JSONL fallback.
+  gateway/cron rows share a process cwd and would pollute association. v26 stores CLI cwd
+  on `sessions.cwd` (system_prompt is often NULL); ACP still uses `model_config.cwd`.
+  Timestamps are epoch seconds and must be converted to ms. Message content is read as
+  BLOB because node:sqlite truncates TEXT at the `\x00json:` NUL. There is no JSONL fallback.
 - **The live progress view is an enhancement layer, never a dependency.** Pipeline stages
   emit events through `src/progress.js`; `src/tui/` renders them on stderr during the
   default run and buffers/replays the plain logger lines on teardown. Every path must
