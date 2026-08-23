@@ -9,10 +9,13 @@ import { DatabaseSync } from "node:sqlite";
 import * as claude from "../src/discovery/adapters/claude.js";
 import * as codex from "../src/discovery/adapters/codex.js";
 import * as pi from "../src/discovery/adapters/pi.js";
+import * as omp from "../src/discovery/adapters/omp.js";
 import * as grok from "../src/discovery/adapters/grok.js";
 import * as cursorCli from "../src/discovery/adapters/cursor-cli.js";
 import * as hermes from "../src/discovery/adapters/hermes.js";
 import { statOrNull } from "../src/discovery/adapters/shared.js";
+import { ALL_HARNESSES } from "../src/config.js";
+import { ADAPTERS } from "../src/discovery/index.js";
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
 
@@ -95,6 +98,44 @@ test("pi adapter reads the session header and drops thinking blocks", () => {
   const [toolCall] = tools(events);
   assert.equal(toolCall.name, "bash");
   assert.equal(toolCall.result, "nothing to commit");
+});
+
+test("omp adapter finds the session header after the leading title line", () => {
+  // Pinned against a real ~10k-file OMP store: most files start with a
+  // {type:"title"} line; the session header only follows it.
+  const file = path.join(FIXTURES, "omp-session.jsonl");
+  const descriptor = omp.classify(candidateFor(file));
+  assert.ok(descriptor, "title-first sessions must classify, not be skipped");
+  assert.equal(descriptor.id, "omp-1234");
+  assert.equal(descriptor.cwd, "/repo/demo");
+  assert.equal(descriptor.title, "Understand src changes", "title line is surfaced");
+  assert.deepEqual(descriptor.remotes, []);
+  assert.equal(descriptor.startedAt, Date.parse("2026-08-20T10:00:00.000Z"));
+});
+
+test("omp adapter reads model_change.model, drops thinking, and folds tool results", () => {
+  const file = path.join(FIXTURES, "omp-session.jsonl");
+  const { events, model } = omp.read({ path: file });
+  assert.equal(model, "openai-codex/gpt-5.5");
+  assert.deepEqual(
+    messages(events).map((m) => `${m.role}: ${m.text}`),
+    [
+      "user: What changed in the parser?",
+      "assistant: Running the tests first.",
+      "assistant: Tests pass; the parser fix is safe.",
+    ],
+  );
+  assert.ok(!JSON.stringify(events).includes("internal reasoning"), "thinking must be dropped");
+  const [toolCall] = tools(events);
+  assert.equal(toolCall.name, "bash");
+  assert.equal(toolCall.input.command, "npm test");
+  assert.equal(toolCall.result, "2 passing");
+});
+
+test("omp stays wired as a harness and adapter", () => {
+  // Fails if anyone removes the omp registration from either surface.
+  assert.ok(ADAPTERS.omp, "omp must stay registered in ADAPTERS");
+  assert.ok(ALL_HARNESSES.includes("omp"), "omp must stay in ALL_HARNESSES");
 });
 
 test("grok adapter reads remotes from summary.json and tool calls off the assistant record", () => {

@@ -1,6 +1,7 @@
 import * as claude from "./adapters/claude.js";
 import * as codex from "./adapters/codex.js";
 import * as pi from "./adapters/pi.js";
+import * as omp from "./adapters/omp.js";
 import * as grok from "./adapters/grok.js";
 import * as opencode from "./adapters/opencode.js";
 import * as hermes from "./adapters/hermes.js";
@@ -16,6 +17,7 @@ import { warn } from "../logger.js";
 export const ADAPTERS = {
   claude,
   codex,
+  omp,
   pi,
   grok,
   opencode,
