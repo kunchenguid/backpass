@@ -90,6 +90,9 @@ backpass reads the local transcript stores of seven harnesses directly. No API, 
 | **cursor CLI** | `~/.cursor/chats/<md5(cwd)>/<uuid>/`           | `meta.json` `cwd`                       |
 | **hermes**     | `~/.hermes/state.db` (sqlite)                  | CLI prompt cwd / ACP `model_config.cwd` |
 
+Hermes collection includes CLI and ACP sessions only. Gateway, cron, and WhatsApp sessions
+are excluded because their recorded cwd belongs to the shared gateway process, not a project.
+
 Association runs in three tiers:
 
 1. **Tier 1 - deterministic.** The session's cwd is (or sits inside) one of this repo's
