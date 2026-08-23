@@ -1,0 +1,14 @@
+{
+  "repo": "hermes-e2e-repo",
+  "perHarness": {
+    "hermes": {
+      "scanned": 0,
+      "matched": 0,
+      "cached": 0,
+      "skipped": 0,
+      "self": 0,
+      "error": "no such table: sessions"
+    }
+  },
+  "transcripts": []
+}

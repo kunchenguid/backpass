@@ -1,0 +1,45 @@
+{
+  "discovered": [
+    {
+      "id": "cli-e2e",
+      "cwd": "/Users/kunchen/.no-mistakes/evidence/01M0R4P06BWXXK7WFCN9RN3D69/hermes-e2e-repo",
+      "startedAt": 1787517370000,
+      "mtimeMs": 1787517375000
+    },
+    {
+      "id": "acp-e2e",
+      "cwd": "/Users/kunchen/.no-mistakes/evidence/01M0R4P06BWXXK7WFCN9RN3D69/hermes-e2e-repo",
+      "startedAt": 1787517380000,
+      "mtimeMs": 1787517381000
+    }
+  ],
+  "cliEvents": [
+    {
+      "kind": "message",
+      "role": "user",
+      "text": "Fix the parser"
+    },
+    {
+      "kind": "message",
+      "role": "assistant",
+      "text": "Running tests"
+    },
+    {
+      "kind": "tool",
+      "name": "Bash",
+      "input": {
+        "command": "pnpm test"
+      },
+      "result": "all targeted tests passed",
+      "status": "completed"
+    },
+    {
+      "kind": "message",
+      "role": "assistant",
+      "text": "Parser fixed."
+    }
+  ],
+  "excludedGateway": true,
+  "excludedInactiveMessage": true,
+  "excludedSessionMeta": true
+}

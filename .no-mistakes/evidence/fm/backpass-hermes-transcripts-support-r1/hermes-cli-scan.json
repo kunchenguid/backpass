@@ -1,0 +1,61 @@
+{
+  "repo": "hermes-e2e-repo",
+  "perHarness": {
+    "hermes": {
+      "scanned": 2,
+      "matched": 2,
+      "cached": 0,
+      "skipped": 0,
+      "self": 0,
+      "error": null
+    }
+  },
+  "transcripts": [
+    {
+      "harness": "hermes",
+      "id": "hermes-acp-e2e",
+      "nativeId": "acp-e2e",
+      "path": "/Users/kunchen/.no-mistakes/evidence/01M0R4P06BWXXK7WFCN9RN3D69/hermes-home/state.db",
+      "cwd": "/Users/kunchen/.no-mistakes/evidence/01M0R4P06BWXXK7WFCN9RN3D69/hermes-e2e-repo",
+      "gitBranch": null,
+      "title": "ACP E2E",
+      "model": "claude-sonnet-4",
+      "startedAt": 1787517380000,
+      "mtimeMs": 1787517381000,
+      "bytes": 0,
+      "experimental": false,
+      "association": {
+        "tier": 1,
+        "confidence": "exact",
+        "reason": "cwd is worktree /Users/kunchen/.no-mistakes/evidence/01M0R4P06BWXXK7WFCN9RN3D69/hermes-e2e-repo"
+      },
+      "extra": {
+        "sessionId": "acp-e2e",
+        "source": "acp"
+      }
+    },
+    {
+      "harness": "hermes",
+      "id": "hermes-cli-e2e",
+      "nativeId": "cli-e2e",
+      "path": "/Users/kunchen/.no-mistakes/evidence/01M0R4P06BWXXK7WFCN9RN3D69/hermes-home/state.db",
+      "cwd": "/Users/kunchen/.no-mistakes/evidence/01M0R4P06BWXXK7WFCN9RN3D69/hermes-e2e-repo",
+      "gitBranch": null,
+      "title": "CLI E2E",
+      "model": "claude-sonnet-4",
+      "startedAt": 1787517370000,
+      "mtimeMs": 1787517375000,
+      "bytes": 0,
+      "experimental": false,
+      "association": {
+        "tier": 1,
+        "confidence": "exact",
+        "reason": "cwd is worktree /Users/kunchen/.no-mistakes/evidence/01M0R4P06BWXXK7WFCN9RN3D69/hermes-e2e-repo"
+      },
+      "extra": {
+        "sessionId": "cli-e2e",
+        "source": "cli"
+      }
+    }
+  ]
+}
