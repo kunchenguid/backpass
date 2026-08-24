@@ -535,13 +535,11 @@ test("apply preflight skips inapplicable accepted edits and still writes the res
     edit: memoryEdit((t) => t.replace("- Use Node 18 via nvm before running any script.\n", "")),
     annotation: { edits: [claim(["H1"], { kind: "remove", title: "drop node pin" })] },
   });
-  proposal.edits.push({
-    id: "e-stale",
-    file: proposal.memoryFile.path,
-    targetsMemoryFile: true,
-    find: "text that is not in the file at all",
-    replace: "x",
-  });
+  const stale = structuredClone(proposal.edits[0]);
+  stale.id = "e-stale";
+  stale.hunks[0].find = "text that is not in the file at all";
+  stale.hunks[0].replace = "x";
+  proposal.edits.push(stale);
 
   const results = applyDecisions({
     proposal,
