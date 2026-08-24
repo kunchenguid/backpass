@@ -120,6 +120,29 @@ test("omp adapter surfaces titles stored on the session header", () => {
   assert.equal(descriptor.title, "Review parser changes");
 });
 
+test("omp classify falls back to the filename for a malformed session id", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-omp-badid-"));
+  const file = path.join(dir, "session.jsonl");
+  fs.writeFileSync(
+    file,
+    [
+      JSON.stringify({
+        type: "session",
+        version: 3,
+        id: { unexpected: true },
+        timestamp: "2026-08-20T10:00:00.000Z",
+        cwd: "/repo/demo",
+      }),
+    ].join("\n"),
+  );
+  try {
+    const descriptor = omp.classify(candidateFor(file));
+    assert.equal(descriptor.id, "session", "discovery ids must stay strings even when the store is malformed");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("omp adapter reads model_change.model, drops thinking, and folds tool results", () => {
   const file = path.join(FIXTURES, "omp-session.jsonl");
   const { events, model } = omp.read({ path: file });

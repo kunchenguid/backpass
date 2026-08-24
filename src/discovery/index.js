@@ -161,11 +161,17 @@ function discoverFiles(adapter, { repo, config, cutoffMs, strict, stats, cache, 
     const cached = cache.entries[cacheKey];
     let descriptor;
 
-    if (cached && cached.mtimeMs === candidate.mtimeMs && cached.bytes === candidate.bytes) {
+    if (
+      cached &&
+      cached.mtimeMs === candidate.mtimeMs &&
+      cached.bytes === candidate.bytes &&
+      usableDescriptor(cached.descriptor)
+    ) {
       stats.cached += 1;
       descriptor = cached.descriptor;
     } else {
       descriptor = adapter.classify(candidate, { repo, config }) || null;
+      if (!usableDescriptor(descriptor)) descriptor = null;
       cache.entries[cacheKey] = { mtimeMs: candidate.mtimeMs, bytes: candidate.bytes, descriptor };
       markDirty();
     }
@@ -196,6 +202,19 @@ function discoverFiles(adapter, { repo, config, cutoffMs, strict, stats, cache, 
   }
 
   return out;
+}
+
+/** Cached descriptors are persisted across releases; reject old malformed shapes before association. */
+function usableDescriptor(descriptor) {
+  return (
+    descriptor === null ||
+    (descriptor &&
+      typeof descriptor === "object" &&
+      typeof descriptor.id === "string" &&
+      descriptor.id.length > 0 &&
+      typeof descriptor.cwd === "string" &&
+      descriptor.cwd.length > 0)
+  );
 }
 
 function toTranscript(adapter, row, association, id) {

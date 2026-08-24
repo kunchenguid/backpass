@@ -128,6 +128,23 @@ function writeClaudeSession(dir, id, firstUserText) {
   return file;
 }
 
+function writeOmpSession(dir, id) {
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `${id}.jsonl`);
+  fs.writeFileSync(
+    file,
+    jsonl([
+      { type: "session", version: 3, id, timestamp: "2026-08-20T10:00:00.000Z", cwd: realRoot },
+      {
+        type: "message",
+        id: "u1",
+        message: { role: "user", content: [{ type: "text", text: "Inspect the parser." }] },
+      },
+    ]),
+  );
+  return file;
+}
+
 const piDir = path.join(fakeHome, ".pi", "agent", "sessions", `-${realRoot.replace(/\//g, "-")}--`);
 const codexDir = path.join(fakeHome, ".codex", "sessions", "2026", "08", "20");
 const claudeDir = path.join(fakeHome, ".claude", "projects", realRoot.replace(/[/.]/g, "-"));
@@ -179,6 +196,32 @@ test("the exclusion survives the scan cache (a cached descriptor is still checke
   ]);
   assert.equal(second.perHarness.pi.cached, 3);
   assert.equal(second.perHarness.pi.self, 1);
+});
+
+test("discovery reclassifies a cached descriptor with an invalid cwd", async () => {
+  const file = writeOmpSession(path.join(fakeHome, ".omp", "agent", "sessions", "repo"), "omp-cache");
+  const stat = fs.statSync(file);
+  const cacheKey = `omp:${file}`;
+  const cache = {
+    version: 1,
+    entries: {
+      [cacheKey]: {
+        mtimeMs: stat.mtimeMs,
+        bytes: stat.size,
+        descriptor: { id: "omp-cache", cwd: { stale: true } },
+      },
+    },
+  };
+  const config = loadConfig(realRoot, { discovery: { harnesses: ["omp"], since: "all" } });
+  config.state = { readScanCache: () => cache, writeScanCache: () => {} };
+
+  const { transcripts, perHarness } = await discoverTranscripts({ repo, config });
+
+  assert.equal(perHarness.omp.error, null, "a stale descriptor must not make the harness fail-soft and disappear");
+  assert.equal(perHarness.omp.cached, 0, "the invalid cached descriptor must be reclassified");
+  assert.equal(transcripts.length, 1);
+  assert.equal(transcripts[0].nativeId, "omp-cache");
+  assert.equal(cache.entries[cacheKey].descriptor.cwd, realRoot);
 });
 
 test("isSelfSession is fail-soft on a missing or directory path", () => {

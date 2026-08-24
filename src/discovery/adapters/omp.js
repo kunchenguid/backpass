@@ -68,7 +68,7 @@ export function classify(candidate) {
   if (!session) return null;
   const parsed = session.timestamp ? Date.parse(session.timestamp) : NaN;
   return {
-    id: session.id || path.basename(candidate.path, ".jsonl"),
+    id: typeof session.id === "string" && session.id ? session.id : path.basename(candidate.path, ".jsonl"),
     cwd: session.cwd,
     gitBranch: null,
     remotes: [],
