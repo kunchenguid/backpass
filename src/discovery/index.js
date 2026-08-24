@@ -14,6 +14,10 @@ import { sinceCutoff } from "../config.js";
 import { emitProgress } from "../progress.js";
 import { warn } from "../logger.js";
 
+// Bump when classifier behavior changes so an older null or stale descriptor is
+// not trusted forever by the path/mtime/size cache.
+const DESCRIPTOR_CACHE_VERSION = 2;
+
 export const ADAPTERS = {
   claude,
   codex,
@@ -163,6 +167,7 @@ function discoverFiles(adapter, { repo, config, cutoffMs, strict, stats, cache, 
 
     if (
       cached &&
+      cached.classifierVersion === DESCRIPTOR_CACHE_VERSION &&
       cached.mtimeMs === candidate.mtimeMs &&
       cached.bytes === candidate.bytes &&
       usableDescriptor(cached.descriptor)
@@ -172,7 +177,12 @@ function discoverFiles(adapter, { repo, config, cutoffMs, strict, stats, cache, 
     } else {
       descriptor = adapter.classify(candidate, { repo, config }) || null;
       if (!usableDescriptor(descriptor)) descriptor = null;
-      cache.entries[cacheKey] = { mtimeMs: candidate.mtimeMs, bytes: candidate.bytes, descriptor };
+      cache.entries[cacheKey] = {
+        classifierVersion: DESCRIPTOR_CACHE_VERSION,
+        mtimeMs: candidate.mtimeMs,
+        bytes: candidate.bytes,
+        descriptor,
+      };
       markDirty();
     }
 
