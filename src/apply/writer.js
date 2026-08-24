@@ -6,6 +6,44 @@ import { budgetStatus } from "../tokens.js";
 import { recordRejection } from "../state.js";
 import { writeSkill } from "../skills.js";
 
+function acceptedSubsetBudgetFailure({ proposal, accepted, repo, capTokens }) {
+  if (!accepted.length) return null;
+
+  const relative = proposal.memoryFile.path;
+  const absolute = path.join(repo.root, relative);
+  if (!fs.existsSync(absolute)) return { file: relative, error: "file does not exist" };
+
+  const before = fs.readFileSync(absolute, "utf8");
+  let projected = before;
+  for (const edit of accepted.filter((candidate) => candidate.targetsMemoryFile)) {
+    try {
+      projected = applyEdit(projected, edit);
+    } catch (err) {
+      return { file: relative, edit: edit.id, error: err.message };
+    }
+  }
+
+  const budget = budgetStatus(before, projected, capTokens);
+  if (budget.current <= capTokens && !budget.withinBudget) {
+    return {
+      file: relative,
+      error:
+        `accepted edits leave ${relative} at ${budget.projected} tokens, ${budget.over} over the ` +
+        `${capTokens}-token budget; choose a compatible set of edits`,
+    };
+  }
+  if (budget.current > capTokens && budget.delta >= 0) {
+    return {
+      file: relative,
+      error:
+        `${relative} is already ${budget.current - capTokens} tokens over the ${capTokens}-token budget, ` +
+        `so accepted edits must shrink it, but they change it by ${budget.delta >= 0 ? "+" : ""}${budget.delta} ` +
+        "tokens; choose a compatible set of edits",
+    };
+  }
+  return null;
+}
+
 /**
  * The only place in backpass that writes to the repo.
  *
@@ -26,6 +64,17 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     accepted: accepted.length,
     rejected: rejected.length,
   };
+
+  const budgetFailure = acceptedSubsetBudgetFailure({
+    proposal,
+    accepted,
+    repo,
+    capTokens: config.budgetTokens,
+  });
+  if (budgetFailure) {
+    results.failed.push(budgetFailure);
+    return results;
+  }
 
   for (const edit of accepted) {
     if (!byFile.has(edit.file)) byFile.set(edit.file, []);

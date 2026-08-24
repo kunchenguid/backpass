@@ -433,6 +433,99 @@ test("applying decisions writes accepted edits, skips rejected ones, and remembe
   assert.equal(Object.keys(remembered.entries).length, 1);
 });
 
+test("apply refuses an accepted subset that exceeds the memory cap before writing any file", () => {
+  const skill = "---\nname: db\ndescription: old trigger\n---\n\nbody\n";
+  const cap = estimateTokens(MEMORY_TEXT);
+  const { proposal, violations, repo, state } = gate({
+    files: { ".agents/skills/db/SKILL.md": skill },
+    edit: (root) => {
+      writeIn(root, "AGENTS.md", (text) =>
+        text
+          .replace("- Use Node 18 via nvm before running any script.\n", "")
+          .replace("include its URL.", "include its full https:// URL."),
+      );
+      writeIn(root, ".agents/skills/db/SKILL.md", (text) =>
+        text.replace("old trigger", "Load before touching the database."),
+      );
+    },
+    annotation: {
+      edits: [
+        claim(["H2"], { kind: "remove", title: "drop node pin" }),
+        claim(["H1"], { title: "expand URL rule" }),
+        claim(["H3"], { title: "fix skill trigger" }),
+      ],
+    },
+    config: config({ budgetTokens: cap }),
+  });
+  assert.deepEqual(violations, [], "the complete proposal is valid because the removal pays for the addition");
+
+  const results = applyDecisions({
+    proposal,
+    decisions: { e1: "rejected", e2: "accepted", e3: "accepted" },
+    repo,
+    state,
+    config: { budgetTokens: cap },
+  });
+
+  assert.match(results.failed[0].error, /accepted edits leave AGENTS\.md .* over the .* budget/);
+  assert.deepEqual(results.written, []);
+  assert.deepEqual(results.skills, []);
+  assert.equal(fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8"), MEMORY_TEXT);
+  assert.equal(fs.readFileSync(path.join(repo.root, ".agents/skills/db/SKILL.md"), "utf8"), skill);
+  assert.equal(Object.keys(state.readRejections().entries).length, 0, "the reviewer can retry with a valid subset");
+});
+
+test("apply refuses a non-shrinking accepted subset when memory already exceeds the cap", () => {
+  const cap = estimateTokens(MEMORY_TEXT) - 1;
+  const { proposal, violations, repo, state } = gate({
+    edit: memoryEdit((text) =>
+      text
+        .replace("- Use Node 18 via nvm before running any script.\n", "")
+        .replace("include its URL.", "include its full https:// URL."),
+    ),
+    annotation: {
+      edits: [claim(["H2"], { kind: "remove", title: "drop node pin" }), claim(["H1"], { title: "expand URL rule" })],
+    },
+    config: config({ budgetTokens: cap }),
+  });
+  assert.deepEqual(violations, [], "the complete proposal is a valid shrink step");
+
+  const results = applyDecisions({
+    proposal,
+    decisions: { e1: "rejected", e2: "accepted" },
+    repo,
+    state,
+    config: { budgetTokens: cap },
+  });
+
+  assert.match(results.failed[0].error, /accepted edits must shrink it, but they change it by \+/);
+  assert.deepEqual(results.written, []);
+  assert.equal(fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8"), MEMORY_TEXT);
+  assert.equal(Object.keys(state.readRejections().entries).length, 0, "the reviewer can retry with a valid subset");
+});
+
+test("rejecting every edit remains valid when memory already exceeds the cap", () => {
+  const cap = estimateTokens(MEMORY_TEXT) - 1;
+  const { proposal, violations, repo, state } = gate({
+    edit: memoryEdit((text) => text.replace("- Use Node 18 via nvm before running any script.\n", "")),
+    annotation: { edits: [claim(["H1"], { kind: "remove", title: "drop node pin" })] },
+    config: config({ budgetTokens: cap }),
+  });
+  assert.deepEqual(violations, []);
+
+  const results = applyDecisions({
+    proposal,
+    decisions: { e1: "rejected" },
+    repo,
+    state,
+    config: { budgetTokens: cap },
+  });
+
+  assert.deepEqual(results.failed, []);
+  assert.deepEqual(results.written, []);
+  assert.equal(Object.keys(state.readRejections().entries).length, 1);
+});
+
 test("an accepted extract writes the skill the agent drafted, in the canonical layout", () => {
   const skillText =
     "---\nname: release-signing\ndescription: Load before tagging a release.\n---\n\n## Steps\n\n1. sign\n";
