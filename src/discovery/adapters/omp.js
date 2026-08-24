@@ -1,11 +1,10 @@
+import fs from "node:fs";
 import path from "node:path";
 
 import {
   attachToolResults,
   contentToEvents,
   home,
-  listDirs,
-  listFiles,
   parseJsonLine,
   readHeadLines,
   readJsonl,
@@ -29,6 +28,9 @@ import {
 
 export const name = "omp";
 
+// OMP has its own epoch so changes here do not invalidate other adapters' caches.
+export const classifierVersion = 2;
+
 /** How many leading lines classify() scans to find the session header. */
 const HEADER_SCAN_LINES = 8;
 
@@ -38,8 +40,13 @@ export function storeRoot() {
 
 export function enumerate() {
   const out = [];
-  for (const dir of listDirs(storeRoot())) {
-    for (const file of listFiles(dir, ".jsonl")) {
+  const root = storeRoot();
+  for (const dirEntry of readDirectory(root)) {
+    if (!dirEntry.isDirectory()) continue;
+    const dir = path.join(root, dirEntry.name);
+    for (const fileEntry of readDirectory(dir)) {
+      if (!fileEntry.isFile() || !fileEntry.name.endsWith(".jsonl")) continue;
+      const file = path.join(dir, fileEntry.name);
       const stat = statOrNull(file);
       if (!stat) continue;
       out.push({ key: file, path: file, mtimeMs: stat.mtimeMs, bytes: stat.size });
@@ -120,7 +127,30 @@ export function read(ref) {
   // result must not be folded into an unrelated later call.
   const correlated = events.filter((e) => e.kind !== "tool-result" || (e.id && toolCallIds.has(e.id)));
 
-  return { events: attachToolResults(correlated), model };
+  return { events: attachToolResults(dedupeToolCalls(correlated)), model };
+}
+
+function readDirectory(dir) {
+  try {
+    return fs.readdirSync(dir, { withFileTypes: true });
+  } catch (err) {
+    const status = err?.code === "ENOENT" ? "missing" : "unreadable";
+    throw Object.assign(new Error(`store ${status} at ${dir}`, { cause: err }), { storeStatus: status });
+  }
+}
+
+/** OMP can persist the same tool call twice; retain one copy when its payload is identical. */
+function dedupeToolCalls(events) {
+  const seen = new Map();
+  return events.filter((event) => {
+    if (event.kind !== "tool" || !event.pendingId) return true;
+    const previous = seen.get(event.pendingId);
+    if (!previous) {
+      seen.set(event.pendingId, event);
+      return true;
+    }
+    return previous.name !== event.name || JSON.stringify(previous.input) !== JSON.stringify(event.input);
+  });
 }
 
 function textOf(content) {

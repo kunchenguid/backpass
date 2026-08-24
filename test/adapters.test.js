@@ -236,6 +236,52 @@ test("omp read drops orphan tool results instead of misattributing them", () => 
   }
 });
 
+test("omp read deduplicates repeated tool-call records before attaching a result", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-omp-duplicate-"));
+  const file = path.join(dir, "session.jsonl");
+  const duplicateCall = { type: "toolCall", id: "call_duplicate", name: "bash", arguments: { command: "npm test" } };
+  fs.writeFileSync(
+    file,
+    [
+      JSON.stringify({
+        type: "session",
+        version: 3,
+        id: "omp-duplicate",
+        timestamp: "2026-08-20T10:00:00.000Z",
+        cwd: "/repo/demo",
+      }),
+      JSON.stringify({
+        type: "message",
+        id: "d1",
+        message: { role: "assistant", content: [duplicateCall] },
+      }),
+      JSON.stringify({
+        type: "message",
+        id: "d2",
+        message: { role: "assistant", content: [duplicateCall] },
+      }),
+      JSON.stringify({
+        type: "message",
+        id: "d3",
+        message: {
+          role: "toolResult",
+          toolCallId: "call_duplicate",
+          content: [{ type: "text", text: "failed" }],
+          isError: true,
+        },
+      }),
+    ].join("\n"),
+  );
+  try {
+    const duplicateCalls = tools(omp.read({ path: file }).events);
+    assert.equal(duplicateCalls.length, 1, "one persisted call id must produce one normalized tool event");
+    assert.equal(duplicateCalls[0].result, "failed");
+    assert.equal(duplicateCalls[0].status, "error");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("grok adapter reads remotes from summary.json and tool calls off the assistant record", () => {
   const sessionDir = path.join(FIXTURES, "grok-session", "%2Frepo%2Fdemo", "grok-9999");
   const descriptor = grok.classify({ path: sessionDir, mtimeMs: 0 });

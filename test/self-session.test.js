@@ -216,6 +216,28 @@ test("the exclusion survives the scan cache (a cached descriptor is still checke
   assert.equal(second.perHarness.pi.self, 1);
 });
 
+test("discovery reuses an unversioned cache entry for an unchanged adapter", async () => {
+  const file = writePiSession(piDir, "pi-cache-compatible", "Keep the cache warm.");
+  const stat = fs.statSync(file);
+  const cache = {
+    version: 1,
+    entries: {
+      [`pi:${file}`]: {
+        mtimeMs: stat.mtimeMs,
+        bytes: stat.size,
+        descriptor: { id: "pi-cache-compatible", cwd: realRoot },
+      },
+    },
+  };
+  const config = loadConfig(realRoot, { discovery: { harnesses: ["pi"], since: "all" } });
+  config.state = { readScanCache: () => cache, writeScanCache: () => {} };
+
+  const { transcripts, perHarness } = await discoverTranscripts({ repo, config });
+
+  assert.equal(perHarness.pi.cached, 1, "adding OMP must not invalidate a compatible pi descriptor");
+  assert.equal(transcripts[0].nativeId, "pi-cache-compatible");
+});
+
 test("discovery reclassifies a cached descriptor with an invalid cwd", async () => {
   const file = writeOmpSession(path.join(fakeHome, ".omp", "agent", "sessions", "repo"), "omp-cache");
   const stat = fs.statSync(file);
@@ -260,6 +282,24 @@ test("discovery reclassifies a cached OMP miss after the classifier learns title
   assert.equal(perHarness.omp.cached, 0, "a cached miss from the old classifier must be retried");
   assert.ok(transcripts.some((transcript) => transcript.nativeId === "omp-title-first"));
   assert.equal(cache.entries[cacheKey].descriptor.cwd, realRoot);
+});
+
+test("discovery reports a missing OMP store without failing the run", async () => {
+  const previousHome = process.env.HOME;
+  const emptyHome = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-omp-missing-home-"));
+  process.env.HOME = emptyHome;
+  try {
+    const config = loadConfig(realRoot, { discovery: { harnesses: ["omp"], since: "all" } });
+    config.state = { readScanCache: () => ({ version: 1, entries: {} }), writeScanCache: () => {} };
+
+    const { transcripts, perHarness } = await discoverTranscripts({ repo, config });
+
+    assert.deepEqual(transcripts, []);
+    assert.match(perHarness.omp.error, /store missing/);
+  } finally {
+    process.env.HOME = previousHome;
+    fs.rmSync(emptyHome, { recursive: true, force: true });
+  }
 });
 
 test("isSelfSession is fail-soft on a missing or directory path", () => {
