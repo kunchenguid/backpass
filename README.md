@@ -369,6 +369,10 @@ CLI flags on top:
 }
 ```
 
+Note: setting `discovery.harnesses` explicitly **replaces** the default list rather than
+merging with it. Configs pinned before omp existed keep the prior seven-harness array;
+add `"omp"` to the array to opt existing repos in.
+
 ### State
 
 Everything mutable lives in `.backpass/`, kept out of git via the repo's local exclude

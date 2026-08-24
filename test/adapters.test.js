@@ -147,6 +147,72 @@ test("omp stays wired as a harness and adapter", () => {
   assert.ok(ALL_HARNESSES.includes("omp"), "omp must stay in ALL_HARNESSES");
 });
 
+test("omp classify falls back to mtime when the session timestamp is invalid", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-omp-badts-"));
+  const file = path.join(dir, "session.jsonl");
+  fs.writeFileSync(
+    file,
+    [
+      JSON.stringify({ type: "title", title: "bad clock" }),
+      JSON.stringify({ type: "session", version: 3, id: "omp-badts", timestamp: "not-a-date", cwd: "/repo/demo" }),
+    ].join("\n"),
+  );
+  try {
+    const descriptor = omp.classify(candidateFor(file));
+    assert.equal(descriptor.id, "omp-badts");
+    assert.equal(descriptor.startedAt, candidateFor(file).mtimeMs, "NaN timestamps fail soft to mtime");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("omp read drops orphan tool results instead of misattributing them", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-omp-orphan-"));
+  const file = path.join(dir, "session.jsonl");
+  fs.writeFileSync(
+    file,
+    [
+      JSON.stringify({
+        type: "session",
+        version: 3,
+        id: "omp-orphan",
+        timestamp: "2026-08-20T10:00:00.000Z",
+        cwd: "/repo/demo",
+      }),
+      JSON.stringify({
+        type: "message",
+        id: "o1",
+        message: {
+          role: "toolResult",
+          toolCallId: "call_truncated_away",
+          content: [{ type: "text", text: "stale result" }],
+        },
+      }),
+      JSON.stringify({
+        type: "message",
+        id: "o2",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "toolCall", id: "call_present", name: "bash", arguments: { command: "npm run build" } },
+            { type: "text", text: "Building." },
+          ],
+        },
+      }),
+    ].join("\n"),
+  );
+  try {
+    const { events } = omp.read({ path: file });
+    const [toolCall] = tools(events);
+    assert.equal(toolCall.name, "bash");
+    assert.equal(toolCall.input.command, "npm run build");
+    assert.equal(toolCall.result, undefined, "a result whose call was truncated away must not attach to another call");
+    assert.ok(!JSON.stringify(events).includes("stale result"));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("grok adapter reads remotes from summary.json and tool calls off the assistant record", () => {
   const sessionDir = path.join(FIXTURES, "grok-session", "%2Frepo%2Fdemo", "grok-9999");
   const descriptor = grok.classify({ path: sessionDir, mtimeMs: 0 });

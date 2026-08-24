@@ -66,12 +66,13 @@ export function classify(candidate) {
     }
   }
   if (!session) return null;
+  const parsed = session.timestamp ? Date.parse(session.timestamp) : NaN;
   return {
     id: session.id || path.basename(candidate.path, ".jsonl"),
     cwd: session.cwd,
     gitBranch: null,
     remotes: [],
-    startedAt: session.timestamp ? Date.parse(session.timestamp) : candidate.mtimeMs,
+    startedAt: Number.isFinite(parsed) ? parsed : candidate.mtimeMs,
     model: null,
     title: title || null,
   };
@@ -81,6 +82,12 @@ export function read(ref) {
   const entries = readJsonl(ref.path);
   const events = [];
   let model = null;
+  // Ids of tool calls seen in this read. readJsonl reads >64MB files tail-first
+  // and drops the partial boundary line, so a call can be truncated away while
+  // its result survives; without tracking, attachToolResults' orphan fallback
+  // would pin that stale result onto the next pending call. Unmatched results
+  // are dropped instead of misattributed.
+  const toolCallIds = new Set();
 
   for (const entry of entries) {
     if (entry.type === "model_change") {
@@ -101,10 +108,19 @@ export function read(ref) {
       continue;
     }
     if (role !== "user" && role !== "assistant") continue;
+    const before = events.length;
     contentToEvents(role, message.content, events);
+    for (let i = before; i < events.length; i += 1) {
+      const event = /** @type {{kind: string, pendingId?: string}} */ (events[i]);
+      if (event.kind === "tool" && event.pendingId) toolCallIds.add(event.pendingId);
+    }
   }
 
-  return { events: attachToolResults(events), model };
+  // Drop results whose call never appeared (truncated tail-read); a stale
+  // result must not be folded into an unrelated later call.
+  const correlated = events.filter((e) => e.kind !== "tool-result" || (e.id && toolCallIds.has(e.id)));
+
+  return { events: attachToolResults(correlated), model };
 }
 
 function textOf(content) {
