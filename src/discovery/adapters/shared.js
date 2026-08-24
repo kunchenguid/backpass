@@ -103,7 +103,7 @@ export function home(...segments) {
 /**
  * Normalize an assistant/user `content` value into distiller events. Every harness
  * settled on some variant of "string, or array of typed blocks", so one tolerant
- * reader covers claude, codex, pi, grok and cursor with adapter-specific tweaks
+ * reader covers claude, codex, pi, omp, grok and cursor with adapter-specific tweaks
  * layered on top.
  */
 export function contentToEvents(role, content, events) {
