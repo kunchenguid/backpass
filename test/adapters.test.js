@@ -113,6 +113,13 @@ test("omp adapter finds the session header after the leading title line", () => 
   assert.equal(descriptor.startedAt, Date.parse("2026-08-20T10:00:00.000Z"));
 });
 
+test("omp adapter surfaces titles stored on the session header", () => {
+  const file = path.join(FIXTURES, "omp-session-header-title.jsonl");
+  const descriptor = omp.classify(candidateFor(file));
+
+  assert.equal(descriptor.title, "Review parser changes");
+});
+
 test("omp adapter reads model_change.model, drops thinking, and folds tool results", () => {
   const file = path.join(FIXTURES, "omp-session.jsonl");
   const { events, model } = omp.read({ path: file });
@@ -126,10 +133,12 @@ test("omp adapter reads model_change.model, drops thinking, and folds tool resul
     ],
   );
   assert.ok(!JSON.stringify(events).includes("internal reasoning"), "thinking must be dropped");
-  const [toolCall] = tools(events);
+  const [toolCall, failedToolCall] = tools(events);
   assert.equal(toolCall.name, "bash");
   assert.equal(toolCall.input.command, "npm test");
   assert.equal(toolCall.result, "2 passing");
+  assert.equal(toolCall.status, "completed");
+  assert.equal(failedToolCall.status, "error");
 });
 
 test("omp stays wired as a harness and adapter", () => {

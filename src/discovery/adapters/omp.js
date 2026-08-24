@@ -22,9 +22,9 @@ import {
  *   with the session header directly), so classify scans the first few lines.
  * - `model_change` records carry the model as `model` (never `modelId`), but
  *   both are accepted for safety.
- * The title line also carries a human-readable session title, which is
- * surfaced on the descriptor. Entries form a parent/child tree that arrives in
- * order. No remote is recorded - dead worktrees reach tier 3 only.
+ * A leading title line or the session header carries a human-readable session
+ * title, which is surfaced on the descriptor. Entries form a parent/child tree
+ * that arrives in order. No remote is recorded - dead worktrees reach tier 3 only.
  */
 
 export const name = "omp";
@@ -62,6 +62,7 @@ export function classify(candidate) {
     }
     if (entry.type === "session" && entry.cwd && !session) {
       session = entry;
+      if (typeof entry.title === "string" && title === null) title = entry.title;
     }
   }
   if (!session) return null;
@@ -91,7 +92,12 @@ export function read(ref) {
     const role = message.role;
 
     if (role === "toolResult") {
-      events.push({ kind: "tool-result", id: message.toolCallId ?? message.id, result: textOf(message.content) });
+      events.push({
+        kind: "tool-result",
+        id: message.toolCallId ?? message.id,
+        result: textOf(message.content),
+        status: message.isError ? "error" : "completed",
+      });
       continue;
     }
     if (role !== "user" && role !== "assistant") continue;
