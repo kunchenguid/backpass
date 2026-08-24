@@ -40,6 +40,13 @@ export function budgetStatus(currentText, projectedText, capTokens) {
   };
 }
 
+/** Cap: stay under. Shrink: already over, so the delta must be negative. */
+export function budgetGateKind(budget) {
+  if (budget.current <= budget.capTokens && !budget.withinBudget) return "cap";
+  if (budget.current > budget.capTokens && budget.delta >= 0) return "shrink";
+  return null;
+}
+
 /** Fixed-width ASCII gauge for `backpass status`. */
 export function budgetBar(status, width = 32) {
   const filled = Math.min(width, Math.round(status.utilization * width));

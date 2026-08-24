@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { applyEdit } from "../proposal.js";
-import { budgetStatus } from "../tokens.js";
+import { applyEdit, projectWithDecisions } from "../proposal.js";
+import { budgetGateKind, budgetStatus } from "../tokens.js";
 import { recordRejection } from "../state.js";
 import { writeSkill } from "../skills.js";
 
@@ -11,20 +11,17 @@ function acceptedSubsetBudgetFailure({ proposal, accepted, repo, capTokens }) {
 
   const relative = proposal.memoryFile.path;
   const absolute = path.join(repo.root, relative);
-  if (!fs.existsSync(absolute)) return { file: relative, error: "file does not exist" };
+  if (!fs.existsSync(absolute)) return null;
 
   const before = fs.readFileSync(absolute, "utf8");
-  let projected = before;
-  for (const edit of accepted.filter((candidate) => candidate.targetsMemoryFile)) {
-    try {
-      projected = applyEdit(projected, edit);
-    } catch (err) {
-      return { file: relative, edit: edit.id, error: err.message };
-    }
-  }
-
-  const budget = budgetStatus(before, projected, capTokens);
-  if (budget.current <= capTokens && !budget.withinBudget) {
+  const { budget } = projectWithDecisions(
+    before,
+    accepted,
+    accepted.map((edit) => edit.id),
+    capTokens,
+  );
+  const gate = budgetGateKind(budget);
+  if (gate === "cap") {
     return {
       file: relative,
       error:
@@ -32,7 +29,7 @@ function acceptedSubsetBudgetFailure({ proposal, accepted, repo, capTokens }) {
         `${capTokens}-token budget; choose a compatible set of edits`,
     };
   }
-  if (budget.current > capTokens && budget.delta >= 0) {
+  if (gate === "shrink") {
     return {
       file: relative,
       error:
@@ -63,6 +60,7 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     warnings: [],
     accepted: accepted.length,
     rejected: rejected.length,
+    rejectionsRecorded: false,
   };
 
   const budgetFailure = acceptedSubsetBudgetFailure({
@@ -125,6 +123,7 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     const rejections = state.readRejections();
     for (const edit of rejected) recordRejection(edit, rejections);
     state.writeRejections(rejections);
+    results.rejectionsRecorded = true;
   }
 
   return results;

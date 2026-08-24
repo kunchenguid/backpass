@@ -426,6 +426,7 @@ test("applying decisions writes accepted edits, skips rejected ones, and remembe
   assert.ok(written.includes("include its URL."), "the rejected rewrite is not applied");
   assert.equal(results.accepted, 1);
   assert.equal(results.rejected, 1);
+  assert.equal(results.rejectionsRecorded, true);
   assert.equal(results.failed.length, 0);
   assert.ok(results.written[0].budget.delta < 0);
 
@@ -468,6 +469,7 @@ test("apply refuses an accepted subset that exceeds the memory cap before writin
   });
 
   assert.match(results.failed[0].error, /accepted edits leave AGENTS\.md .* over the .* budget/);
+  assert.equal(results.rejectionsRecorded, false);
   assert.deepEqual(results.written, []);
   assert.deepEqual(results.skills, []);
   assert.equal(fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8"), MEMORY_TEXT);
@@ -499,6 +501,7 @@ test("apply refuses a non-shrinking accepted subset when memory already exceeds 
   });
 
   assert.match(results.failed[0].error, /accepted edits must shrink it, but they change it by \+/);
+  assert.equal(results.rejectionsRecorded, false);
   assert.deepEqual(results.written, []);
   assert.equal(fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8"), MEMORY_TEXT);
   assert.equal(Object.keys(state.readRejections().entries).length, 0, "the reviewer can retry with a valid subset");
@@ -523,7 +526,35 @@ test("rejecting every edit remains valid when memory already exceeds the cap", (
 
   assert.deepEqual(results.failed, []);
   assert.deepEqual(results.written, []);
+  assert.equal(results.rejectionsRecorded, true);
   assert.equal(Object.keys(state.readRejections().entries).length, 1);
+});
+
+test("apply preflight skips inapplicable accepted edits and still writes the rest", () => {
+  const { proposal, repo, state } = gate({
+    edit: memoryEdit((t) => t.replace("- Use Node 18 via nvm before running any script.\n", "")),
+    annotation: { edits: [claim(["H1"], { kind: "remove", title: "drop node pin" })] },
+  });
+  proposal.edits.push({
+    id: "e-stale",
+    file: proposal.memoryFile.path,
+    targetsMemoryFile: true,
+    find: "text that is not in the file at all",
+    replace: "x",
+  });
+
+  const results = applyDecisions({
+    proposal,
+    decisions: { e1: "accepted", "e-stale": "accepted" },
+    repo,
+    state,
+    config: { budgetTokens: 5000 },
+  });
+
+  assert.equal(results.written.length, 1);
+  assert.equal(results.failed.length, 1);
+  assert.equal(results.failed[0].edit, "e-stale");
+  assert.ok(!fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8").includes("Node 18"));
 });
 
 test("an accepted extract writes the skill the agent drafted, in the canonical layout", () => {

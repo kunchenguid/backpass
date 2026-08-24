@@ -97,7 +97,7 @@ export async function cmdApply(ctx) {
     out(`  ${color.red("failed")} ${failure.file}${failure.edit ? ` (${failure.edit})` : ""}: ${failure.error}`);
   }
 
-  if (results.rejected) {
+  if (results.rejectionsRecorded) {
     out(color.dim("  rejections recorded - they will not be re-proposed without new evidence"));
   }
   if (!results.written.length && !results.skills.length) out("  nothing written");

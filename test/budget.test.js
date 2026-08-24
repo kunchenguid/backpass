@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { budgetBar, budgetStatus, estimateTokens, formatTokens } from "../src/tokens.js";
+import { budgetBar, budgetGateKind, budgetStatus, estimateTokens, formatTokens } from "../src/tokens.js";
 import { parseMemoryUnits, similarity, reanchor, unitHash } from "../src/memory.js";
 import { extractionBudgetEffect, parseFrontmatter, renderSkillFile } from "../src/skills.js";
 
@@ -29,6 +29,10 @@ test("budgetStatus reports the delta, the overage, and whether the gate passes",
   assert.equal(over.delta, 2000);
   assert.equal(over.withinBudget, false);
   assert.equal(over.over, 1000);
+  assert.equal(budgetGateKind(within), null);
+  assert.equal(budgetGateKind(over), "cap");
+  assert.equal(budgetGateKind(budgetStatus(grown, grown, 5000)), "shrink");
+  assert.equal(budgetGateKind(budgetStatus(grown, current, 5000)), null);
 });
 
 test("a shrinking edit is within budget even when the file started over it", () => {
