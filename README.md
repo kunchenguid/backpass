@@ -104,12 +104,13 @@ Association runs in three tiers:
 3. **Tier 3 - best-effort.** A dead path whose last segment is the repo's directory name,
    or one matching a glob you configured. Labelled as such, and excluded by `--strict`.
 
-Collection is incremental. Codex alone can hold 10,000+ rollouts, so verdicts are cached in
-`.backpass/scan-cache.json` by path, mtime and size - re-scans cost only the new files.
-A harness whose store is missing or has drifted into an unrecognised shape produces a
-warning and is skipped; the run continues. backpass's own loss and gradient-descent calls land
-in these same stores under the repo's cwd; every prompt it sends is tagged, and tagged
-sessions are excluded from the corpus (the `SELF` column in `backpass scan`).
+Collection is incremental. Codex alone can hold 10,000+ rollouts, so classify results are
+cached in `.backpass/scan-cache.json` by adapter, path, file mtime/size, and classifier version.
+Re-scans cost only new files or entries invalidated by a classifier change. A harness whose
+store is missing or has drifted into an unrecognised shape produces a warning and is skipped;
+the run continues. backpass's own loss and gradient-descent calls land in these same stores
+under the repo's cwd; every prompt it sends is tagged, and tagged sessions are excluded from the
+corpus (the `SELF` column in `backpass scan`).
 
 ```sh
 backpass scan --since 7d --strict
@@ -380,7 +381,7 @@ Everything mutable lives in `.backpass/`, kept out of git via the repo's local e
 
 ```
 .backpass/
-  scan-cache.json        collect-samples verdicts by path + mtime + size
+  scan-cache.json        incremental collect-samples cache (see cache behavior above)
   evidence/<id>.json     per-transcript loss
   evidence-summary.json  aggregated gradients
   proposal.json          the latest gradient-descent step

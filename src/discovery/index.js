@@ -38,9 +38,10 @@ export function getAdapter(harness) {
  * Discovery (design section 2).
  *
  * For file-backed stores the expensive step is reading each transcript's header, so
- * results are memoised in `.backpass/scan-cache.json` keyed by path + mtime + size.
- * Re-scans are then O(new files) - which matters: codex alone had 10,317 rollouts on
- * the machine this was designed against.
+ * results are memoised in `.backpass/scan-cache.json` by path + mtime + size, with
+ * `DESCRIPTOR_CACHE_VERSION` invalidating entries when classifier behavior changes.
+ * Re-scans are then O(new files) until that version changes - which matters: codex alone
+ * had 10,317 rollouts on the machine this was designed against.
  *
  * SQLite-backed stores (opencode, hermes, cursor IDE) answer the same question with one
  * indexed query, so they skip the cache entirely.
