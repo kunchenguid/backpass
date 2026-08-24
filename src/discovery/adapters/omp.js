@@ -60,7 +60,7 @@ export function classify(candidate) {
       if (title === null) title = entry.title;
       continue;
     }
-    if (entry.type === "session" && entry.cwd && !session) {
+    if (entry.type === "session" && typeof entry.cwd === "string" && entry.cwd && !session) {
       session = entry;
       if (typeof entry.title === "string" && title === null) title = entry.title;
     }
