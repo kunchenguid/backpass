@@ -13,8 +13,9 @@ import { budgetBar, formatTokens } from "../tokens.js";
  * terminal. `applyDecisions` owns the pre-write freshness, budget, and composition gates;
  * a failing gate records no rejections.
  */
-export async function cmdApply(ctx) {
+export async function cmdApply(ctx, deps = {}) {
   const { config, repo } = ctx;
+  const review = deps.review || reviewInTerminal;
   const proposal = config.state.readProposal();
 
   if (!proposal) {
@@ -42,7 +43,7 @@ export async function cmdApply(ctx) {
   let surfaceFile = null;
 
   if (ctx.flags["no-ui"]) {
-    decisions = await reviewInTerminal(proposal);
+    decisions = await review(proposal);
   } else {
     surfaceFile = renderApplySurface(proposal, config.state, ctx.version);
     const url = await openApplySurface(surfaceFile);
@@ -70,6 +71,12 @@ export async function cmdApply(ctx) {
   });
 
   if (surfaceFile) await closeApplySurface(surfaceFile);
+
+  if (!ctx.flags["dry-run"] && !results.failed.length) {
+    proposal.appliedAt = new Date().toISOString();
+    proposal.appliedBy = "apply";
+    config.state.writeProposal(proposal);
+  }
 
   if (ctx.flags.json) {
     json({ decisions, results });
