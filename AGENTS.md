@@ -58,6 +58,8 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   every other stage is read-only analysis, which is what makes a run safe to interrupt.
   Bootstrap (`src/commands/bootstrap.js`, a repo with no memory file) is the one run that
   writes without the apply gate, and it only ever creates files, never overwrites.
+  Apply revalidates the accepted subset with `budgetGateKind` (`src/tokens.js`) before any
+  write; a failing subset writes nothing and does not record rejections.
 - **Synthesis edits natively, in a staging copy, never by describing text.** The agent
   gets `--approve-all` with `cwd` = `.backpass/synthesis/` (`prepareWorkspace`), which holds
   only the memory file and the skills dir; backpass measures the copy (`measureWorkspace`,

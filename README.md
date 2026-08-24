@@ -241,6 +241,11 @@ a headless box or `--no-open` just hands you the link.
 There is no DEFER button, and it isn't missing: **rejections are remembered.** A rejected
 edit is not proposed again unless materially new evidence arrives.
 
+The live budget gauge is not just a readout. Apply rechecks the accepted subset against
+the same budget gate as synthesis: stay under the cap, or shrink if the file is already
+over. An incompatible set writes nothing and does not record rejections, so you can pick
+a compatible set and try again.
+
 ```sh
 backpass apply --no-ui     # same decision, in the terminal
 backpass apply --no-open   # print the surface URL, don't launch a browser

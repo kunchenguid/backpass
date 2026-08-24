@@ -45,8 +45,10 @@ function acceptedSubsetBudgetFailure({ proposal, accepted, repo, capTokens }) {
  * The only place in backpass that writes to the repo.
  *
  * Everything upstream is read-only analysis; a run only changes the weights here, after
- * a human accepted specific edits. Writes are grouped per file so a memory file is
- * rewritten once, atomically, rather than edit by edit.
+ * a human accepted specific edits. The accepted subset is rechecked with the same
+ * cap/shrink budget gate as the full proposal (`budgetGateKind`); a failing subset
+ * returns with no writes and no rejection ledger. Writes are grouped per file so a
+ * memory file is rewritten once, atomically, rather than edit by edit.
  */
 export function applyDecisions({ proposal, decisions, repo, state, config, dryRun = false }) {
   const accepted = proposal.edits.filter((e) => decisions[e.id] === "accepted");
