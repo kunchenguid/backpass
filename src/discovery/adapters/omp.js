@@ -139,17 +139,14 @@ function readDirectory(dir) {
   }
 }
 
-/** OMP can persist the same tool call twice; retain one copy when its payload is identical. */
+/** OMP can persist the same tool-call id twice; retain the first record deterministically. */
 function dedupeToolCalls(events) {
-  const seen = new Map();
+  const seen = new Set();
   return events.filter((event) => {
     if (event.kind !== "tool" || !event.pendingId) return true;
-    const previous = seen.get(event.pendingId);
-    if (!previous) {
-      seen.set(event.pendingId, event);
-      return true;
-    }
-    return previous.name !== event.name || JSON.stringify(previous.input) !== JSON.stringify(event.input);
+    if (seen.has(event.pendingId)) return false;
+    seen.add(event.pendingId);
+    return true;
   });
 }
 

@@ -236,10 +236,11 @@ test("omp read drops orphan tool results instead of misattributing them", () => 
   }
 });
 
-test("omp read deduplicates repeated tool-call records before attaching a result", () => {
+test("omp read deduplicates repeated tool-call ids before attaching a result", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-omp-duplicate-"));
   const file = path.join(dir, "session.jsonl");
   const duplicateCall = { type: "toolCall", id: "call_duplicate", name: "bash", arguments: { command: "npm test" } };
+  const conflictingDuplicateCall = { ...duplicateCall, arguments: { command: "npm run deploy" } };
   fs.writeFileSync(
     file,
     [
@@ -258,7 +259,7 @@ test("omp read deduplicates repeated tool-call records before attaching a result
       JSON.stringify({
         type: "message",
         id: "d2",
-        message: { role: "assistant", content: [duplicateCall] },
+        message: { role: "assistant", content: [conflictingDuplicateCall] },
       }),
       JSON.stringify({
         type: "message",
@@ -275,6 +276,7 @@ test("omp read deduplicates repeated tool-call records before attaching a result
   try {
     const duplicateCalls = tools(omp.read({ path: file }).events);
     assert.equal(duplicateCalls.length, 1, "one persisted call id must produce one normalized tool event");
+    assert.deepEqual(duplicateCalls[0].input, { command: "npm test" });
     assert.equal(duplicateCalls[0].result, "failed");
     assert.equal(duplicateCalls[0].status, "error");
   } finally {
