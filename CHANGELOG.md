@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.5](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.4...backpass-v0.1.5) (2026-08-25)
+
+
+### Bug Fixes
+
+* **discovery:** scan CLAUDE_CONFIG_DIR alongside the default claude store ([#41](https://github.com/kunchenguid/backpass/issues/41)) ([8d0b423](https://github.com/kunchenguid/backpass/commit/8d0b423a164bcd691b9ae6ac6fbcf3f1435aff3e))
+
 ## [0.1.4](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.3...backpass-v0.1.4) (2026-08-25)
 
 
