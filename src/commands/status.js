@@ -112,7 +112,8 @@ export async function cmdStatus(ctx) {
     );
     const surface = path.join(state.applyDir, "apply.html");
     if (fs.existsSync(surface)) out(color.dim(`  surface         ${surface}`));
-    if (!proposal.appliedAt && !proposal.violations?.length && proposal.edits.length) out("  review with `backpass apply`");
+    if (!proposal.appliedAt && !proposal.violations?.length && proposal.edits.length)
+      out("  review with `backpass apply`");
   }
 
   out("");
