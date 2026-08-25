@@ -798,6 +798,29 @@ test("a successful apply marks the proposal as consumed and prevents replay", as
   assert.equal(reviews, 1, "the consumed proposal is rejected before reopening review");
 });
 
+test("an all-skipped apply leaves the proposal available for review", async () => {
+  const { proposal, repo, state } = gate({
+    edit: memoryEdit((t) => t.replace("- Use Node 18 via nvm before running any script.\n", "")),
+    annotation: { edits: [claim(["H1"], { kind: "remove", title: "drop node pin" })] },
+  });
+  state.writeProposal(proposal);
+  const ctx = {
+    repo,
+    config: { ...config(), state },
+    flags: { "no-ui": true, json: true },
+  };
+  let reviews = 0;
+  const review = async () => {
+    reviews += 1;
+    return { e1: "skipped" };
+  };
+
+  assert.equal(await cmdApply(ctx, { review }), 0);
+  assert.equal(state.readProposal().appliedAt, undefined);
+  assert.equal(await cmdApply(ctx, { review }), 0);
+  assert.equal(reviews, 2, "an untouched proposal reopens for a later decision");
+});
+
 test("a failed apply leaves the proposal available for retry", async () => {
   const { proposal, repo, state } = gate({
     edit: memoryEdit((t) => t.replace("- Use Node 18 via nvm before running any script.\n", "")),

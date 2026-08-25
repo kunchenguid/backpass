@@ -72,7 +72,8 @@ export async function cmdApply(ctx, deps = {}) {
 
   if (surfaceFile) await closeApplySurface(surfaceFile);
 
-  if (!ctx.flags["dry-run"] && !results.failed.length) {
+  const decided = results.accepted + results.rejected > 0;
+  if (!ctx.flags["dry-run"] && decided && !results.failed.length) {
     proposal.appliedAt = new Date().toISOString();
     proposal.appliedBy = "apply";
     config.state.writeProposal(proposal);
