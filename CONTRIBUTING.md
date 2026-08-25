@@ -11,6 +11,8 @@ Thanks for wanting to contribute.
 
 Do not open the pull request manually. The repository gate requires the signature and
 head-SHA-bound pipeline attestation that no-mistakes writes to the pull request body.
+`review`, `test`, and `document` must be `completed` in that attestation; a signature-only
+body from no-mistakes older than 1.46.0 is not enough.
 
 CI runs lint, format:check, typecheck, and the test suite on every PR; a guard also
 rejects hand-edits to release-please-generated files.
