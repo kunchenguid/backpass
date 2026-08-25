@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.3...backpass-v0.1.4) (2026-08-25)
+
+
+### Bug Fixes
+
+* **apply:** revalidate accepted edit subsets ([#38](https://github.com/kunchenguid/backpass/issues/38)) ([1f473f2](https://github.com/kunchenguid/backpass/commit/1f473f22c30128cb4b2c27f7fe0e7910f9c6787c))
+
 ## [0.1.3](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.2...backpass-v0.1.3) (2026-08-23)
 
 
