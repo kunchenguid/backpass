@@ -268,6 +268,11 @@ For compatibility, proposals created by older backpass versions that do not cont
 memory-file hash skip the freshness check. Regenerate such a proposal before applying it if
 the repository may have changed.
 
+A decided apply (any accept or reject, and no write failures) **consumes** the saved
+proposal: `backpass apply` refuses a replay. Skip every edit, or hit a write failure, and
+the proposal stays reviewable. `--dry-run` never consumes it. `backpass status` only
+hints `review with backpass apply` while the proposal is still open.
+
 ```sh
 backpass apply --no-ui     # same decision, in the terminal
 backpass apply --no-open   # print the surface URL, don't launch a browser
@@ -405,7 +410,7 @@ Everything mutable lives in `.backpass/`, kept out of git via the repo's local e
   scan-cache.json        collect-samples verdicts by path + mtime + size
   evidence/<id>.json     per-transcript loss
   evidence-summary.json  aggregated gradients
-  proposal.json          the latest gradient-descent step
+  proposal.json          the latest gradient-descent step (stamped when consumed)
   synthesis/             the staging copy the gradient-descent agent edited (memory file + skills)
   prompts/               the exact prompts of the last run
   agent-probe-cache.json which harnesses were available and logged in, and when

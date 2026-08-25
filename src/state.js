@@ -18,7 +18,7 @@ export const STATE_EXCLUDE_LINE = `${STATE_DIRNAME}/`;
  *   scan-cache.json        path+mtime+size -> association verdict (design section 2.2)
  *   evidence/<id>.json     per-transcript tier-1 analysis output (design section 3)
  *   evidence-summary.json  folded evidence (stage 2)
- *   proposal.json          latest tier-2 synthesis (stage 3)
+ *   proposal.json          latest tier-2 synthesis (stage 3); stamped appliedAt/appliedBy when consumed
  *   rejections.json        edits the human rejected, and the evidence weight behind them
  *   gap-ledger.json        gap observations by gap and session, accumulated across runs (src/gap-ledger.js)
  *   agent-probe-cache.json TTL'd availability/auth verdicts per agent|model (src/agents.js)

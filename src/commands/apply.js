@@ -12,6 +12,10 @@ import { budgetBar, formatTokens } from "../tokens.js";
  * structured decision vector; `--no-ui` keeps the same ACCEPT/REJECT decision in the
  * terminal. `applyDecisions` owns the pre-write freshness, budget, and composition gates;
  * a failing gate records no rejections.
+ *
+ * A decided apply (any accept or reject, no write failures, not `--dry-run`) stamps
+ * `appliedAt`/`appliedBy` on the saved proposal so a second apply refuses. An all-skip
+ * or a failed write leaves the proposal reviewable.
  */
 export async function cmdApply(ctx, deps = {}) {
   const { config, repo } = ctx;
