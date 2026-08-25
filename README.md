@@ -91,7 +91,9 @@ backpass reads the local transcript stores of seven harnesses directly. No API, 
 | **hermes**     | `~/.hermes/state.db` (sqlite)                  | session cwd, with CLI prompt / ACP config fallbacks |
 
 Claude collection covers `$CLAUDE_CONFIG_DIR/projects` alongside the default store, so a
-profile you only reach through an alias (`CLAUDE_CONFIG_DIR=~/.claude-work claude`) is read too.
+relocated config dir does not hide its sessions. The variable is read from backpass's own
+environment: if you reach that profile through an alias that only prefixes `claude`, set it
+for the backpass run too (`CLAUDE_CONFIG_DIR=~/.claude-work backpass`, or export it).
 
 Hermes collection includes CLI and ACP sessions only. Gateway, cron, and WhatsApp sessions
 are excluded because their recorded cwd belongs to the shared gateway process, not a project.

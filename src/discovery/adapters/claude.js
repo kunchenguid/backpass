@@ -21,8 +21,9 @@ import {
  * No git remote is recorded, so a deleted worktree can only reach tier 3.
  *
  * `CLAUDE_CONFIG_DIR` relocates the whole config dir, and it is commonly set per
- * invocation (a shell alias for a work profile), which leaves a machine's sessions
- * split across two stores - so both are scanned.
+ * invocation (a shell alias for a work profile), which splits a machine's sessions across
+ * two stores rather than moving them - so both roots are scanned. The variable is read
+ * from this process's environment; an alias that only prefixes `claude` never reaches it.
  */
 
 const HEADER_LINES = 40;
