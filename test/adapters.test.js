@@ -56,6 +56,42 @@ test("claude adapter reads messages, folds tool results, and drops sidechains", 
   assert.equal(toolCall.result, "2 passing");
 });
 
+function writeClaudeStore(configRoot, sessionName) {
+  const dir = path.join(configRoot, "projects", "-repo-demo");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.copyFileSync(path.join(FIXTURES, "claude-session.jsonl"), path.join(dir, `${sessionName}.jsonl`));
+}
+
+function enumerateClaude(homeDir, configDir) {
+  const prevHome = process.env.HOME;
+  const prevConfigDir = process.env.CLAUDE_CONFIG_DIR;
+  process.env.HOME = homeDir;
+  if (configDir) process.env.CLAUDE_CONFIG_DIR = configDir;
+  else delete process.env.CLAUDE_CONFIG_DIR;
+  try {
+    return claude
+      .enumerate()
+      .map((candidate) => path.basename(candidate.path))
+      .sort();
+  } finally {
+    process.env.HOME = prevHome;
+    if (prevConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = prevConfigDir;
+  }
+}
+
+test("claude adapter enumerates the default store and CLAUDE_CONFIG_DIR, without double-counting", () => {
+  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-claude-home-"));
+  const defaultRoot = path.join(fakeHome, ".claude");
+  const workRoot = path.join(fakeHome, ".claude-work");
+  writeClaudeStore(defaultRoot, "personal");
+  writeClaudeStore(workRoot, "work");
+
+  assert.deepEqual(enumerateClaude(fakeHome, workRoot), ["personal.jsonl", "work.jsonl"]);
+  assert.deepEqual(enumerateClaude(fakeHome, null), ["personal.jsonl"]);
+  assert.deepEqual(enumerateClaude(fakeHome, defaultRoot), ["personal.jsonl"]);
+});
+
 test("codex adapter reads the recorded git remote, enabling tier-2 association", () => {
   const file = path.join(FIXTURES, "codex-rollout.jsonl");
   const descriptor = codex.classify(candidateFor(file));

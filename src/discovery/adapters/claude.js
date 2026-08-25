@@ -19,23 +19,32 @@ import {
  * directory name is a lossy munge of the cwd (slashes and dots both become dashes),
  * so it is only used to narrow the search - the per-line `cwd` is the authority.
  * No git remote is recorded, so a deleted worktree can only reach tier 3.
+ *
+ * `CLAUDE_CONFIG_DIR` relocates the whole config dir, and it is commonly set per
+ * invocation (a shell alias for a work profile), which leaves a machine's sessions
+ * split across two stores - so both are scanned.
  */
 
 const HEADER_LINES = 40;
 
 export const name = "claude";
 
-export function storeRoot() {
-  return home(".claude", "projects");
+export function storeRoots() {
+  const roots = [home(".claude", "projects")];
+  const configured = process.env.CLAUDE_CONFIG_DIR;
+  if (configured) roots.push(path.join(configured, "projects"));
+  return [...new Set(roots)];
 }
 
 export function enumerate() {
   const out = [];
-  for (const dir of listDirs(storeRoot())) {
-    for (const file of listFiles(dir, ".jsonl")) {
-      const stat = statOrNull(file);
-      if (!stat) continue;
-      out.push({ key: file, path: file, mtimeMs: stat.mtimeMs, bytes: stat.size });
+  for (const root of storeRoots()) {
+    for (const dir of listDirs(root)) {
+      for (const file of listFiles(dir, ".jsonl")) {
+        const stat = statOrNull(file);
+        if (!stat) continue;
+        out.push({ key: file, path: file, mtimeMs: stat.mtimeMs, bytes: stat.size });
+      }
     }
   }
   return out;
