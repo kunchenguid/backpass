@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.6](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.5...backpass-v0.1.6) (2026-08-26)
+
+
+### Bug Fixes
+
+* **apply:** reopen ended Lavish review sessions ([#45](https://github.com/kunchenguid/backpass/issues/45)) ([b0d92bc](https://github.com/kunchenguid/backpass/commit/b0d92bcb4f17175b9fcb24787ac1304991392d23))
+
 ## [0.1.5](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.4...backpass-v0.1.5) (2026-08-25)
 
 
