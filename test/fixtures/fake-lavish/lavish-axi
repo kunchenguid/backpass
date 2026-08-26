@@ -28,10 +28,15 @@ if (cmd === "poll") {
   }
   // A `Send & End` that carries feedback arrives as the final `status: feedback` block
   // flagged with `session_ended: true`.
-  const ending = next.startsWith("ENDING:");
-  const body = ending ? next.slice("ENDING:".length) : next;
+  // An entry may also be `{ body, stderr }`: the real CLI writes its long-poll banner to
+  // stderr, and backpass concatenates both streams before matching, so tests need to be
+  // able to put text on stderr too.
+  const entry = typeof next === "string" ? { body: next } : next;
+  const ending = entry.body.startsWith("ENDING:");
+  const body = ending ? entry.body.slice("ENDING:".length) : entry.body;
   const flags = ending ? "  session_ended: true\n  ended_by: user\n" : "";
   process.stdout.write(`session:\n  file: ${args[1]}\n  status: feedback\n${flags}${body}\n`);
+  if (entry.stderr) process.stderr.write(entry.stderr);
 } else if (cmd === "end") {
   process.stdout.write(`session:\n  file: ${args[1]}\n  status: ended\n`);
 } else {

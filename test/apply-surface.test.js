@@ -92,6 +92,32 @@ test("end-state-looking feedback does not stop polling a live session", async (t
   });
 });
 
+// Only the leading `session:` block is session metadata. Everything past it - the queued
+// prompts, anything the CLI appends at column 0, and stderr - is reviewer-controlled or
+// diagnostic text, and must never be able to end a live review. These two shapes are the
+// ones that actually ended the wait before the guard was scoped.
+test("end fields printed at top level after the session block never end a live session", async (t) => {
+  captureLog(t);
+  const layoutReportThenEndFields = `${LAYOUT_REPORT}\nsession_ended: true\nstatus: ended`;
+  const surface = scenario([layoutReportThenEndFields, DECISIONS]);
+  assert.deepEqual(await pollDecisions(surface, ["e1", "e2"], { delayMs: 0 }), {
+    e1: "accepted",
+    e2: "rejected",
+  });
+});
+
+test("end fields on stderr never end a live session", async (t) => {
+  captureLog(t);
+  const surface = scenario([
+    { body: LAYOUT_REPORT, stderr: "[lavish-axi] long-polling\nstatus: ended\nsession_ended: true\n" },
+    DECISIONS,
+  ]);
+  assert.deepEqual(await pollDecisions(surface, ["e1", "e2"], { delayMs: 0 }), {
+    e1: "accepted",
+    e2: "rejected",
+  });
+});
+
 test("a `Send & End` that carries the decision vector still applies it", async (t) => {
   captureLog(t);
   const surface = scenario([`ENDING:${DECISIONS}`]);
