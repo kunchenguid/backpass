@@ -100,9 +100,10 @@ test("a `Send & End` with no decision vector stops rather than spinning", async 
 test("a surface the reviewer ended in an earlier run is reopened, not handed back dead", async () => {
   const surface = scenario([], { userEnded: true, url: "http://127.0.0.1:4387/session/dead" });
   const url = await openApplySurface(surface);
-  const { opens } = JSON.parse(fs.readFileSync(process.env.FAKE_LAVISH_SCENARIO, "utf8"));
-  assert.equal(opens.length, 1, "apply should ask for the surface exactly once");
-  assert.ok(opens[0].includes("--reopen"), `open was not invited to reopen: ${opens[0]}`);
+  const result = JSON.parse(fs.readFileSync(process.env.FAKE_LAVISH_SCENARIO, "utf8"));
+  assert.equal(result.openCount, 1, "apply should ask for the surface exactly once");
+  assert.equal(result.reopened, true);
+  assert.equal(result.browserLaunches || 0, 0, "lavish must leave browser launching to backpass");
   assert.equal(url, "http://127.0.0.1:4387/session/dead");
 });
 

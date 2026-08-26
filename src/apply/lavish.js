@@ -83,7 +83,7 @@ export async function openApplySurface(file) {
   // lavish-axi keys sessions by file path and `ended_by: "user"` is sticky, so without
   // `--reopen` it exits 0 and prints the dead session's URL - which apply would then hand
   // the reviewer as if it were live. On a live or agent-ended session the flag is a no-op.
-  const result = await runLavish([file, "--reopen"]);
+  const result = await runLavish([file, "--reopen", "--no-open"]);
   if (result.spawnError && result.spawnError.code === "ENOENT") {
     throw new UserError(
       `${LAVISH_BIN} not found on PATH`,

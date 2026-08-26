@@ -36,12 +36,15 @@ if (cmd === "poll") {
   process.stdout.write(`session:\n  file: ${args[1]}\n  status: ended\n`);
 } else {
   const reopen = args.includes("--reopen");
-  scenario.opens = [...(scenario.opens || []), args];
-  save();
+  scenario.openCount = (scenario.openCount || 0) + 1;
   if (scenario.userEnded && !reopen) {
+    save();
     // The real refusal: exit 0, and the dead session's URL is still printed.
     process.stdout.write(`session:\n  file: ${cmd}\n  url: "${url}"\n  status: user-ended\n`);
     process.exit(0);
   }
+  if (scenario.userEnded) scenario.reopened = true;
+  if (!args.includes("--no-open")) scenario.browserLaunches = (scenario.browserLaunches || 0) + 1;
+  save();
   process.stdout.write(`session:\n  file: ${cmd}\n  url: "${url}"\n  status: opened\n`);
 }
