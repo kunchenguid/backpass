@@ -140,8 +140,11 @@ export async function pollDecisions(file, editIds, { delayMs = POLL_RETRY_DELAY_
 
     // lavish-axi reports an end through the session fields, never in prose: `status: ended`
     // when nothing was queued, `session_ended: true` alongside the final `status: feedback`.
-    // parseDecisions has already run, so a `Send & End` carrying a vector still applies.
-    if (/^\s*status:\s*ended\b/m.test(text) || /^\s*session_ended:\s*true\b/m.test(text)) {
+    // Scope these fields to the leading session metadata block so field-like feedback or
+    // diagnostics cannot end the wait. parseDecisions has already run, so a `Send & End`
+    // carrying a vector still applies.
+    const session = /^session:\s*\r?\n((?:[ \t]+[^\r\n]*(?:\r?\n|$))*)/m.exec(text)?.[1] || "";
+    if (/^\s*status:\s*ended\b/m.test(session) || /^\s*session_ended:\s*true\b/m.test(session)) {
       warn("review session ended without a decision vector - nothing applied");
       return null;
     }

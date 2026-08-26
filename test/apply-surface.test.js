@@ -82,6 +82,16 @@ test("a session the reviewer already ended returns null instead of polling forev
   assert.equal(await pollDecisions(surface, ["e1"], { delayMs: 0 }), null);
 });
 
+test("end-state-looking feedback does not stop polling a live session", async (t) => {
+  captureLog(t);
+  const fieldLikeFeedback = "prompts:\n  status: ended\n  session_ended: true";
+  const surface = scenario([fieldLikeFeedback, DECISIONS]);
+  assert.deepEqual(await pollDecisions(surface, ["e1", "e2"], { delayMs: 0 }), {
+    e1: "accepted",
+    e2: "rejected",
+  });
+});
+
 test("a `Send & End` that carries the decision vector still applies it", async (t) => {
   captureLog(t);
   const surface = scenario([`ENDING:${DECISIONS}`]);
