@@ -116,6 +116,15 @@ export function parseMemoryUnits(text) {
   }));
 }
 
+/**
+ * The fingerprint of one memory file's exact bytes. It is written into the proposal and
+ * re-checked at apply, so it has exactly one definition: a proposal and the freshness
+ * check that guards it can never disagree about what "unchanged" means.
+ */
+export function memoryTextHash(text) {
+  return `sha256:${sha256(text).slice(0, 16)}`;
+}
+
 export function readMemoryFile(repoRoot, relativePath) {
   const absolute = path.join(repoRoot, relativePath);
   if (!fs.existsSync(absolute)) return null;
@@ -124,7 +133,7 @@ export function readMemoryFile(repoRoot, relativePath) {
     path: relativePath,
     absolute,
     text,
-    hash: `sha256:${sha256(text).slice(0, 16)}`,
+    hash: memoryTextHash(text),
     tokens: estimateTokens(text),
     units: parseMemoryUnits(text),
   };

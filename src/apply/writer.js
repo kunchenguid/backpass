@@ -2,7 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { applyEdit, projectWithDecisions } from "../proposal.js";
-import { budgetGateKind, budgetStatus } from "../tokens.js";
+import { memoryTextHash } from "../memory.js";
+import { budgetGateKind, budgetStatus, formatTokens } from "../tokens.js";
 import { recordRejection } from "../state.js";
 import { writeSkill } from "../skills.js";
 
@@ -42,13 +43,58 @@ function acceptedSubsetBudgetFailure({ proposal, accepted, repo, capTokens }) {
 }
 
 /**
+ * Freshness before mutation.
+ *
+ * Every hunk was cut from one exact image of the memory file, and the proposal records
+ * that image's hash. If the file has changed since - an upstream merge, a hand edit,
+ * another agent - then the hunks describe text that may no longer exist, and the ones
+ * that still happen to match would leave the file half-descended: part of a shrink plan
+ * applied against a file the plan was never measured against. So the run is refused
+ * before it writes anything, and the fix is to re-measure, not to salvage.
+ *
+ * A proposal saved before this field existed carries no hash and is left alone.
+ */
+function memoryFileDrift(proposal, repo) {
+  const expected = proposal.memoryFile?.hash;
+  const relative = proposal.memoryFile?.path;
+  if (!expected || !relative) return null;
+
+  const absolute = path.join(repo.root, relative);
+  if (!fs.existsSync(absolute)) return null;
+
+  const observed = memoryTextHash(fs.readFileSync(absolute, "utf8"));
+  if (observed === expected) return null;
+
+  return {
+    file: relative,
+    error:
+      `${relative} changed after this proposal was made (${expected} -> ${observed}), so its edits ` +
+      `no longer describe the file on disk; nothing was written. Run \`backpass\` to re-propose ` +
+      `against the current ${relative}.`,
+  };
+}
+
+function overBudgetWarning(relative, budget) {
+  return (
+    `${relative} is still ${formatTokens(budget.over)} tokens over the ${formatTokens(budget.capTokens)}-token ` +
+    "budget; run `backpass` again for the next shrink step"
+  );
+}
+
+/**
  * The only place in backpass that writes to the repo.
  *
  * Everything upstream is read-only analysis; a run only changes the weights here, after
- * a human accepted specific edits. The accepted subset is rechecked with the same
- * cap/shrink budget gate as the full proposal (`budgetGateKind`); a failing subset
- * returns with no writes and no rejection ledger. Writes are grouped per file so a
- * memory file is rewritten once, atomically, rather than edit by edit.
+ * a human accepted specific edits. Three gates run before the first byte is written:
+ * the memory file must still be the file the proposal was measured against
+ * (`memoryFileDrift`), the accepted subset must clear the same cap/shrink budget gate as
+ * the full proposal (`budgetGateKind`), and every accepted edit for a file must compose
+ * against that file's single pre-write image. Any of them failing writes nothing and
+ * records no rejection.
+ *
+ * A file is therefore applied all at once or not at all, and a skill is written only
+ * when the memory-file edit that points at it lands - otherwise the repo would hold the
+ * same instructions twice, once inline and once in a skill nothing references.
  */
 export function applyDecisions({ proposal, decisions, repo, state, config, dryRun = false }) {
   const accepted = proposal.edits.filter((e) => decisions[e.id] === "accepted");
@@ -64,6 +110,14 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     rejected: rejected.length,
     rejectionsRecorded: false,
   };
+
+  if (accepted.length) {
+    const drift = memoryFileDrift(proposal, repo);
+    if (drift) {
+      results.failed.push(drift);
+      return results;
+    }
+  }
 
   const budgetFailure = acceptedSubsetBudgetFailure({
     proposal,
@@ -81,6 +135,11 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     byFile.get(edit.file).push(edit);
   }
 
+  // Compose first, write later. Each file's accepted edits are applied to one immutable
+  // image of that file; only a set that composes completely earns a write.
+  const planned = [];
+  const landed = new Set();
+
   for (const [relative, edits] of byFile) {
     const absolute = path.join(repo.root, relative);
     if (!fs.existsSync(absolute)) {
@@ -91,33 +150,68 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     const before = fs.readFileSync(absolute, "utf8");
     let text = before;
     const applied = [];
+    const failures = [];
 
     for (const edit of edits) {
       try {
         text = applyEdit(text, edit);
         applied.push(edit.id);
       } catch (err) {
-        results.failed.push({ file: relative, edit: edit.id, error: err.message });
+        failures.push({ file: relative, edit: edit.id, error: err.message });
       }
     }
 
+    if (failures.length) {
+      results.failed.push(...failures);
+      if (applied.length) {
+        results.failed.push({
+          file: relative,
+          error: `${relative} was left unchanged: a file takes every accepted edit or none of them`,
+        });
+      }
+      continue;
+    }
+
     if (text === before) continue;
-
-    const budget = relative === proposal.memoryFile.path ? budgetStatus(before, text, config.budgetTokens) : null;
-
-    if (!dryRun) fs.writeFileSync(absolute, text);
-    results.written.push({ file: relative, edits: applied, budget, dryRun });
+    planned.push({ relative, absolute, before, text, applied });
+    for (const id of applied) landed.add(id);
   }
 
+  // Skills go in before the memory file. A skill nothing points at yet is inert, while a
+  // memory file pointing at a skill that is not there is actively wrong - so if a skill
+  // cannot be written, the files that would reference it are left alone.
+  const skillFailures = [];
   for (const edit of accepted) {
     if (edit.kind !== "extract" || !edit.skill) continue;
+    if (!landed.has(edit.id)) continue;
     try {
       const layout = dryRun ? { created: [], warnings: [] } : writeSkill(repo.root, edit.skill);
       results.skills.push({ path: edit.skill.path, dryRun, created: layout.created });
       for (const w of layout.warnings) if (!results.warnings.includes(w)) results.warnings.push(w);
     } catch (err) {
-      results.failed.push({ file: edit.skill.path, edit: edit.id, error: err.message });
+      skillFailures.push({ file: edit.skill.path, edit: edit.id, error: err.message });
     }
+  }
+
+  if (skillFailures.length) {
+    results.failed.push(...skillFailures);
+    for (const { relative } of planned) {
+      results.failed.push({
+        file: relative,
+        error: `${relative} was left unchanged: its edits point at a skill that could not be written`,
+      });
+    }
+    return results;
+  }
+
+  for (const { relative, absolute, before, text, applied } of planned) {
+    const budget = relative === proposal.memoryFile.path ? budgetStatus(before, text, config.budgetTokens) : null;
+
+    if (!dryRun) fs.writeFileSync(absolute, text);
+    results.written.push({ file: relative, edits: applied, budget, dryRun });
+
+    // Shrinking over several runs is the design, so this is a heading, not a failure.
+    if (budget && !budget.withinBudget) results.warnings.push(overBudgetWarning(relative, budget));
   }
 
   // Rejections are remembered so the same edit is not re-proposed without new evidence.

@@ -47,9 +47,16 @@ export function budgetGateKind(budget) {
   return null;
 }
 
-/** Fixed-width ASCII gauge for `backpass status`. */
+/**
+ * Fixed-width ASCII gauge for `backpass status`.
+ *
+ * Over budget the `!!` marker gets its own cells rather than the leftover ones, because
+ * past 100% there are no leftover cells: a file at twice its cap must not render as a
+ * merely-full bar.
+ */
 export function budgetBar(status, width = 32) {
-  const filled = Math.min(width, Math.round(status.utilization * width));
-  const overflow = status.withinBudget ? 0 : Math.min(width - filled, 2);
-  return `[${"#".repeat(filled)}${"!".repeat(overflow)}${".".repeat(Math.max(0, width - filled - overflow))}]`;
+  const overflow = status.withinBudget ? 0 : Math.min(width, 2);
+  const cells = width - overflow;
+  const filled = Math.min(cells, Math.round(status.utilization * width));
+  return `[${"#".repeat(filled)}${"!".repeat(overflow)}${".".repeat(Math.max(0, cells - filled))}]`;
 }

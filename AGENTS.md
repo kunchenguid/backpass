@@ -58,14 +58,21 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   every other stage is read-only analysis, which is what makes a run safe to interrupt.
   Bootstrap (`src/commands/bootstrap.js`, a repo with no memory file) is the one run that
   writes without the apply gate, and it only ever creates files, never overwrites.
-  Apply revalidates the accepted subset with `budgetGateKind` (`src/tokens.js`) before any
-  write; a failing subset writes nothing and does not record rejections.
+  Nothing is written until three gates pass: the memory file still hashes to
+  `proposal.memoryFile.hash` (`memoryFileDrift`, using `memoryTextHash` from `src/memory.js`
+  so the check and the proposal cannot disagree), the accepted subset clears
+  `budgetGateKind` (`src/tokens.js`), and every accepted edit for a file composes against
+  that file's one pre-write image. Any of them failing writes nothing and records no
+  rejection. A file is therefore applied whole or not at all, and a skill is written only
+  when the memory-file edit pointing at it lands - skills go in first, so an interrupt
+  leaves an unreferenced skill rather than a memory file naming one that is missing.
 - **Synthesis edits natively, in a staging copy, never by describing text.** The agent
   gets `--approve-all` with `cwd` = `.backpass/synthesis/` (`prepareWorkspace`), which holds
   only the memory file and the skills dir; backpass measures the copy (`measureWorkspace`,
   `anchoredHunks`) and the agent annotates the measured changes by id in a second turn of
   the same session. The model never supplies `find` text - every hunk is cut from the raw
-  file, widened until unique, so "find text does not appear" cannot recur. Never pass
+  file, widened until unique, so a hunk can only go stale by the file itself changing after
+  the proposal, which apply refuses rather than part-applies. Never pass
   `approveAll` with the repo as `cwd`; the repo is fingerprinted and a harness that
   writes there fails the run loudly.
 - **Skills only count if a harness loads them.** Extractions target `.agents/skills` with

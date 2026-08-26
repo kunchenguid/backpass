@@ -47,8 +47,9 @@ test("the budget bar marks overflow distinctly from a full bar", () => {
   const full = budgetBar(budgetStatus("x".repeat(20000), null, 5000), 10);
   const over = budgetBar(budgetStatus("x".repeat(40000), null, 5000), 10);
   assert.equal(full, "[##########]");
-  assert.ok(over.includes("#"));
-  assert.equal(over.length, 12);
+  assert.notEqual(over, full, "twice the cap must not render as merely full");
+  assert.match(over, /!!\]$/, "the overflow marker gets its own cells past 100%");
+  assert.equal(over.length, full.length, "both bars stay the same width");
 });
 
 test("formatTokens groups thousands for the gauge readout", () => {
