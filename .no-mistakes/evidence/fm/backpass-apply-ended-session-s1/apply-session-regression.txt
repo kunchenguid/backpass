@@ -1,0 +1,4 @@
+Previously ended review reopened: true
+Lavish browser launches: 0
+Live review URL returned: http://127.0.0.1:4387/session/previously-ended
+Live review survived end-looking layout/stderr text: {"e1":"accepted","e2":"rejected"}
