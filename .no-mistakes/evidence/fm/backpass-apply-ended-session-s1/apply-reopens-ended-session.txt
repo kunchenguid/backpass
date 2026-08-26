@@ -1,0 +1,17 @@
+· review surface: http://127.0.0.1:4387/session/previously-ended
+waiting for your decisions in the browser (Ctrl-C to abort; nothing is written until you send)
+warn review session ended without a decision vector - nothing applied
+No decisions received - nothing was written.
+
+Persisted fake lavish session state after command:
+{
+  "openCount": 1,
+  "reopened": true,
+  "browserLaunches": 0,
+  "pollsRemaining": 0
+}
+
+Repository memory after command (must remain unchanged because session ended without decisions):
+# Demo instructions
+
+- Keep reviews live.

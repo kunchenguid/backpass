@@ -1,0 +1,19 @@
+· review surface: http://127.0.0.1:4387/session/reopened-send-end
+waiting for your decisions in the browser (Ctrl-C to abort; nothing is written until you send)
+
+[dry-run] 1 accepted · 0 rejected
+  wrote AGENTS.md (e1)
+    budget [................................] 11 -> 13 / 5,000 tok
+
+Persisted fake lavish session state after command:
+{
+  "openCount": 1,
+  "reopened": true,
+  "browserLaunches": 0,
+  "pollsRemaining": 0
+}
+
+Repository memory after dry run (must remain unchanged):
+# Demo instructions
+
+- Keep reviews live.
