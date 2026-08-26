@@ -76,10 +76,34 @@ test("a decision vector on the first poll returns with only the wait line", asyn
   assert.equal(lines.length, 1);
 });
 
-test("a session that ends without decisions returns null", async (t) => {
+test("a session the reviewer already ended returns null instead of polling forever", async (t) => {
   captureLog(t);
-  const surface = scenario(["status: session ended"]);
+  const surface = scenario(["ENDED"]);
   assert.equal(await pollDecisions(surface, ["e1"], { delayMs: 0 }), null);
+});
+
+test("a `Send & End` that carries the decision vector still applies it", async (t) => {
+  captureLog(t);
+  const surface = scenario([`ENDING:${DECISIONS}`]);
+  assert.deepEqual(await pollDecisions(surface, ["e1", "e2"], { delayMs: 0 }), {
+    e1: "accepted",
+    e2: "rejected",
+  });
+});
+
+test("a `Send & End` with no decision vector stops rather than spinning", async (t) => {
+  captureLog(t);
+  const surface = scenario([`ENDING:${LAYOUT_REPORT}`]);
+  assert.equal(await pollDecisions(surface, ["e1"], { delayMs: 0 }), null);
+});
+
+test("a surface the reviewer ended in an earlier run is reopened, not handed back dead", async () => {
+  const surface = scenario([], { userEnded: true, url: "http://127.0.0.1:4387/session/dead" });
+  const url = await openApplySurface(surface);
+  const { opens } = JSON.parse(fs.readFileSync(process.env.FAKE_LAVISH_SCENARIO, "utf8"));
+  assert.equal(opens.length, 1, "apply should ask for the surface exactly once");
+  assert.ok(opens[0].includes("--reopen"), `open was not invited to reopen: ${opens[0]}`);
+  assert.equal(url, "http://127.0.0.1:4387/session/dead");
 });
 
 test("openInBrowser launches a detached opener and never throws", () => {

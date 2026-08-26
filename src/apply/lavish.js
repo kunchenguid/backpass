@@ -78,7 +78,12 @@ export function parseDecisions(text, editIds) {
 }
 
 export async function openApplySurface(file) {
-  const result = await runLavish([file]);
+  // `backpass apply` is itself the human asking for the review surface, so a session the
+  // reviewer ended from the browser in an earlier run has to be reopened, not refused.
+  // lavish-axi keys sessions by file path and `ended_by: "user"` is sticky, so without
+  // `--reopen` it exits 0 and prints the dead session's URL - which apply would then hand
+  // the reviewer as if it were live. On a live or agent-ended session the flag is a no-op.
+  const result = await runLavish([file, "--reopen"]);
   if (result.spawnError && result.spawnError.code === "ENOENT") {
     throw new UserError(
       `${LAVISH_BIN} not found on PATH`,
@@ -133,7 +138,10 @@ export async function pollDecisions(file, editIds, { delayMs = POLL_RETRY_DELAY_
     const decisions = parseDecisions(text, editIds);
     if (decisions) return decisions;
 
-    if (/session\s+(ended|closed)/i.test(text)) {
+    // lavish-axi reports an end through the session fields, never in prose: `status: ended`
+    // when nothing was queued, `session_ended: true` alongside the final `status: feedback`.
+    // parseDecisions has already run, so a `Send & End` carrying a vector still applies.
+    if (/^\s*status:\s*ended\b/m.test(text) || /^\s*session_ended:\s*true\b/m.test(text)) {
       warn("review session ended without a decision vector - nothing applied");
       return null;
     }
