@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync, spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 import { bootstrapRun } from "../src/commands/bootstrap.js";
 import { renderPointer, renderStarterMemory } from "../src/bootstrap.js";
@@ -10,6 +12,8 @@ import { loadConfig } from "../src/config.js";
 import { setLoggerSink } from "../src/logger.js";
 import { isPointerTo, parseMemoryUnits } from "../src/memory.js";
 import { State } from "../src/state.js";
+
+const CLI = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../bin/backpass");
 
 function makeRepo(files = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-bootstrap-"));
@@ -131,6 +135,24 @@ test("starter memory is the minimal skeleton: purpose, an empty Learnings sectio
 
   // Deterministic: the checkout's contents no longer change the starter.
   assert.equal(renderStarterMemory({ repo: makeRepo() }), text);
+});
+
+test("a bootstrap run invalidates an older proposal", () => {
+  const repo = makeRepo();
+  execFileSync("git", ["init", "-q"], { cwd: repo.root });
+  const state = new State(repo.root).ensure();
+  state.writeProposal({ generatedAt: "earlier", edits: [{ id: "stale" }] });
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-bootstrap-home-"));
+
+  const result = spawnSync(process.execPath, [CLI, "--since", "1m"], {
+    cwd: repo.root,
+    encoding: "utf8",
+    env: { ...process.env, HOME: home, NO_COLOR: "1" },
+  });
+
+  assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+  assert.equal(fs.existsSync(path.join(repo.root, "AGENTS.md")), true);
+  assert.equal(state.readProposal(), null);
 });
 
 test("no memory file and no transcripts: seeds AGENTS.md from defaults plus a CLAUDE.md pointer", async () => {

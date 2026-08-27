@@ -31,6 +31,8 @@ export async function cmdRun(ctx) {
       )}`,
     );
 
+    config.state.clearProposal();
+
     if (!resolveMemoryFiles(repo.root, config.memoryFiles).primary) {
       const result = await bootstrapRun(ctx);
       tui?.stop();
@@ -39,9 +41,6 @@ export async function cmdRun(ctx) {
       return 0;
     }
 
-    // The full pass is also a proposal run. Invalidate an older result before discovery
-    // and analysis so an early failure cannot leave it available to `backpass apply`.
-    config.state.clearProposal();
     const analysis = await runAnalysis(ctx);
 
     if (!analysis.transcripts.length) {

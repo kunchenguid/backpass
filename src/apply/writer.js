@@ -5,7 +5,14 @@ import { applyEdit, projectWithDecisions } from "../proposal.js";
 import { memoryTextHash } from "../memory.js";
 import { budgetGateKind, budgetStatus, formatTokens } from "../tokens.js";
 import { recordRejection } from "../state.js";
-import { editSkills, removeOwnedSkillPaths, writeSkill } from "../skills.js";
+import {
+  CANONICAL_SKILLS_DIR,
+  CLAUDE_SKILLS_LINK,
+  editSkills,
+  ensureSkillsLayout,
+  removeOwnedSkillPaths,
+  writeSkill,
+} from "../skills.js";
 
 function acceptedSubsetBudgetFailure({ proposal, accepted, repo, capTokens, memoryText }) {
   if (!accepted.length) return null;
@@ -226,7 +233,9 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
   const ownedSkillPaths = [];
   for (const { edit, skill } of plannedSkills) {
     try {
-      const layout = dryRun ? { created: [], warnings: [] } : writeSkill(repo.root, skill, { exclusive: true });
+      const layout = dryRun
+        ? { created: [], warnings: [] }
+        : writeSkill(repo.root, skill, { exclusive: true, ensureLayout: false });
       results.skills.push({ path: skill.path, dryRun, created: layout.created });
       if (!dryRun) {
         writtenSkillPaths.push(skill.path);
@@ -235,6 +244,20 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
       for (const w of layout.warnings) if (!results.warnings.includes(w)) results.warnings.push(w);
     } catch (err) {
       skillFailures.push({ file: skill.path, edit: edit.id, error: err.message });
+    }
+  }
+
+  const canonical = plannedSkills.find(
+    ({ skill }) => skill.path === CANONICAL_SKILLS_DIR || skill.path.startsWith(`${CANONICAL_SKILLS_DIR}/`),
+  );
+  if (!dryRun && !skillFailures.length && canonical) {
+    try {
+      const layout = ensureSkillsLayout(repo.root);
+      const result = results.skills.find(({ path: skillPath }) => skillPath === canonical.skill.path);
+      result.created = [...new Set([...result.created, ...layout.created])];
+      for (const w of layout.warnings) if (!results.warnings.includes(w)) results.warnings.push(w);
+    } catch (err) {
+      skillFailures.push({ file: CLAUDE_SKILLS_LINK, edit: canonical.edit.id, error: err.message });
     }
   }
 
