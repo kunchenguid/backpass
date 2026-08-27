@@ -1,4 +1,5 @@
 const childProcess = require("node:child_process");
+const process = require("node:process");
 
 const spawn = childProcess.spawn;
 childProcess.spawn = function signalDuringSpawn(...args) {
