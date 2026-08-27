@@ -23,7 +23,8 @@ import { UserError } from "./logger.js";
  *
  * No overlay requested means no wrapper, no `--model`, no `set` - same spawn as before.
  * A requested overlay with no proven invocation-scoped mechanism throws rather than
- * writing persistent defaults or silently ignoring the request.
+ * writing persistent defaults or silently ignoring the request. OpenCode effort is the
+ * sole explicit exception: it is skipped with a report note.
  */
 
 /** ACP session-config ids used only when that `set` is session-local, not a persist path. */

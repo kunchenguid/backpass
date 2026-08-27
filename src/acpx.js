@@ -330,10 +330,11 @@ export async function execOneShot({
  * effort for every harness, so an effortful call still goes through a session when
  * the overlay needs one. Synthesis also needs more than one turn in the same context:
  * the agent edits the staging copy, then annotates the changes backpass measured.
- * Adapters that cannot apply effort skip that overlay with a report line - never silently.
+ * OpenCode alone skips its unsupported effort overlay with a report line. Every other
+ * requested overlay without a proven mechanism stops rather than pretending it applied.
  *
  * Resolves to the handle, or throws an `AcpxError` (`unsupported: true` when the adapter
- * has no session support at all, which `sessionPrompt` turns into an exec fallback).
+ * has no session support; `sessionPrompt` only falls back when it can preserve the requested overlays).
  *
  * @returns {Promise<{ notes: string[],
  *   prompt: (options: { promptFile: string, timeoutSeconds?: number, promptRetries?: number,
@@ -463,8 +464,9 @@ function subtractUsage(current, previous) {
 
 /**
  * One prompt through a short-lived named session: open, prompt, close. The analysis
- * pass uses this whenever an effort is configured. An adapter without session support
- * falls back to a one-shot `exec`, and says so.
+ * pass uses this whenever an effort is configured. Without session support, it falls
+ * back to one-shot `exec` only when that preserves the requested overlays; otherwise it
+ * stops with actionable guidance. OpenCode effort remains the explicit reported skip.
  */
 export async function sessionPrompt({
   agent,
