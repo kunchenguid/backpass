@@ -1,0 +1,48 @@
+$ backpass propose --synthesis-agent claude --synthesis-model fake-model
+proposal · backpass-cli-y2mIZt · AGENTS.md · 1 edit(s) from 3 session(s)
+  budget [................................] 53 -> 51 / 5,000 tok
+  evidence: 0 positive · 3 negative · 0 gap clusters
+
+  e1 EXTRACT  extract two playbooks (-2 tok, 3 transcript(s))
+
+  tier-2 tokens: input=2,000 output=80 total=2,080
+
+Review and apply with `backpass apply` (nothing has been written).
+· synthesizing with claude (fake-model) effort=high
+warn synthesis ended its turn with no output; retrying the annotation once in a fresh session
+
+OBSERVED RECOVERY STATE
+exit=0
+sessions_opened=2 (fresh session used after empty output)
+annotation_attempt=1 (empty turn did not consume an attempt)
+review_decisions=1
+skills_in_decision=incident-response,release-checklist
+
+$ backpass apply --no-open  # reviewer accepts e1
+1 accepted · 0 rejected
+  wrote AGENTS.md (e1)
+    budget [................................] 53 -> 51 / 5,000 tok
+  wrote .agents/skills/incident-response/SKILL.md (new skill)
+    created .agents/skills
+    created .claude/skills -> ../.agents/skills
+  wrote .agents/skills/release-checklist/SKILL.md (new skill)
+· review surface: http://127.0.0.1:4387/session/51233fdaf6389690
+waiting for your decisions in the browser (Ctrl-C to abort; nothing is written until you send)
+
+OBSERVED APPLIED STATE
+exit=0
+# Demo agent memory
+
+## Build
+
+- Run make build.
+
+## Playbooks
+- Release: .agents/skills/release-checklist/SKILL.md
+- Incidents: .agents/skills/incident-response/SKILL.md
+
+## Style
+
+- Keep it concise.
+.agents/skills/release-checklist/SKILL.md: written
+.agents/skills/incident-response/SKILL.md: written
