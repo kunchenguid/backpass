@@ -1,0 +1,47 @@
+
+===== DRIFT REFUSAL: USER-VISIBLE CLI OUTPUT =====
+2 accepted · 0 rejected
+  failed AGENTS.md: AGENTS.md changed after this proposal was made (sha256:f4826be6a1cea07a -> sha256:d34085de1c52c18a), so its edits no longer describe the file on disk; nothing was written. Run `backpass` to re-propose against the current AGENTS.md.
+  nothing written
+· review surface: http://127.0.0.1:4387/session/51233fdaf6389690
+waiting for your decisions in the browser (Ctrl-C to abort; nothing is written until you send)
+===== END DRIFT REFUSAL =====
+
+
+===== SUCCESSFUL APPLY: USER-VISIBLE CLI OUTPUT =====
+2 accepted · 0 rejected
+  wrote AGENTS.md (e1, e2)
+    budget [................................] 124 -> 51 / 5,000 tok
+  wrote .agents/skills/ci-details/SKILL.md (new skill)
+    created .agents/skills
+    created .claude/skills -> ../.agents/skills
+  wrote .agents/skills/release-details/SKILL.md (new skill)
+· review surface: http://127.0.0.1:4387/session/51233fdaf6389690
+waiting for your decisions in the browser (Ctrl-C to abort; nothing is written until you send)
+===== END SUCCESSFUL APPLY =====
+
+
+===== OVER-BUDGET SHRINK: USER-VISIBLE CLI OUTPUT =====
+2 accepted · 0 rejected
+  wrote AGENTS.md (e1, e2)
+    budget [##############################!!] 124 -> 51 / 20 tok
+  wrote .agents/skills/ci-details/SKILL.md (new skill)
+    created .agents/skills
+    created .claude/skills -> ../.agents/skills
+  wrote .agents/skills/release-details/SKILL.md (new skill)
+· review surface: http://127.0.0.1:4387/session/51233fdaf6389690
+waiting for your decisions in the browser (Ctrl-C to abort; nothing is written until you send)
+warn AGENTS.md is still 31 tokens over the 20-token budget; run `backpass` again for the next shrink step
+===== END OVER-BUDGET SHRINK =====
+
+✔ a memory file that changed after the proposal is left untouched by apply (173.268ms)
+✔ an unchanged memory file applies every accepted edit and its skills (156.952208ms)
+✔ apply names a memory file left over budget without refusing the shrink (163.547833ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 525.8275
