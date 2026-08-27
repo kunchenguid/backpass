@@ -193,8 +193,27 @@ function pathIdentity(stat) {
 function restoreQuarantinedPath(quarantine, destination) {
   const stat = fs.lstatSync(quarantine);
   if (stat.isDirectory()) {
-    fs.cpSync(quarantine, destination, { recursive: true, force: false, errorOnExist: true });
-    fs.rmSync(quarantine, { recursive: true });
+    // Restore the directory object itself. Recursively copying it can fail for valid
+    // entries such as Unix sockets and would turn restoration into a lossy clone. On
+    // POSIX, an empty directory created with mkdir is an atomic no-clobber reservation;
+    // rename may replace that reservation, but cannot replace it after another process
+    // has populated it.
+    if (process.platform === "win32") {
+      fs.renameSync(quarantine, destination);
+      return;
+    }
+
+    fs.mkdirSync(destination, { mode: stat.mode & 0o7777 });
+    try {
+      fs.renameSync(quarantine, destination);
+    } catch (err) {
+      try {
+        fs.rmdirSync(destination);
+      } catch {
+        // Another process populated the reservation. Preserve both directory trees.
+      }
+      throw err;
+    }
     return;
   }
   if (stat.isSymbolicLink()) {

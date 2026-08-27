@@ -518,7 +518,7 @@ test("skill rollback preserves a replacement made immediately before removal", (
   assert.equal(fs.readFileSync(memory, "utf8"), before);
 });
 
-test("skill rollback restores a concurrent directory replacement", () => {
+test("skill rollback restores an exact concurrent directory without recursively copying it", () => {
   const dir = initRepo();
   const proposal = proposeExtractions(dir);
   const concurrentSkill = path.join(dir, ".agents/skills/ci-details/SKILL.md");
@@ -537,6 +537,7 @@ test("skill rollback restores a concurrent directory replacement", () => {
     BACKPASS_TEST_REPLACE_ON_ROLLBACK: concurrentSkill,
     BACKPASS_TEST_REPLACEMENT_TEXT: "directory replacement\n",
     BACKPASS_TEST_REPLACEMENT_DIRECTORY: "1",
+    BACKPASS_TEST_REJECT_DIRECTORY_COPY: "1",
   };
 
   let applied;
