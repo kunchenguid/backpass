@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { buildProposal } from "../src/proposal.js";
@@ -147,7 +147,7 @@ function proposeExtractions(dir) {
 }
 
 /** Run `backpass apply` for real, with the fake review surface accepting every edit. */
-function runApply(dir, editIds) {
+function applyInvocation(dir, editIds) {
   const decisions = editIds.map((id) => `${id}=accepted`).join(" ");
   // Outside the repo: the assertions below read `git status`, so the harness must not
   // leave a file there itself.
@@ -160,18 +160,38 @@ function runApply(dir, editIds) {
       ],
     }),
   );
-
-  const result = spawnSync(process.execPath, [CLI, "apply", "--no-open"], {
-    cwd: dir,
-    encoding: "utf8",
-    env: {
-      ...process.env,
-      NO_COLOR: "1",
-      BACKPASS_LAVISH_BIN: FAKE_LAVISH,
-      FAKE_LAVISH_SCENARIO: scenario,
+  return {
+    args: [CLI, "apply", "--no-open"],
+    options: {
+      cwd: dir,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        NO_COLOR: "1",
+        BACKPASS_LAVISH_BIN: FAKE_LAVISH,
+        FAKE_LAVISH_SCENARIO: scenario,
+      },
     },
-  });
+  };
+}
+
+function runApply(dir, editIds) {
+  const { args, options } = applyInvocation(dir, editIds);
+  const result = spawnSync(process.execPath, args, options);
   return { ...result, output: `${result.stdout}${result.stderr}` };
+}
+
+function runApplyAsync(dir, editIds) {
+  const { args, options } = applyInvocation(dir, editIds);
+  const child = spawn(process.execPath, args, options);
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => (stdout += chunk));
+  child.stderr.on("data", (chunk) => (stderr += chunk));
+  return new Promise((resolve, reject) => {
+    child.on("error", reject);
+    child.on("close", (status, signal) => resolve({ status, signal, stdout, stderr, output: `${stdout}${stderr}` }));
+  });
 }
 
 const porcelain = (dir) => execFileSync("git", ["status", "--porcelain"], { cwd: dir, encoding: "utf8" }).trim();
@@ -346,6 +366,8 @@ test("a later file failure rolls back earlier files and leaves memory untouched"
   assert.equal(fs.readFileSync(memory, "utf8"), before, "the memory file stayed byte-identical");
   assert.equal(fs.existsSync(path.join(dir, ".agents/skills/ci-details/SKILL.md")), false);
   assert.equal(fs.existsSync(path.join(dir, ".agents/skills/release-details/SKILL.md")), false);
+  assert.equal(fs.existsSync(path.join(dir, ".agents")), false);
+  assert.equal(fs.existsSync(path.join(dir, ".claude")), false);
   assert.equal(
     fs.readdirSync(dir).some((name) => name.includes(".backpass-")),
     false,
@@ -389,6 +411,68 @@ test("apply refuses accepted paths that resolve to the same target", () => {
   assert.equal(fs.readFileSync(existing, "utf8"), "before\n");
   assert.equal(fs.readFileSync(memory, "utf8"), memoryBefore);
   assert.equal(fs.existsSync(path.join(dir, ".agents")), false);
+});
+
+test("rollback leaves a concurrently changed file untouched", { timeout: 15000 }, async () => {
+  const dir = initRepo();
+  const proposal = proposeExtractions(dir);
+  const existing = path.join(dir, "existing.md");
+  const slow = path.join(dir, "slow.md");
+  const lockedDir = path.join(dir, "locked");
+  const slowBefore = "a".repeat(8 * 1024 * 1024);
+  const slowAfter = "b".repeat(8 * 1024 * 1024);
+  fs.writeFileSync(existing, "before\n");
+  fs.writeFileSync(slow, slowBefore);
+  fs.mkdirSync(lockedDir);
+  fs.writeFileSync(path.join(lockedDir, "existing.md"), "locked before\n");
+  proposal.edits.push(
+    {
+      id: "e3",
+      kind: "rewrite",
+      file: "existing.md",
+      find: "before\n",
+      replace: "first write\n",
+    },
+    {
+      id: "e4",
+      kind: "rewrite",
+      file: "slow.md",
+      find: slowBefore,
+      replace: slowAfter,
+    },
+    {
+      id: "e5",
+      kind: "rewrite",
+      file: "locked/existing.md",
+      find: "locked before\n",
+      replace: "locked after\n",
+    },
+  );
+  fs.writeFileSync(path.join(dir, ".backpass/proposal.json"), JSON.stringify(proposal));
+  fs.chmodSync(lockedDir, 0o555);
+
+  const applying = runApplyAsync(
+    dir,
+    proposal.edits.map((e) => e.id),
+  );
+  let changed = false;
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    if (fs.readFileSync(existing, "utf8") === "first write\n") {
+      fs.writeFileSync(existing, "concurrent write\n");
+      changed = true;
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+
+  const applied = await applying;
+  fs.chmodSync(lockedDir, 0o755);
+  assert.equal(changed, true, `the apply never exposed its first committed file:\n${applied.output}`);
+  assert.equal(applied.status, 1, `apply should fail:\n${applied.output}`);
+  assert.match(applied.output, /existing\.md rollback conflict/);
+  assert.equal(fs.readFileSync(existing, "utf8"), "concurrent write\n");
+  assert.equal(fs.readFileSync(slow, "utf8"), slowBefore);
 });
 
 test("a memory write failure rolls back skills without truncating memory", () => {

@@ -146,6 +146,26 @@ function commitStillCurrent(commit) {
   }
 }
 
+function absentParentDirectories(root, files) {
+  const directories = new Set();
+  for (const file of files) {
+    for (let current = path.dirname(file); current !== root; current = path.dirname(current)) {
+      if (!fs.existsSync(current)) directories.add(current);
+    }
+  }
+  return [...directories].sort((a, b) => b.length - a.length);
+}
+
+function removeEmptyDirectories(directories) {
+  for (const directory of directories) {
+    try {
+      fs.rmdirSync(directory);
+    } catch {
+      continue;
+    }
+  }
+}
+
 /**
  * The only place in backpass that writes to the repo.
  *
@@ -288,6 +308,13 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
   }
   if (results.failed.length) return results;
 
+  const canonical = plannedSkills.find(
+    ({ skill }) => skill.path === CANONICAL_SKILLS_DIR || skill.path.startsWith(`${CANONICAL_SKILLS_DIR}/`),
+  );
+  const createdDirectoryCandidates = absentParentDirectories(repo.root, [
+    ...plannedSkills.map(({ skill }) => path.join(repo.root, skill.path)),
+    ...(canonical ? [path.join(repo.root, CLAUDE_SKILLS_LINK)] : []),
+  ]);
   const skillFailures = [];
   const writtenSkillPaths = [];
   const ownedSkillPaths = [];
@@ -307,22 +334,9 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     }
   }
 
-  const canonical = plannedSkills.find(
-    ({ skill }) => skill.path === CANONICAL_SKILLS_DIR || skill.path.startsWith(`${CANONICAL_SKILLS_DIR}/`),
-  );
-  if (!dryRun && !skillFailures.length && canonical) {
-    try {
-      const layout = ensureSkillsLayout(repo.root);
-      const result = results.skills.find(({ path: skillPath }) => skillPath === canonical.skill.path);
-      result.created = [...new Set([...result.created, ...layout.created])];
-      for (const w of layout.warnings) if (!results.warnings.includes(w)) results.warnings.push(w);
-    } catch (err) {
-      skillFailures.push({ file: CLAUDE_SKILLS_LINK, edit: canonical.edit.id, error: err.message });
-    }
-  }
-
   const rollbackSkills = () => {
     removeOwnedSkillPaths(ownedSkillPaths);
+    removeEmptyDirectories(createdDirectoryCandidates);
     results.skills = [];
     if (writtenSkillPaths.length) {
       results.failed.push({
@@ -349,6 +363,26 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     return Number(aMemory) - Number(bMemory);
   });
   const committed = [];
+  const rollbackCommitted = () => {
+    for (const written of [...committed].reverse()) {
+      if (!commitStillCurrent(written.commit)) {
+        results.failed.push({
+          file: written.relative,
+          error: `${written.relative} rollback conflict: the file changed after this apply wrote it; left untouched`,
+        });
+        continue;
+      }
+      try {
+        atomicReplace(written.commit.absolute, written.before);
+      } catch (rollbackError) {
+        results.failed.push({
+          file: written.relative,
+          error: `${written.relative} could not be rolled back: ${rollbackError.message}`,
+        });
+      }
+    }
+    results.written = [];
+  };
   for (const item of orderedPlanned) {
     const { relative, resolved, before, text, applied } = item;
     const budget = relative === proposal.memoryFile.path ? budgetStatus(before, text, config.budgetTokens) : null;
@@ -361,24 +395,7 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
         file: relative,
         error: `${relative} could not be written: ${err.message}`,
       });
-      for (const written of [...committed].reverse()) {
-        if (!commitStillCurrent(written.commit)) {
-          results.failed.push({
-            file: written.relative,
-            error: `${written.relative} rollback conflict: the file changed after this apply wrote it; left untouched`,
-          });
-          continue;
-        }
-        try {
-          atomicReplace(written.commit.absolute, written.before);
-        } catch (rollbackError) {
-          results.failed.push({
-            file: written.relative,
-            error: `${written.relative} could not be rolled back: ${rollbackError.message}`,
-          });
-        }
-      }
-      results.written = [];
+      rollbackCommitted();
       rollbackSkills();
       return results;
     }
@@ -387,6 +404,20 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
 
     // Shrinking over several runs is the design, so this is a heading, not a failure.
     if (budget && !budget.withinBudget) results.warnings.push(overBudgetWarning(relative, budget));
+  }
+
+  if (!dryRun && canonical) {
+    try {
+      const layout = ensureSkillsLayout(repo.root);
+      const result = results.skills.find(({ path: skillPath }) => skillPath === canonical.skill.path);
+      result.created = [...new Set([...result.created, ...layout.created])];
+      for (const w of layout.warnings) if (!results.warnings.includes(w)) results.warnings.push(w);
+    } catch (err) {
+      results.failed.push({ file: CLAUDE_SKILLS_LINK, edit: canonical.edit.id, error: err.message });
+      rollbackCommitted();
+      rollbackSkills();
+      return results;
+    }
   }
 
   // Rejections are remembered so the same edit is not re-proposed without new evidence.
