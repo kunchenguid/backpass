@@ -8,7 +8,7 @@ import { renderInstructionIndex } from "./memory.js";
 import { renderPrompt } from "./prompts.js";
 import { evidenceKey, isEvidenceFresh, safeFileName } from "./state.js";
 import { emitProgress } from "./progress.js";
-import { color, info, warn } from "./logger.js";
+import { UserError, color, info, warn } from "./logger.js";
 
 /**
  * Stage 1 of the pipeline (design section 3): one cheap model call per transcript,
@@ -265,6 +265,7 @@ export async function analyzeTranscripts({ transcripts, memoryFile, config, repo
         emitProgress("analyze:evidence", { ...evidenceTotals });
       }
     } catch (err) {
+      if (err instanceof UserError) throw err;
       // Per-transcript fail-soft: recorded, listed by `backpass status`, retried next run.
       summary.failed += 1;
       warn(`${transcript.harness} ${transcriptLabel(transcript)}: ${err.message}`);

@@ -123,11 +123,11 @@ if (argv.includes("sessions") && argv.includes("new")) {
 if (argv.includes("exec")) {
   spawnWrappedPi();
   spawnOverriddenAgent();
-  process.stdout.write('{"ok":true}\\n');
+  process.stdout.write('{"edits":[],"notes":[]}\\n');
   process.exit(0);
 }
 if (argv.includes("--file")) {
-  process.stdout.write('{"ok":true}\\n');
+  process.stdout.write('{"edits":[],"notes":[]}\\n');
   process.exit(0);
 }
 process.exit(0);
@@ -187,6 +187,71 @@ function setCalls(calls) {
 function setKey(call) {
   const i = call.argv.indexOf("set");
   return i >= 0 ? call.argv[i + 1] : null;
+}
+
+const cli = fileURLToPath(new URL("../bin/backpass.js", import.meta.url));
+let cliRun = 0;
+
+function makeCliRepo(label) {
+  cliRun += 1;
+  const repo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), `backpass-cli-${label}-`)));
+  const initialized = spawnSync("git", ["init", "--quiet"], { cwd: repo });
+  assert.equal(initialized.status, 0);
+  fs.writeFileSync(path.join(repo, "AGENTS.md"), "# Agent instructions\n\n- Keep changes focused.\n");
+
+  const id = `${label}-${cliRun}`;
+  const sessionDir = path.join(fakeHome, ".pi", "agent", "sessions", id);
+  fs.mkdirSync(sessionDir, { recursive: true });
+  const entries = [
+    { type: "session", version: 3, id, timestamp: new Date().toISOString(), cwd: repo },
+    { type: "message", message: { role: "user", content: "Please inspect the implementation." } },
+    { type: "message", message: { role: "assistant", content: "I inspected the implementation." } },
+    { type: "message", message: { role: "user", content: "Now explain the behavior." } },
+    { type: "message", message: { role: "assistant", content: "The behavior is isolated per invocation." } },
+  ];
+  fs.writeFileSync(
+    path.join(sessionDir, `${Date.now()}_${id}.jsonl`),
+    `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+  );
+  return repo;
+}
+
+function runBackpass(repo, args, extraEnv = {}) {
+  return spawnSync(process.execPath, [cli, ...args], {
+    cwd: repo,
+    env: { ...process.env, ...extraEnv },
+    encoding: "utf8",
+    timeout: 15_000,
+  });
+}
+
+function analysisArgs(agent, model, effort = "high") {
+  return [
+    "analyze",
+    "--harness",
+    "pi",
+    "--since",
+    "all",
+    "--analysis-agent",
+    agent,
+    "--analysis-model",
+    model,
+    "--analysis-effort",
+    effort,
+    "--jobs",
+    "1",
+    "--json",
+  ];
+}
+
+function assertBareDefaults(before) {
+  const bare = spawnSync(fakePi, ["--mode", "rpc", "--no-themes"], {
+    env: process.env,
+    encoding: "utf8",
+  });
+  assert.equal(bare.status, 0);
+  assert.deepEqual(JSON.parse(bare.stdout), { provider: "xai", model: "grok-4.6", thinking: "high" });
+  assert.equal(settingsBytes().compare(before), 0);
 }
 
 test("ACP set model against the isolated fixture is the persist path (pre-fix counterfactual)", () => {
@@ -569,46 +634,8 @@ test("Claude and Codex stop when effort cannot be applied without a session", as
 test("the Backpass CLI applies Pi overlays without changing persistent defaults", () => {
   resetLogsAndSettings();
   const before = Buffer.from(settingsBytes());
-  const repo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-cli-repo-")));
-  const initialized = spawnSync("git", ["init", "--quiet"], { cwd: repo });
-  assert.equal(initialized.status, 0);
-  fs.writeFileSync(path.join(repo, "AGENTS.md"), "# Agent instructions\n\n- Keep changes focused.\n");
-
-  const sessionDir = path.join(fakeHome, ".pi", "agent", "sessions", "cli-e2e");
-  fs.mkdirSync(sessionDir, { recursive: true });
-  const sessionPath = path.join(sessionDir, `${Date.now()}_cli-e2e.jsonl`);
-  const timestamp = new Date().toISOString();
-  const entries = [
-    { type: "session", version: 3, id: "cli-e2e", timestamp, cwd: repo },
-    { type: "message", message: { role: "user", content: "Please inspect the implementation." } },
-    { type: "message", message: { role: "assistant", content: "I inspected the implementation." } },
-    { type: "message", message: { role: "user", content: "Now explain the behavior." } },
-    { type: "message", message: { role: "assistant", content: "The behavior is isolated per invocation." } },
-  ];
-  fs.writeFileSync(sessionPath, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
-
-  const cli = fileURLToPath(new URL("../bin/backpass.js", import.meta.url));
-  const result = spawnSync(
-    process.execPath,
-    [
-      cli,
-      "analyze",
-      "--harness",
-      "pi",
-      "--since",
-      "all",
-      "--analysis-agent",
-      "pi",
-      "--analysis-model",
-      "openai-codex/gpt-5.6-sol",
-      "--analysis-effort",
-      "high",
-      "--jobs",
-      "1",
-      "--json",
-    ],
-    { cwd: repo, env: process.env, encoding: "utf8", timeout: 15_000 },
-  );
+  const repo = makeCliRepo("pi-analysis");
+  const result = runBackpass(repo, analysisArgs("pi", "openai-codex/gpt-5.6-sol"));
   assert.equal(result.status, 0, result.stderr);
   assert.equal(settingsBytes().compare(before), 0);
   const spawned = jsonl(piLog);
@@ -620,14 +647,120 @@ test("the Backpass CLI applies Pi overlays without changing persistent defaults"
     "high",
   ]);
   assert.deepEqual(spawned[0].slice(4), ["--mode", "rpc", "--no-themes"]);
+  assertBareDefaults(before);
+});
 
-  const bare = spawnSync(fakePi, ["--mode", "rpc", "--no-themes"], {
-    env: process.env,
-    encoding: "utf8",
-  });
-  assert.equal(bare.status, 0);
-  assert.deepEqual(JSON.parse(bare.stdout), { provider: "xai", model: "grok-4.6", thinking: "high" });
+test("the Backpass CLI preserves safe argument handling for Pi", () => {
+  resetLogsAndSettings();
+  const before = Buffer.from(settingsBytes());
+  const repo = makeCliRepo("pi-literal");
+  const pwned = path.join(repo, "pwned");
+  const model = `provider/foo bar $(touch "${pwned}")`;
+  const result = runBackpass(repo, analysisArgs("pi", model, "medium"));
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(!fs.existsSync(pwned));
+  assert.deepEqual(jsonl(piLog)[0].slice(0, 4), ["--model", model, "--thinking", "medium"]);
+  assertBareDefaults(before);
+});
+
+test("the Backpass CLI uses verified overlays for every positional harness", () => {
+  const cases = [
+    { agent: "claude", model: "claude-opus-5", effortKey: "effort" },
+    { agent: "codex", model: "gpt-5.6-sol", effortKey: "reasoning_effort" },
+    { agent: "opencode", model: "openai/gpt-5.6-sol", effortKey: null },
+  ];
+  for (const { agent, model, effortKey } of cases) {
+    resetLogsAndSettings();
+    const before = Buffer.from(settingsBytes());
+    const repo = makeCliRepo(`${agent}-analysis`);
+    const result = runBackpass(repo, analysisArgs(agent, model));
+    assert.equal(result.status, 0, result.stderr);
+    const calls = acpxCalls();
+    const created = calls.find((call) => call.argv.includes("new"));
+    assert.equal(created.argv[created.argv.indexOf("--model") + 1], model);
+    const effortCalls = setCalls(calls);
+    assert.deepEqual(effortCalls.map(setKey), effortKey ? [effortKey] : []);
+    assert.equal(settingsBytes().compare(before), 0);
+    assertBareDefaults(before);
+  }
+});
+
+test("the Backpass CLI applies Grok model and effort as process arguments", () => {
+  resetLogsAndSettings();
+  const before = Buffer.from(settingsBytes());
+  const repo = makeCliRepo("grok-analysis");
+  const result = runBackpass(repo, analysisArgs("grok", "grok-4.6"));
+  assert.equal(result.status, 0, result.stderr);
+  const calls = acpxCalls();
+  assert.ok(calls.every((call) => !call.argv.includes("grok-build")));
+  const spawned = jsonl(grokLog);
+  assert.deepEqual(spawned[0], ["-m", "grok-4.6", "--reasoning-effort", "high", "agent", "stdio"]);
   assert.equal(settingsBytes().compare(before), 0);
+  assertBareDefaults(before);
+});
+
+test("the Backpass CLI preserves safe process fallbacks and rejects unsafe ones", () => {
+  for (const agent of ["pi", "grok", "opencode"]) {
+    resetLogsAndSettings();
+    const before = Buffer.from(settingsBytes());
+    const repo = makeCliRepo(`${agent}-fallback`);
+    const model = agent === "grok" ? "grok-4.6" : "safe-model";
+    const result = runBackpass(repo, analysisArgs(agent, model), { FAKE_SESSIONS_UNSUPPORTED: "1" });
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(acpxCalls().some((call) => call.argv.includes("exec")));
+    if (agent === "pi") assert.ok(jsonl(piLog)[0].includes("--thinking"));
+    if (agent === "grok") assert.ok(jsonl(grokLog)[0].includes("--reasoning-effort"));
+    if (agent === "opencode") assert.match(result.stderr, /ran without effort=high/);
+    assert.equal(settingsBytes().compare(before), 0);
+    assertBareDefaults(before);
+  }
+
+  for (const agent of ["claude", "codex"]) {
+    resetLogsAndSettings();
+    const before = Buffer.from(settingsBytes());
+    const repo = makeCliRepo(`${agent}-unsafe-fallback`);
+    const result = runBackpass(repo, analysisArgs(agent, "safe-model"), { FAKE_SESSIONS_UNSUPPORTED: "1" });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, new RegExp(`${agent} cannot apply invocation-scoped effort=high`));
+    assert.match(result.stderr, /upgrade acpx or omit the effort override/);
+    assert.ok(!acpxCalls().some((call) => call.argv.includes("exec")));
+    assert.equal(settingsBytes().compare(before), 0);
+    assertBareDefaults(before);
+  }
+});
+
+test("the Backpass CLI keeps Pi synthesis overlays invocation-scoped", () => {
+  resetLogsAndSettings();
+  const before = Buffer.from(settingsBytes());
+  const repo = makeCliRepo("pi-synthesis");
+  const result = runBackpass(repo, [
+    "--harness",
+    "pi",
+    "--since",
+    "all",
+    "--analysis-agent",
+    "pi",
+    "--analysis-model",
+    "openai-codex/gpt-5.6-luna",
+    "--analysis-effort",
+    "medium",
+    "--synthesis-agent",
+    "pi",
+    "--synthesis-model",
+    "openai-codex/gpt-5.6-sol",
+    "--synthesis-effort",
+    "high",
+    "--jobs",
+    "1",
+    "--json",
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  const spawned = jsonl(piLog);
+  assert.ok(spawned.some((args) => args[1] === "openai-codex/gpt-5.6-luna" && args[3] === "medium"));
+  assert.ok(spawned.some((args) => args[1] === "openai-codex/gpt-5.6-sol" && args[3] === "high"));
+  assert.ok(!acpxCalls().some((call) => call.argv.includes("set") && ["model", "thought_level"].includes(setKey(call))));
+  assert.equal(settingsBytes().compare(before), 0);
+  assertBareDefaults(before);
 });
 
 test("an unsupported harness with a requested model stops instead of persisting", async () => {
