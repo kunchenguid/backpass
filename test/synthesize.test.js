@@ -20,6 +20,10 @@ const fs = require("node:fs");
 const path = require("node:path");
 const argv = process.argv.slice(2);
 fs.appendFileSync(process.env.FAKE_ACPX_LOG, JSON.stringify({ argv, cwd: process.cwd() }) + "\\n");
+if (argv.includes("config") && argv.includes("show")) {
+  process.stdout.write('{"agents":{}}\\n');
+  process.exit(0);
+}
 const script = JSON.parse(fs.readFileSync(process.env.FAKE_ACPX_SCRIPT, "utf8"));
 const cwdAt = argv.indexOf("--cwd");
 const cwd = cwdAt >= 0 ? argv[cwdAt + 1] : process.cwd();
@@ -192,30 +196,36 @@ test("synthesis edits the staging copy natively; measured hunks anchor to the ra
   const staged = fs.readFileSync(path.join(repo.root, ".backpass", "synthesis", "AGENTS.md"), "utf8");
   assert.ok(!staged.includes("Transcript formats drift"));
 
-  // Session lifecycle: new -> set model -> set effort -> edit turn -> annotate turn -> close,
+  // Session lifecycle: new (with --model) -> set effort -> edit turn -> annotate turn -> close,
   // every turn in the staging workspace with writes approved, never --deny-all.
   const invocations = calls();
   const workspace = path.join(repo.root, ".backpass", "synthesis");
+  const configured = invocations.find((c) => c.argv.includes("config") && c.argv.includes("show"));
+  assert.ok(configured);
+  const created = invocations.find((c) => c.argv.includes("new"));
+  assert.equal(created.argv[created.argv.indexOf("--model") + 1], "claude-opus-5");
+  assert.ok(!invocations.some((c) => c.argv.includes("set") && c.argv[c.argv.indexOf("set") + 1] === "model"));
   assert.deepEqual(
-    invocations.map((c) =>
-      c.argv
-        .filter((a) =>
-          [
-            "sessions",
-            "new",
-            "close",
-            "set",
-            "model",
-            "effort",
-            "--file",
-            "--approve-all",
-            "--deny-all",
-            "--approve-reads",
-          ].includes(a),
-        )
-        .join(" "),
-    ),
-    ["sessions new", "set model", "set effort", "--approve-all --file", "--approve-all --file", "sessions close"],
+    invocations
+      .filter((c) => !c.argv.includes("config"))
+      .map((c) =>
+        c.argv
+          .filter((a) =>
+            [
+              "sessions",
+              "new",
+              "close",
+              "set",
+              "effort",
+              "--file",
+              "--approve-all",
+              "--deny-all",
+              "--approve-reads",
+            ].includes(a),
+          )
+          .join(" "),
+      ),
+    ["sessions new", "set effort", "--approve-all --file", "--approve-all --file", "sessions close"],
   );
   for (const turn of invocations.filter((c) => c.argv.includes("--file"))) {
     assert.equal(turn.argv[turn.argv.indexOf("--cwd") + 1], workspace);

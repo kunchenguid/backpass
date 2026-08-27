@@ -33,6 +33,10 @@ fs.writeFileSync(
 const fs = require("node:fs");
 const path = require("node:path");
 const argv = process.argv.slice(2);
+if (argv.includes("config") && argv.includes("show")) {
+  process.stdout.write('{"agents":{}}\\n');
+  process.exit(0);
+}
 const agent = argv.find((a) => a === "codex" || a === "pi");
 // Session management calls (new / set / close) succeed silently, as acpx's do.
 if (argv.includes("sessions") || argv.includes("set")) process.exit(0);
@@ -168,7 +172,7 @@ test("across the turns of one pi session, each turn is accounted as its own incr
   const fileOut = path.join(fakeAcpxDir, "pi-session-file.txt");
   process.env.FAKE_PI_SESSION_FILE_OUT = fileOut;
   try {
-    const session = await openSession({ agent: "pi", effort: "high", sessionName: "bp-test", cwd: workDir });
+    const session = await openSession({ agent: "pi", sessionName: "bp-test", cwd: workDir });
     const first = await session.prompt({ promptFile: sessionPrompt, approveAll: true, timeoutSeconds: 5 });
     assert.deepEqual(first.usage, {
       input: 10778,

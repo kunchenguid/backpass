@@ -8,7 +8,7 @@ import { renderInstructionIndex } from "./memory.js";
 import { renderPrompt } from "./prompts.js";
 import { evidenceKey, isEvidenceFresh, safeFileName } from "./state.js";
 import { emitProgress } from "./progress.js";
-import { color, info, warn } from "./logger.js";
+import { UserError, color, info, warn } from "./logger.js";
 
 /**
  * Stage 1 of the pipeline (design section 3): one cheap model call per transcript,
@@ -137,8 +137,8 @@ async function analyzeOne({ transcript, memoryFile, config, repo, slot = 0 }) {
       timeoutSeconds: config.timeoutSeconds,
       promptRetries: config.promptRetries,
     };
-    // Effort is a session config option, so an effortful analysis call needs a
-    // (fresh, per-transcript) session; without effort the plain one-shot is cheaper.
+    // Route effortful calls through a fresh per-transcript session so each harness's
+    // invocation-scoped overlay or safe fallback is applied; otherwise one-shot is cheaper.
     if (!pick.effort) return execOneShot(call);
     callCounter += 1;
     return sessionPrompt({
@@ -265,6 +265,7 @@ export async function analyzeTranscripts({ transcripts, memoryFile, config, repo
         emitProgress("analyze:evidence", { ...evidenceTotals });
       }
     } catch (err) {
+      if (err instanceof UserError) throw err;
       // Per-transcript fail-soft: recorded, listed by `backpass status`, retried next run.
       summary.failed += 1;
       warn(`${transcript.harness} ${transcriptLabel(transcript)}: ${err.message}`);

@@ -124,13 +124,18 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   CLI change has one blast radius. v1 uses plain `exec` and named sessions only; acpx flows
   are deferred until they are stable upstream. The one sanctioned exception is the
   per-harness native status table in `src/agents.js` (`claude auth status`, `opencode models`).
+- **Model and effort overrides are invocation-scoped.** Never ACP `set model` / Pi
+  `set thought_level` (those rewrite `~/.pi/agent/settings.json`) and never edit-then-restore
+  harness defaults. `src/harness-invoke.js` owns the harness overlay mechanisms and
+  `src/acpx.js` owns verification and fallback. An unproven overlay must stop rather than
+  pretend; OpenCode effort alone is skipped with a report note. Preserve the current spawn
+  when no override is requested.
 - **Agent auto-pick is probe-then-verify, never probe-only.** `src/agents.js` walks each
   role's ladder with a zero-token probe, but the claude adapter cannot be pre-verified by
   acpx (sessions succeed while logged out), so every real call runs under
   `AgentResolver.withFallthrough`, which demotes a candidate on a classifiable failure
-  (`classifyAcpxFailure`). Reasoning effort is a per-adapter session option
-  (`EFFORT_OPTION_KEYS`), so effortful calls always go through `sessionPrompt`. Verdicts
-  cache in `.backpass/agent-probe-cache.json`.
+  (`classifyAcpxFailure`). Effortful calls go through `sessionPrompt` so the overlay in
+  `src/harness-invoke.js` can apply. Verdicts cache in `.backpass/agent-probe-cache.json`.
 - **The Lavish apply surface is chatty and its output is YAML-quoted.** `lavish-axi poll`
   can return feedback that is not a decision vector (a comment, a queued layout report) any
   number of times before the real one; `pollDecisions` in `src/apply/lavish.js` announces

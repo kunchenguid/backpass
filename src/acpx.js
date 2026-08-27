@@ -1,7 +1,8 @@
 import fs from "node:fs";
 
-import { warn } from "./logger.js";
+import { UserError, warn } from "./logger.js";
 import { runCapture } from "./subprocess.js";
+import { prepareHarnessInvocation } from "./harness-invoke.js";
 import * as piStore from "./discovery/adapters/pi.js";
 import { readJsonl } from "./discovery/adapters/shared.js";
 
@@ -32,13 +33,13 @@ export function acpxAgentName(agent) {
 }
 
 /**
- * The session config-option id each adapter uses for reasoning effort. There is no
- * shared ACP name for it and `acpx status` does not expose config options, so this
- * small table is measured (see the ordered-defaults design report) rather than
- * derived. Adapters absent here (grok, opencode) advertise no effort option at all;
- * effort is then skipped with a report note, never silently.
+ * The session config-option id each adapter uses for reasoning effort when that
+ * `set` is session-local. Pi is absent: ACP `set thought_level` rewrites
+ * `~/.pi/agent/settings.json`, so Pi effort is process `--thinking` instead
+ * (`src/harness-invoke.js`). Grok uses process `--reasoning-effort`. OpenCode
+ * has no overlay; effort is skipped with a report note, never silently.
  */
-export const EFFORT_OPTION_KEYS = { codex: "reasoning_effort", claude: "effort", pi: "thought_level" };
+export const EFFORT_OPTION_KEYS = { codex: "reasoning_effort", claude: "effort" };
 
 export function effortOptionKey(agent) {
   return EFFORT_OPTION_KEYS[agent] || null;
@@ -60,7 +61,7 @@ export class AcpxError extends Error {
 
 /**
  * @param {string[]} args
- * @param {{ timeoutMs?: number, cwd?: string, input?: string }} [options]
+ * @param {{ timeoutMs?: number, cwd?: string, input?: string, env?: NodeJS.ProcessEnv }} [options]
  */
 function run(args, options = {}) {
   return runCapture(ACPX_BIN, args, options);
@@ -170,6 +171,52 @@ function baseArgs({ cwd, model, timeoutSeconds, approveReads, approveAll = false
   return args;
 }
 
+function invocationAgentArgs(invocation, agent) {
+  return invocation.acpxAgentCommand ? ["--agent", invocation.acpxAgentCommand] : [acpxAgentName(agent)];
+}
+
+async function verifyHarnessInvocation(invocation, cwd) {
+  if (!invocation.requiredBuiltinAgent) return;
+  const args = [...(cwd ? ["--cwd", cwd] : []), "config", "show", "--format", "json"];
+  const result = await run(args, { timeoutMs: 10_000, cwd, env: invocation.env });
+  if (result.code !== 0) {
+    throw new UserError(
+      `cannot verify acpx adapter configuration for ${invocation.requiredBuiltinAgent}: ${firstLine(result.stderr) || `exit ${result.code}`}`,
+      "upgrade acpx or omit the model and effort override",
+    );
+  }
+
+  let config;
+  try {
+    config = JSON.parse(result.stdout);
+  } catch {
+    throw new UserError(
+      `cannot verify acpx adapter configuration for ${invocation.requiredBuiltinAgent}: config show returned invalid JSON`,
+      "upgrade acpx or omit the model and effort override",
+    );
+  }
+
+  if (
+    !config ||
+    typeof config !== "object" ||
+    Array.isArray(config) ||
+    !config.agents ||
+    typeof config.agents !== "object"
+  ) {
+    throw new UserError(
+      `cannot verify acpx adapter configuration for ${invocation.requiredBuiltinAgent}: config show omitted the resolved agents map`,
+      "upgrade acpx or omit the model and effort override",
+    );
+  }
+
+  if (Object.prototype.hasOwnProperty.call(config.agents, invocation.requiredBuiltinAgent)) {
+    throw new UserError(
+      `cannot safely apply model or effort overrides because acpx agents.${invocation.requiredBuiltinAgent} replaces the proven built-in adapter`,
+      `remove the agents.${invocation.requiredBuiltinAgent} replacement or omit the model and effort override`,
+    );
+  }
+}
+
 /** `acpx --version`, used to key the probe cache. Null when acpx is missing. */
 export async function acpxVersion({ timeoutMs = 10_000 } = {}) {
   const result = await run(["--version"], { timeoutMs });
@@ -230,6 +277,7 @@ export async function probeSession({ agent, sessionName, cwd = undefined, timeou
 export async function execOneShot({
   agent,
   model = null,
+  effort = null,
   promptFile,
   cwd,
   timeoutSeconds = 300,
@@ -237,42 +285,56 @@ export async function execOneShot({
   approveReads = true,
   suppressReads = true,
 }) {
+  const invocation = prepareHarnessInvocation({ agent, model, effort });
   const args = [
-    ...baseArgs({ cwd, model, timeoutSeconds, approveReads, suppressReads }),
+    ...baseArgs({ cwd, model: invocation.acpxModel, timeoutSeconds, approveReads, suppressReads }),
     "--prompt-retries",
     String(promptRetries),
-    acpxAgentName(agent),
+    ...invocationAgentArgs(invocation, agent),
     "exec",
     "--file",
     promptFile,
   ];
 
   const startedAt = Date.now();
-  const result = await run(args, { timeoutMs: (timeoutSeconds + 30) * 1000, cwd });
-  if (result.spawnError && result.spawnError.code === "ENOENT") throw notFoundError(result);
-  if (result.timedOut) {
-    throw new AcpxError(`acpx ${agent} exec timed out after ${timeoutSeconds}s`, result);
-  }
-  if (result.code !== 0) {
-    throw new AcpxError(`acpx ${agent} exec failed (exit ${result.code})`, result);
-  }
+  try {
+    await verifyHarnessInvocation(invocation, cwd);
+    if (effort && invocation.setEffortKey) {
+      throw new UserError(
+        `${agent} cannot apply invocation-scoped effort=${effort} in an exec one-shot`,
+        "use a named session or omit the effort override",
+      );
+    }
+    const result = await run(args, { timeoutMs: (timeoutSeconds + 30) * 1000, cwd, env: invocation.env });
+    if (result.spawnError && result.spawnError.code === "ENOENT") throw notFoundError(result);
+    if (result.timedOut) {
+      throw new AcpxError(`acpx ${agent} exec timed out after ${timeoutSeconds}s`, result);
+    }
+    if (result.code !== 0) {
+      throw new AcpxError(`acpx ${agent} exec failed (exit ${result.code})`, result);
+    }
 
-  const combined = `${result.stdout}\n${result.stderr}`;
-  const usage = parseTokenLine(combined) ?? recoverUsageFromStore({ agent, promptFile, cwd, startedAt });
-  return { text: stripAcpxNoise(result.stdout), usage, raw: result.stdout };
+    const combined = `${result.stdout}\n${result.stderr}`;
+    const usage = parseTokenLine(combined) ?? recoverUsageFromStore({ agent, promptFile, cwd, startedAt });
+    return { text: stripAcpxNoise(result.stdout), usage, raw: result.stdout, notes: invocation.notes };
+  } finally {
+    invocation.dispose();
+  }
 }
 
 /**
  * A named session that stays open across turns (design section 5).
  *
- * Reasoning effort is a session config option on every adapter that has one, and
- * `exec` cannot set it - so any call that wants effort applied goes through a session.
- * Synthesis also needs more than one turn in the same context: the agent edits the
- * staging copy, then annotates the changes backpass measured. Adapters that do not
- * advertise an effort option skip that step with a report line - never silently.
+ * Model and effort are applied as invocation-scoped overlays (`src/harness-invoke.js`),
+ * never by rewriting persistent harness defaults. `exec` cannot carry process-level
+ * effort for every harness, so an effortful call still goes through a session when
+ * the overlay needs one. Synthesis also needs more than one turn in the same context:
+ * the agent edits the staging copy, then annotates the changes backpass measured.
+ * OpenCode alone skips its unsupported effort overlay with a report line. Every other
+ * requested overlay without a proven mechanism stops rather than pretending it applied.
  *
  * Resolves to the handle, or throws an `AcpxError` (`unsupported: true` when the adapter
- * has no session support at all, which `sessionPrompt` turns into an exec fallback).
+ * has no session support; `sessionPrompt` only falls back when it can preserve the requested overlays).
  *
  * @returns {Promise<{ notes: string[],
  *   prompt: (options: { promptFile: string, timeoutSeconds?: number, promptRetries?: number,
@@ -281,11 +343,33 @@ export async function execOneShot({
  *   close: () => Promise<void> }>}
  */
 export async function openSession({ agent, model = null, effort = null, sessionName, cwd }) {
-  const notes = [];
-  const acpxAgent = acpxAgentName(agent);
-  const created = await run([acpxAgent, "sessions", "new", "--name", sessionName], { timeoutMs: 60_000, cwd });
-  if (created.spawnError && created.spawnError.code === "ENOENT") throw notFoundError(created);
+  const invocation = prepareHarnessInvocation({ agent, model, effort });
+  const notes = [...invocation.notes];
+  const acpxAgentArgs = invocationAgentArgs(invocation, agent);
+  const runOpts = { timeoutMs: 60_000, cwd, env: invocation.env };
+  try {
+    await verifyHarnessInvocation(invocation, cwd);
+  } catch (err) {
+    invocation.dispose();
+    throw err;
+  }
+  const created = await run(
+    [
+      ...(invocation.acpxModel ? ["--model", invocation.acpxModel] : []),
+      ...acpxAgentArgs,
+      "sessions",
+      "new",
+      "--name",
+      sessionName,
+    ],
+    runOpts,
+  );
+  if (created.spawnError && created.spawnError.code === "ENOENT") {
+    invocation.dispose();
+    throw notFoundError(created);
+  }
   if (created.code !== 0) {
+    invocation.dispose();
     // An auth or spawn failure must surface as such so the caller can fall through.
     if (classifyAcpxFailure(created)) {
       throw new AcpxError(`acpx ${agent} session create failed: ${firstLine(created.stderr)}`, created);
@@ -306,27 +390,23 @@ export async function openSession({ agent, model = null, effort = null, sessionN
   const close = async () => {
     if (closed) return;
     closed = true;
-    const result = await run([acpxAgent, "sessions", "close", sessionName], { timeoutMs: 30_000, cwd });
+    const result = await run([...acpxAgentArgs, "sessions", "close", sessionName], {
+      timeoutMs: 30_000,
+      cwd,
+      env: invocation.env,
+    });
     if (result.code !== 0) warn(`could not close acpx session ${sessionName}`);
+    invocation.dispose();
   };
 
   try {
-    if (model) {
-      const set = await run([acpxAgent, "-s", sessionName, "set", "model", model], { timeoutMs: 60_000, cwd });
+    if (effort && invocation.setEffortKey) {
+      const set = await run([...acpxAgentArgs, "-s", sessionName, "set", invocation.setEffortKey, effort], runOpts);
       if (set.code !== 0) {
-        if (classifyAcpxFailure(set) === "model-unavailable") {
-          throw new AcpxError(`acpx ${agent} rejected model ${model}: ${firstLine(set.stderr)}`, set);
-        }
-        notes.push(`could not set model=${model} on ${agent}: ${firstLine(set.stderr)}`);
-      }
-    }
-    if (effort) {
-      const key = effortOptionKey(agent);
-      const set = key
-        ? await run([acpxAgent, "-s", sessionName, "set", key, effort], { timeoutMs: 60_000, cwd })
-        : null;
-      if (!set || set.code !== 0) {
-        notes.push(`${agent} does not advertise a reasoning-effort option; ran without effort=${effort}`);
+        throw new AcpxError(
+          `acpx ${agent} could not apply invocation-scoped effort=${effort}: ${firstLine(set.stderr) || `exit ${set.code}`}`,
+          set,
+        );
       }
     }
   } catch (err) {
@@ -348,13 +428,13 @@ export async function openSession({ agent, model = null, effort = null, sessionN
       ...baseArgs({ cwd, model: null, timeoutSeconds, approveReads, approveAll, suppressReads }),
       "--prompt-retries",
       String(promptRetries),
-      acpxAgent,
+      ...acpxAgentArgs,
       "-s",
       sessionName,
       "--file",
       promptFile,
     ];
-    const result = await run(args, { timeoutMs: (timeoutSeconds + 30) * 1000, cwd });
+    const result = await run(args, { timeoutMs: (timeoutSeconds + 30) * 1000, cwd, env: invocation.env });
     if (result.timedOut) throw new AcpxError(`acpx ${agent} session prompt timed out after ${timeoutSeconds}s`, result);
     if (result.code !== 0) throw new AcpxError(`acpx ${agent} session prompt failed (exit ${result.code})`, result);
 
@@ -384,8 +464,9 @@ function subtractUsage(current, previous) {
 
 /**
  * One prompt through a short-lived named session: open, prompt, close. The analysis
- * pass uses this whenever an effort is configured. An adapter without session support
- * falls back to a one-shot `exec`, and says so.
+ * pass uses this whenever an effort is configured. Without session support, it falls
+ * back to one-shot `exec` only when that preserves the requested overlays; otherwise it
+ * stops with actionable guidance. OpenCode effort remains the explicit reported skip.
  */
 export async function sessionPrompt({
   agent,
@@ -404,11 +485,20 @@ export async function sessionPrompt({
     session = await openSession({ agent, model, effort, sessionName, cwd });
   } catch (err) {
     if (!(err instanceof AcpxError) || !err.unsupported) throw err;
+    if (effort && (agent === "claude" || agent === "codex")) {
+      throw new UserError(
+        `${agent} cannot apply invocation-scoped effort=${effort} because its acpx adapter does not support sessions`,
+        "upgrade acpx or omit the effort override",
+      );
+    }
     const notes = [`session unsupported for ${agent}; fell back to exec one-shot`];
-    if (effort) notes.push(`${agent} cannot set effort without a session; ran without effort=${effort}`);
+    if (effort && agent === "opencode") {
+      notes.push(`${agent} does not advertise a reasoning-effort option; ran without effort=${effort}`);
+    }
     const fallback = await execOneShot({
       agent,
       model,
+      effort: agent === "opencode" ? null : effort,
       promptFile,
       cwd,
       timeoutSeconds,

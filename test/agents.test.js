@@ -442,6 +442,6 @@ test("acpx failure classification and the per-adapter tables", () => {
   assert.equal(acpxAgentName("codex"), "codex");
   assert.equal(effortOptionKey("codex"), "reasoning_effort");
   assert.equal(effortOptionKey("claude"), "effort");
-  assert.equal(effortOptionKey("pi"), "thought_level");
+  assert.equal(effortOptionKey("pi"), null, "Pi effort is process --thinking, not ACP set");
   assert.equal(effortOptionKey("grok"), null);
 });
