@@ -18,17 +18,19 @@ import { UserError, color, info, warn } from "./logger.js";
  *
  * The agent never describes an edit for backpass to locate - it makes the edit, with its
  * harness's own file tools, in a staging copy of the memory file (`src/workspace.js`).
- * One session, two kinds of turn:
+ * A run starts in one session with two kinds of turn:
  *
  *   edit      the synthesis prompt; the agent edits `./AGENTS.md` in the staging copy
  *   annotate  backpass measures the copy against the original (`src/diff.js`) and shows
  *             the changes by id; the agent attaches kind, title, rationale, and evidence
  *
- * The annotation is what the mechanical gates validate (`buildProposal`); on a violation
- * the agent is re-prompted with the exact breaches, at most ANNOTATE_TURNS times in all,
- * then backpass fails loudly and saves the rejected proposal rather than quietly trimming
- * it (design section 6). The repo is fingerprinted before and checked after: a harness
- * that wrote past the staging copy is an error, never a silent apply.
+ * An empty annotation turn is retried once in a fresh session, as described below.
+ *
+ * The annotation is what the mechanical gates validate (`buildProposal`). A parseable
+ * gate-rejected answer is saved before the agent is re-prompted with the exact breaches;
+ * judged answers are bounded by ANNOTATE_TURNS, then backpass fails loudly rather than
+ * quietly trimming the result (design section 6). The repo is fingerprinted around each
+ * turn; a harness that wrote past the staging copy is an error, never a silent apply.
  *
  * Three things an annotate turn can be are deliberately kept apart, because they call for
  * different responses and produce different advice at the end of a failed run:

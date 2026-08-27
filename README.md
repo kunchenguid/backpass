@@ -168,7 +168,7 @@ out of the proposal entirely.
 
 ### 5. Gradient descent - native edits
 
-A high-reasoning synthesis session turns the aggregated gradients into concrete edits: ADD,
+A high-reasoning synthesis run turns the aggregated gradients into concrete edits: ADD,
 REMOVE, REWRITE, or EXTRACT→SKILL. The agent does not describe edits for backpass to
 splice in - it makes them, with its harness's own file tools, in a **staging copy** of the
 memory file under `.backpass/synthesis/` (the repo itself is read-only to it, for

@@ -10,7 +10,7 @@ import { resolveMemoryFiles } from "../memory.js";
 /**
  * The default command: one full backward pass.
  *
- *   discover -> distill -> analyze (cheap, fanned out) -> fold -> synthesize (one big call)
+ *   discover -> distill -> analyze (cheap, fanned out) -> fold -> synthesize (high-reasoning turns)
  *
  * It never writes - with one exception: a repo with no memory file at all is
  * bootstrapped (`./bootstrap.js`), which only ever creates files. Otherwise applying
