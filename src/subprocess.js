@@ -53,6 +53,7 @@ export function runCapture(bin, args, { timeoutMs, cwd, input, env } = {}) {
     });
     child.on("close", (code) => {
       if (timer) clearTimeout(timer);
+      if (timedOut && process.platform !== "win32") killPosixGroup(child, "SIGKILL");
       if (escalationTimer) clearTimeout(escalationTimer);
       resolve({ code, stdout, stderr, timedOut });
     });
