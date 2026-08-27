@@ -8,12 +8,16 @@ import { spawn } from "node:child_process";
  *
  * @param {string} bin
  * @param {string[]} args
- * @param {{ timeoutMs?: number, cwd?: string, input?: string }} [options]
+ * @param {{ timeoutMs?: number, cwd?: string, input?: string, env?: NodeJS.ProcessEnv }} [options]
  * @returns {Promise<{ code: number | null, stdout: string, stderr: string, timedOut?: boolean, spawnError?: NodeJS.ErrnoException }>}
  */
-export function runCapture(bin, args, { timeoutMs, cwd, input } = {}) {
+export function runCapture(bin, args, { timeoutMs, cwd, input, env } = {}) {
   return new Promise((resolve) => {
-    const child = spawn(bin, args, { cwd, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(bin, args, {
+      cwd,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: env ? { ...process.env, ...env } : undefined,
+    });
     let stdout = "";
     let stderr = "";
     let timedOut = false;

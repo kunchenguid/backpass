@@ -352,9 +352,10 @@ backpass \
   --synthesis-agent claude --synthesis-model claude-opus-5 --synthesis-effort high
 ```
 
-`--no-auto-agent` pins the pre-ladder defaults (codex / claude). If an adapter does not
-advertise reasoning effort, backpass says so in the run report rather than pretending it
-applied.
+`--no-auto-agent` pins the pre-ladder defaults (codex / claude). Model and effort
+overrides are one-off for that spawn (`src/harness-invoke.js`) so they never rewrite
+your harness defaults. If an adapter has no proven overlay, backpass stops rather than
+pretending it applied, except OpenCode effort which is skipped with a report note.
 
 ### Configuration
 
