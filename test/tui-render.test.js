@@ -368,6 +368,47 @@ test("a gate violation renders the exact breaches and the re-prompt marker", () 
   assert.ok(text.includes("annotating 3 measured change(s) with evidence…"));
 });
 
+test("synthesis progress shows only the active annotation condition", () => {
+  const afterViolation = stateAfter([
+    ...SYNTH_SCRIPT,
+    [
+      "synth:start",
+      { agent: "claude", model: "claude-opus-5", phase: "annotate", attempt: 1, changes: 3 },
+    ],
+    ["synth:empty", { emptyTurns: 1 }],
+    [
+      "synth:start",
+      { agent: "claude", model: "claude-opus-5", phase: "annotate", attempt: 1, changes: 3 },
+    ],
+    ["synth:violations", { attempt: 1, violations: ["answer was not JSON"] }],
+    [
+      "synth:start",
+      { agent: "claude", model: "claude-opus-5", phase: "annotate", attempt: 2, changes: 3 },
+    ],
+  ]);
+  const violationText = render(afterViolation).join("\n");
+  assert.ok(violationText.includes("synthesis violated 1 gate(s)"));
+  assert.ok(!violationText.includes("fresh session after an empty turn"));
+  assert.ok(!violationText.includes("retrying in a fresh session"));
+
+  const afterEmpty = stateAfter([
+    ...SYNTH_SCRIPT,
+    [
+      "synth:start",
+      { agent: "claude", model: "claude-opus-5", phase: "annotate", attempt: 1, changes: 3 },
+    ],
+    ["synth:remeasure", { remeasures: 1 }],
+    ["synth:empty", { emptyTurns: 1 }],
+    [
+      "synth:start",
+      { agent: "claude", model: "claude-opus-5", phase: "annotate", attempt: 1, changes: 3 },
+    ],
+  ]);
+  const emptyText = render(afterEmpty).join("\n");
+  assert.ok(emptyText.includes("retrying in a fresh session"));
+  assert.ok(!emptyText.includes("the files moved"));
+});
+
 test("an over-budget file flips the header gauge into shrink-plan mode", () => {
   const lines = render(
     stateAfter([
