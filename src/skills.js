@@ -185,6 +185,46 @@ function inspectClaudeSkillsLink(repoRoot) {
   return { state: "other" };
 }
 
+function pathIdentity(stat) {
+  return { dev: stat.dev, ino: stat.ino, directory: stat.isDirectory() };
+}
+
+function ownedPath(absolute) {
+  return { absolute, identity: pathIdentity(fs.lstatSync(absolute)) };
+}
+
+function missingDirectories(root, directory) {
+  const missing = [];
+  for (let current = directory; current !== root && !fs.existsSync(current); current = path.dirname(current)) {
+    missing.push(current);
+  }
+  return missing.reverse();
+}
+
+function createDirectories(root, directory) {
+  const missing = missingDirectories(root, directory);
+  fs.mkdirSync(directory, { recursive: true });
+  return missing.map(ownedPath);
+}
+
+export function removeOwnedSkillPaths(paths) {
+  for (const item of [...paths].reverse()) {
+    let observed;
+    try {
+      observed = pathIdentity(fs.lstatSync(item.absolute));
+    } catch {
+      continue;
+    }
+    if (observed.dev !== item.identity.dev || observed.ino !== item.identity.ino) continue;
+    try {
+      if (item.identity.directory) fs.rmdirSync(item.absolute);
+      else fs.unlinkSync(item.absolute);
+    } catch {
+      continue;
+    }
+  }
+}
+
 /**
  * Create the canonical skills dir and the `.claude/skills -> ../.agents/skills` symlink
  * so both harness families load the same files with no duplication. An existing
@@ -193,42 +233,51 @@ function inspectClaudeSkillsLink(repoRoot) {
  */
 export function ensureSkillsLayout(repoRoot) {
   const created = [];
+  const ownership = [];
   const warnings = [];
-  const canonical = path.join(repoRoot, CANONICAL_SKILLS_DIR);
-  if (!fs.existsSync(canonical)) {
-    fs.mkdirSync(canonical, { recursive: true });
-    created.push(CANONICAL_SKILLS_DIR);
-  }
+  try {
+    const canonical = path.join(repoRoot, CANONICAL_SKILLS_DIR);
+    if (!fs.existsSync(canonical)) {
+      ownership.push(...createDirectories(repoRoot, canonical));
+      created.push(CANONICAL_SKILLS_DIR);
+    }
 
-  const claude = inspectClaudeSkillsLink(repoRoot);
-  if (claude.state === "missing") {
-    const link = path.join(repoRoot, CLAUDE_SKILLS_LINK);
-    fs.mkdirSync(path.dirname(link), { recursive: true });
-    fs.symlinkSync(CLAUDE_SKILLS_LINK_TARGET, link, "dir");
-    created.push(`${CLAUDE_SKILLS_LINK} -> ${CLAUDE_SKILLS_LINK_TARGET}`);
-  } else if (claude.state === "dir") {
-    warnings.push(claudeSkillsDirWarning());
+    const claude = inspectClaudeSkillsLink(repoRoot);
+    if (claude.state === "missing") {
+      const link = path.join(repoRoot, CLAUDE_SKILLS_LINK);
+      ownership.push(...createDirectories(repoRoot, path.dirname(link)));
+      fs.symlinkSync(CLAUDE_SKILLS_LINK_TARGET, link, "dir");
+      ownership.push(ownedPath(link));
+      created.push(`${CLAUDE_SKILLS_LINK} -> ${CLAUDE_SKILLS_LINK_TARGET}`);
+    } else if (claude.state === "dir") {
+      warnings.push(claudeSkillsDirWarning());
+    }
+    return ownership.length ? { created, warnings, ownership } : { created, warnings };
+  } catch (err) {
+    removeOwnedSkillPaths(ownership);
+    throw err;
   }
-  return { created, warnings };
 }
 
 /** Write an accepted skill extraction to disk, setting up the load layout on first use. */
 export function writeSkill(repoRoot, skill, { exclusive = false } = {}) {
   const inCanonical = skill.path === CANONICAL_SKILLS_DIR || skill.path.startsWith(`${CANONICAL_SKILLS_DIR}/`);
   const layout = inCanonical ? ensureSkillsLayout(repoRoot) : { created: [], warnings: [] };
+  const ownership = [...(layout.ownership ?? [])];
   const target = path.join(repoRoot, skill.path);
-  fs.mkdirSync(path.dirname(target), { recursive: true });
   const text = renderSkillFile(skill);
   if (!exclusive) {
+    fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, text);
-    return { target, ...layout };
+    return { target, created: layout.created, warnings: layout.warnings };
   }
 
-  // Own the exclusive target from open through close. If writing fails after creation,
-  // remove only the inode this call opened; an EEXIST race never reaches that cleanup.
   let fd;
+  let targetOwnership;
   try {
+    ownership.push(...createDirectories(repoRoot, path.dirname(target)));
     fd = fs.openSync(target, "wx");
+    targetOwnership = { absolute: target, identity: pathIdentity(fs.fstatSync(fd)) };
     fs.writeFileSync(fd, text);
     fs.closeSync(fd);
     fd = undefined;
@@ -239,9 +288,10 @@ export function writeSkill(repoRoot, skill, { exclusive = false } = {}) {
       } catch {
         // Preserve the original write error.
       }
-      fs.rmSync(target, { force: true });
     }
+    removeOwnedSkillPaths(targetOwnership ? [...ownership, targetOwnership] : ownership);
     throw err;
   }
-  return { target, ...layout };
+  ownership.push(targetOwnership);
+  return { target, created: layout.created, warnings: layout.warnings, ownership };
 }
