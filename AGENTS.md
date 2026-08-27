@@ -87,12 +87,6 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   as that proposal's author, and `synthesisFailureHint` in `src/commands/propose.js` is
   where the advice for each terminal condition lives - never a blanket
   stronger-model/budget/max-edits line.
-- **`backpass propose --resume` re-annotates the staged tree instead of rebuilding it.**
-  `prepareWorkspace` records the baseline it measured against in `.backpass/synthesis.json`
-  (the tree itself cannot hold it - anything inside the workspace measures as a stray);
-  `restoreWorkspace` re-opens the tree only when the repo still hashes to that baseline and
-  otherwise returns a refusal. It never deletes or partially applies saved state: a failed
-  run's staging copy is the only surviving record of an expensive editing turn.
 - **An extract is one measured memory change plus the skill(s) it pays for.** `anchoredHunks`
   merges adjacent removals, so extracting neighbouring sections yields one change and N
   created skills - one honest accept/reject decision, since a merged change cannot be

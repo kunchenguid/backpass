@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { annotatePrompts, makeCliRepo, readJson, runCli, snapshotTree } from "./helpers/synthesis-cli.js";
+import { annotatePrompts, makeCliRepo, readJson, runCli } from "./helpers/synthesis-cli.js";
 
 /**
  * The synthesis orchestration, through `backpass propose` as a user runs it.
@@ -118,7 +118,6 @@ const SPLIT_ANSWER = {
 const SPLIT_THE_COPY = { editFirst: { "AGENTS.md": { replace: [[POINTERS, SPLIT]] } }, reply: { edits: [] } };
 
 const proposalOf = (dir) => readJson(path.join(dir, ".backpass", "proposal.json"));
-const stagedTree = (dir) => snapshotTree(path.join(dir, ".backpass", "synthesis"));
 
 test("a remeasurement is not a failed annotation: it costs no attempt, and the new ids get a real one", () => {
   const dir = makeCliRepo({ memory: MEMORY });
@@ -240,7 +239,7 @@ test("a run that ends on an empty turn says so, and never reads an older proposa
   assert.match(run.stderr, /carries no verbatim evidence quote/);
 
   // The advice is about the condition the run actually ended on.
-  assert.match(run.stderr, /backpass propose --resume/);
+  assert.match(run.stderr, /retry `backpass propose`/);
   assert.doesNotMatch(run.stderr, /stronger synthesis model/);
   assert.doesNotMatch(run.stderr, /--budget/);
   assert.doesNotMatch(run.stderr, /--max-edits/);
@@ -254,128 +253,6 @@ test("a run that ends on an empty turn says so, and never reads an older proposa
     "the empty turn wrote nothing into the rejected proposal",
   );
 
-  // The expensive half of the run survives the failure: this is what --resume picks up.
-  const staged = stagedTree(dir);
-  assert.ok(staged["AGENTS.md"].includes("## Incident response"), "the staged copy is the split layout");
-  assert.ok(staged[".agents/skills/release-checklist/SKILL.md"]);
-  assert.ok(staged[".agents/skills/incident-response/SKILL.md"]);
-});
-
-test("propose --resume annotates the staged synthesis in a fresh session, without re-running the editing turn", () => {
-  const dir = makeCliRepo({ memory: MEMORY });
-  const failed = runCli(dir, ["propose", ...PIN], {
-    script: {
-      edit: EDIT_TURN,
-      annotations: [
-        { reply: { edits: [extract(["H1", "H2", "H3"], "extract two playbooks", { evidence: [] })] } },
-        SPLIT_THE_COPY,
-        { empty: true },
-        { empty: true },
-      ],
-    },
-  });
-  assert.equal(failed.status, 1);
-  const before = stagedTree(dir);
-
-  const resumed = runCli(dir, ["propose", "--resume", ...PIN], {
-    script: { edit: {}, annotations: [{ reply: SPLIT_ANSWER }] },
-  });
-
-  assert.equal(resumed.status, 0, `the resume should succeed:\n${resumed.output}`);
-  assert.equal(resumed.editTurns(), 0, "no editing turn: the edits were already on disk");
-  assert.equal(resumed.annotateTurns(), 1);
-  assert.deepEqual(stagedTree(dir), before, "the staged copy is annotated in place, byte for byte");
-
-  const [prompt] = annotatePrompts(dir);
-  assert.ok(prompt.includes("You are joining a synthesis run that is already half done"));
-  assert.ok(prompt.includes("session 1 re-derived the release steps by hand"));
-
-  const proposal = proposalOf(dir);
-  assert.deepEqual(proposal.violations ?? [], []);
-  assert.equal(proposal.edits.length, 2, "the layout the failed run was one annotation away from");
-  assert.deepEqual(
-    proposal.edits.map((e) => e.kind),
-    ["extract", "extract"],
-  );
-  assert.ok(proposal.notes.some((n) => /resumed the staged synthesis/.test(n)));
-  assert.match(resumed.stdout, /2 edit\(s\) from 3 session\(s\)/);
-});
-
-test("propose --resume falls through when the first candidate fails its real annotation call", () => {
-  const dir = makeCliRepo({ memory: MEMORY });
-  const failed = runCli(dir, ["propose", ...PIN], {
-    script: { edit: EDIT_TURN, annotations: [{ empty: true }, { empty: true }] },
-  });
-  assert.equal(failed.status, 1);
-  fs.writeFileSync(
-    path.join(dir, ".backpassrc.json"),
-    JSON.stringify({ ladders: { synthesis: [{ model: "fake-model", agents: ["pi", "codex"] }] } }),
-  );
-
-  const resumed = runCli(dir, ["propose", "--resume"], {
-    script: {
-      edit: {},
-      annotations: [{ reply: COALESCED_ANSWER }],
-      availableModels: ["fake-model"],
-      failAgent: "pi",
-    },
-  });
-
-  assert.equal(resumed.status, 0, `the fallback candidate should complete the resume:\n${resumed.output}`);
-  const annotationCalls = resumed.calls().filter((call) => call.turn === "annotate");
-  assert.equal(annotationCalls.length, 2);
-  assert.ok(annotationCalls[0].argv.includes("pi"));
-  assert.ok(annotationCalls[1].argv.includes("codex"));
-  assert.ok(proposalOf(dir).notes.some((note) => /fell through to codex/.test(note)));
-});
-
-test("propose --resume refuses saved state it cannot annotate safely, and destroys none of it", () => {
-  const fresh = makeCliRepo({ memory: MEMORY });
-  const nothingStaged = runCli(fresh, ["propose", "--resume", ...PIN], { script: { edit: {}, annotations: [] } });
-  assert.equal(nothingStaged.status, 1);
-  assert.match(nothingStaged.stderr, /cannot resume: there is no staged synthesis to resume/);
-  assert.equal(nothingStaged.calls().length, 0, "nothing was spent on a model");
-
-  const dir = makeCliRepo({ memory: MEMORY });
-  const failed = runCli(dir, ["propose", ...PIN], {
-    script: {
-      edit: EDIT_TURN,
-      annotations: [
-        { reply: { edits: [extract(["H1", "H2", "H3"], "extract two playbooks", { evidence: [] })] } },
-        { empty: true },
-        { empty: true },
-      ],
-    },
-  });
-  assert.equal(failed.status, 1);
-  const staged = stagedTree(dir);
-  const rejected = proposalOf(dir);
-
-  // Someone edits the memory file the staged synthesis was measured against. Every hunk in
-  // that copy is anchored to text that may no longer exist, so resuming would measure
-  // against the wrong baseline.
-  fs.appendFileSync(path.join(dir, "AGENTS.md"), "\n- A rule that landed while the run was failing.\n");
-  const drifted = runCli(dir, ["propose", "--resume", ...PIN], {
-    script: { edit: {}, annotations: [{ reply: SPLIT_ANSWER }] },
-  });
-
-  assert.equal(drifted.status, 1, `the resume should be refused:\n${drifted.output}`);
-  assert.match(drifted.stderr, /cannot resume: AGENTS\.md changed after the staged synthesis was measured/);
-  assert.match(drifted.stderr, /the staged copy was left untouched/);
-  assert.equal(drifted.calls().length, 0, "no session was opened for a resume that cannot be trusted");
-  assert.deepEqual(stagedTree(dir), staged, "the staged copy is exactly as the failed run left it");
-  assert.deepEqual(proposalOf(dir), rejected, "and the rejected proposal is neither applied nor rewritten");
-  assert.equal(fs.readFileSync(path.join(dir, "AGENTS.md"), "utf8").includes("## Playbooks"), false, "nothing applied");
-
-  // A tree staged by a version that kept no baseline record. Guessing one is how a hunk
-  // lands on text it was never measured against, so it is refused too - and still kept.
-  fs.rmSync(path.join(dir, ".backpass", "synthesis.json"));
-  const unrecorded = runCli(dir, ["propose", "--resume", ...PIN], {
-    script: { edit: {}, annotations: [{ reply: SPLIT_ANSWER }] },
-  });
-  assert.equal(unrecorded.status, 1);
-  assert.match(unrecorded.stderr, /has no record of what it was measured against/);
-  assert.deepEqual(stagedTree(dir), staged);
 });
 
 test("skills whose removals merged into one change ship as one decision, and apply writes them together", () => {
