@@ -382,6 +382,39 @@ test("a custom PI_ACP_PI_COMMAND is rejected before launch", async () => {
   assert.deepEqual(jsonl(piLog), []);
 });
 
+test("the process wrapper forwards a signal received while spawning", async () => {
+  const signalBin = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-early-signal-bin-"));
+  const signalChild = path.join(signalBin, "pi");
+  fs.writeFileSync(signalChild, `#!${process.execPath}\nsetInterval(() => {}, 1000);\n`);
+  fs.chmodSync(signalChild, 0o755);
+
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${signalBin}${path.delimiter}${previousPath || ""}`;
+  const invocation = prepareHarnessInvocation({ agent: "pi", model: "provider/model" });
+  process.env.PATH = previousPath;
+
+  let wrapper;
+  try {
+    wrapper = spawn(invocation.env.PI_ACP_PI_COMMAND, [], {
+      stdio: "ignore",
+      env: {
+        ...process.env,
+        NODE_OPTIONS: `--require=${path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures/signal-during-spawn.cjs")}`,
+        BACKPASS_TEST_SIGNAL_DURING_SPAWN: "1",
+      },
+    });
+    const exited = new Promise((resolve) => wrapper.once("close", (code, signal) => resolve({ code, signal })));
+    const outcome = await Promise.race([
+      exited,
+      new Promise((resolve) => setTimeout(() => resolve("timeout"), 2000).unref()),
+    ]);
+    assert.notEqual(outcome, "timeout");
+  } finally {
+    if (wrapper?.exitCode === null && wrapper?.signalCode === null) wrapper.kill("SIGKILL");
+    invocation.dispose();
+  }
+});
+
 test("the process wrapper escalates when its harness child ignores termination", async () => {
   const signalBin = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-signal-bin-"));
   const signalChild = path.join(signalBin, "pi");

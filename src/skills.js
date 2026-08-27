@@ -190,6 +190,22 @@ function pathIdentity(stat) {
   return { dev: stat.dev, ino: stat.ino };
 }
 
+function restoreQuarantinedPath(quarantine, destination) {
+  const stat = fs.lstatSync(quarantine);
+  if (stat.isDirectory()) {
+    fs.cpSync(quarantine, destination, { recursive: true, force: false, errorOnExist: true });
+    fs.rmSync(quarantine, { recursive: true });
+    return;
+  }
+  if (stat.isSymbolicLink()) {
+    fs.symlinkSync(fs.readlinkSync(quarantine), destination);
+    fs.unlinkSync(quarantine);
+    return;
+  }
+  fs.linkSync(quarantine, destination);
+  fs.unlinkSync(quarantine);
+}
+
 export function removeOwnedSkillPaths(paths) {
   const removed = [];
   const conflicts = [];
@@ -239,25 +255,14 @@ export function removeOwnedSkillPaths(paths) {
         continue;
       }
 
-      // The pathname was replaced after validation. Put that exact object back without
-      // overwriting anything that may have appeared at the original path meanwhile.
-      fs.linkSync(quarantine, item.absolute);
-      fs.unlinkSync(quarantine);
+      restoreQuarantinedPath(quarantine, item.absolute);
       conflicts.push(item);
     } catch {
       if (quarantined) {
         try {
-          fs.linkSync(quarantine, item.absolute);
+          restoreQuarantinedPath(quarantine, item.absolute);
         } catch {
-          // An object at the original path wins; retain the quarantined object rather
-          // than overwrite or delete either concurrent version.
-        }
-        try {
-          const moved = pathIdentity(fs.lstatSync(quarantine));
-          const restored = pathIdentity(fs.lstatSync(item.absolute));
-          if (moved.dev === restored.dev && moved.ino === restored.ino) fs.unlinkSync(quarantine);
-        } catch {
-          // Leave any object whose ownership cannot be established untouched.
+          fs.existsSync(quarantine);
         }
       }
       conflicts.push(item);

@@ -14,7 +14,12 @@ fs.renameSync = function replaceBeforeSkillRollback(source, destination) {
   ) {
     replaced = true;
     fs.unlinkSync(source);
-    fs.writeFileSync(source, replacement ?? "concurrent replacement\n");
+    if (process.env.BACKPASS_TEST_REPLACEMENT_DIRECTORY === "1") {
+      fs.mkdirSync(source);
+      fs.writeFileSync(`${source}/marker.txt`, replacement ?? "concurrent replacement\n");
+    } else {
+      fs.writeFileSync(source, replacement ?? "concurrent replacement\n");
+    }
   }
   return renameSync.call(this, source, destination);
 };

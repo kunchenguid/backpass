@@ -197,9 +197,14 @@ const { spawn } = require("node:child_process");
 const { real, extra } = ${payload};
 const signals = ["SIGTERM", "SIGINT", "SIGHUP"];
 let child = null;
+let pendingSignal = null;
 let escalationTimer = null;
 const forwardSignal = (signal) => {
-  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  if (!child) {
+    pendingSignal ??= signal;
+    return;
+  }
+  if (child.exitCode !== null || child.signalCode !== null) return;
   try { child.kill(signal); } catch {}
   if (!escalationTimer) {
     escalationTimer = setTimeout(() => {
@@ -213,6 +218,7 @@ const forwardSignal = (signal) => {
 const signalHandlers = new Map(signals.map((signal) => [signal, () => forwardSignal(signal)]));
 for (const [signal, handler] of signalHandlers) process.on(signal, handler);
 child = spawn(real, extra.concat(process.argv.slice(2)), { stdio: "inherit" });
+if (pendingSignal) forwardSignal(pendingSignal);
 child.on("error", (err) => {
   console.error(err.message);
   process.exit(1);

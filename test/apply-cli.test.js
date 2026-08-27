@@ -518,6 +518,45 @@ test("skill rollback preserves a replacement made immediately before removal", (
   assert.equal(fs.readFileSync(memory, "utf8"), before);
 });
 
+test("skill rollback restores a concurrent directory replacement", () => {
+  const dir = initRepo();
+  const proposal = proposeExtractions(dir);
+  const concurrentSkill = path.join(dir, ".agents/skills/ci-details/SKILL.md");
+  fs.mkdirSync(path.join(dir, ".agents/skills"), { recursive: true });
+  fs.mkdirSync(path.join(dir, ".claude"));
+  fs.symlinkSync("../.agents/skills", path.join(dir, ".claude/skills"), "dir");
+  fs.chmodSync(dir, 0o555);
+
+  const invocation = applyInvocation(
+    dir,
+    proposal.edits.map((edit) => edit.id),
+  );
+  invocation.args.unshift("--import", path.join(ROOT, "test/fixtures/replace-before-skill-rollback.js"));
+  invocation.options.env = {
+    ...invocation.options.env,
+    BACKPASS_TEST_REPLACE_ON_ROLLBACK: concurrentSkill,
+    BACKPASS_TEST_REPLACEMENT_TEXT: "directory replacement\n",
+    BACKPASS_TEST_REPLACEMENT_DIRECTORY: "1",
+  };
+
+  let applied;
+  try {
+    const result = spawnSync(process.execPath, invocation.args, invocation.options);
+    applied = { ...result, output: `${result.stdout}${result.stderr}` };
+  } finally {
+    fs.chmodSync(dir, 0o755);
+  }
+
+  assert.equal(applied.status, 1, `apply should report the write failure:\n${applied.output}`);
+  assert.match(applied.output, /ci-details\/SKILL\.md rollback conflict/);
+  assert.equal(fs.lstatSync(concurrentSkill).isDirectory(), true);
+  assert.equal(fs.readFileSync(path.join(concurrentSkill, "marker.txt"), "utf8"), "directory replacement\n");
+  assert.equal(
+    fs.readdirSync(path.dirname(concurrentSkill)).some((name) => name.includes(".backpass-rollback-")),
+    false,
+  );
+});
+
 test("a memory write failure rolls back skills without truncating memory", () => {
   const dir = initRepo();
   const proposal = proposeExtractions(dir);
