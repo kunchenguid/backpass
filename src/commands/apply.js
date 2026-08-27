@@ -12,9 +12,14 @@ import { budgetBar, formatTokens } from "../tokens.js";
  * structured decision vector; `--no-ui` keeps the same ACCEPT/REJECT decision in the
  * terminal. `applyDecisions` owns the pre-write freshness, budget, and composition gates;
  * a failing gate records no rejections.
+ *
+ * A decided apply (any accept or reject, no write failures, not `--dry-run`) stamps
+ * `appliedAt`/`appliedBy` on the saved proposal so a second apply refuses. An all-skip
+ * or a failed write leaves the proposal reviewable.
  */
-export async function cmdApply(ctx) {
+export async function cmdApply(ctx, deps = {}) {
   const { config, repo } = ctx;
+  const review = deps.review || reviewInTerminal;
   const proposal = config.state.readProposal();
 
   if (!proposal) {
@@ -42,7 +47,7 @@ export async function cmdApply(ctx) {
   let surfaceFile = null;
 
   if (ctx.flags["no-ui"]) {
-    decisions = await reviewInTerminal(proposal);
+    decisions = await review(proposal);
   } else {
     surfaceFile = renderApplySurface(proposal, config.state, ctx.version);
     const url = await openApplySurface(surfaceFile);
@@ -70,6 +75,13 @@ export async function cmdApply(ctx) {
   });
 
   if (surfaceFile) await closeApplySurface(surfaceFile);
+
+  const decided = results.accepted + results.rejected > 0;
+  if (!ctx.flags["dry-run"] && decided && !results.failed.length) {
+    proposal.appliedAt = new Date().toISOString();
+    proposal.appliedBy = "apply";
+    config.state.writeProposal(proposal);
+  }
 
   if (ctx.flags.json) {
     json({ decisions, results });

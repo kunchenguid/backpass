@@ -15,6 +15,7 @@ import {
 import { estimateTokens } from "../src/tokens.js";
 import { isSuppressedByRejection, recordRejection } from "../src/state.js";
 import { applyDecisions } from "../src/apply/writer.js";
+import { cmdApply } from "../src/commands/apply.js";
 import { injectPayload, parseDecisions } from "../src/apply/lavish.js";
 import { extractJson, parseTokenLine, stripAcpxNoise } from "../src/acpx.js";
 import { makeRepo, stageAndMeasure, writeIn } from "./helpers/staging.js";
@@ -770,6 +771,73 @@ test("a failed later skill write names skill paths already written", () => {
         /already written/.test(failure.error) && failure.error.includes(".agents/skills/node-setup/SKILL.md"),
     ),
   );
+});
+
+test("a successful apply marks the proposal as consumed and prevents replay", async () => {
+  const { proposal, repo, state } = gate({
+    edit: memoryEdit((t) => t.replace("- Use Node 18 via nvm before running any script.\n", "")),
+    annotation: { edits: [claim(["H1"], { kind: "remove", title: "drop node pin" })] },
+  });
+  state.writeProposal(proposal);
+  const ctx = {
+    repo,
+    config: { ...config(), state },
+    flags: { "no-ui": true, json: true },
+  };
+  let reviews = 0;
+  const review = async () => {
+    reviews += 1;
+    return { e1: "accepted" };
+  };
+
+  assert.equal(await cmdApply(ctx, { review }), 0);
+  const applied = state.readProposal();
+  assert.equal(applied.appliedBy, "apply");
+  assert.match(applied.appliedAt, /^\d{4}-\d{2}-\d{2}T/);
+  await assert.rejects(() => cmdApply(ctx, { review }), /already applied by apply/);
+  assert.equal(reviews, 1, "the consumed proposal is rejected before reopening review");
+});
+
+test("an all-skipped apply leaves the proposal available for review", async () => {
+  const { proposal, repo, state } = gate({
+    edit: memoryEdit((t) => t.replace("- Use Node 18 via nvm before running any script.\n", "")),
+    annotation: { edits: [claim(["H1"], { kind: "remove", title: "drop node pin" })] },
+  });
+  state.writeProposal(proposal);
+  const ctx = {
+    repo,
+    config: { ...config(), state },
+    flags: { "no-ui": true, json: true },
+  };
+  let reviews = 0;
+  const review = async () => {
+    reviews += 1;
+    return { e1: "skipped" };
+  };
+
+  assert.equal(await cmdApply(ctx, { review }), 0);
+  assert.equal(state.readProposal().appliedAt, undefined);
+  assert.equal(await cmdApply(ctx, { review }), 0);
+  assert.equal(reviews, 2, "an untouched proposal reopens for a later decision");
+});
+
+test("a failed apply leaves the proposal available for retry", async () => {
+  const { proposal, repo, state } = gate({
+    edit: memoryEdit((t) => t.replace("- Use Node 18 via nvm before running any script.\n", "")),
+    annotation: { edits: [claim(["H1"], { kind: "remove", title: "drop node pin" })] },
+  });
+  state.writeProposal(proposal);
+  fs.writeFileSync(path.join(repo.root, "AGENTS.md"), MEMORY_TEXT.replace("Node 18", "Node 22"));
+  const ctx = {
+    repo,
+    config: { ...config(), state },
+    flags: { "no-ui": true, json: true },
+  };
+
+  assert.equal(await cmdApply(ctx, { review: async () => ({ e1: "accepted" }) }), 1);
+  const unapplied = state.readProposal();
+  assert.equal(unapplied.appliedAt, undefined);
+  assert.equal(unapplied.appliedBy, undefined);
 });
 
 test("an accepted extract writes the skill the agent drafted, in the canonical layout", () => {
