@@ -1,33 +1,4 @@
-=== End-to-end recovery: empty annotation, fresh session, successful grouped extraction ===
-$ backpass propose --synthesis-agent claude --synthesis-model fake-model
-exit: 0
-· synthesizing with claude (fake-model) effort=high
-warn synthesis ended its turn with no output; retrying the annotation once in a fresh session
-observable proposal: attempt=1, review_decisions=1, created_skills=2
-harness behavior: sessions_opened=2, edit_turns=1, annotation_turns=2
-
-$ backpass apply --no-open  # reviewer accepts e1
-exit: 0
-· review surface: http://127.0.0.1:4387/session/51233fdaf6389690
-waiting for your decisions in the browser (Ctrl-C to abort; nothing is written until you send)
-persisted result:
-# Demo agent memory
-
-## Build
-
-- Run make build before every push.
-
-## Playbooks
-- Release steps: .agents/skills/release-checklist/SKILL.md
-- Incidents: .agents/skills/incident-response/SKILL.md
-
-## Style
-
-- Never use the em dash.
-.agents/skills/release-checklist/SKILL.md: written
-.agents/skills/incident-response/SKILL.md: written
-
-=== End-to-end terminal diagnosis: rejected proposal followed by two empty turns ===
+=== User-visible recovery from a final empty adapter turn ===
 $ backpass propose --synthesis-agent claude --synthesis-model fake-model
 exit: 1
 · synthesizing with claude (fake-model) effort=high
@@ -36,9 +7,51 @@ warn synthesis ended its turn with no output; retrying the annotation once in a 
 
   x the synthesis harness ended its turn with no output at all - no JSON, no prose, no tool call
 
-  the rejected proposal was saved to /private/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/backpass-cli-UwwB3D/.backpass/proposal.json
+  the rejected proposal was saved to /private/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/backpass-cli-vgBOYL/.backpass/proposal.json
   it is from annotation attempt 1, not the turn above, and it lists:
     - edit e1 ("extract two playbooks") carries no verbatim evidence quote
 error synthesis ended its turn with no output, in the run's session and again in a fresh one
-  the synthesis harness returned no text, so retry `backpass propose`; if it repeats, pin a different harness with --synthesis-agent
-saved rejected proposal provenance: attempt=1, violations=["edit e1 (\"extract two playbooks\") carries no verbatim evidence quote"]
+  the synthesis harness returned no text, so nothing about the model, the budget, or the edit cap was the constraint; run `backpass propose` again to start a fresh synthesis session
+persisted rejected proposal: {
+  "attempt": 1,
+  "edits": 0,
+  "violations": [
+    "edit e1 (\"extract two playbooks\") carries no verbatim evidence quote"
+  ]
+}
+sessions opened: 2 (the empty response was retried fresh)
+
+=== Coalesced two-skill extraction through public propose + apply ===
+$ backpass propose --synthesis-agent claude --synthesis-model fake-model
+exit: 0
+· synthesizing with claude (fake-model) effort=high
+proposal decision shape: {
+  "edits": 1,
+  "hunks": 1,
+  "skills": [
+    "incident-response",
+    "release-checklist"
+  ]
+}
+$ backpass apply --no-open
+exit: 0
+1 accepted · 0 rejected
+  wrote AGENTS.md (e1)
+    budget [................................] 98 -> 59 / 5,000 tok
+  wrote .agents/skills/incident-response/SKILL.md (new skill)
+    created .agents/skills
+    created .claude/skills -> ../.agents/skills
+  wrote .agents/skills/release-checklist/SKILL.md (new skill)
+· review surface: http://127.0.0.1:4387/session/51233fdaf6389690
+waiting for your decisions in the browser (Ctrl-C to abort; nothing is written until you send)
+resulting AGENTS.md excerpt:
+- Release steps: .agents/skills/release-checklist/SKILL.md
+- Incidents: .agents/skills/incident-response/SKILL.md
+written skill files: release-checklist, incident-response
+
+=== Superseded resume feature remains absent ===
+$ backpass propose --resume
+exit: 2
+error Unknown option '--resume'. To specify a positional argument starting with a '-', place it at the end of the command after '--', as in '-- "--resume"
+
+Run `backpass --help` for the full option list.
