@@ -16,7 +16,7 @@ import { UserError } from "./logger.js";
  *
  * How each invoked harness applies a requested overlay for this spawn:
  *   pi        process argv via `PI_ACP_PI_COMMAND` wrapper: `--model`, `--thinking`
- *   grok      process argv via a PATH wrapper: `-m`, `--reasoning-effort`
+ *   grok      process argv via acpx `--agent` wrapper: `-m`, `--reasoning-effort`
  *   claude    acpx `--model` at `sessions new` (session/new `_meta`); ACP `set effort`
  *   codex     acpx `--model` at `sessions new`; ACP `set reasoning_effort`
  *   opencode  acpx `--model` at `sessions new`; no effort overlay (report, never pretend)
@@ -34,6 +34,7 @@ const SESSION_LOCAL_EFFORT_KEYS = { codex: "reasoning_effort", claude: "effort" 
  *   env: Record<string, string> | undefined,
  *   acpxModel: string | null,
  *   setEffortKey: string | null,
+ *   acpxAgentCommand: string | null,
  *   notes: string[],
  *   dispose: () => void,
  * }} HarnessInvocation
@@ -60,7 +61,7 @@ export function prepareHarnessInvocation({ agent, model = null, effort = null })
   const requestedEffort = typeof effort === "string" && effort.trim() ? effort.trim() : null;
 
   if (!requestedModel && !requestedEffort) {
-    return { env: undefined, acpxModel: null, setEffortKey: null, notes, dispose };
+    return { env: undefined, acpxModel: null, setEffortKey: null, acpxAgentCommand: null, notes, dispose };
   }
 
   try {
@@ -71,6 +72,7 @@ export function prepareHarnessInvocation({ agent, model = null, effort = null })
         env: undefined,
         acpxModel: requestedModel,
         setEffortKey: requestedEffort ? SESSION_LOCAL_EFFORT_KEYS[agent] : null,
+        acpxAgentCommand: null,
         notes,
         dispose,
       };
@@ -79,7 +81,14 @@ export function prepareHarnessInvocation({ agent, model = null, effort = null })
       if (requestedEffort) {
         notes.push(`${agent} does not advertise a reasoning-effort option; ran without effort=${requestedEffort}`);
       }
-      return { env: undefined, acpxModel: requestedModel, setEffortKey: null, notes, dispose };
+      return {
+        env: undefined,
+        acpxModel: requestedModel,
+        setEffortKey: null,
+        acpxAgentCommand: null,
+        notes,
+        dispose,
+      };
     }
     throw new UserError(
       `${agent} has no proven invocation-scoped way to apply ${describeOverride(requestedModel, requestedEffort)} without writing persistent harness defaults`,
@@ -109,6 +118,7 @@ function piInvocation({ requestedModel, requestedEffort, notes, cleanups, dispos
     env: { PI_ACP_PI_COMMAND: wrapperPath },
     acpxModel: null,
     setEffortKey: null,
+    acpxAgentCommand: null,
     notes,
     dispose,
   };
@@ -118,6 +128,7 @@ function grokInvocation({ requestedModel, requestedEffort, notes, cleanups, disp
   const extra = [];
   if (requestedModel) extra.push("-m", requestedModel);
   if (requestedEffort) extra.push("--reasoning-effort", requestedEffort);
+  extra.push("agent", "stdio");
   const real = resolveOnPath("grok");
   if (!real) {
     throw new UserError(
@@ -125,12 +136,13 @@ function grokInvocation({ requestedModel, requestedEffort, notes, cleanups, disp
       "install the grok CLI, or pin a different agent / omit the model and effort override",
     );
   }
-  const { dir } = writeArgvWrapper({ realCommand: real, extraArgs: extra, binName: "grok" });
+  const { wrapperPath, dir } = writeArgvWrapper({ realCommand: real, extraArgs: extra, binName: "grok" });
   cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
   return {
-    env: { PATH: `${dir}${path.delimiter}${process.env.PATH || ""}` },
+    env: undefined,
     acpxModel: null,
     setEffortKey: null,
+    acpxAgentCommand: wrapperPath,
     notes,
     dispose,
   };

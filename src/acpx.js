@@ -1,6 +1,6 @@
 import fs from "node:fs";
 
-import { warn } from "./logger.js";
+import { UserError, warn } from "./logger.js";
 import { runCapture } from "./subprocess.js";
 import { prepareHarnessInvocation } from "./harness-invoke.js";
 import * as piStore from "./discovery/adapters/pi.js";
@@ -171,6 +171,12 @@ function baseArgs({ cwd, model, timeoutSeconds, approveReads, approveAll = false
   return args;
 }
 
+function invocationAgentArgs(invocation, agent) {
+  return invocation.acpxAgentCommand
+    ? ["--agent", invocation.acpxAgentCommand]
+    : [acpxAgentName(agent)];
+}
+
 /** `acpx --version`, used to key the probe cache. Null when acpx is missing. */
 export async function acpxVersion({ timeoutMs = 10_000 } = {}) {
   const result = await run(["--version"], { timeoutMs });
@@ -231,6 +237,7 @@ export async function probeSession({ agent, sessionName, cwd = undefined, timeou
 export async function execOneShot({
   agent,
   model = null,
+  effort = null,
   promptFile,
   cwd,
   timeoutSeconds = 300,
@@ -238,12 +245,12 @@ export async function execOneShot({
   approveReads = true,
   suppressReads = true,
 }) {
-  const invocation = prepareHarnessInvocation({ agent, model });
+  const invocation = prepareHarnessInvocation({ agent, model, effort });
   const args = [
     ...baseArgs({ cwd, model: invocation.acpxModel, timeoutSeconds, approveReads, suppressReads }),
     "--prompt-retries",
     String(promptRetries),
-    acpxAgentName(agent),
+    ...invocationAgentArgs(invocation, agent),
     "exec",
     "--file",
     promptFile,
@@ -251,6 +258,12 @@ export async function execOneShot({
 
   const startedAt = Date.now();
   try {
+    if (effort && invocation.setEffortKey) {
+      throw new UserError(
+        `${agent} cannot apply invocation-scoped effort=${effort} in an exec one-shot`,
+        "use a named session or omit the effort override",
+      );
+    }
     const result = await run(args, { timeoutMs: (timeoutSeconds + 30) * 1000, cwd, env: invocation.env });
     if (result.spawnError && result.spawnError.code === "ENOENT") throw notFoundError(result);
     if (result.timedOut) {
@@ -262,7 +275,7 @@ export async function execOneShot({
 
     const combined = `${result.stdout}\n${result.stderr}`;
     const usage = parseTokenLine(combined) ?? recoverUsageFromStore({ agent, promptFile, cwd, startedAt });
-    return { text: stripAcpxNoise(result.stdout), usage, raw: result.stdout };
+    return { text: stripAcpxNoise(result.stdout), usage, raw: result.stdout, notes: invocation.notes };
   } finally {
     invocation.dispose();
   }
@@ -290,12 +303,12 @@ export async function execOneShot({
 export async function openSession({ agent, model = null, effort = null, sessionName, cwd }) {
   const invocation = prepareHarnessInvocation({ agent, model, effort });
   const notes = [...invocation.notes];
-  const acpxAgent = acpxAgentName(agent);
+  const acpxAgentArgs = invocationAgentArgs(invocation, agent);
   const runOpts = { timeoutMs: 60_000, cwd, env: invocation.env };
   const created = await run(
     [
       ...(invocation.acpxModel ? ["--model", invocation.acpxModel] : []),
-      acpxAgent,
+      ...acpxAgentArgs,
       "sessions",
       "new",
       "--name",
@@ -329,7 +342,7 @@ export async function openSession({ agent, model = null, effort = null, sessionN
   const close = async () => {
     if (closed) return;
     closed = true;
-    const result = await run([acpxAgent, "sessions", "close", sessionName], {
+    const result = await run([...acpxAgentArgs, "sessions", "close", sessionName], {
       timeoutMs: 30_000,
       cwd,
       env: invocation.env,
@@ -340,9 +353,12 @@ export async function openSession({ agent, model = null, effort = null, sessionN
 
   try {
     if (effort && invocation.setEffortKey) {
-      const set = await run([acpxAgent, "-s", sessionName, "set", invocation.setEffortKey, effort], runOpts);
+      const set = await run([...acpxAgentArgs, "-s", sessionName, "set", invocation.setEffortKey, effort], runOpts);
       if (set.code !== 0) {
-        notes.push(`${agent} does not advertise a reasoning-effort option; ran without effort=${effort}`);
+        throw new AcpxError(
+          `acpx ${agent} could not apply invocation-scoped effort=${effort}: ${firstLine(set.stderr) || `exit ${set.code}`}`,
+          set,
+        );
       }
     }
   } catch (err) {
@@ -364,7 +380,7 @@ export async function openSession({ agent, model = null, effort = null, sessionN
       ...baseArgs({ cwd, model: null, timeoutSeconds, approveReads, approveAll, suppressReads }),
       "--prompt-retries",
       String(promptRetries),
-      acpxAgent,
+      ...acpxAgentArgs,
       "-s",
       sessionName,
       "--file",
@@ -420,11 +436,20 @@ export async function sessionPrompt({
     session = await openSession({ agent, model, effort, sessionName, cwd });
   } catch (err) {
     if (!(err instanceof AcpxError) || !err.unsupported) throw err;
+    if (effort && (agent === "claude" || agent === "codex")) {
+      throw new UserError(
+        `${agent} cannot apply invocation-scoped effort=${effort} because its acpx adapter does not support sessions`,
+        "upgrade acpx or omit the effort override",
+      );
+    }
     const notes = [`session unsupported for ${agent}; fell back to exec one-shot`];
-    if (effort) notes.push(`${agent} cannot set effort without a session; ran without effort=${effort}`);
+    if (effort && agent === "opencode") {
+      notes.push(`${agent} does not advertise a reasoning-effort option; ran without effort=${effort}`);
+    }
     const fallback = await execOneShot({
       agent,
       model,
+      effort: agent === "opencode" ? null : effort,
       promptFile,
       cwd,
       timeoutSeconds,

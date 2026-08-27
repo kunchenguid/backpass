@@ -90,18 +90,23 @@ function spawnWrappedPi() {
   if (!wrap) return;
   spawnSync(wrap, ["--mode", "rpc", "--no-themes"], { stdio: "ignore", env: process.env });
 }
-function spawnWrappedGrok() {
-  if (process.env.FAKE_SPAWN_GROK !== "1") return;
-  spawnSync("grok", ["agent", "stdio"], { stdio: "ignore", env: process.env });
+function spawnOverriddenAgent() {
+  const at = argv.indexOf("--agent");
+  if (at < 0) return;
+  spawnSync(argv[at + 1], [], { stdio: "ignore", env: process.env });
 }
 if (argv.includes("sessions") && argv.includes("new")) {
+  if (process.env.FAKE_SESSIONS_UNSUPPORTED === "1") {
+    process.stderr.write("sessions unsupported\\n");
+    process.exit(2);
+  }
   spawnWrappedPi();
-  spawnWrappedGrok();
+  spawnOverriddenAgent();
   process.exit(0);
 }
 if (argv.includes("exec")) {
   spawnWrappedPi();
-  spawnWrappedGrok();
+  spawnOverriddenAgent();
   process.stdout.write('{"ok":true}\\n');
   process.exit(0);
 }
@@ -124,7 +129,7 @@ fs.writeFileSync(acpxLog, "");
 fs.writeFileSync(piLog, "");
 fs.writeFileSync(grokLog, "");
 
-const { execOneShot, openSession } = await import("../src/acpx.js");
+const { execOneShot, openSession, sessionPrompt } = await import("../src/acpx.js");
 
 const promptFile = path.join(binDir, "prompt.md");
 fs.writeFileSync(promptFile, "<!-- backpass:self-session -->\nping\n");
@@ -319,30 +324,99 @@ test("OpenCode session passes --model at create, skips effort, and does not pers
   assert.deepEqual(setCalls(calls).map(setKey), []);
 });
 
-test("Grok session uses process -m and --reasoning-effort and leaves defaults unchanged", async () => {
+test("Grok session forces an acpx raw-command override with process model and effort", async () => {
   resetLogsAndSettings();
-  process.env.FAKE_SPAWN_GROK = "1";
   const before = Buffer.from(settingsBytes());
-  try {
-    const session = await openSession({
-      agent: "grok",
-      model: "grok-4.6",
-      effort: "high",
-      sessionName: "bp-grok",
-      cwd: workDir,
-    });
-    await session.close();
-  } finally {
-    delete process.env.FAKE_SPAWN_GROK;
-  }
+  const session = await openSession({
+    agent: "grok",
+    model: "grok-4.6",
+    effort: "high",
+    sessionName: "bp-grok",
+    cwd: workDir,
+  });
+  await session.close();
+
   assert.equal(settingsBytes().compare(before), 0);
   const calls = acpxCalls();
+  assert.ok(calls.every((c) => c.argv.includes("--agent")));
+  assert.ok(calls.every((c) => !c.argv.includes("grok-build")));
   assert.ok(!calls.some((c) => c.argv.includes("--model")));
   assert.deepEqual(setCalls(calls).map(setKey), []);
   const spawned = jsonl(grokLog);
   assert.ok(spawned.length >= 1);
   assert.deepEqual(spawned[0].slice(0, 4), ["-m", "grok-4.6", "--reasoning-effort", "high"]);
   assert.deepEqual(spawned[0].slice(4), ["agent", "stdio"]);
+});
+
+test("Pi and Grok retain process effort when session fallback uses exec", async () => {
+  for (const agent of ["pi", "grok"]) {
+    resetLogsAndSettings();
+    process.env.FAKE_SESSIONS_UNSUPPORTED = "1";
+    try {
+      const result = await sessionPrompt({
+        agent,
+        model: agent === "pi" ? "provider/model" : "grok-4.6",
+        effort: "high",
+        sessionName: `bp-${agent}-fallback`,
+        promptFile,
+        cwd: workDir,
+        timeoutSeconds: 5,
+      });
+      assert.match(result.notes.join("\n"), /fell back to exec one-shot/);
+    } finally {
+      delete process.env.FAKE_SESSIONS_UNSUPPORTED;
+    }
+    const spawned = jsonl(agent === "pi" ? piLog : grokLog);
+    assert.ok(spawned.length >= 1);
+    assert.ok(spawned.some((args) => args.includes(agent === "pi" ? "--thinking" : "--reasoning-effort")));
+  }
+});
+
+test("OpenCode session fallback keeps its authorized effort omission visible", async () => {
+  resetLogsAndSettings();
+  process.env.FAKE_SESSIONS_UNSUPPORTED = "1";
+  let result;
+  try {
+    result = await sessionPrompt({
+      agent: "opencode",
+      model: "safe-model",
+      effort: "high",
+      sessionName: "bp-opencode-fallback",
+      promptFile,
+      cwd: workDir,
+      timeoutSeconds: 5,
+    });
+  } finally {
+    delete process.env.FAKE_SESSIONS_UNSUPPORTED;
+  }
+  assert.match(result.notes.join("\n"), /ran without effort=high/);
+  const exec = acpxCalls().find((c) => c.argv.includes("exec"));
+  assert.equal(exec.argv[exec.argv.indexOf("--model") + 1], "safe-model");
+});
+
+test("Claude and Codex stop when effort cannot be applied without a session", async () => {
+  for (const agent of ["claude", "codex"]) {
+    resetLogsAndSettings();
+    process.env.FAKE_SESSIONS_UNSUPPORTED = "1";
+    try {
+      await assert.rejects(
+        () =>
+          sessionPrompt({
+            agent,
+            model: "safe-model",
+            effort: "high",
+            sessionName: `bp-${agent}-fallback`,
+            promptFile,
+            cwd: workDir,
+            timeoutSeconds: 5,
+          }),
+        { name: "UserError", message: /cannot apply invocation-scoped effort=high/ },
+      );
+    } finally {
+      delete process.env.FAKE_SESSIONS_UNSUPPORTED;
+    }
+    assert.ok(!acpxCalls().some((c) => c.argv.includes("exec")));
+  }
 });
 
 test("an unsupported harness with a requested model stops instead of persisting", async () => {
