@@ -10,8 +10,8 @@ import { budgetBar, formatTokens } from "../tokens.js";
  *
  * By default it serves the shipped static template through lavish-axi and waits for one
  * structured decision vector; `--no-ui` keeps the same ACCEPT/REJECT decision in the
- * terminal. `applyDecisions` revalidates the accepted subset against the budget before
- * writing; a failing set records no rejections.
+ * terminal. `applyDecisions` owns the pre-write freshness, budget, and composition gates;
+ * a failing gate records no rejections.
  */
 export async function cmdApply(ctx) {
   const { config, repo } = ctx;
