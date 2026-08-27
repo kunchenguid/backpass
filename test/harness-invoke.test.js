@@ -247,7 +247,7 @@ test("a configured replacement Pi adapter is rejected before model or effort can
   assert.deepEqual(jsonl(piLog), []);
 });
 
-test("the process wrapper forwards termination signals to its harness child", async () => {
+test("the process wrapper escalates when its harness child ignores termination", async () => {
   const signalChild = path.join(binDir, "signal-child");
   const readyPath = path.join(binDir, "signal-child.ready");
   const signalPath = path.join(binDir, "signal-child.signal");
@@ -258,7 +258,6 @@ const fs = require("node:fs");
 fs.writeFileSync(${JSON.stringify(readyPath)}, String(process.pid));
 process.on("SIGTERM", () => {
   fs.writeFileSync(${JSON.stringify(signalPath)}, "SIGTERM");
-  process.exit(0);
 });
 setInterval(() => {}, 1000);
 `,
@@ -284,10 +283,12 @@ setInterval(() => {}, 1000);
     wrapper.kill("SIGTERM");
     const outcome = await Promise.race([
       exited,
-      new Promise((resolve) => setTimeout(() => resolve("timeout"), 2000).unref()),
+      new Promise((resolve) => setTimeout(() => resolve("timeout"), 6000).unref()),
     ]);
     assert.notEqual(outcome, "timeout");
+    assert.deepEqual(outcome, { code: null, signal: "SIGKILL" });
     assert.equal(fs.readFileSync(signalPath, "utf8"), "SIGTERM");
+    assert.throws(() => process.kill(childPid, 0), { code: "ESRCH" });
   } finally {
     if (wrapper?.exitCode === null && wrapper?.signalCode === null) wrapper.kill("SIGKILL");
     if (childPid) {
