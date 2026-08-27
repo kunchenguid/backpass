@@ -65,8 +65,8 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   composes against that file's one pre-write image, and every created skill target is still
   absent. Any of them failing writes nothing and records no rejection. A file is therefore applied whole or not at all, and a skill is written only
   when the memory-file edit pointing at it has composed and is ready to land - skills go
-  in first, so an interrupt or later write failure leaves an unreferenced skill rather
-  than a memory file naming one that is missing.
+  in first, and a later skill failure rolls back the ones this round already wrote, so a
+  failed apply never leaves a memory file naming a skill that is missing.
 - **Synthesis edits natively, in a staging copy, never by describing text.** The agent
   gets `--approve-all` with `cwd` = `.backpass/synthesis/` (`prepareWorkspace`), which holds
   only the memory file and the skills dir; backpass measures the copy (`measureWorkspace`,
@@ -83,10 +83,7 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   writes `proposal.json`, stamped with `attempt`. `ProposalViolation` carries `reason` and
   the `saved` proposal's own attempt/violations so a later empty turn is never reported as
   that proposal's author. A new synthesis clears the prior proposal before its first model
-  call, so an empty-only failure cannot leave an older proposal applicable. `propose
---resume` restores the staged tree against the versioned `synthesis.json` baseline and
-  its evidence snapshot, refuses repository drift or created-skill collisions, and starts
-  annotation in a fresh fallthrough-capable session without discovery, folding, or editing.
+  call, so an empty-only failure cannot leave an older proposal applicable.
   `synthesisFailureHint` in `src/commands/propose.js` is
   where the advice for each terminal condition lives - never a blanket
   stronger-model/budget/max-edits line.
