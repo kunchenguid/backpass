@@ -106,10 +106,44 @@ function spawnWrappedPi() {
   if (!wrap) return;
   spawnSync(wrap, ["--mode", "rpc", "--no-themes"], { stdio: "ignore", env: process.env });
 }
+function splitAgentCommand(value) {
+  const parts = [];
+  let current = "";
+  let quote = null;
+  let escaping = false;
+  let hasPart = false;
+  for (const ch of value) {
+    if (escaping) {
+      current += ch;
+      escaping = false;
+      hasPart = true;
+    } else if (ch === "\\\\" && quote !== "'") {
+      escaping = true;
+    } else if (quote) {
+      if (ch === quote) quote = null;
+      else current += ch;
+      hasPart = true;
+    } else if (ch === "'" || ch === '"') {
+      quote = ch;
+      hasPart = true;
+    } else if (/\\s/.test(ch)) {
+      if (hasPart) parts.push(current);
+      current = "";
+      hasPart = false;
+    } else {
+      current += ch;
+      hasPart = true;
+    }
+  }
+  if (escaping) current += "\\\\";
+  if (quote) process.exit(3);
+  if (hasPart) parts.push(current);
+  return parts;
+}
 function spawnOverriddenAgent() {
   const at = argv.indexOf("--agent");
   if (at < 0) return;
-  const parts = (argv[at + 1].match(/"(?:\\\\.|[^"\\\\])*"/g) || []).map((part) => JSON.parse(part));
+  const parts = splitAgentCommand(argv[at + 1]);
   spawnSync(parts[0], parts.slice(1), { stdio: "ignore", env: process.env });
 }
 if (argv.includes("sessions") && argv.includes("new")) {
@@ -690,7 +724,7 @@ test("the Backpass CLI applies Grok model and effort as process arguments", () =
   resetLogsAndSettings();
   const before = Buffer.from(settingsBytes());
   const repo = makeCliRepo("grok-analysis");
-  const spacedTmp = path.join(repo, "temporary files with spaces");
+  const spacedTmp = path.join(repo, "temporary 'files\\with\nspaces");
   fs.mkdirSync(spacedTmp);
   const result = runBackpass(repo, analysisArgs("grok", "grok-4.6"), { TMPDIR: spacedTmp });
   assert.equal(result.status, 0, result.stderr);

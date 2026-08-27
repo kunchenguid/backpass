@@ -239,7 +239,7 @@ child.on("exit", (code, signal) => {
 }
 
 function renderCommandArgv(argv) {
-  return argv.map((arg) => JSON.stringify(arg)).join(" ");
+  return argv.map((arg) => `'${arg.replaceAll("'", "'\\''")}'`).join(" ");
 }
 
 function cmdQuote(value) {
