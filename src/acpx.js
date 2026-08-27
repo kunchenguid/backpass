@@ -177,6 +177,48 @@ function invocationAgentArgs(invocation, agent) {
     : [acpxAgentName(agent)];
 }
 
+async function verifyHarnessInvocation(invocation, cwd) {
+  if (!invocation.requiredBuiltinAgent) return;
+  const args = [...(cwd ? ["--cwd", cwd] : []), "config", "show", "--format", "json"];
+  const result = await run(args, { timeoutMs: 10_000, cwd, env: invocation.env });
+  if (result.code !== 0) {
+    throw new UserError(
+      `cannot verify acpx adapter configuration for ${invocation.requiredBuiltinAgent}: ${firstLine(result.stderr) || `exit ${result.code}`}`,
+      "upgrade acpx or omit the model and effort override",
+    );
+  }
+
+  let config;
+  try {
+    config = JSON.parse(result.stdout);
+  } catch {
+    throw new UserError(
+      `cannot verify acpx adapter configuration for ${invocation.requiredBuiltinAgent}: config show returned invalid JSON`,
+      "upgrade acpx or omit the model and effort override",
+    );
+  }
+
+  if (
+    !config ||
+    typeof config !== "object" ||
+    Array.isArray(config) ||
+    !config.agents ||
+    typeof config.agents !== "object"
+  ) {
+    throw new UserError(
+      `cannot verify acpx adapter configuration for ${invocation.requiredBuiltinAgent}: config show omitted the resolved agents map`,
+      "upgrade acpx or omit the model and effort override",
+    );
+  }
+
+  if (Object.prototype.hasOwnProperty.call(config.agents, invocation.requiredBuiltinAgent)) {
+    throw new UserError(
+      `cannot safely apply model or effort overrides because acpx agents.${invocation.requiredBuiltinAgent} replaces the proven built-in adapter`,
+      `remove the agents.${invocation.requiredBuiltinAgent} replacement or omit the model and effort override`,
+    );
+  }
+}
+
 /** `acpx --version`, used to key the probe cache. Null when acpx is missing. */
 export async function acpxVersion({ timeoutMs = 10_000 } = {}) {
   const result = await run(["--version"], { timeoutMs });
@@ -258,6 +300,7 @@ export async function execOneShot({
 
   const startedAt = Date.now();
   try {
+    await verifyHarnessInvocation(invocation, cwd);
     if (effort && invocation.setEffortKey) {
       throw new UserError(
         `${agent} cannot apply invocation-scoped effort=${effort} in an exec one-shot`,
@@ -305,6 +348,12 @@ export async function openSession({ agent, model = null, effort = null, sessionN
   const notes = [...invocation.notes];
   const acpxAgentArgs = invocationAgentArgs(invocation, agent);
   const runOpts = { timeoutMs: 60_000, cwd, env: invocation.env };
+  try {
+    await verifyHarnessInvocation(invocation, cwd);
+  } catch (err) {
+    invocation.dispose();
+    throw err;
+  }
   const created = await run(
     [
       ...(invocation.acpxModel ? ["--model", invocation.acpxModel] : []),

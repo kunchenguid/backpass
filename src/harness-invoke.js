@@ -35,6 +35,7 @@ const SESSION_LOCAL_EFFORT_KEYS = { codex: "reasoning_effort", claude: "effort" 
  *   acpxModel: string | null,
  *   setEffortKey: string | null,
  *   acpxAgentCommand: string | null,
+ *   requiredBuiltinAgent: string | null,
  *   notes: string[],
  *   dispose: () => void,
  * }} HarnessInvocation
@@ -61,7 +62,15 @@ export function prepareHarnessInvocation({ agent, model = null, effort = null })
   const requestedEffort = typeof effort === "string" && effort.trim() ? effort.trim() : null;
 
   if (!requestedModel && !requestedEffort) {
-    return { env: undefined, acpxModel: null, setEffortKey: null, acpxAgentCommand: null, notes, dispose };
+    return {
+      env: undefined,
+      acpxModel: null,
+      setEffortKey: null,
+      acpxAgentCommand: null,
+      requiredBuiltinAgent: null,
+      notes,
+      dispose,
+    };
   }
 
   try {
@@ -73,6 +82,7 @@ export function prepareHarnessInvocation({ agent, model = null, effort = null })
         acpxModel: requestedModel,
         setEffortKey: requestedEffort ? SESSION_LOCAL_EFFORT_KEYS[agent] : null,
         acpxAgentCommand: null,
+        requiredBuiltinAgent: null,
         notes,
         dispose,
       };
@@ -86,6 +96,7 @@ export function prepareHarnessInvocation({ agent, model = null, effort = null })
         acpxModel: requestedModel,
         setEffortKey: null,
         acpxAgentCommand: null,
+        requiredBuiltinAgent: null,
         notes,
         dispose,
       };
@@ -119,6 +130,7 @@ function piInvocation({ requestedModel, requestedEffort, notes, cleanups, dispos
     acpxModel: null,
     setEffortKey: null,
     acpxAgentCommand: null,
+    requiredBuiltinAgent: "pi",
     notes,
     dispose,
   };
@@ -143,6 +155,7 @@ function grokInvocation({ requestedModel, requestedEffort, notes, cleanups, disp
     acpxModel: null,
     setEffortKey: null,
     acpxAgentCommand: wrapperPath,
+    requiredBuiltinAgent: null,
     notes,
     dispose,
   };

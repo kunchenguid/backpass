@@ -77,6 +77,11 @@ fs.appendFileSync(process.env.FAKE_ACPX_LOG, JSON.stringify({
   PI_ACP_PI_COMMAND: process.env.PI_ACP_PI_COMMAND || null,
 }) + "\\n");
 const settings = process.env.FAKE_HARNESS_SETTINGS;
+if (argv.includes("config") && argv.includes("show")) {
+  const agents = process.env.FAKE_PI_REPLACEMENT === "1" ? { pi: { argv: ["custom-pi-adapter"] } } : {};
+  process.stdout.write(JSON.stringify({ agents }) + "\\n");
+  process.exit(0);
+}
 const setAt = argv.indexOf("set");
 if (setAt >= 0) {
   const key = argv[setAt + 1];
@@ -211,6 +216,34 @@ test("a Pi session with model and effort uses process --model/--thinking and lea
   assert.equal(defaults.defaultProvider, "xai");
   assert.equal(defaults.defaultModel, "grok-4.6");
   assert.equal(defaults.defaultThinkingLevel, "high");
+});
+
+test("a configured replacement Pi adapter is rejected before model or effort can be claimed", async () => {
+  resetLogsAndSettings();
+  const before = Buffer.from(settingsBytes());
+  process.env.FAKE_PI_REPLACEMENT = "1";
+  try {
+    await assert.rejects(
+      () =>
+        openSession({
+          agent: "pi",
+          model: "provider/model",
+          effort: "high",
+          sessionName: "bp-pi-replaced",
+          cwd: workDir,
+        }),
+      {
+        name: "UserError",
+        message: /agents\.pi replaces the proven built-in adapter/,
+      },
+    );
+  } finally {
+    delete process.env.FAKE_PI_REPLACEMENT;
+  }
+  assert.equal(settingsBytes().compare(before), 0);
+  assert.ok(acpxCalls().some((c) => c.argv.includes("config") && c.argv.includes("show")));
+  assert.ok(!acpxCalls().some((c) => c.argv.includes("new") || c.argv.includes("exec")));
+  assert.deepEqual(jsonl(piLog), []);
 });
 
 test("Pi process args keep values that need literal handling, including $() and spaces", async () => {
