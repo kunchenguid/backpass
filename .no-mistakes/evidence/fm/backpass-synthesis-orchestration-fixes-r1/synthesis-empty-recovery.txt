@@ -1,0 +1,12 @@
+$ backpass propose --synthesis-agent claude --synthesis-model fake-model
+· synthesizing with claude (fake-model) effort=high
+warn synthesis ended its turn with no output; retrying the annotation once in a fresh session
+
+exit: 0
+sessions opened: 2
+editing turns: 1
+annotation turns: 2
+proposal attempt: 1
+proposal violations: []
+proposal decisions: 1
+staged skill exists: true
