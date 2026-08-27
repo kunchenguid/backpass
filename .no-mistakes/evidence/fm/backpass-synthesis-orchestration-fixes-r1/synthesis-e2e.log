@@ -1,0 +1,54 @@
+=== backpass propose user-visible output ===
+proposal · backpass-cli-ZJ5yAK · AGENTS.md · 1 edit(s) from 3 session(s)
+  budget [................................] 98 -> 58 / 5,000 tok
+  evidence: 0 positive · 3 negative · 0 gap clusters
+
+  e1 EXTRACT  extract two playbooks (-40 tok, 3 transcript(s))
+
+  tier-2 tokens: input=2,000 output=80 total=2,080
+
+Review and apply with `backpass apply` (nothing has been written).
+· synthesizing with claude (fake-model) effort=high
+warn synthesis ended its turn with no output; retrying the annotation once in a fresh session
+
+=== observed orchestration ===
+{
+  "exit": 0,
+  "editTurns": 1,
+  "annotationTurns": 2,
+  "sessionsOpened": 2,
+  "proposalAttempt": 1,
+  "reviewCards": 1,
+  "skillsOnCard": [
+    "incident-response",
+    "release-checklist"
+  ]
+}
+
+=== backpass apply user-visible output ===
+1 accepted · 0 rejected
+  wrote AGENTS.md (e1)
+    budget [................................] 98 -> 58 / 5,000 tok
+  wrote .agents/skills/incident-response/SKILL.md (new skill)
+    created .agents/skills
+    created .claude/skills -> ../.agents/skills
+  wrote .agents/skills/release-checklist/SKILL.md (new skill)
+· review surface: http://127.0.0.1:4387/session/51233fdaf6389690
+waiting for your decisions in the browser (Ctrl-C to abort; nothing is written until you send)
+
+=== persisted result ===
+# Demo agent memory
+
+## Build
+
+- Run make build before every push.
+
+## Playbooks
+- Release steps: .agents/skills/release-checklist/SKILL.md
+- Incidents: .agents/skills/incident-response/SKILL.md
+
+## Style
+
+- Never use the em dash.
+.agents/skills/release-checklist/SKILL.md: written
+.agents/skills/incident-response/SKILL.md: written

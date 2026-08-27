@@ -1,0 +1,163 @@
+=== FAILED PROPOSE: user-visible CLI ===
+exit: 1
+· synthesizing with claude (fake-model) effort=high
+warn synthesis violated 1 gate(s); re-prompting with the exact violations
+warn synthesis edited the staging copy again; re-measuring and re-annotating (annotation attempt 2 of 3 is still unspent)
+warn synthesis ended its turn with no output; retrying the annotation once in a fresh session
+
+  x the synthesis harness ended its turn with no output at all - no JSON, no prose, no tool call
+
+  the rejected proposal was saved to /private/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/backpass-cli-LwDqr4/.backpass/proposal.json
+  it is from annotation attempt 1, not the turn above, and it lists:
+    - edit e1 ("extract two playbooks") carries no verbatim evidence quote
+error synthesis ended its turn with no output, in the run's session and again in a fresh one
+  the synthesis harness returned no text, so nothing about the model, the budget, or the edit cap was the constraint; `backpass propose --resume` re-annotates the staged edits in a fresh session, without re-running the expensive editing turn
+sessions opened: 2
+edit turns: 1
+annotation turns: 4
+staged tree sha256: e2d83d80926a791892fb009bca0707672bdaaa81acffba2e40e0c1604bff4f69
+saved rejected proposal: {
+  "version": 2,
+  "tool": "backpass",
+  "generatedAt": "2026-08-27T05:38:26.035Z",
+  "repo": {
+    "name": "backpass-cli-LwDqr4",
+    "root": "/private/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/backpass-cli-LwDqr4"
+  },
+  "memoryFile": {
+    "path": "AGENTS.md",
+    "hash": "sha256:87e924fc2e484ef8",
+    "tokens": 101
+  },
+  "budget": {
+    "capTokens": 5000,
+    "current": 101,
+    "projected": 101,
+    "delta": 0,
+    "withinBudget": true,
+    "over": 0,
+    "utilization": 0.0202,
+    "mode": "cap",
+    "startedOverBudget": false
+  },
+  "config": {
+    "budgetTokens": 5000,
+    "maxEditsPerRun": 5,
+    "minGapEvidence": 2,
+    "skillsDir": ".agents/skills",
+    "analysis": {
+      "agent": null,
+      "model": null,
+      "effort": null
+    },
+    "synthesis": {
+      "agent": "claude",
+      "model": "fake-model",
+      "effort": null
+    }
+  },
+  "stats": {
+    "transcripts": 3,
+    "harnessCounts": {},
+    "positive": 0,
+    "negative": 3,
+    "gapClusters": 0,
+    "skillExtractions": 0
+  },
+  "edits": [],
+  "verdicts": [],
+  "notes": [],
+  "usage": [
+    {
+      "agent": "claude",
+      "usage": {
+        "input": 1000,
+        "output": 20,
+        "total": 1020
+      }
+    },
+    {
+      "agent": "claude",
+      "usage": {
+        "input": 500,
+        "output": 30,
+        "total": 530
+      }
+    }
+  ],
+  "overflowTarget": {
+    "kind": "skills",
+    "dir": ".agents/skills",
+    "warnings": []
+  },
+  "attempt": 1,
+  "violations": [
+    "edit e1 (\"extract two playbooks\") carries no verbatim evidence quote"
+  ]
+}
+
+=== RESUMED PROPOSE: user-visible CLI ===
+exit: 0
+proposal · backpass-cli-LwDqr4 · AGENTS.md · 2 edit(s) from 3 session(s)
+  budget [................................] 101 -> 69 / 5,000 tok
+  evidence: 0 positive · 3 negative · 0 gap clusters
+
+  e1 EXTRACT  extract the release checklist (-13 tok, 3 transcript(s))
+  e2 EXTRACT  extract incident response (-19 tok, 3 transcript(s))
+  note: resumed the staged synthesis in a fresh session; the editing turn was not re-run
+
+  tier-2 tokens: input=500 output=30 total=530
+
+Review and apply with `backpass apply` (nothing has been written).
+· resuming the synthesis staged at 2026-08-27T05:38:25.833Z · AGENTS.md · 3 session(s) of evidence
+· resuming the staged synthesis with claude (fake-model) effort=high
+sessions opened: 1
+edit turns: 0
+annotation turns: 1
+staged tree sha256: e2d83d80926a791892fb009bca0707672bdaaa81acffba2e40e0c1604bff4f69
+staged tree preserved byte-for-byte: true
+proposal attempt: 1
+proposal edit count: 2
+evidence sessions used: 3
+notes: resumed the staged synthesis in a fresh session; the editing turn was not re-run
+
+=== COALESCED MULTI-SKILL EXTRACT AND APPLY ===
+propose exit: 0
+proposal · backpass-cli-y89gXu · AGENTS.md · 1 edit(s) from 3 session(s)
+  budget [................................] 101 -> 61 / 5,000 tok
+  evidence: 0 positive · 3 negative · 0 gap clusters
+
+  e1 EXTRACT  extract two playbooks (-40 tok, 3 transcript(s))
+
+  tier-2 tokens: input=1,500 output=50 total=1,550
+
+Review and apply with `backpass apply` (nothing has been written).
+· synthesizing with claude (fake-model) effort=high
+review cards: 1
+skills on accepted card: incident-response, release-checklist
+apply exit: 0
+1 accepted · 0 rejected
+  wrote AGENTS.md (e1)
+    budget [................................] 101 -> 61 / 5,000 tok
+  wrote .agents/skills/incident-response/SKILL.md (new skill)
+    created .agents/skills
+    created .claude/skills -> ../.agents/skills
+  wrote .agents/skills/release-checklist/SKILL.md (new skill)
+· review surface: http://127.0.0.1:4387/session/51233fdaf6389690
+waiting for your decisions in the browser (Ctrl-C to abort; nothing is written until you send)
+final AGENTS.md:
+# Demo agent memory
+
+## Build
+
+- Run `make build` before every push.
+
+## Playbooks
+- Release steps: .agents/skills/release-checklist/SKILL.md
+- Incidents: .agents/skills/incident-response/SKILL.md
+
+## Style
+
+- Never use long dash punctuation.
+release-checklist skill written: true
+incident-response skill written: true
