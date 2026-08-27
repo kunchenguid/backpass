@@ -321,7 +321,6 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     ...(canonical ? [path.join(repo.root, CLAUDE_SKILLS_LINK)] : []),
   ]);
   const skillFailures = [];
-  const writtenSkillPaths = [];
   const ownedSkillPaths = [];
   for (const { edit, skill } of plannedSkills) {
     try {
@@ -330,7 +329,6 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
         : writeSkill(repo.root, skill, { exclusive: true, ensureLayout: false });
       results.skills.push({ path: skill.path, dryRun, created: layout.created });
       if (!dryRun) {
-        writtenSkillPaths.push(skill.path);
         ownedSkillPaths.push(...("ownership" in layout && Array.isArray(layout.ownership) ? layout.ownership : []));
       }
       for (const w of layout.warnings) if (!results.warnings.includes(w)) results.warnings.push(w);
@@ -340,12 +338,19 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
   }
 
   const rollbackSkills = () => {
-    removeOwnedSkillPaths(ownedSkillPaths);
+    const { removed, conflicts } = removeOwnedSkillPaths(ownedSkillPaths);
     removeEmptyDirectories(createdDirectoryCandidates);
     results.skills = [];
-    if (writtenSkillPaths.length) {
+    const removedPaths = removed.map((item) => item.relative).filter(Boolean);
+    if (removedPaths.length) {
       results.failed.push({
-        error: `rolled back skill paths written earlier in this round: ${writtenSkillPaths.join(", ")}`,
+        error: `rolled back skill paths written earlier in this round: ${removedPaths.join(", ")}`,
+      });
+    }
+    for (const item of conflicts) {
+      results.failed.push({
+        file: item.relative,
+        error: `${item.relative} rollback conflict: the skill changed after this apply wrote it; left untouched`,
       });
     }
   };

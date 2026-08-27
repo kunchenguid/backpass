@@ -190,20 +190,41 @@ function pathIdentity(stat) {
 }
 
 export function removeOwnedSkillPaths(paths) {
+  const removed = [];
+  const conflicts = [];
   for (const item of [...paths].reverse()) {
-    let observed;
+    let stat;
     try {
-      observed = pathIdentity(fs.lstatSync(item.absolute));
+      stat = fs.lstatSync(item.absolute);
     } catch {
       continue;
     }
-    if (observed.dev !== item.identity.dev || observed.ino !== item.identity.ino) continue;
+    const observed = pathIdentity(stat);
+    if (observed.dev !== item.identity.dev || observed.ino !== item.identity.ino) {
+      conflicts.push(item);
+      continue;
+    }
+    if (item.text !== undefined) {
+      let text;
+      try {
+        text = fs.readFileSync(item.absolute, "utf8");
+      } catch {
+        conflicts.push(item);
+        continue;
+      }
+      if (text !== item.text) {
+        conflicts.push(item);
+        continue;
+      }
+    }
     try {
       fs.unlinkSync(item.absolute);
+      removed.push(item);
     } catch {
-      continue;
+      conflicts.push(item);
     }
   }
+  return { removed, conflicts };
 }
 
 /**
@@ -248,13 +269,15 @@ export function writeSkill(repoRoot, skill, { exclusive = false, ensureLayout = 
   }
 
   let fd;
+  /** @type {{ absolute: string, identity: { dev: number, ino: number }, relative: string, text?: string }[] | undefined} */
   let ownership;
   try {
     fd = fs.openSync(target, "wx");
-    ownership = [{ absolute: target, identity: pathIdentity(fs.fstatSync(fd)) }];
+    ownership = [{ absolute: target, identity: pathIdentity(fs.fstatSync(fd)), relative: skill.path }];
     fs.writeFileSync(fd, text);
     fs.closeSync(fd);
     fd = undefined;
+    ownership[0].text = text;
   } catch (err) {
     if (fd !== undefined) {
       try {

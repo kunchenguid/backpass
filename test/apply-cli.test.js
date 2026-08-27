@@ -413,10 +413,11 @@ test("apply refuses accepted paths that resolve to the same target", () => {
   assert.equal(fs.existsSync(path.join(dir, ".agents")), false);
 });
 
-test("rollback leaves a concurrently changed file untouched", { timeout: 15000 }, async () => {
+test("rollback leaves concurrently changed files and skills untouched", { timeout: 15000 }, async () => {
   const dir = initRepo();
   const proposal = proposeExtractions(dir);
   const existing = path.join(dir, "existing.md");
+  const concurrentSkill = path.join(dir, ".agents/skills/ci-details/SKILL.md");
   const slow = path.join(dir, "slow.md");
   const lockedDir = path.join(dir, "locked");
   const slowBefore = "a".repeat(8 * 1024 * 1024);
@@ -460,6 +461,7 @@ test("rollback leaves a concurrently changed file untouched", { timeout: 15000 }
   while (Date.now() < deadline) {
     if (fs.readFileSync(existing, "utf8") === "first write\n") {
       fs.writeFileSync(existing, "concurrent write\n");
+      fs.writeFileSync(concurrentSkill, "concurrent skill write\n");
       changed = true;
       break;
     }
@@ -471,7 +473,10 @@ test("rollback leaves a concurrently changed file untouched", { timeout: 15000 }
   assert.equal(changed, true, `the apply never exposed its first committed file:\n${applied.output}`);
   assert.equal(applied.status, 1, `apply should fail:\n${applied.output}`);
   assert.match(applied.output, /existing\.md rollback conflict/);
+  assert.match(applied.output, /ci-details\/SKILL\.md rollback conflict/);
   assert.equal(fs.readFileSync(existing, "utf8"), "concurrent write\n");
+  assert.equal(fs.readFileSync(concurrentSkill, "utf8"), "concurrent skill write\n");
+  assert.equal(fs.existsSync(path.join(dir, ".agents/skills/release-details/SKILL.md")), false);
   assert.equal(fs.readFileSync(slow, "utf8"), slowBefore);
 });
 
