@@ -1,0 +1,16 @@
+COMMAND: backpass apply --no-open
+EXIT: 1
+--- CLI OUTPUT ---
+
+1 accepted · 0 rejected
+  failed AGENTS.md: AGENTS.md changed after this proposal was made (sha256:e5f6a0c3ad29a13f -> sha256:291b51978f828e8f), so its edits no longer describe the file on disk; nothing was written. Run `backpass` to re-propose against the current AGENTS.md.
+  nothing written
+· review surface: http://127.0.0.1:4387/session/51233fdaf6389690
+waiting for your decisions in the browser (Ctrl-C to abort; nothing is written until you send)
+--- OBSERVED DISK STATE ---
+AGENTS.md byte-identical to drifted input: true
+AGENTS.md hash before apply: sha256:291b51978f828e8f
+AGENTS.md hash after apply:  sha256:291b51978f828e8f
+.agents exists: false
+.claude exists: false
+git status --porcelain: ""
