@@ -98,132 +98,6 @@ function overBudgetWarning(relative, budget) {
   );
 }
 
-function currentMemoryFailure(proposal, repo) {
-  if (!proposal.memoryFile?.hash) return null;
-  return memoryFileSnapshot(proposal, repo).failure ?? null;
-}
-
-function acquireApplyLock(repoRoot) {
-  const stateDir = path.join(repoRoot, ".backpass");
-  fs.mkdirSync(stateDir, { recursive: true });
-  const lock = path.join(stateDir, "apply.lock");
-
-  let fd;
-  try {
-    fd = fs.openSync(lock, "wx");
-  } catch (err) {
-    if (err.code !== "EEXIST") throw err;
-    const owner = Number.parseInt(fs.readFileSync(lock, "utf8"), 10);
-    let live = Number.isInteger(owner);
-    if (live) {
-      try {
-        process.kill(owner, 0);
-      } catch (probeError) {
-        live = probeError.code === "EPERM";
-      }
-    }
-    if (live) throw new Error(`another backpass apply is running (pid ${owner})`, { cause: err });
-    fs.rmSync(lock, { force: true });
-    fd = fs.openSync(lock, "wx");
-  }
-  fs.writeFileSync(fd, String(process.pid));
-
-  return () => {
-    fs.closeSync(fd);
-    fs.rmSync(lock, { force: true });
-  };
-}
-
-function fileSnapshot(target) {
-  if (!fs.existsSync(target)) return { target, existed: false };
-  return { target, existed: true, text: fs.readFileSync(target), mode: fs.statSync(target).mode };
-}
-
-function restoreSnapshot(snapshot) {
-  if (!snapshot.existed) {
-    fs.rmSync(snapshot.target, { force: true });
-    return;
-  }
-  fs.writeFileSync(snapshot.target, snapshot.text, { mode: snapshot.mode });
-  fs.chmodSync(snapshot.target, snapshot.mode);
-}
-
-function layoutSnapshot(repoRoot) {
-  return [".agents", ".agents/skills", ".claude", ".claude/skills"].map((relative) => {
-    let existed = true;
-    try {
-      fs.lstatSync(path.join(repoRoot, relative));
-    } catch (err) {
-      if (err.code !== "ENOENT") throw err;
-      existed = false;
-    }
-    return { relative, existed };
-  });
-}
-
-function removeCreatedLayout(repoRoot, snapshot) {
-  for (const { relative, existed } of [...snapshot].reverse()) {
-    if (existed) continue;
-    const target = path.join(repoRoot, relative);
-    try {
-      const stat = fs.lstatSync(target);
-      if (stat.isSymbolicLink()) fs.unlinkSync(target);
-      else if (stat.isDirectory() && fs.readdirSync(target).length === 0) fs.rmdirSync(target);
-    } catch (err) {
-      if (err.code !== "ENOENT") throw err;
-    }
-  }
-}
-
-function rollbackApply(repoRoot, fileSnapshots, layout, results) {
-  const failures = [];
-  for (const snapshot of [...fileSnapshots].reverse()) {
-    try {
-      restoreSnapshot(snapshot);
-    } catch (err) {
-      failures.push({ file: path.relative(repoRoot, snapshot.target), error: `rollback failed: ${err.message}` });
-    }
-  }
-  try {
-    removeCreatedLayout(repoRoot, layout);
-  } catch (err) {
-    failures.push({ file: ".agents/skills", error: `layout rollback failed: ${err.message}` });
-  }
-  results.written = [];
-  results.skills = [];
-  results.failed.push(...failures);
-}
-
-function skillWritePreflight(repoRoot, edits) {
-  const targets = edits.map((edit) => path.resolve(repoRoot, edit.skill.path));
-  for (let index = 0; index < edits.length; index += 1) {
-    const edit = edits[index];
-    const target = targets[index];
-    if (targets.some((other, otherIndex) => otherIndex !== index && other.startsWith(`${target}${path.sep}`))) {
-      return { file: edit.skill.path, edit: edit.id, error: "skill path is not a file" };
-    }
-    try {
-      if (fs.existsSync(target)) {
-        if (!fs.statSync(target).isFile()) {
-          return { file: edit.skill.path, edit: edit.id, error: "skill path is not a file" };
-        }
-        fs.accessSync(target, fs.constants.W_OK);
-        continue;
-      }
-
-      let parent = path.dirname(target);
-      while (!fs.existsSync(parent)) parent = path.dirname(parent);
-      if (!fs.statSync(parent).isDirectory()) {
-        return { file: edit.skill.path, edit: edit.id, error: "skill parent path is not a directory" };
-      }
-      fs.accessSync(parent, fs.constants.W_OK);
-    } catch (err) {
-      return { file: edit.skill.path, edit: edit.id, error: err.message };
-    }
-  }
-  return null;
-}
-
 /**
  * The only place in backpass that writes to the repo.
  *
@@ -236,8 +110,7 @@ function skillWritePreflight(repoRoot, edits) {
  * records no rejection.
  *
  * A file is therefore applied all at once or not at all. Skills are written only after
- * every accepted edit has composed, and before the files that reference them. The commit
- * holds an apply lock, and a handled I/O failure compensates earlier writes before returning.
+ * every accepted edit has composed, and before the files that reference them.
  */
 export function applyDecisions({ proposal, decisions, repo, state, config, dryRun = false }) {
   const accepted = proposal.edits.filter((e) => decisions[e.id] === "accepted");
@@ -326,83 +199,48 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
 
   if (results.failed.length) return results;
 
-  // Skills go in before the memory file. Preflight every target before the first write,
-  // so a malformed or unwritable later target cannot leave an earlier skill behind.
-  const skillEdits = accepted.filter((edit) => edit.kind === "extract" && edit.skill && landed.has(edit.id));
-  const skillFailure = skillWritePreflight(repo.root, skillEdits);
-  if (skillFailure) {
-    results.failed.push(skillFailure);
+  // Skills go in before the memory file. A skill nothing points at yet is inert, while a
+  // memory file pointing at a skill that is not there is actively wrong - so if a skill
+  // cannot be written, the files that would reference it are left alone.
+  const skillFailures = [];
+  const writtenSkillPaths = [];
+  for (const edit of accepted) {
+    if (edit.kind !== "extract" || !edit.skill) continue;
+    if (!landed.has(edit.id)) continue;
+    try {
+      const layout = dryRun ? { created: [], warnings: [] } : writeSkill(repo.root, edit.skill);
+      results.skills.push({ path: edit.skill.path, dryRun, created: layout.created });
+      if (!dryRun) writtenSkillPaths.push(edit.skill.path);
+      for (const w of layout.warnings) if (!results.warnings.includes(w)) results.warnings.push(w);
+    } catch (err) {
+      skillFailures.push({ file: edit.skill.path, edit: edit.id, error: err.message });
+    }
+  }
+
+  if (skillFailures.length) {
+    results.failed.push(...skillFailures);
+    if (writtenSkillPaths.length) {
+      results.failed.push({
+        error: `skill paths already written in this round: ${writtenSkillPaths.join(", ")}; remove them before retrying`,
+      });
+    }
+    for (const { relative } of planned) {
+      results.failed.push({
+        file: relative,
+        error: `${relative} was left unchanged: its edits point at a skill that could not be written`,
+      });
+    }
     return results;
   }
 
-  const ordered = [...planned].sort(
-    (a, b) => Number(a.relative === proposal.memoryFile.path) - Number(b.relative === proposal.memoryFile.path),
-  );
+  for (const { relative, absolute, before, text, applied } of planned) {
+    const budget = relative === proposal.memoryFile.path ? budgetStatus(before, text, config.budgetTokens) : null;
 
-  if (dryRun) {
-    for (const edit of skillEdits) results.skills.push({ path: edit.skill.path, dryRun: true, created: [] });
-    for (const { relative, before, text, applied } of ordered) {
-      const budget = relative === proposal.memoryFile.path ? budgetStatus(before, text, config.budgetTokens) : null;
-      results.written.push({ file: relative, edits: applied, budget, dryRun: true });
-      if (budget && !budget.withinBudget) results.warnings.push(overBudgetWarning(relative, budget));
-    }
-  } else {
-    let releaseLock;
-    try {
-      releaseLock = acquireApplyLock(repo.root);
-    } catch (err) {
-      results.failed.push({ file: proposal.memoryFile.path, error: `could not lock apply: ${err.message}` });
-      return results;
-    }
+    if (!dryRun) fs.writeFileSync(absolute, text);
+    results.written.push({ file: relative, edits: applied, budget, dryRun });
 
-    const skillSnapshots = skillEdits.map((edit) => fileSnapshot(path.join(repo.root, edit.skill.path)));
-    const changedSnapshots = [];
-    const layoutBefore = layoutSnapshot(repo.root);
-    let commitFailed = false;
-
-    try {
-      // Planning can take time. Hold the apply lock and revalidate at the shared
-      // pre-write boundary so two backpass processes cannot race this check.
-      const preWriteFailure = currentMemoryFailure(proposal, repo);
-      if (preWriteFailure) {
-        results.failed.push(preWriteFailure);
-        commitFailed = true;
-      }
-
-      if (!commitFailed) {
-        for (const edit of skillEdits) {
-          const layout = writeSkill(repo.root, edit.skill);
-          results.skills.push({ path: edit.skill.path, dryRun: false, created: layout.created });
-          for (const w of layout.warnings) if (!results.warnings.includes(w)) results.warnings.push(w);
-        }
-
-        // The memory file remains last. Revalidate while still holding the lock after
-        // skill I/O, then compensate every earlier write if this or any write fails.
-        for (const { relative, absolute, before, text, applied } of ordered) {
-          if (relative === proposal.memoryFile.path) {
-            const failure = currentMemoryFailure(proposal, repo);
-            if (failure) {
-              results.failed.push(failure);
-              commitFailed = true;
-              break;
-            }
-          }
-          const budget = relative === proposal.memoryFile.path ? budgetStatus(before, text, config.budgetTokens) : null;
-          changedSnapshots.push(fileSnapshot(absolute));
-          fs.writeFileSync(absolute, text);
-          results.written.push({ file: relative, edits: applied, budget, dryRun: false });
-          if (budget && !budget.withinBudget) results.warnings.push(overBudgetWarning(relative, budget));
-        }
-      }
-    } catch (err) {
-      results.failed.push({ file: proposal.memoryFile.path, error: err.message });
-      commitFailed = true;
-    } finally {
-      if (commitFailed) rollbackApply(repo.root, [...skillSnapshots, ...changedSnapshots], layoutBefore, results);
-      releaseLock();
-    }
-
-    if (commitFailed) return results;
+    // Shrinking over several runs is the design, so this is a heading, not a failure.
+    if (budget && !budget.withinBudget) results.warnings.push(overBudgetWarning(relative, budget));
   }
 
   // Rejections are remembered so the same edit is not re-proposed without new evidence.

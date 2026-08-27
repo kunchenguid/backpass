@@ -65,10 +65,9 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   `budgetGateKind` (`src/tokens.js`), and every accepted edit for a file composes against
   that file's one pre-write image. Any of them failing writes nothing and records no
   rejection. A file is therefore applied whole or not at all, and a skill is written only
-  when the memory-file edit pointing at it has composed and is ready to land. Commit holds
-  `.backpass/apply.lock`; handled write failures compensate earlier file and layout changes.
-  Skills still go first, so a process interruption can leave an inert unreferenced skill
-  rather than a memory file naming one that is missing.
+  when the memory-file edit pointing at it has composed and is ready to land - skills go
+  in first, so an interrupt or later write failure leaves an unreferenced skill rather
+  than a memory file naming one that is missing.
 - **Synthesis edits natively, in a staging copy, never by describing text.** The agent
   gets `--approve-all` with `cwd` = `.backpass/synthesis/` (`prepareWorkspace`), which holds
   only the memory file and the skills dir; backpass measures the copy (`measureWorkspace`,
