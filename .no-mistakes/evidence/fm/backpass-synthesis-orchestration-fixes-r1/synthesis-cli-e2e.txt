@@ -1,0 +1,63 @@
+=== FAILURE RECOVERY SURFACE: gated proposal, remeasurement, then two empty turns ===
+exit: 1
+· synthesizing with claude (fake-model) effort=high
+warn synthesis violated 1 gate(s); re-prompting with the exact violations
+warn synthesis edited the staging copy again; re-measuring and re-annotating (annotation attempt 2 of 3 is still unspent)
+warn synthesis ended its turn with no output; retrying the annotation once in a fresh session
+
+  x the synthesis harness ended its turn with no output at all - no JSON, no prose, no tool call
+
+  the rejected proposal was saved to /private/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/backpass-cli-Mp2H20/.backpass/proposal.json
+  it is from annotation attempt 1, not the turn above, and it lists:
+    - edit e1 ("extract two playbooks") carries no verbatim evidence quote
+error synthesis ended its turn with no output, in the run's session and again in a fresh one
+  the synthesis harness returned no text, so retry `backpass propose`; if it repeats, pin a different harness with --synthesis-agent
+saved proposal summary: {
+  "attempt": 1,
+  "edits": 0,
+  "violations": [
+    "edit e1 (\"extract two playbooks\") carries no verbatim evidence quote"
+  ]
+}
+sessions opened: 2, edit turns: 1, annotate turns: 4
+
+=== RECOVERED SUCCESS SURFACE: empty turn retried fresh, coalesced two-skill extract applied ===
+propose exit: 0
+· synthesizing with claude (fake-model) effort=high
+warn synthesis ended its turn with no output; retrying the annotation once in a fresh session
+proposal summary: {
+  "attempt": 1,
+  "decisions": 1,
+  "skills": [
+    "incident-response",
+    "release-checklist"
+  ]
+}
+sessions opened: 2, edit turns: 1, annotate turns: 2
+apply exit: 0
+1 accepted · 0 rejected
+  wrote AGENTS.md (e1)
+    budget [................................] 98 -> 59 / 5,000 tok
+  wrote .agents/skills/incident-response/SKILL.md (new skill)
+    created .agents/skills
+    created .claude/skills -> ../.agents/skills
+  wrote .agents/skills/release-checklist/SKILL.md (new skill)
+· review surface: http://127.0.0.1:4387/session/51233fdaf6389690
+waiting for your decisions in the browser (Ctrl-C to abort; nothing is written until you send)
+final AGENTS.md:
+# Demo agent memory
+
+## Build
+
+- Run `make build` before every push.
+
+## Playbooks
+- Release steps: .agents/skills/release-checklist/SKILL.md
+- Incidents: .agents/skills/incident-response/SKILL.md
+
+## Style
+
+- Never use the em dash.
+
+release-checklist skill exists: true
+incident-response skill exists: true
