@@ -1,40 +1,21 @@
-=== User-visible recovery from a final empty adapter turn ===
-$ backpass propose --synthesis-agent claude --synthesis-model fake-model
-exit: 1
+SCENARIO 1: empty adapter turn recovers in a fresh session, then one accepted decision writes two coalesced skills
+COMMAND: backpass propose --synthesis-agent claude --synthesis-model fake-model
+EXIT: 0
+proposal · backpass-cli-cxVQBS · AGENTS.md · 1 edit(s) from 3 session(s)
+  budget [................................] 98 -> 59 / 5,000 tok
+  evidence: 0 positive · 3 negative · 0 gap clusters
+
+  e1 EXTRACT  extract two playbooks (-39 tok, 3 transcript(s))
+
+  tier-2 tokens: input=2,000 output=80 total=2,080
+
+Review and apply with `backpass apply` (nothing has been written).
 · synthesizing with claude (fake-model) effort=high
-warn synthesis violated 1 gate(s); re-prompting with the exact violations
 warn synthesis ended its turn with no output; retrying the annotation once in a fresh session
-
-  x the synthesis harness ended its turn with no output at all - no JSON, no prose, no tool call
-
-  the rejected proposal was saved to /private/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/backpass-cli-vgBOYL/.backpass/proposal.json
-  it is from annotation attempt 1, not the turn above, and it lists:
-    - edit e1 ("extract two playbooks") carries no verbatim evidence quote
-error synthesis ended its turn with no output, in the run's session and again in a fresh one
-  the synthesis harness returned no text, so nothing about the model, the budget, or the edit cap was the constraint; run `backpass propose` again to start a fresh synthesis session
-persisted rejected proposal: {
-  "attempt": 1,
-  "edits": 0,
-  "violations": [
-    "edit e1 (\"extract two playbooks\") carries no verbatim evidence quote"
-  ]
-}
-sessions opened: 2 (the empty response was retried fresh)
-
-=== Coalesced two-skill extraction through public propose + apply ===
-$ backpass propose --synthesis-agent claude --synthesis-model fake-model
-exit: 0
-· synthesizing with claude (fake-model) effort=high
-proposal decision shape: {
-  "edits": 1,
-  "hunks": 1,
-  "skills": [
-    "incident-response",
-    "release-checklist"
-  ]
-}
-$ backpass apply --no-open
-exit: 0
+OBSERVED SESSIONS OPENED: 2
+PROPOSAL: attempt=1; decisions=1; skills=incident-response,release-checklist
+COMMAND: backpass apply --no-open (review decision e1=accepted)
+EXIT: 0
 1 accepted · 0 rejected
   wrote AGENTS.md (e1)
     budget [................................] 98 -> 59 / 5,000 tok
@@ -44,14 +25,26 @@ exit: 0
   wrote .agents/skills/release-checklist/SKILL.md (new skill)
 · review surface: http://127.0.0.1:4387/session/51233fdaf6389690
 waiting for your decisions in the browser (Ctrl-C to abort; nothing is written until you send)
-resulting AGENTS.md excerpt:
+RESULTING MEMORY PLAYBOOK POINTERS:
 - Release steps: .agents/skills/release-checklist/SKILL.md
 - Incidents: .agents/skills/incident-response/SKILL.md
-written skill files: release-checklist, incident-response
+WRITTEN release-checklist: true
+WRITTEN incident-response: true
 
-=== Superseded resume feature remains absent ===
-$ backpass propose --resume
-exit: 2
-error Unknown option '--resume'. To specify a positional argument starting with a '-', place it at the end of the command after '--', as in '-- "--resume"
+SCENARIO 2: prior gated proposal, staging remeasurement, then empty output twice
+COMMAND: backpass propose --synthesis-agent claude --synthesis-model fake-model
+EXIT: 1
+· synthesizing with claude (fake-model) effort=high
+warn synthesis violated 1 gate(s); re-prompting with the exact violations
+warn synthesis edited the staging copy again; re-measuring and re-annotating (annotation attempt 2 of 3 is still unspent)
+warn synthesis ended its turn with no output; retrying the annotation once in a fresh session
 
-Run `backpass --help` for the full option list.
+  x the synthesis harness ended its turn with no output at all - no JSON, no prose, no tool call
+
+  the rejected proposal was saved to /private/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/backpass-cli-CoApKY/.backpass/proposal.json
+  it is from annotation attempt 1, not the turn above, and it lists:
+    - edit e1 ("extract two playbooks") carries no verbatim evidence quote
+error synthesis ended its turn with no output, in the run's session and again in a fresh one
+  the synthesis harness returned no text, so nothing about the model, the budget, or the edit cap was the constraint; run `backpass propose` again to start a fresh synthesis session
+OBSERVED ANNOTATION TURNS: 4; SESSIONS OPENED: 2
+PRESERVED REJECTED PROPOSAL: attempt=1; violations=["edit e1 (\"extract two playbooks\") carries no verbatim evidence quote"]
