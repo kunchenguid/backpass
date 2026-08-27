@@ -1,0 +1,22 @@
+{
+  "backpassExit": 0,
+  "backpassOutput": "{\n  \"memoryFile\": \"AGENTS.md\",\n  \"transcripts\": 1,\n  \"summary\": {\n    \"total\": 1,\n    \"cached\": 0,\n    \"analyzed\": 1,\n    \"skipped\": 0,\n    \"failed\": 0,\n    \"usage\": [\n      {\n        \"agent\": \"pi\",\n        \"usage\": null\n      }\n    ]\n  }\n}",
+  "launchedPiArgv": [
+    "--model",
+    "openai-codex/gpt-5.6-sol",
+    "--thinking",
+    "high",
+    "--mode",
+    "rpc",
+    "--no-themes"
+  ],
+  "acpxPersistenceSetCalls": [],
+  "settingsSha256Before": "7bce2e2b39eabb39887c5e5000eb7ef519969bfbe2285964316f878cf844a78d",
+  "settingsSha256After": "7bce2e2b39eabb39887c5e5000eb7ef519969bfbe2285964316f878cf844a78d",
+  "settingsByteStable": true,
+  "laterBarePiDefault": {
+    "provider": "xai",
+    "model": "grok-4.6",
+    "thinking": "high"
+  }
+}
