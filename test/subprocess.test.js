@@ -58,7 +58,9 @@ setInterval(() => {}, 1000);
       if (harnessPid) {
         try {
           process.kill(harnessPid, "SIGKILL");
-        } catch {}
+        } catch {
+          // The timed process may already be gone.
+        }
       }
       fs.rmSync(dir, { recursive: true, force: true });
     }
