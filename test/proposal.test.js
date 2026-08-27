@@ -725,7 +725,7 @@ test("a skill is written only when the memory-file edit that points at it lands"
   assert.equal(fs.existsSync(path.join(repo.root, ".claude/skills")), false, "and no layout side effects");
 });
 
-test("a failed later skill write names skill paths already written", () => {
+test("a failed later skill target is refused before any skill is written", () => {
   const skillText = "---\nname: node-setup\ndescription: Load before running any script.\n---\n\nuse nvm\n";
   const { proposal, repo, state } = gate({
     edit: (root) => {
@@ -762,14 +762,11 @@ test("a failed later skill write names skill paths already written", () => {
   });
 
   assert.deepEqual(results.written, []);
+  assert.deepEqual(results.skills, []);
   assert.equal(fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8"), MEMORY_TEXT);
-  assert.equal(fs.existsSync(path.join(repo.root, ".agents/skills/node-setup/SKILL.md")), true);
-  assert.ok(
-    results.failed.some(
-      (failure) =>
-        /already written/.test(failure.error) && failure.error.includes(".agents/skills/node-setup/SKILL.md"),
-    ),
-  );
+  assert.equal(fs.existsSync(path.join(repo.root, ".agents/skills/node-setup/SKILL.md")), false);
+  assert.equal(fs.existsSync(path.join(repo.root, ".claude/skills")), false, "preflight has no layout side effects");
+  assert.ok(results.failed.some((failure) => failure.edit === "e2" && /not a file/.test(failure.error)));
 });
 
 test("an accepted extract writes the skill the agent drafted, in the canonical layout", () => {

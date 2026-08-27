@@ -98,6 +98,41 @@ function overBudgetWarning(relative, budget) {
   );
 }
 
+function currentMemoryFailure(proposal, repo) {
+  if (!proposal.memoryFile?.hash) return null;
+  return memoryFileSnapshot(proposal, repo).failure ?? null;
+}
+
+function skillWritePreflight(repoRoot, edits) {
+  const targets = edits.map((edit) => path.resolve(repoRoot, edit.skill.path));
+  for (let index = 0; index < edits.length; index += 1) {
+    const edit = edits[index];
+    const target = targets[index];
+    if (targets.some((other, otherIndex) => otherIndex !== index && other.startsWith(`${target}${path.sep}`))) {
+      return { file: edit.skill.path, edit: edit.id, error: "skill path is not a file" };
+    }
+    try {
+      if (fs.existsSync(target)) {
+        if (!fs.statSync(target).isFile()) {
+          return { file: edit.skill.path, edit: edit.id, error: "skill path is not a file" };
+        }
+        fs.accessSync(target, fs.constants.W_OK);
+        continue;
+      }
+
+      let parent = path.dirname(target);
+      while (!fs.existsSync(parent)) parent = path.dirname(parent);
+      if (!fs.statSync(parent).isDirectory()) {
+        return { file: edit.skill.path, edit: edit.id, error: "skill parent path is not a directory" };
+      }
+      fs.accessSync(parent, fs.constants.W_OK);
+    } catch (err) {
+      return { file: edit.skill.path, edit: edit.id, error: err.message };
+    }
+  }
+  return null;
+}
+
 /**
  * The only place in backpass that writes to the repo.
  *
@@ -199,41 +234,47 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
 
   if (results.failed.length) return results;
 
-  // Skills go in before the memory file. A skill nothing points at yet is inert, while a
-  // memory file pointing at a skill that is not there is actively wrong - so if a skill
-  // cannot be written, the files that would reference it are left alone.
-  const skillFailures = [];
-  const writtenSkillPaths = [];
-  for (const edit of accepted) {
-    if (edit.kind !== "extract" || !edit.skill) continue;
-    if (!landed.has(edit.id)) continue;
-    try {
-      const layout = dryRun ? { created: [], warnings: [] } : writeSkill(repo.root, edit.skill);
-      results.skills.push({ path: edit.skill.path, dryRun, created: layout.created });
-      if (!dryRun) writtenSkillPaths.push(edit.skill.path);
-      for (const w of layout.warnings) if (!results.warnings.includes(w)) results.warnings.push(w);
-    } catch (err) {
-      skillFailures.push({ file: edit.skill.path, edit: edit.id, error: err.message });
-    }
-  }
-
-  if (skillFailures.length) {
-    results.failed.push(...skillFailures);
-    if (writtenSkillPaths.length) {
-      results.failed.push({
-        error: `skill paths already written in this round: ${writtenSkillPaths.join(", ")}; remove them before retrying`,
-      });
-    }
-    for (const { relative } of planned) {
-      results.failed.push({
-        file: relative,
-        error: `${relative} was left unchanged: its edits point at a skill that could not be written`,
-      });
-    }
+  // Skills go in before the memory file. Preflight every target before the first write,
+  // so a malformed or unwritable later target cannot leave an earlier skill behind.
+  const skillEdits = accepted.filter((edit) => edit.kind === "extract" && edit.skill && landed.has(edit.id));
+  const skillFailure = skillWritePreflight(repo.root, skillEdits);
+  if (skillFailure) {
+    results.failed.push(skillFailure);
     return results;
   }
 
-  for (const { relative, absolute, before, text, applied } of planned) {
+  // Planning can take time. Revalidate at the shared pre-write boundary rather than
+  // relying only on the snapshot used for composition.
+  const preWriteFailure = currentMemoryFailure(proposal, repo);
+  if (preWriteFailure) {
+    results.failed.push(preWriteFailure);
+    return results;
+  }
+
+  for (const edit of skillEdits) {
+    try {
+      const layout = dryRun ? { created: [], warnings: [] } : writeSkill(repo.root, edit.skill);
+      results.skills.push({ path: edit.skill.path, dryRun, created: layout.created });
+      for (const w of layout.warnings) if (!results.warnings.includes(w)) results.warnings.push(w);
+    } catch (err) {
+      results.failed.push({ file: edit.skill.path, edit: edit.id, error: err.message });
+      return results;
+    }
+  }
+
+  // Write the memory file last, after one final freshness check. If skill I/O was slow
+  // enough for another process to change memory, its new content is never overwritten.
+  const ordered = [...planned].sort(
+    (a, b) => Number(a.relative === proposal.memoryFile.path) - Number(b.relative === proposal.memoryFile.path),
+  );
+  for (const { relative, absolute, before, text, applied } of ordered) {
+    if (relative === proposal.memoryFile.path) {
+      const failure = currentMemoryFailure(proposal, repo);
+      if (failure) {
+        results.failed.push(failure);
+        return results;
+      }
+    }
     const budget = relative === proposal.memoryFile.path ? budgetStatus(before, text, config.budgetTokens) : null;
 
     if (!dryRun) fs.writeFileSync(absolute, text);
