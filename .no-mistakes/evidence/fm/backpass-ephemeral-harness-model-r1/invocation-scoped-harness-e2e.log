@@ -1,0 +1,17 @@
+EVIDENCE {"surface":"Backpass CLI Pi analysis","exit":0,"harnessArgv":["--model","openai-codex/gpt-5.6-sol","--thinking","high","--mode","rpc","--no-themes"],"persistentSettingsByteStable":true,"laterBarePiDefaults":{"provider":"xai","model":"grok-4.6","thinking":"high"}}
+EVIDENCE {"surface":"Backpass CLI Grok analysis","exit":0,"harnessArgv":["-m","grok-4.6","--reasoning-effort","high","agent","stdio"],"persistentSettingsByteStable":true}
+EVIDENCE {"surface":"Backpass CLI unsafe claude fallback","exit":1,"actionableError":["error claude cannot apply invocation-scoped effort=high because its acpx adapter does not support sessions","  upgrade acpx or omit the effort override"]}
+EVIDENCE {"surface":"Backpass CLI unsafe codex fallback","exit":1,"actionableError":["error codex cannot apply invocation-scoped effort=high because its acpx adapter does not support sessions","  upgrade acpx or omit the effort override"]}
+EVIDENCE {"surface":"Backpass CLI Pi synthesis","exit":0,"harnessLaunches":[["--model","openai-codex/gpt-5.6-luna","--thinking","medium","--mode","rpc","--no-themes"],["--model","openai-codex/gpt-5.6-sol","--thinking","high","--mode","rpc","--no-themes"]],"persistentSettingsByteStable":true}
+✔ the Backpass CLI applies Pi overlays without changing persistent defaults (623.885125ms)
+✔ the Backpass CLI applies Grok model and effort as process arguments (274.564167ms)
+✔ the Backpass CLI preserves safe process fallbacks and rejects unsafe ones (1008.733958ms)
+✔ the Backpass CLI keeps Pi synthesis overlays invocation-scoped (602.6135ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2543.899708
