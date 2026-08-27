@@ -1,0 +1,38 @@
+{
+  "scenario": "Public Backpass CLI full run with isolated Pi analysis and synthesis settings",
+  "command": "node --test --test-name-pattern='the Backpass CLI keeps Pi synthesis overlays invocation-scoped' test/harness-invoke.test.js",
+  "result": "passed",
+  "analysisHarnessLaunch": [
+    "--model",
+    "openai-codex/gpt-5.6-luna",
+    "--thinking",
+    "medium",
+    "--mode",
+    "rpc",
+    "--no-themes"
+  ],
+  "synthesisHarnessLaunch": [
+    "--model",
+    "openai-codex/gpt-5.6-sol",
+    "--thinking",
+    "high",
+    "--mode",
+    "rpc",
+    "--no-themes"
+  ],
+  "laterBareHarnessLaunch": [
+    "--mode",
+    "rpc",
+    "--no-themes"
+  ],
+  "laterBareHarnessObservedDefaults": {
+    "lastChangelogVersion": "0.84.1",
+    "defaultProvider": "xai",
+    "defaultModel": "grok-4.6",
+    "defaultThinkingLevel": "high"
+  },
+  "persistentAcpModelOrThinkingSetCalls": [],
+  "settingsByteStable": true,
+  "settingsSha256Before": "ff692ef6ed7cf954c2687ecfcae7811d3db67ef757a419f777d2d81e6cbfbda2",
+  "settingsSha256After": "ff692ef6ed7cf954c2687ecfcae7811d3db67ef757a419f777d2d81e6cbfbda2"
+}
