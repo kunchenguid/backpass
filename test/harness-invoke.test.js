@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
 /**
  * Isolated harness-default mutation coverage.
@@ -135,6 +135,7 @@ fs.writeFileSync(piLog, "");
 fs.writeFileSync(grokLog, "");
 
 const { execOneShot, openSession, sessionPrompt } = await import("../src/acpx.js");
+const { prepareHarnessInvocation } = await import("../src/harness-invoke.js");
 
 const promptFile = path.join(binDir, "prompt.md");
 fs.writeFileSync(promptFile, "<!-- backpass:self-session -->\nping\n");
@@ -244,6 +245,58 @@ test("a configured replacement Pi adapter is rejected before model or effort can
   assert.ok(acpxCalls().some((c) => c.argv.includes("config") && c.argv.includes("show")));
   assert.ok(!acpxCalls().some((c) => c.argv.includes("new") || c.argv.includes("exec")));
   assert.deepEqual(jsonl(piLog), []);
+});
+
+test("the process wrapper forwards termination signals to its harness child", async () => {
+  const signalChild = path.join(binDir, "signal-child");
+  const readyPath = path.join(binDir, "signal-child.ready");
+  const signalPath = path.join(binDir, "signal-child.signal");
+  fs.writeFileSync(
+    signalChild,
+    `#!${process.execPath}
+const fs = require("node:fs");
+fs.writeFileSync(${JSON.stringify(readyPath)}, String(process.pid));
+process.on("SIGTERM", () => {
+  fs.writeFileSync(${JSON.stringify(signalPath)}, "SIGTERM");
+  process.exit(0);
+});
+setInterval(() => {}, 1000);
+`,
+  );
+  fs.chmodSync(signalChild, 0o755);
+
+  const previous = process.env.PI_ACP_PI_COMMAND;
+  process.env.PI_ACP_PI_COMMAND = signalChild;
+  const invocation = prepareHarnessInvocation({ agent: "pi", model: "provider/model" });
+  if (previous === undefined) delete process.env.PI_ACP_PI_COMMAND;
+  else process.env.PI_ACP_PI_COMMAND = previous;
+
+  let wrapper;
+  let childPid;
+  try {
+    wrapper = spawn(invocation.env.PI_ACP_PI_COMMAND, [], { stdio: "ignore" });
+    for (let attempt = 0; attempt < 100 && !fs.existsSync(readyPath); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.ok(fs.existsSync(readyPath));
+    childPid = Number(fs.readFileSync(readyPath, "utf8"));
+    const exited = new Promise((resolve) => wrapper.once("close", (code, signal) => resolve({ code, signal })));
+    wrapper.kill("SIGTERM");
+    const outcome = await Promise.race([
+      exited,
+      new Promise((resolve) => setTimeout(() => resolve("timeout"), 2000).unref()),
+    ]);
+    assert.notEqual(outcome, "timeout");
+    assert.equal(fs.readFileSync(signalPath, "utf8"), "SIGTERM");
+  } finally {
+    if (wrapper?.exitCode === null && wrapper?.signalCode === null) wrapper.kill("SIGKILL");
+    if (childPid) {
+      try {
+        process.kill(childPid, "SIGKILL");
+      } catch {}
+    }
+    invocation.dispose();
+  }
 });
 
 test("Pi process args keep values that need literal handling, including $() and spaces", async () => {
