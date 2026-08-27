@@ -77,6 +77,28 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   the proposal, which apply refuses rather than part-applies. Never pass
   `approveAll` with the repo as `cwd`; the repo is fingerprinted and a harness that
   writes there fails the run loudly.
+- **An annotate turn has three outcomes, and conflating them is the 0.1.7 failure mode**
+  (`annotateLoop` in `src/synthesize.js`): the staging tree moved (re-measure and re-ask -
+  costs no `ANNOTATE_TURNS` attempt, bounded by `REMEASURE_TURNS`), the adapter returned
+  no text at all (retry once in a NEW session - the old context is the suspect), or the
+  answer was judged by the gates (the only outcome that spends an attempt and writes a
+  rejected `proposal.json`, stamped with `attempt`). `ProposalViolation` carries `reason`
+  and the `saved` proposal's own attempt/violations so a later empty turn is never reported
+  as that proposal's author, and `synthesisFailureHint` in `src/commands/propose.js` is
+  where the advice for each terminal condition lives - never a blanket
+  stronger-model/budget/max-edits line.
+- **`backpass propose --resume` re-annotates the staged tree instead of rebuilding it.**
+  `prepareWorkspace` records the baseline it measured against in `.backpass/synthesis.json`
+  (the tree itself cannot hold it - anything inside the workspace measures as a stray);
+  `restoreWorkspace` re-opens the tree only when the repo still hashes to that baseline and
+  otherwise returns a refusal. It never deletes or partially applies saved state: a failed
+  run's staging copy is the only surviving record of an expensive editing turn.
+- **An extract is one measured memory change plus the skill(s) it pays for.** `anchoredHunks`
+  merges adjacent removals, so extracting neighbouring sections yields one change and N
+  created skills - one honest accept/reject decision, since a merged change cannot be
+  half-accepted. `buildProposal` allows N skills only when they share ONE hunk; separately
+  measured skills must stay separate edits. Edits carry `skills: []`; read them through
+  `editSkills` (`src/skills.js`), which also understands the pre-0.1.8 single `skill`.
 - **Skills only count if a harness loads them.** Extractions target `.agents/skills` with
   `.claude/skills -> ../.agents/skills` as a symlink (`ensureSkillsLayout` in
   `src/skills.js`, run at write time); a bare `skills/` dir is never auto-detected and a

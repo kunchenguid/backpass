@@ -2,7 +2,7 @@ import { UserError, color, info, json, out } from "../logger.js";
 import { ProposalViolation } from "../proposal.js";
 import { runAnalysis } from "./analyze.js";
 import { bootstrapJson, bootstrapRun, printBootstrap } from "./bootstrap.js";
-import { printProposal, runProposal } from "./propose.js";
+import { printProposal, printSynthesisFailure, runProposal, synthesisFailureHint } from "./propose.js";
 import { budgetBar, formatTokens } from "../tokens.js";
 import { startTui } from "../tui/index.js";
 import { resolveMemoryFiles } from "../memory.js";
@@ -82,11 +82,8 @@ export async function cmdRun(ctx) {
   } catch (err) {
     tui?.stop();
     if (err instanceof ProposalViolation) {
-      info("");
-      for (const violation of err.violations) info(`  ${color.red("x")} ${violation}`);
-      info("");
-      info(color.dim(`  the rejected proposal was saved to ${config.state.proposalPath}`));
-      throw new UserError(err.message, "try a stronger synthesis model, or raise --budget / --max-edits");
+      printSynthesisFailure(err, config.state);
+      throw new UserError(err.message, synthesisFailureHint(err));
     }
     throw err;
   } finally {

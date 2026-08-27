@@ -1,4 +1,5 @@
 import { renderHunkLines } from "./diff.js";
+import { editSkills } from "./skills.js";
 import { budgetGateKind, budgetStatus, estimateTokens } from "./tokens.js";
 
 /**
@@ -14,7 +15,7 @@ import { budgetGateKind, budgetStatus, estimateTokens } from "./tokens.js";
  *   add      only inserts text                  (gated like a new instruction)
  *   remove   only deletes text
  *   rewrite  replaces text
- *   extract  memory-file change(s) + one created SKILL.md
+ *   extract  memory-file change(s) + the created SKILL.md file(s) they pay for
  *
  * Each hunk carries a `find`/`replace` pair copied out of the original file by
  * construction; `find` occurs exactly once there. That is what the writer applies later,
@@ -44,11 +45,30 @@ export function effectiveMaxEdits(memoryFile, config) {
   return Math.min(SHRINK_MAX_EDITS, Math.max(DEFAULT_MAX_EDITS, Math.ceil(overage / SHRINK_EDIT_TOKENS)));
 }
 
+/**
+ * A synthesis run that ended without a valid proposal, carrying *why* it ended.
+ *
+ * `reason` is the terminal condition - "gates", "empty", "unparseable", "editing" - and
+ * `saved` is the last parseable-but-gated proposal written to disk, if any, with the
+ * annotation attempt that produced it. They are separate because they can disagree: a run
+ * whose last turn was empty still leaves an older rejected proposal on disk, and reporting
+ * that proposal's violations as the empty turn's result is how a run gets diagnosed wrong.
+ */
 export class ProposalViolation extends Error {
-  constructor(message, violations) {
+  /**
+   * @param {string} message
+   * @param {string[]} violations
+   * @param {{ reason?: string, attempts?: number,
+   *   saved?: { attempt: number, violations: string[] } | null, proposalPath?: string | null }} [detail]
+   */
+  constructor(message, violations, detail = {}) {
     super(message);
     this.name = "ProposalViolation";
     this.violations = violations;
+    this.reason = detail.reason || "gates";
+    this.attempts = detail.attempts ?? 0;
+    this.saved = detail.saved || null;
+    this.proposalPath = detail.proposalPath || null;
   }
 }
 
@@ -265,16 +285,27 @@ export function buildProposal(rawResult, context) {
       continue;
     }
     if (edit.kind === "extract") {
-      if (created.length !== 1 || !hunks.length || files[0] !== memoryFile.path) {
+      if (!created.length || !hunks.length || files[0] !== memoryFile.path) {
         violations.push(
-          `edit ${edit.id}: kind "extract" must group exactly one created SKILL.md with change(s) to ${memoryFile.path}`,
+          `edit ${edit.id}: kind "extract" must group created SKILL.md file(s) with change(s) to ${memoryFile.path}`,
         );
         continue;
       }
-      if (!created[0].skill) {
+      // Several skills may share one extract only when their removals were merged into a
+      // single measured change - a merged change cannot be accepted in halves, so that
+      // grouping is the measurement's, not the model's. Skills whose removals were measured
+      // separately stay separately decidable.
+      if (created.length > 1 && hunks.length > 1) {
         violations.push(
-          `edit ${edit.id}: ${created[0].file} needs YAML frontmatter with \`name:\` and \`description:\``,
+          `edit ${edit.id}: groups ${created.length} created skills against ${hunks.length} separate changes to ` +
+            `${memoryFile.path} (${hunks.map((h) => h.id).join(", ")}); give each skill its own extract, or group ` +
+            `several skills only when they share one measured change`,
         );
+        continue;
+      }
+      const unusable = created.find((c) => !c.skill);
+      if (unusable) {
+        violations.push(`edit ${edit.id}: ${unusable.file} needs YAML frontmatter with \`name:\` and \`description:\``);
         continue;
       }
     } else if (created.length) {
@@ -302,7 +333,7 @@ export function buildProposal(rawResult, context) {
       instructions: edit.instructions,
       evidence: edit.evidence,
       transcripts: edit.transcripts,
-      skill: created[0]?.skill || null,
+      skills: created.map((c) => c.skill),
       hunks: hunks.map((h) => ({
         id: h.id,
         find: h.find,
@@ -394,7 +425,7 @@ export function buildProposal(rawResult, context) {
       positive: summary?.totals?.positive ?? 0,
       negative: summary?.totals?.negative ?? 0,
       gapClusters: summary?.totals?.gapClusters ?? 0,
-      skillExtractions: accepted.filter((e) => e.kind === "extract").length,
+      skillExtractions: accepted.reduce((n, e) => n + editSkills(e).length, 0),
     },
     edits: accepted,
     verdicts: Array.isArray(rawResult?.verdicts) ? rawResult.verdicts : [],

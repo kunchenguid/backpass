@@ -104,19 +104,35 @@ export function renderSkillFile(skill) {
 }
 
 /**
+ * The skills one extract creates.
+ *
+ * Usually one. Several arrive together when the measurement merged their removals into a
+ * single change (`anchoredHunks`), which makes them one accept/reject decision - accepting
+ * half a merged change is not a thing a file can do. Proposals written before that was
+ * possible carry a single `skill`, so both shapes read the same way here.
+ *
+ * @returns {object[]}
+ */
+export function editSkills(edit) {
+  if (Array.isArray(edit?.skills)) return edit.skills.filter(Boolean);
+  return edit?.skill ? [edit.skill] : [];
+}
+
+/**
  * The budget arithmetic that makes extraction worth it, reported per edit:
  * "-1,900 tok always-loaded, +140 tok description".
  */
 export function extractionBudgetEffect(edit) {
-  if (edit.kind !== "extract" || !edit.skill) return null;
+  const skills = editSkills(edit);
+  if (edit.kind !== "extract" || !skills.length) return null;
   const pairs = Array.isArray(edit.hunks) ? edit.hunks : [edit];
   const removedFromMemory = pairs.reduce((sum, p) => sum + estimateTokens(p.find) - estimateTokens(p.replace), 0);
-  const descriptionCost = estimateTokens(edit.skill.description);
+  const descriptionCost = skills.reduce((sum, skill) => sum + estimateTokens(skill.description), 0);
   return {
     alwaysLoadedDelta: -removedFromMemory,
     descriptionCost,
     net: descriptionCost - removedFromMemory,
-    skillBodyTokens: estimateTokens(edit.skill.body),
+    skillBodyTokens: skills.reduce((sum, skill) => sum + estimateTokens(skill.body), 0),
   };
 }
 

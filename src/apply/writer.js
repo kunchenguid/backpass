@@ -5,7 +5,7 @@ import { applyEdit, projectWithDecisions } from "../proposal.js";
 import { memoryTextHash } from "../memory.js";
 import { budgetGateKind, budgetStatus, formatTokens } from "../tokens.js";
 import { recordRejection } from "../state.js";
-import { writeSkill } from "../skills.js";
+import { editSkills, writeSkill } from "../skills.js";
 
 function acceptedSubsetBudgetFailure({ proposal, accepted, repo, capTokens, memoryText }) {
   if (!accepted.length) return null;
@@ -205,15 +205,19 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
   const skillFailures = [];
   const writtenSkillPaths = [];
   for (const edit of accepted) {
-    if (edit.kind !== "extract" || !edit.skill) continue;
+    if (edit.kind !== "extract") continue;
     if (!landed.has(edit.id)) continue;
-    try {
-      const layout = dryRun ? { created: [], warnings: [] } : writeSkill(repo.root, edit.skill);
-      results.skills.push({ path: edit.skill.path, dryRun, created: layout.created });
-      if (!dryRun) writtenSkillPaths.push(edit.skill.path);
-      for (const w of layout.warnings) if (!results.warnings.includes(w)) results.warnings.push(w);
-    } catch (err) {
-      skillFailures.push({ file: edit.skill.path, edit: edit.id, error: err.message });
+    // One edit may create several skills when their removals were measured as one change;
+    // they land together, before the memory file that will point at all of them.
+    for (const skill of editSkills(edit)) {
+      try {
+        const layout = dryRun ? { created: [], warnings: [] } : writeSkill(repo.root, skill);
+        results.skills.push({ path: skill.path, dryRun, created: layout.created });
+        if (!dryRun) writtenSkillPaths.push(skill.path);
+        for (const w of layout.warnings) if (!results.warnings.includes(w)) results.warnings.push(w);
+      } catch (err) {
+        skillFailures.push({ file: skill.path, edit: edit.id, error: err.message });
+      }
     }
   }
 

@@ -281,7 +281,8 @@ test("an agent that keeps editing during an annotate turn is shown the re-measur
   assert.deepEqual(violations, []);
   assert.equal(proposal.edits.length, 2);
   const second = fs.readFileSync(path.join(repo.root, ".backpass", "prompts", "synthesis-annotate-2.md"), "utf8");
-  assert.ok(second.includes("the files changed after the changes were measured"));
+  assert.ok(second.includes("The files moved after they were measured"));
+  assert.ok(!second.includes("Your previous answer was rejected"), "a re-measurement is not a rejected answer");
   assert.ok(second.includes("[H2: AGENTS.md line 12 (-1/+1)"));
 });
 

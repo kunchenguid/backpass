@@ -1,7 +1,9 @@
 import { foldEvidence } from "../fold.js";
 import { ledgerGapObservations, pruneGapLedger, recordGapObservations } from "../gap-ledger.js";
-import { synthesizeProposal } from "../synthesize.js";
+import { resumeAnnotation, synthesizeProposal } from "../synthesize.js";
 import { ProposalViolation } from "../proposal.js";
+import { resolveOverflowTarget } from "../skills.js";
+import { restoreWorkspace } from "../workspace.js";
 import { UserError, color, info, json, out } from "../logger.js";
 import { budgetBar, formatTokens } from "../tokens.js";
 import { emitProgress } from "../progress.js";
@@ -69,6 +71,54 @@ export async function runProposal(ctx, precomputed = null) {
 }
 
 /**
+ * `backpass propose --resume`: annotate the staging copy that is already on disk.
+ *
+ * A failed annotation loses the annotation, not the edits - those are in
+ * `.backpass/synthesis/`, and they cost the expensive turn of the run. This skips
+ * discovery, analysis, the fold, and the editing turn, re-measures that tree as it stands,
+ * and annotates it in a new session. Nothing here rebuilds or removes the tree: saved
+ * state that cannot be resumed safely is refused with the reason, and left where it is.
+ */
+export async function resumeProposal(ctx) {
+  const { repo, config } = ctx;
+  const { file } = primaryMemoryFile(repo, config);
+  const skillsDir = resolveOverflowTarget(repo.root, config.skillsDir).dir;
+
+  const { workspace, manifest, refusal } = restoreWorkspace({
+    state: config.state,
+    repo,
+    memoryFile: file,
+    skillsDir,
+  });
+  if (refusal) throw new UserError(`cannot resume: ${refusal.message}`, refusal.hint);
+
+  const summary = config.state.readSummary();
+  if (!summary?.analyzedSessions) {
+    throw new UserError(
+      "cannot resume: the aggregated evidence this synthesis was built from is gone",
+      "run `backpass analyze` and then `backpass propose`; the staged copy was left untouched",
+    );
+  }
+
+  info(
+    `${color.cyan("·")} resuming the synthesis staged at ${manifest.stagedAt} · ` +
+      `${file.path} · ${summary.analyzedSessions} session(s) of evidence`,
+  );
+
+  const { proposal } = await resumeAnnotation({
+    memoryFile: file,
+    summary,
+    config,
+    repo,
+    workspace,
+    harnessCounts: manifest.harnessCounts || {},
+  });
+
+  config.state.writeProposal(proposal);
+  return { proposal, summary, memoryFile: file };
+}
+
+/**
  * @param {object} proposal
  * @param {{ applied?: boolean, analysisUsage?: import("../acpx.js").UsageRecord[] }} [options]
  *   `analysisUsage` is the tier-1 accounting of the same run, when the caller ran it.
@@ -113,9 +163,66 @@ export function printProposal(proposal, { applied = false, analysisUsage = [] } 
   out("Review and apply with `backpass apply` (nothing has been written).");
 }
 
+/** True when a violation is about the always-loaded budget rather than the annotation. */
+const isBudgetViolation = (v) => /-token budget/.test(v);
+const isEditCapViolation = (v) => /per-run cap is \d+/.test(v);
+
+/**
+ * What to actually try next, read off the condition the run ended on.
+ *
+ * The old advice - a stronger model, a bigger budget, a higher edit cap - was printed for
+ * every failure, including the ones where the model never spoke and the ones where the
+ * budget was never the constraint. Each terminal condition has a different repair, and
+ * three of the four are cheap, because the editing turn's work is still on disk.
+ */
+export function synthesisFailureHint(err) {
+  const resume =
+    "`backpass propose --resume` re-annotates the staged edits in a fresh session, without re-running the expensive editing turn";
+  if (err.reason === "empty") {
+    return `the synthesis harness returned no text, so nothing about the model, the budget, or the edit cap was the constraint; ${resume}`;
+  }
+  if (err.reason === "unparseable") {
+    return `the model answered but not with a JSON object; ${resume}, or pin a different harness with --synthesis-agent`;
+  }
+  if (err.reason === "editing") {
+    return `the agent kept rewriting the staging copy instead of describing it; ${resume}`;
+  }
+  const violations = err.violations || [];
+  if (violations.some(isBudgetViolation)) {
+    return "the edit set did not clear the budget gate: raise --budget, or let the shrink continue over more runs";
+  }
+  if (violations.some(isEditCapViolation)) {
+    return "the annotation proposed more edits than the per-run learning rate allows: raise --max-edits, or re-run and let the next pass take the rest";
+  }
+  return `the gates above are what the annotation must satisfy; ${resume}`;
+}
+
+/**
+ * Report a synthesis that ended without a valid proposal: loudly, and about the turn that
+ * actually ended it (design section 6).
+ *
+ * The saved proposal and the terminal condition can be from different turns - a run whose
+ * last turn was empty leaves the rejected proposal of an earlier one on disk - so the
+ * provenance is printed rather than letting the older violations read as this turn's.
+ */
+export function printSynthesisFailure(err, state) {
+  info("");
+  for (const violation of err.violations) info(`  ${color.red("x")} ${violation}`);
+  info("");
+  if (!err.saved) {
+    info(color.dim("  no proposal was saved: no annotation turn produced one"));
+    return;
+  }
+  info(color.dim(`  the rejected proposal was saved to ${state.proposalPath}`));
+  if (err.reason !== "gates") {
+    info(color.dim(`  it is from annotation attempt ${err.saved.attempt}, not the turn above, and it lists:`));
+    for (const violation of err.saved.violations) info(color.dim(`    - ${violation}`));
+  }
+}
+
 export async function cmdPropose(ctx) {
   try {
-    const { proposal } = await runProposal(ctx);
+    const { proposal } = ctx.flags.resume ? await resumeProposal(ctx) : await runProposal(ctx);
     if (ctx.flags.json) {
       json(proposal);
       return 0;
@@ -124,12 +231,8 @@ export async function cmdPropose(ctx) {
     return 0;
   } catch (err) {
     if (err instanceof ProposalViolation) {
-      // Loud failure, never silent truncation (design section 6).
-      info("");
-      for (const violation of err.violations) info(`  ${color.red("x")} ${violation}`);
-      info("");
-      info(color.dim(`  the rejected proposal was saved to ${ctx.config.state.proposalPath}`));
-      throw new UserError(err.message, "try a stronger synthesis model, or raise --budget / --max-edits");
+      printSynthesisFailure(err, ctx.config.state);
+      throw new UserError(err.message, synthesisFailureHint(err));
     }
     throw err;
   }

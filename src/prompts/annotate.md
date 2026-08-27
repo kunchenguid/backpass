@@ -1,5 +1,5 @@
-backpass measured the changes you made in the staging copy. Every change below is
-identified by an id; annotate each one so a human can review it with its evidence.
+{{PREFACE}}backpass measured the changes in the staging copy of {{MEMORY_PATH}}. Every change below
+is identified by an id; annotate each one so a human can review it with its evidence.
 
 ## Measured changes
 
@@ -39,10 +39,15 @@ Hard rules - a violation fails the whole proposal:
 4. **New instructions need evidence from at least {{MIN_GAP_EVIDENCE}} distinct
    sessions.** `transcripts` is how many distinct sessions back the edit; an edit that
    only adds text is a new instruction whatever its `kind` says.
-5. `kind: "extract"` is exactly an edit whose changes include one created `SKILL.md`
-   and at least one change to `{{MEMORY_PATH}}`. Any other edit must not include a
-   created file, and an edit changes one file only.
+5. `kind: "extract"` is an edit whose changes are one or more created `SKILL.md` files
+   plus the change(s) to {{MEMORY_PATH}} that pay for them. One skill per extract is the
+   normal shape. Several skills belong in ONE extract exactly when their removals landed
+   in a **single** measured change: adjacent removals are merged into one change, and a
+   merged change cannot be accepted in halves. If each skill has its own measured change,
+   give each its own extract. Any other kind must not include a created file, and an edit
+   changes one file only.
 6. **Budget:** {{BUDGET_RULE}}
 
 If you still need to change the files, do that first and then answer; backpass
-re-measures after this reply and shows you the new ids if anything moved.
+re-measures after this reply and shows you the new ids if anything moved. Re-measuring
+does not use up an annotation attempt.

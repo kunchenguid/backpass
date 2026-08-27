@@ -189,10 +189,39 @@ Then mechanical gates run, and they are not negotiable:
 - every edit carries a verbatim quote
 - the post-edit file must fit the budget, measured on the staged file
 
+An extraction is the created `SKILL.md` plus the memory-file change that pays for it.
+Neighbouring removals are merged into one measured change, and a merged change cannot be
+accepted in halves - so when several sections leave together, their skills arrive as one
+extract with several skills, which is one honest accept/reject decision. Skills whose
+removals were measured separately stay separate decisions, and bundling them is refused.
+
 A violation triggers a re-prompt naming the exact breach (at most two). If those also
 fail, backpass **fails loudly** and saves the rejected proposal. It never silently
 truncates. A harness that writes past the staging copy into the repo is an error, never
 an apply.
+
+Not every annotate turn is an answer, and the three cases are kept apart because they call
+for different things:
+
+- **the agent edited the copy again** - the ids it was given no longer describe the files.
+  It is shown the fresh measurement and answers again; this costs no re-prompt.
+- **the turn came back empty** - the harness returned success with no text at all. Nothing
+  was said, so there is nothing to correct: the annotation is retried once in a **new**
+  session, since the accumulated context of the old one is the likeliest cause.
+- **the answer was judged** - only this uses a re-prompt, and only this writes a rejected
+  proposal, stamped with the attempt that produced it.
+
+When a run does fail, the advice it prints comes from the condition it ended on, and the
+staging copy is left where it is:
+
+```
+backpass propose --resume
+```
+
+re-measures `.backpass/synthesis/` as it stands and annotates it in a fresh session -
+no discovery, no analysis, no second editing turn. It refuses, without deleting or
+half-applying anything, when the repository moved on under it: a changed memory file, a
+changed or missing skill, a different target, or another checkout.
 
 Token deltas shown to you are measured by backpass from the actual text - never taken from
 the model's own arithmetic.
@@ -294,15 +323,16 @@ pointer-aware:
 
 ## CLI Reference
 
-| Command            | What it does                                                                             |
-| ------------------ | ---------------------------------------------------------------------------------------- |
-| `backpass`         | collect samples → calculate loss → aggregate gradients → gradient descent. Never writes. |
-| `backpass scan`    | collect samples only: the transcript table with a confidence column                      |
-| `backpass analyze` | calculate loss: the tier-1 pass over pending transcripts                                 |
-| `backpass propose` | aggregate gradients + gradient descent: the tier-2 pass from cached evidence             |
-| `backpass apply`   | review and write the accepted edits                                                      |
-| `backpass status`  | cache state, failed transcripts, budget bars                                             |
-| `backpass init`    | write `.backpassrc.json`, exclude `.backpass/` locally                                   |
+| Command                     | What it does                                                                                 |
+| --------------------------- | -------------------------------------------------------------------------------------------- |
+| `backpass`                  | collect samples → calculate loss → aggregate gradients → gradient descent. Never writes.     |
+| `backpass scan`             | collect samples only: the transcript table with a confidence column                          |
+| `backpass analyze`          | calculate loss: the tier-1 pass over pending transcripts                                     |
+| `backpass propose`          | aggregate gradients + gradient descent: the tier-2 pass from cached evidence                 |
+| `backpass propose --resume` | annotate the staged synthesis again, in a fresh session, without re-running the editing turn |
+| `backpass apply`            | review and write the accepted edits                                                          |
+| `backpass status`           | cache state, failed transcripts, budget bars                                                 |
+| `backpass init`             | write `.backpassrc.json`, exclude `.backpass/` locally                                       |
 
 Run `backpass --help` for the full flag list.
 
@@ -407,6 +437,7 @@ Everything mutable lives in `.backpass/`, kept out of git via the repo's local e
   evidence-summary.json  aggregated gradients
   proposal.json          the latest gradient-descent step
   synthesis/             the staging copy the gradient-descent agent edited (memory file + skills)
+  synthesis.json         what that copy was measured against, so `propose --resume` can re-open it
   prompts/               the exact prompts of the last run
   agent-probe-cache.json which harnesses were available and logged in, and when
   rejections.json        edits you turned down, and the evidence behind them

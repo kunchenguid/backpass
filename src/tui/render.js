@@ -247,6 +247,9 @@ function synthSummary(theme, s) {
   const model = [s.agent, s.model].filter(Boolean).join(" · ");
   const effort = s.effort ? ` · effort ${s.effort}` : "";
   if (s.status === "done") return theme.paint(`${s.edits} edit(s) · passed validation`, "dim");
+  if (s.phase === "annotate" && s.emptyTurns) {
+    return theme.paint("fresh session after an empty turn · ", "dim") + theme.paint(`${model}${effort}`, "dim");
+  }
   if (s.phase === "annotate" && s.attempt > 1) {
     return (
       theme.paint("re-prompt ", "dim") +
@@ -384,6 +387,19 @@ function synthesizeDetail(state, theme, width, spin) {
     sectionRule(theme, STAGE_LABELS.synthesize, `aggregated gradients → at most ${state.meta.maxEdits} edits`, width),
   ];
 
+  // A re-measurement and an empty turn are named for what they are: neither spent one of
+  // the annotation attempts, and saying "violated 1 gate(s)" for either is how a run gets
+  // read as almost-passing when nothing was judged at all.
+  if (s.phase === "annotate" && s.remeasures) {
+    lines.push(
+      ` ${theme.paint("~", "yellow")} ${theme.paint("the files moved; re-annotating the new ids", "text")} ${theme.paint("· no annotation attempt spent", "dim")}`,
+    );
+  }
+  if (s.phase === "annotate" && s.emptyTurns) {
+    lines.push(
+      ` ${theme.paint("~", "yellow")} ${theme.paint("the harness returned an empty turn", "text")} ${theme.paint("· retrying in a fresh session", "dim")}`,
+    );
+  }
   if (s.phase === "annotate" && s.attempt > 1 && s.violations.length) {
     lines.push(
       ` ${theme.paint("!", "yellow")} ${theme.paint(`synthesis violated ${s.violations.length} gate(s)`, "text")} ${theme.paint("· re-prompting with the exact breaches", "dim")}`,

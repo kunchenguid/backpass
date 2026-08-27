@@ -730,22 +730,21 @@
           if (!edit.targetsMemoryFile) body.appendChild(el("div", "target", "target: " + edit.file));
           if (edit.rationale) body.appendChild(el("p", "rationale", edit.rationale));
 
-          if (edit.kind === "extract" && edit.skill) {
-            var prev = el("div", "skillprev");
-            prev.appendChild(
-              el(
-                "span",
-                "fm",
-                "--- " +
-                  edit.skill.path +
-                  " (new) ---\nname: " +
-                  edit.skill.name +
-                  "\ndescription: " +
-                  edit.skill.description,
-              ),
-            );
-            prev.appendChild(document.createTextNode("\n\n" + (edit.skill.body || "").slice(0, 900)));
-            body.appendChild(prev);
+          // An extract creates one skill, or several when their removals were measured as
+          // one change - then they are one decision, so they are previewed on one card.
+          if (edit.kind === "extract") {
+            editSkills(edit).forEach(function (skill) {
+              var prev = el("div", "skillprev");
+              prev.appendChild(
+                el(
+                  "span",
+                  "fm",
+                  "--- " + skill.path + " (new) ---\nname: " + skill.name + "\ndescription: " + skill.description,
+                ),
+              );
+              prev.appendChild(document.createTextNode("\n\n" + (skill.body || "").slice(0, 900)));
+              body.appendChild(prev);
+            });
           }
 
           var diff = el("div", "diff");
@@ -807,6 +806,17 @@
 
         function nonEmpty(line) {
           return line.length > 0;
+        }
+
+        // The skills one extract creates. A proposal saved before an extract could carry
+        // several (merged removals) has a single `skill`; both shapes read the same way.
+        function editSkills(edit) {
+          if (Array.isArray(edit.skills)) {
+            return edit.skills.filter(function (skill) {
+              return skill;
+            });
+          }
+          return edit.skill ? [edit.skill] : [];
         }
 
         // Measured edits carry display lines per hunk (ctx/del/ins); a legacy

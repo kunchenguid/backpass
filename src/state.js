@@ -24,6 +24,8 @@ export const STATE_EXCLUDE_LINE = `${STATE_DIRNAME}/`;
  *   agent-probe-cache.json TTL'd availability/auth verdicts per agent|model (src/agents.js)
  *   prompts/               the exact prompts of the last run, one file per model turn
  *   synthesis/             the staging copy the synthesis agent edits natively (src/workspace.js)
+ *   synthesis.json         what that copy was measured against, so `propose --resume` can
+ *                          re-open it instead of paying for another editing turn
  *   apply/                 the rendered Lavish apply surface
  */
 export class State {
@@ -37,6 +39,7 @@ export class State {
     this.rejectionsPath = path.join(this.root, "rejections.json");
     this.gapLedgerPath = path.join(this.root, "gap-ledger.json");
     this.probeCachePath = path.join(this.root, "agent-probe-cache.json");
+    this.workspaceManifestPath = path.join(this.root, "synthesis.json");
   }
 
   /**
@@ -132,6 +135,15 @@ export class State {
 
   writeGapLedger(ledger) {
     this.writeJsonFile(this.gapLedgerPath, ledger);
+  }
+
+  /** The staging copy's baseline record; null when no synthesis has been staged. */
+  readWorkspaceManifest() {
+    return this.readJsonFile(this.workspaceManifestPath, null);
+  }
+
+  writeWorkspaceManifest(manifest) {
+    this.writeJsonFile(this.workspaceManifestPath, manifest);
   }
 
   readProbeCache() {

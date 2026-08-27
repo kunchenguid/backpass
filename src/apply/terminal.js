@@ -2,6 +2,7 @@ import readline from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 
 import { UserError, color } from "../logger.js";
+import { editSkills } from "../skills.js";
 import { formatTokens } from "../tokens.js";
 
 /**
@@ -51,10 +52,10 @@ export function renderEdit(edit, index, total) {
   out.push("");
   out.push(renderDiff(edit));
 
-  if (edit.kind === "extract" && edit.skill) {
+  for (const skill of edit.kind === "extract" ? editSkills(edit) : []) {
     out.push("");
-    out.push(color.dim(`  new skill: ${edit.skill.path}`));
-    out.push(color.dim(`  description: ${edit.skill.description}`));
+    out.push(color.dim(`  new skill: ${skill.path}`));
+    out.push(color.dim(`  description: ${skill.description}`));
   }
 
   if (edit.evidence?.length) {

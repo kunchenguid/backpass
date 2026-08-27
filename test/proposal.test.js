@@ -274,14 +274,14 @@ test("a proposal that would exceed the budget fails the gate", () => {
   assert.ok(violations.some((v) => /over the 100-token budget/.test(v)));
 });
 
-test("an extract is one created SKILL.md grouped with the memory change that pays for it", () => {
-  const skillText =
-    "---\nname: release-signing\ndescription: Load before tagging a release.\n---\n\n## Steps\n\n1. sign\n";
+const skillFile = (name) => `---\nname: ${name}\ndescription: Load before ${name}.\n---\n\n## Steps\n\n1. do it\n`;
+
+test("an extract is the created SKILL.md file(s) grouped with the memory change that pays for them", () => {
   const extractEdit = (root) => {
     writeIn(root, "AGENTS.md", (t) =>
       t.replace("- Use Node 18 via nvm before running any script.", "- See the release-signing skill."),
     );
-    writeIn(root, ".agents/skills/release-signing/SKILL.md", skillText);
+    writeIn(root, ".agents/skills/release-signing/SKILL.md", skillFile("release-signing"));
   };
 
   const good = gate({
@@ -289,16 +289,17 @@ test("an extract is one created SKILL.md grouped with the memory change that pay
     annotation: { edits: [claim(["H1", "H2"], { kind: "extract", title: "x" })] },
   });
   assert.deepEqual(good.violations, []);
-  assert.equal(good.proposal.edits[0].skill.path, ".agents/skills/release-signing/SKILL.md");
-  assert.equal(good.proposal.edits[0].skill.name, "release-signing");
-  assert.equal(good.proposal.edits[0].skill.body, "## Steps\n\n1. sign");
+  assert.deepEqual(
+    good.proposal.edits[0].skills.map((s) => [s.path, s.name, s.body]),
+    [[".agents/skills/release-signing/SKILL.md", "release-signing", "## Steps\n\n1. do it"]],
+  );
   assert.equal(good.proposal.stats.skillExtractions, 1);
 
   const split = gate({
     edit: extractEdit,
     annotation: { edits: [claim(["H1"], { kind: "extract", title: "x" }), claim(["H2"], { kind: "add", title: "y" })] },
   });
-  assert.ok(split.violations.some((v) => /kind "extract" must group exactly one created SKILL\.md/.test(v)));
+  assert.ok(split.violations.some((v) => /kind "extract" must group created SKILL\.md file\(s\)/.test(v)));
   assert.ok(split.violations.some((v) => /only kind "extract" may include a created file \(H2\)/.test(v)));
 
   const headless = gate({
@@ -309,6 +310,49 @@ test("an extract is one created SKILL.md grouped with the memory change that pay
     annotation: { edits: [claim(["H1", "H2"], { kind: "extract", title: "x" })] },
   });
   assert.ok(headless.violations.some((v) => /needs YAML frontmatter/.test(v)));
+});
+
+test("skills whose removals were measured as one change may share an extract; separately measured ones may not", () => {
+  // Two neighbouring rules leave together, so the measurement merges their removal into a
+  // single hunk. Their two skills then cannot be accepted apart from each other.
+  const coalesced = gate({
+    edit: (root) => {
+      writeIn(root, "AGENTS.md", (t) =>
+        t.replace(
+          "- Prefer small commits.\n- Use Node 18 via nvm before running any script.\n",
+          "- See the commit-style and node-setup skills.\n",
+        ),
+      );
+      writeIn(root, ".agents/skills/commit-style/SKILL.md", skillFile("commit-style"));
+      writeIn(root, ".agents/skills/node-setup/SKILL.md", skillFile("node-setup"));
+    },
+    annotation: { edits: [claim(["H1", "H2", "H3"], { kind: "extract", title: "extract two playbooks" })] },
+  });
+  assert.deepEqual(coalesced.violations, [], "one measured change plus two skills is one honest decision");
+  assert.equal(coalesced.proposal.edits.length, 1);
+  assert.deepEqual(coalesced.proposal.edits[0].skills.map((s) => s.name).sort(), ["commit-style", "node-setup"]);
+  assert.equal(coalesced.proposal.edits[0].hunks.length, 1);
+  assert.equal(coalesced.proposal.stats.skillExtractions, 2, "the stat counts skills, not cards");
+
+  // Two rules with an untouched line between them stay two measured changes, so they stay
+  // two decisions: bundling them would take away the reviewer's ability to split them.
+  const separate = gate({
+    edit: (root) => {
+      writeIn(root, "AGENTS.md", (t) =>
+        t
+          .replace("- Whenever a PR is mentioned, include its URL.", "- See the url-policy skill.")
+          .replace("- Use Node 18 via nvm before running any script.", "- See the node-setup skill."),
+      );
+      writeIn(root, ".agents/skills/url-policy/SKILL.md", skillFile("url-policy"));
+      writeIn(root, ".agents/skills/node-setup/SKILL.md", skillFile("node-setup"));
+    },
+    annotation: { edits: [claim(["H1", "H2", "H3", "H4"], { kind: "extract", title: "extract both" })] },
+  });
+  assert.ok(
+    separate.violations.some((v) => /groups 2 created skills against 2 separate changes/.test(v)),
+    `expected a split demand, got ${JSON.stringify(separate.violations)}`,
+  );
+  assert.ok(separate.violations.some((v) => /give each skill its own extract/.test(v)));
 });
 
 test("a skill's description can be rewritten in place; deletions and stray files are refused or ignored", () => {
@@ -745,12 +789,9 @@ test("a failed later skill write names skill paths already written", () => {
       replace: "- See the url-policy skill.",
     },
   ];
-  second.skill = {
-    ...second.skill,
-    name: "url-policy",
-    path: ".agents/skills",
-    body: "Always include the full URL.",
-  };
+  second.skills = [
+    { ...second.skills[0], name: "url-policy", path: ".agents/skills", body: "Always include the full URL." },
+  ];
   proposal.edits.push(second);
 
   const results = applyDecisions({
