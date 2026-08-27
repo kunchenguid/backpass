@@ -428,7 +428,7 @@ Everything mutable lives in `.backpass/`, kept out of git via the repo's local e
   scan-cache.json        collect-samples verdicts by path + mtime + size
   evidence/<id>.json     per-transcript loss
   evidence-summary.json  aggregated gradients
-  proposal.json          the latest gradient-descent step
+  proposal.json          the latest parseable gradient-descent step (absent if none was produced)
   synthesis/             the staging copy the gradient-descent agent edited (memory file + skills)
   prompts/               the exact prompts of the last run
   agent-probe-cache.json which harnesses were available and logged in, and when

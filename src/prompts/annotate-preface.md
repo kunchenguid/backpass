@@ -17,4 +17,3 @@ Every edit you report needs a verbatim quote from the evidence below, so read it
 {{EVIDENCE}}
 
 ---
-
