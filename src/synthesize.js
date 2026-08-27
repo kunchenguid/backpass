@@ -24,11 +24,11 @@ import { UserError, color, info, warn } from "./logger.js";
  *   annotate  backpass measures the copy against the original (`src/diff.js`) and shows
  *             the changes by id; the agent attaches kind, title, rationale, and evidence
  *
- * The annotation is what the mechanical gates validate (`buildProposal`); malformed or
- * gated answers spend at most ANNOTATE_TURNS attempts and are re-prompted with the exact
- * breaches. Backpass then fails loudly and preserves the latest parseable rejected proposal
- * rather than quietly trimming it (design section 6). The repo is fingerprinted before and
- * checked after: a harness that wrote past the staging copy is an error, never a silent apply.
+ * The annotation is what the mechanical gates validate (`buildProposal`); on a violation
+ * the agent is re-prompted with the exact breaches, at most ANNOTATE_TURNS times in all,
+ * then backpass fails loudly and saves the rejected proposal rather than quietly trimming
+ * it (design section 6). The repo is fingerprinted before and checked after: a harness
+ * that wrote past the staging copy is an error, never a silent apply.
  *
  * Three things an annotate turn can be are deliberately kept apart, because they call for
  * different responses and produce different advice at the end of a failed run:
@@ -41,8 +41,8 @@ import { UserError, color, info, warn } from "./logger.js";
  *                        spoke, so there is nothing to correct - the annotation is retried
  *                        once in a NEW session, since the accumulated context of the old
  *                        one is the likeliest reason it collapsed.
- *   the turn had text    a malformed or gated answer consumes an annotation attempt. Only
- *                        a parseable, gate-rejected answer writes a rejected proposal.
+ *   the answer was judged the model spoke and the gates ruled. Only this consumes an
+ *                        annotation attempt, and only this writes a rejected proposal.
  */
 
 /** Annotation attempts per run: the first answer plus re-prompts with the exact violations. */
@@ -120,7 +120,11 @@ function assertRepoUntouched(repo, before, workspaceRoot) {
   );
 }
 
-/** Everything synthesis needs: prompt values, proposal context, and overflow target. */
+/**
+ * Everything both entry points need: the prompt values, the `buildProposal` context, and
+ * the overflow target. `synthesizeProposal` runs an edit turn first; `resumeAnnotation`
+ * starts straight at the annotation of a staging copy that is already on disk.
+ */
 function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts }) {
   const state = config.state;
   const rejections = state.readRejections();
@@ -155,8 +159,9 @@ function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts }) {
 
 /**
  * The header a fresh annotation session needs. An in-session annotate turn inherits the
- * repository, the budget, and the evidence from its earlier turns; a session opened after
- * an empty reply would otherwise be asked to quote evidence it has never been shown.
+ * repository, the budget, and the evidence from the editing turn that preceded it; a
+ * session that never saw that turn - the retry after an empty reply, or `propose
+ * --resume` - would otherwise be asked to quote evidence it has never been shown.
  */
 function prefaceFor({ memoryFile, summary, config, repo, workspaceRoot }) {
   return render(loadPrompt("annotate-preface"), {
@@ -218,8 +223,8 @@ async function annotateLoop({
   noteOnce,
   overflow,
   progress,
-  ranWith,
   renderPreface,
+  startFresh = false,
 }) {
   const { memoryFile, config } = context;
   const state = config.state;
@@ -229,7 +234,7 @@ async function annotateLoop({
   let emptyTurns = 0;
   let violationsToShow = [];
   let justRemeasured = false;
-  let owePreface = false;
+  let owePreface = startFresh;
   /** @type {{ attempt: number, violations: string[] } | null} */
   let saved = null;
   /** @type {{ reason: string, violations: string[] }} */
@@ -252,13 +257,13 @@ async function annotateLoop({
     fs.writeFileSync(promptFile, prompt);
     progress("annotate", { attempt: attempts + 1, turn, changes: measured.changes.length });
 
-    const result = await holder.session.prompt({
+    const result = await holder.prompt({
       promptFile,
       approveAll: true,
       timeoutSeconds,
       promptRetries,
     });
-    usage.push(usageRecord(ranWith, result));
+    usage.push(usageRecord(holder.ranWith, result));
     for (const note of result.notes || []) noteOnce(note);
 
     // The agent may keep editing during an annotate turn; the ids it was answering about
@@ -417,15 +422,23 @@ export async function synthesizeProposal({ memoryFile, summary, config, repo, tr
   // through to the next ladder candidate; the switch is recorded in the notes so the
   // proposal's provenance is visible. Once the editing turn has run, later turns stay
   // on the same candidate - a run never silently switches models after real work.
-  /** @type {{ session: Awaited<ReturnType<typeof openSession>> | null }} */
-  const holder = { session: null };
+  /** @type {{ session: Awaited<ReturnType<typeof openSession>> | null, ranWith: string, prompt: Function }} */
+  const holder = {
+    session: null,
+    ranWith,
+    prompt(args) {
+      if (!this.session) throw new Error("synthesis session is not open");
+      return this.session.prompt(args);
+    },
+  };
   /** @type {ReturnType<typeof prepareWorkspace>} */
   let workspace = null;
   const editResult = await config.agents.withFallthrough("synthesis", async (current) => {
     ranWith = current.agent;
+    holder.ranWith = current.agent;
     chosen = current;
     if (current !== pick) notes.push(`synthesis fell through to ${current.agent} (${current.model})`);
-    workspace = prepareWorkspace({ state, repo, memoryFile, skillsDir: overflow.dir });
+    workspace = prepareWorkspace({ state, repo, memoryFile, skillsDir: overflow.dir, harnessCounts, summary });
     progress("edit", { attempt: 1 });
     holder.session = await openSession({
       agent: current.agent,
@@ -477,10 +490,124 @@ export async function synthesizeProposal({ memoryFile, summary, config, repo, tr
       noteOnce,
       overflow,
       progress,
-      ranWith,
       renderPreface: () => prefaceFor({ memoryFile, summary, config, repo, workspaceRoot: workspace.root }),
     });
   } finally {
     await holder.session.close();
+  }
+}
+
+/**
+ * `backpass propose --resume`: annotate a staging copy that is already on disk.
+ *
+ * The expensive half of a synthesis run is the editing turn, and its result survives a
+ * failed annotation - it is sitting in `.backpass/synthesis/`. This picks that up in a new
+ * session (the old one is gone, and its accumulated context is exactly what a resume is
+ * escaping), re-measures the tree as it stands, and runs the same annotate loop. The
+ * workspace is never rebuilt here, so nothing the previous run produced is destroyed.
+ */
+export async function resumeAnnotation({ memoryFile, summary, config, repo, workspace, harnessCounts = {} }) {
+  config.state.clearProposal();
+  const { rejections, overflow, skillFiles, maxEdits, common, context, promptDir } = synthesisSetup({
+    memoryFile,
+    summary,
+    config,
+    repo,
+    harnessCounts,
+  });
+
+  const fingerprint = repoFingerprint(repo, [memoryFile.path, ...skillFiles.map((s) => s.path)]);
+  const sessionName = `backpass-resume-${process.pid}`;
+  const timeoutSeconds = Math.max(config.timeoutSeconds, 900);
+  const usage = [];
+  const notes = ["resumed the staged synthesis in a fresh session; the editing turn was not re-run"];
+  const noteOnce = (note) => {
+    if (notes.includes(note)) return;
+    notes.push(note);
+    warn(note);
+  };
+
+  const pick = await config.agents.resolve("synthesis");
+  info(
+    `${color.cyan("·")} resuming the staged synthesis with ${pick.agent}` +
+      `${pick.model ? ` (${pick.model})` : ""}` +
+      `${pick.effort ? ` effort=${pick.effort}` : ""}`,
+  );
+  let chosen = pick;
+  let serial = 0;
+  const holder = {
+    session: null,
+    ranWith: pick.agent,
+    async prompt(args) {
+      if (this.session) return this.session.prompt(args);
+      return config.agents.withFallthrough("synthesis", async (current) => {
+        chosen = current;
+        this.ranWith = current.agent;
+        if (current !== pick) notes.push(`synthesis fell through to ${current.agent} (${current.model})`);
+        this.session = await openSession({
+          agent: current.agent,
+          model: current.model,
+          effort: current.effort,
+          sessionName,
+          cwd: workspace.root,
+        });
+        try {
+          return await this.session.prompt(args);
+        } catch (err) {
+          await this.session.close();
+          this.session = null;
+          throw err;
+        }
+      });
+    },
+  };
+  const progress = (phase, extra = {}) =>
+    emitProgress("synth:start", {
+      agent: holder.ranWith,
+      model: chosen.model,
+      effort: chosen.effort,
+      phase,
+      maxEdits,
+      sessionName,
+      resumed: true,
+      gapClusters: summary.totals.gapClusters,
+      instructions: summary.instructions.length,
+      suppressed: Object.keys(rejections.entries || {}).length,
+      ...extra,
+    });
+
+  const nextSession = () => {
+    serial += 1;
+    return openSession({
+      agent: chosen.agent,
+      model: chosen.model,
+      effort: chosen.effort,
+      sessionName: `${sessionName}-r${serial}`,
+      cwd: workspace.root,
+    });
+  };
+
+  try {
+    return await annotateLoop({
+      holder,
+      freshSession: nextSession,
+      workspace,
+      fingerprint,
+      repo,
+      context,
+      common,
+      promptDir,
+      timeoutSeconds,
+      promptRetries: config.promptRetries,
+      usage,
+      notes,
+      noteOnce,
+      overflow,
+      progress,
+      startFresh: true,
+      renderPreface: () => prefaceFor({ memoryFile, summary, config, repo, workspaceRoot: workspace.root }),
+    });
+  } finally {
+    await holder.session?.close();
   }
 }

@@ -226,3 +226,17 @@ export function annotatePrompts(dir) {
 export function readJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
 }
+
+/** Every file under a directory as `relative path -> contents`, for preservation checks. */
+export function snapshotTree(root) {
+  const out = {};
+  const walk = (dir, prefix) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) walk(path.join(dir, entry.name), relative);
+      else if (entry.isFile()) out[relative] = fs.readFileSync(path.join(dir, entry.name), "utf8");
+    }
+  };
+  if (fs.existsSync(root)) walk(root, "");
+  return out;
+}

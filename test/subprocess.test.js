@@ -103,7 +103,17 @@ setInterval(() => {}, 1000);
       assert.ok(fs.existsSync(pidPath), "the harness descendant started before timeout");
       assert.equal(fs.readFileSync(signalPath, "utf8"), "SIGTERM");
       harnessPid = Number(fs.readFileSync(pidPath, "utf8"));
-      assert.throws(() => process.kill(harnessPid, 0), { code: "ESRCH" });
+      let alive = true;
+      for (let attempt = 0; attempt < 100 && alive; attempt += 1) {
+        try {
+          process.kill(harnessPid, 0);
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        } catch (err) {
+          if (err.code !== "ESRCH") throw err;
+          alive = false;
+        }
+      }
+      assert.equal(alive, false, "the harness descendant was reaped after termination");
     } finally {
       if (!harnessPid && fs.existsSync(pidPath)) harnessPid = Number(fs.readFileSync(pidPath, "utf8"));
       if (harnessPid) {

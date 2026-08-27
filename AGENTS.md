@@ -83,7 +83,10 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   writes `proposal.json`, stamped with `attempt`. `ProposalViolation` carries `reason` and
   the `saved` proposal's own attempt/violations so a later empty turn is never reported as
   that proposal's author. A new synthesis clears the prior proposal before its first model
-  call, so an empty-only failure cannot leave an older proposal applicable.
+  call, so an empty-only failure cannot leave an older proposal applicable. `propose
+--resume` restores the staged tree against the versioned `synthesis.json` baseline and
+  its evidence snapshot, refuses repository drift or created-skill collisions, and starts
+  annotation in a fresh fallthrough-capable session without discovery, folding, or editing.
   `synthesisFailureHint` in `src/commands/propose.js` is
   where the advice for each terminal condition lives - never a blanket
   stronger-model/budget/max-edits line.
