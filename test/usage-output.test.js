@@ -33,6 +33,10 @@ fs.writeFileSync(
 const fs = require("node:fs");
 const path = require("node:path");
 const argv = process.argv.slice(2);
+if (argv.includes("config") && argv.includes("show")) {
+  process.stdout.write('{"agents":{}}\\n');
+  process.exit(0);
+}
 const agent = argv.find((a) => a === "codex" || a === "pi");
 // Session management calls (new / set / close) succeed silently, as acpx's do.
 if (argv.includes("sessions") || argv.includes("set")) process.exit(0);

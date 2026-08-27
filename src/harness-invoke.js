@@ -82,7 +82,7 @@ export function prepareHarnessInvocation({ agent, model = null, effort = null })
         acpxModel: requestedModel,
         setEffortKey: requestedEffort ? SESSION_LOCAL_EFFORT_KEYS[agent] : null,
         acpxAgentCommand: null,
-        requiredBuiltinAgent: null,
+        requiredBuiltinAgent: agent,
         notes,
         dispose,
       };
@@ -96,7 +96,7 @@ export function prepareHarnessInvocation({ agent, model = null, effort = null })
         acpxModel: requestedModel,
         setEffortKey: null,
         acpxAgentCommand: null,
-        requiredBuiltinAgent: null,
+        requiredBuiltinAgent: agent,
         notes,
         dispose,
       };
@@ -119,10 +119,16 @@ function describeOverride(model, effort) {
 }
 
 function piInvocation({ requestedModel, requestedEffort, notes, cleanups, dispose }) {
+  if (process.env.PI_ACP_PI_COMMAND) {
+    throw new UserError(
+      "cannot safely apply Pi model or effort overrides when PI_ACP_PI_COMMAND replaces the proven Pi command",
+      "unset PI_ACP_PI_COMMAND or omit the model and effort override",
+    );
+  }
   const extra = [];
   if (requestedModel) extra.push("--model", requestedModel);
   if (requestedEffort) extra.push("--thinking", requestedEffort);
-  const real = process.env.PI_ACP_PI_COMMAND || "pi";
+  const real = "pi";
   const { wrapperPath, dir } = writeArgvWrapper({ realCommand: real, extraArgs: extra, binName: "pi" });
   cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
   return {

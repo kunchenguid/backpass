@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 
 /**
@@ -49,7 +50,16 @@ fs.writeFileSync(
   fakePi,
   `#!${process.execPath}
 const fs = require("node:fs");
-fs.appendFileSync(process.env.FAKE_PI_LOG, JSON.stringify(process.argv.slice(2)) + "\\n");
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.FAKE_PI_LOG, JSON.stringify(args) + "\\n");
+if (!args.includes("--model")) {
+  const settings = JSON.parse(fs.readFileSync(process.env.FAKE_HARNESS_SETTINGS, "utf8"));
+  process.stdout.write(JSON.stringify({
+    provider: settings.defaultProvider,
+    model: settings.defaultModel,
+    thinking: settings.defaultThinkingLevel,
+  }) + "\\n");
+}
 process.exit(0);
 `,
 );
@@ -78,7 +88,8 @@ fs.appendFileSync(process.env.FAKE_ACPX_LOG, JSON.stringify({
 }) + "\\n");
 const settings = process.env.FAKE_HARNESS_SETTINGS;
 if (argv.includes("config") && argv.includes("show")) {
-  const agents = process.env.FAKE_PI_REPLACEMENT === "1" ? { pi: { argv: ["custom-pi-adapter"] } } : {};
+  const replacement = process.env.FAKE_REPLACEMENT_AGENT;
+  const agents = replacement ? { [replacement]: { argv: ["custom-adapter"] } } : {};
   process.stdout.write(JSON.stringify({ agents }) + "\\n");
   process.exit(0);
 }
@@ -222,7 +233,7 @@ test("a Pi session with model and effort uses process --model/--thinking and lea
 test("a configured replacement Pi adapter is rejected before model or effort can be claimed", async () => {
   resetLogsAndSettings();
   const before = Buffer.from(settingsBytes());
-  process.env.FAKE_PI_REPLACEMENT = "1";
+  process.env.FAKE_REPLACEMENT_AGENT = "pi";
   try {
     await assert.rejects(
       () =>
@@ -239,7 +250,7 @@ test("a configured replacement Pi adapter is rejected before model or effort can
       },
     );
   } finally {
-    delete process.env.FAKE_PI_REPLACEMENT;
+    delete process.env.FAKE_REPLACEMENT_AGENT;
   }
   assert.equal(settingsBytes().compare(before), 0);
   assert.ok(acpxCalls().some((c) => c.argv.includes("config") && c.argv.includes("show")));
@@ -247,8 +258,33 @@ test("a configured replacement Pi adapter is rejected before model or effort can
   assert.deepEqual(jsonl(piLog), []);
 });
 
+test("a custom PI_ACP_PI_COMMAND is rejected before launch", async () => {
+  resetLogsAndSettings();
+  const before = Buffer.from(settingsBytes());
+  process.env.PI_ACP_PI_COMMAND = fakePi;
+  try {
+    await assert.rejects(
+      () =>
+        openSession({
+          agent: "pi",
+          model: "provider/model",
+          effort: "high",
+          sessionName: "bp-pi-custom-command",
+          cwd: workDir,
+        }),
+      { name: "UserError", message: /PI_ACP_PI_COMMAND replaces the proven Pi command/ },
+    );
+  } finally {
+    delete process.env.PI_ACP_PI_COMMAND;
+  }
+  assert.equal(settingsBytes().compare(before), 0);
+  assert.deepEqual(acpxCalls(), []);
+  assert.deepEqual(jsonl(piLog), []);
+});
+
 test("the process wrapper escalates when its harness child ignores termination", async () => {
-  const signalChild = path.join(binDir, "signal-child");
+  const signalBin = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-signal-bin-"));
+  const signalChild = path.join(signalBin, "pi");
   const readyPath = path.join(binDir, "signal-child.ready");
   const signalPath = path.join(binDir, "signal-child.signal");
   fs.writeFileSync(
@@ -264,16 +300,15 @@ setInterval(() => {}, 1000);
   );
   fs.chmodSync(signalChild, 0o755);
 
-  const previous = process.env.PI_ACP_PI_COMMAND;
-  process.env.PI_ACP_PI_COMMAND = signalChild;
   const invocation = prepareHarnessInvocation({ agent: "pi", model: "provider/model" });
-  if (previous === undefined) delete process.env.PI_ACP_PI_COMMAND;
-  else process.env.PI_ACP_PI_COMMAND = previous;
 
   let wrapper;
   let childPid;
   try {
-    wrapper = spawn(invocation.env.PI_ACP_PI_COMMAND, [], { stdio: "ignore" });
+    wrapper = spawn(invocation.env.PI_ACP_PI_COMMAND, [], {
+      stdio: "ignore",
+      env: { ...process.env, PATH: `${path.dirname(signalChild)}${path.delimiter}${process.env.PATH || ""}` },
+    });
     for (let attempt = 0; attempt < 100 && !fs.existsSync(readyPath); attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
@@ -411,6 +446,31 @@ test("OpenCode session passes --model at create, skips effort, and does not pers
   assert.deepEqual(setCalls(calls).map(setKey), []);
 });
 
+test("configured replacement adapters are rejected for positional built-ins", async () => {
+  for (const agent of ["claude", "codex", "opencode"]) {
+    resetLogsAndSettings();
+    const before = Buffer.from(settingsBytes());
+    process.env.FAKE_REPLACEMENT_AGENT = agent;
+    try {
+      await assert.rejects(
+        () =>
+          openSession({
+            agent,
+            model: "safe-model",
+            effort: "high",
+            sessionName: `bp-${agent}-replacement`,
+            cwd: workDir,
+          }),
+        { name: "UserError", message: new RegExp(`agents\\.${agent} replaces the proven built-in adapter`) },
+      );
+    } finally {
+      delete process.env.FAKE_REPLACEMENT_AGENT;
+    }
+    assert.equal(settingsBytes().compare(before), 0);
+    assert.ok(!acpxCalls().some((c) => c.argv.includes("new") || c.argv.includes("exec")));
+  }
+});
+
 test("Grok session forces an acpx raw-command override with process model and effort", async () => {
   resetLogsAndSettings();
   const before = Buffer.from(settingsBytes());
@@ -504,6 +564,70 @@ test("Claude and Codex stop when effort cannot be applied without a session", as
     }
     assert.ok(!acpxCalls().some((c) => c.argv.includes("exec")));
   }
+});
+
+test("the Backpass CLI applies Pi overlays without changing persistent defaults", () => {
+  resetLogsAndSettings();
+  const before = Buffer.from(settingsBytes());
+  const repo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-cli-repo-")));
+  const initialized = spawnSync("git", ["init", "--quiet"], { cwd: repo });
+  assert.equal(initialized.status, 0);
+  fs.writeFileSync(path.join(repo, "AGENTS.md"), "# Agent instructions\n\n- Keep changes focused.\n");
+
+  const sessionDir = path.join(fakeHome, ".pi", "agent", "sessions", "cli-e2e");
+  fs.mkdirSync(sessionDir, { recursive: true });
+  const sessionPath = path.join(sessionDir, `${Date.now()}_cli-e2e.jsonl`);
+  const timestamp = new Date().toISOString();
+  const entries = [
+    { type: "session", version: 3, id: "cli-e2e", timestamp, cwd: repo },
+    { type: "message", message: { role: "user", content: "Please inspect the implementation." } },
+    { type: "message", message: { role: "assistant", content: "I inspected the implementation." } },
+    { type: "message", message: { role: "user", content: "Now explain the behavior." } },
+    { type: "message", message: { role: "assistant", content: "The behavior is isolated per invocation." } },
+  ];
+  fs.writeFileSync(sessionPath, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+
+  const cli = fileURLToPath(new URL("../bin/backpass.js", import.meta.url));
+  const result = spawnSync(
+    process.execPath,
+    [
+      cli,
+      "analyze",
+      "--harness",
+      "pi",
+      "--since",
+      "all",
+      "--analysis-agent",
+      "pi",
+      "--analysis-model",
+      "openai-codex/gpt-5.6-sol",
+      "--analysis-effort",
+      "high",
+      "--jobs",
+      "1",
+      "--json",
+    ],
+    { cwd: repo, env: process.env, encoding: "utf8", timeout: 15_000 },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(settingsBytes().compare(before), 0);
+  const spawned = jsonl(piLog);
+  assert.ok(spawned.length >= 1);
+  assert.deepEqual(spawned[0].slice(0, 4), [
+    "--model",
+    "openai-codex/gpt-5.6-sol",
+    "--thinking",
+    "high",
+  ]);
+  assert.deepEqual(spawned[0].slice(4), ["--mode", "rpc", "--no-themes"]);
+
+  const bare = spawnSync(fakePi, ["--mode", "rpc", "--no-themes"], {
+    env: process.env,
+    encoding: "utf8",
+  });
+  assert.equal(bare.status, 0);
+  assert.deepEqual(JSON.parse(bare.stdout), { provider: "xai", model: "grok-4.6", thinking: "high" });
+  assert.equal(settingsBytes().compare(before), 0);
 });
 
 test("an unsupported harness with a requested model stops instead of persisting", async () => {
