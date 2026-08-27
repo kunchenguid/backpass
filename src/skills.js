@@ -193,18 +193,24 @@ function ownedPath(absolute) {
   return { absolute, identity: pathIdentity(fs.lstatSync(absolute)) };
 }
 
-function missingDirectories(root, directory) {
-  const missing = [];
-  for (let current = directory; current !== root && !fs.existsSync(current); current = path.dirname(current)) {
-    missing.push(current);
-  }
-  return missing.reverse();
-}
-
 function createDirectories(root, directory) {
-  const missing = missingDirectories(root, directory);
-  fs.mkdirSync(directory, { recursive: true });
-  return missing.map(ownedPath);
+  const relative = path.relative(root, directory);
+  if (path.isAbsolute(relative) || relative === ".." || relative.startsWith(`..${path.sep}`)) {
+    throw new Error(`skill directory escapes the repository: ${directory}`);
+  }
+
+  const ownership = [];
+  let current = root;
+  for (const component of relative.split(path.sep).filter(Boolean)) {
+    current = path.join(current, component);
+    try {
+      fs.mkdirSync(current);
+      ownership.push(ownedPath(current));
+    } catch (err) {
+      if (err.code !== "EEXIST" || !fs.statSync(current).isDirectory()) throw err;
+    }
+  }
+  return ownership;
 }
 
 export function removeOwnedSkillPaths(paths) {
@@ -238,8 +244,9 @@ export function ensureSkillsLayout(repoRoot) {
   try {
     const canonical = path.join(repoRoot, CANONICAL_SKILLS_DIR);
     if (!fs.existsSync(canonical)) {
-      ownership.push(...createDirectories(repoRoot, canonical));
-      created.push(CANONICAL_SKILLS_DIR);
+      const canonicalOwnership = createDirectories(repoRoot, canonical);
+      ownership.push(...canonicalOwnership);
+      if (canonicalOwnership.some((item) => item.absolute === canonical)) created.push(CANONICAL_SKILLS_DIR);
     }
 
     const claude = inspectClaudeSkillsLink(repoRoot);
