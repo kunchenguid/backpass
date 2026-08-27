@@ -195,11 +195,11 @@ function writeArgvWrapper({ realCommand, extraArgs, binName }) {
     `#!/usr/bin/env node
 const { spawn } = require("node:child_process");
 const { real, extra } = ${payload};
-const child = spawn(real, extra.concat(process.argv.slice(2)), { stdio: "inherit" });
 const signals = ["SIGTERM", "SIGINT", "SIGHUP"];
+let child = null;
 let escalationTimer = null;
 const forwardSignal = (signal) => {
-  if (child.exitCode !== null || child.signalCode !== null) return;
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
   try { child.kill(signal); } catch {}
   if (!escalationTimer) {
     escalationTimer = setTimeout(() => {
@@ -212,6 +212,7 @@ const forwardSignal = (signal) => {
 };
 const signalHandlers = new Map(signals.map((signal) => [signal, () => forwardSignal(signal)]));
 for (const [signal, handler] of signalHandlers) process.on(signal, handler);
+child = spawn(real, extra.concat(process.argv.slice(2)), { stdio: "inherit" });
 child.on("error", (err) => {
   console.error(err.message);
   process.exit(1);
