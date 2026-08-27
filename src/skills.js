@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 
 import { estimateTokens } from "./tokens.js";
 
@@ -217,10 +218,48 @@ export function removeOwnedSkillPaths(paths) {
         continue;
       }
     }
+
+    // Move the pathname out of the way atomically, then validate the object that was
+    // actually moved. A second pathname check followed by unlink would let a concurrent
+    // replacement slip between those operations and be deleted as if it were ours.
+    const quarantine = path.join(
+      path.dirname(item.absolute),
+      `.${path.basename(item.absolute)}.backpass-rollback-${randomUUID()}`,
+    );
+    let quarantined = false;
     try {
-      fs.unlinkSync(item.absolute);
-      removed.push(item);
+      fs.renameSync(item.absolute, quarantine);
+      quarantined = true;
+      const moved = pathIdentity(fs.lstatSync(quarantine));
+      const identityMatches = moved.dev === item.identity.dev && moved.ino === item.identity.ino;
+      const textMatches = item.text === undefined || fs.readFileSync(quarantine, "utf8") === item.text;
+      if (identityMatches && textMatches) {
+        fs.unlinkSync(quarantine);
+        removed.push(item);
+        continue;
+      }
+
+      // The pathname was replaced after validation. Put that exact object back without
+      // overwriting anything that may have appeared at the original path meanwhile.
+      fs.linkSync(quarantine, item.absolute);
+      fs.unlinkSync(quarantine);
+      conflicts.push(item);
     } catch {
+      if (quarantined) {
+        try {
+          fs.linkSync(quarantine, item.absolute);
+        } catch {
+          // An object at the original path wins; retain the quarantined object rather
+          // than overwrite or delete either concurrent version.
+        }
+        try {
+          const moved = pathIdentity(fs.lstatSync(quarantine));
+          const restored = pathIdentity(fs.lstatSync(item.absolute));
+          if (moved.dev === restored.dev && moved.ino === restored.ino) fs.unlinkSync(quarantine);
+        } catch {
+          // Leave any object whose ownership cannot be established untouched.
+        }
+      }
       conflicts.push(item);
     }
   }

@@ -165,12 +165,12 @@ function applyInvocation(dir, editIds) {
     options: {
       cwd: dir,
       encoding: /** @type {BufferEncoding} */ ("utf8"),
-      env: {
+      env: /** @type {NodeJS.ProcessEnv} */ ({
         ...process.env,
         NO_COLOR: "1",
         BACKPASS_LAVISH_BIN: FAKE_LAVISH,
         FAKE_LAVISH_SCENARIO: scenario,
-      },
+      }),
     },
   };
 }
@@ -478,6 +478,44 @@ test("rollback leaves concurrently changed files and skills untouched", { timeou
   assert.equal(fs.readFileSync(concurrentSkill, "utf8"), "concurrent skill write\n");
   assert.equal(fs.existsSync(path.join(dir, ".agents/skills/release-details/SKILL.md")), false);
   assert.equal(fs.readFileSync(slow, "utf8"), slowBefore);
+});
+
+test("skill rollback preserves a replacement made immediately before removal", () => {
+  const dir = initRepo();
+  const proposal = proposeExtractions(dir);
+  const memory = path.join(dir, "AGENTS.md");
+  const before = fs.readFileSync(memory, "utf8");
+  const concurrentSkill = path.join(dir, ".agents/skills/ci-details/SKILL.md");
+  const replacement = "concurrent replacement\n";
+  fs.mkdirSync(path.join(dir, ".agents/skills"), { recursive: true });
+  fs.mkdirSync(path.join(dir, ".claude"));
+  fs.symlinkSync("../.agents/skills", path.join(dir, ".claude/skills"), "dir");
+  fs.chmodSync(dir, 0o555);
+
+  const invocation = applyInvocation(
+    dir,
+    proposal.edits.map((edit) => edit.id),
+  );
+  invocation.args.unshift("--import", path.join(ROOT, "test/fixtures/replace-before-skill-rollback.js"));
+  invocation.options.env = {
+    ...invocation.options.env,
+    BACKPASS_TEST_REPLACE_ON_ROLLBACK: concurrentSkill,
+    BACKPASS_TEST_REPLACEMENT_TEXT: replacement,
+  };
+
+  let applied;
+  try {
+    const result = spawnSync(process.execPath, invocation.args, invocation.options);
+    applied = { ...result, output: `${result.stdout}${result.stderr}` };
+  } finally {
+    fs.chmodSync(dir, 0o755);
+  }
+
+  assert.equal(applied.status, 1, `apply should report the write failure:\n${applied.output}`);
+  assert.match(applied.output, /ci-details\/SKILL\.md rollback conflict/);
+  assert.equal(fs.readFileSync(concurrentSkill, "utf8"), replacement);
+  assert.equal(fs.existsSync(path.join(dir, ".agents/skills/release-details/SKILL.md")), false);
+  assert.equal(fs.readFileSync(memory, "utf8"), before);
 });
 
 test("a memory write failure rolls back skills without truncating memory", () => {
