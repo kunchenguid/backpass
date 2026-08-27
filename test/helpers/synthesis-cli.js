@@ -68,6 +68,11 @@ function log() {
   fs.appendFileSync(process.env.FAKE_ACPX_LOG, JSON.stringify(entry) + "\\n");
 }
 
+if (argv.includes("config") && argv.includes("show")) {
+  process.stdout.write(JSON.stringify({ agents: {} }) + "\\n");
+  log();
+  process.exit(0);
+}
 if (argv.includes("sessions") || argv.includes("set")) {
   if (argv.includes("new")) process.stdout.write("fake-session-id\\n");
   log();

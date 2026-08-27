@@ -200,7 +200,7 @@ test("an empty turn is retried once in a fresh session, with the evidence it wou
   // The fresh session never saw the editing turn, so the annotate prompt has to carry the
   // repository, the file, and the evidence every edit must quote.
   const [, retry] = annotatePrompts(dir);
-  assert.ok(retry.includes("You are joining a synthesis run that is already half done"));
+  assert.ok(retry.includes("You are joining a synthesis run already in progress"));
   assert.ok(retry.includes("The edits below are already made."));
   assert.ok(retry.includes("session 1 re-derived the release steps by hand"), "the evidence travels with it");
   assert.ok(retry.includes("## Measured changes"));
