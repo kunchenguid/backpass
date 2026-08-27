@@ -121,9 +121,8 @@ function assertRepoUntouched(repo, before, workspaceRoot) {
 }
 
 /**
- * Everything both entry points need: the prompt values, the `buildProposal` context, and
- * the overflow target. `synthesizeProposal` runs an edit turn first; `resumeAnnotation`
- * starts straight at the annotation of a staging copy that is already on disk.
+ * Everything the edit and annotation turns need: prompt values, the `buildProposal`
+ * context, and the overflow target.
  */
 function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts }) {
   const state = config.state;
@@ -159,9 +158,9 @@ function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts }) {
 
 /**
  * The header a fresh annotation session needs. An in-session annotate turn inherits the
- * repository, the budget, and the evidence from the editing turn that preceded it; a
- * session that never saw that turn - the retry after an empty reply, or `propose
- * --resume` - would otherwise be asked to quote evidence it has never been shown.
+ * repository, the budget, and the evidence from the editing turn that preceded it; the
+ * fresh session used after an empty reply would otherwise be asked to quote evidence it
+ * has never been shown.
  */
 function prefaceFor({ memoryFile, summary, config, repo, workspaceRoot }) {
   return render(loadPrompt("annotate-preface"), {
@@ -438,7 +437,7 @@ export async function synthesizeProposal({ memoryFile, summary, config, repo, tr
     holder.ranWith = current.agent;
     chosen = current;
     if (current !== pick) notes.push(`synthesis fell through to ${current.agent} (${current.model})`);
-    workspace = prepareWorkspace({ state, repo, memoryFile, skillsDir: overflow.dir, harnessCounts, summary });
+    workspace = prepareWorkspace({ state, repo, memoryFile, skillsDir: overflow.dir });
     progress("edit", { attempt: 1 });
     holder.session = await openSession({
       agent: current.agent,
@@ -494,120 +493,5 @@ export async function synthesizeProposal({ memoryFile, summary, config, repo, tr
     });
   } finally {
     await holder.session.close();
-  }
-}
-
-/**
- * `backpass propose --resume`: annotate a staging copy that is already on disk.
- *
- * The expensive half of a synthesis run is the editing turn, and its result survives a
- * failed annotation - it is sitting in `.backpass/synthesis/`. This picks that up in a new
- * session (the old one is gone, and its accumulated context is exactly what a resume is
- * escaping), re-measures the tree as it stands, and runs the same annotate loop. The
- * workspace is never rebuilt here, so nothing the previous run produced is destroyed.
- */
-export async function resumeAnnotation({ memoryFile, summary, config, repo, workspace, harnessCounts = {} }) {
-  config.state.clearProposal();
-  const { rejections, overflow, skillFiles, maxEdits, common, context, promptDir } = synthesisSetup({
-    memoryFile,
-    summary,
-    config,
-    repo,
-    harnessCounts,
-  });
-
-  const fingerprint = repoFingerprint(repo, [memoryFile.path, ...skillFiles.map((s) => s.path)]);
-  const sessionName = `backpass-resume-${process.pid}`;
-  const timeoutSeconds = Math.max(config.timeoutSeconds, 900);
-  const usage = [];
-  const notes = ["resumed the staged synthesis in a fresh session; the editing turn was not re-run"];
-  const noteOnce = (note) => {
-    if (notes.includes(note)) return;
-    notes.push(note);
-    warn(note);
-  };
-
-  const pick = await config.agents.resolve("synthesis");
-  info(
-    `${color.cyan("·")} resuming the staged synthesis with ${pick.agent}` +
-      `${pick.model ? ` (${pick.model})` : ""}` +
-      `${pick.effort ? ` effort=${pick.effort}` : ""}`,
-  );
-  let chosen = pick;
-  let serial = 0;
-  const holder = {
-    session: null,
-    ranWith: pick.agent,
-    async prompt(args) {
-      if (this.session) return this.session.prompt(args);
-      return config.agents.withFallthrough("synthesis", async (current) => {
-        chosen = current;
-        this.ranWith = current.agent;
-        if (current !== pick) notes.push(`synthesis fell through to ${current.agent} (${current.model})`);
-        this.session = await openSession({
-          agent: current.agent,
-          model: current.model,
-          effort: current.effort,
-          sessionName,
-          cwd: workspace.root,
-        });
-        try {
-          return await this.session.prompt(args);
-        } catch (err) {
-          await this.session.close();
-          this.session = null;
-          throw err;
-        }
-      });
-    },
-  };
-  const progress = (phase, extra = {}) =>
-    emitProgress("synth:start", {
-      agent: holder.ranWith,
-      model: chosen.model,
-      effort: chosen.effort,
-      phase,
-      maxEdits,
-      sessionName,
-      resumed: true,
-      gapClusters: summary.totals.gapClusters,
-      instructions: summary.instructions.length,
-      suppressed: Object.keys(rejections.entries || {}).length,
-      ...extra,
-    });
-
-  const nextSession = () => {
-    serial += 1;
-    return openSession({
-      agent: chosen.agent,
-      model: chosen.model,
-      effort: chosen.effort,
-      sessionName: `${sessionName}-r${serial}`,
-      cwd: workspace.root,
-    });
-  };
-
-  try {
-    return await annotateLoop({
-      holder,
-      freshSession: nextSession,
-      workspace,
-      fingerprint,
-      repo,
-      context,
-      common,
-      promptDir,
-      timeoutSeconds,
-      promptRetries: config.promptRetries,
-      usage,
-      notes,
-      noteOnce,
-      overflow,
-      progress,
-      startFresh: true,
-      renderPreface: () => prefaceFor({ memoryFile, summary, config, repo, workspaceRoot: workspace.root }),
-    });
-  } finally {
-    await holder.session?.close();
   }
 }

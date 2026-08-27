@@ -51,7 +51,6 @@ const OPTIONS = {
   "synthesis-model": { type: "string" },
   "synthesis-effort": { type: "string" },
 
-  resume: { type: "boolean" },
   "dry-run": { type: "boolean" },
   "no-ui": { type: "boolean" },
   "no-open": { type: "boolean" },
@@ -76,8 +75,7 @@ COMMANDS
   scan       collect samples only: which transcripts belong to this repo, and how we know
   analyze    calculate loss: one cheap model call per new transcript (tier 1)
   propose    aggregate gradients, then gradient descent: one high-reasoning call
-             turning the aggregated evidence into edits (tier 2).
-             --resume re-annotates the synthesis this repo already has staged
+             turning the aggregated evidence into edits (tier 2)
   apply      review the proposal and write the accepted edits (the only writer)
   status     cache state, evidence counts, and the budget bar
   init       write .backpassrc.json and exclude .backpass/ via .git/info/exclude
@@ -107,12 +105,6 @@ MODELS (two-tier: cheap analysis, smart synthesis - all through acpx)
   --synthesis-effort <e>   one-off reasoning effort for synthesis            [high]
   --no-auto-agent          skip the ladders and pin codex / claude (the pre-0.2 defaults)
   --jobs <n>               parallel analysis calls                      [4]
-
-GRADIENT DESCENT
-  --resume                 (propose only) annotate the staged synthesis in
-                           .backpass/synthesis/ in a fresh session, instead of
-                           re-running the editing turn. Refuses, without deleting
-                           anything, if the repository moved on since it was staged.
 
 BUDGET AND SHAPE
   --budget <tokens>        always-loaded budget per memory file         [5000]
@@ -144,7 +136,6 @@ EXAMPLES
   backpass scan --since 7d --strict         what would be collected, deterministic only
   backpass --synthesis-agent claude --synthesis-model claude-opus-5
   backpass apply --no-ui                    review and write from the terminal
-  backpass propose --resume                 re-annotate a synthesis that failed its gates
 `;
 
 /** Map CLI flags onto the config shape so one merge order covers every layer. */
@@ -236,11 +227,6 @@ export async function main(argv) {
   if (!command) {
     fail(`unknown command "${commandName}"`);
     console.error("\nRun `backpass --help` for the command list.");
-    return 2;
-  }
-  if (values.resume && commandName !== "propose") {
-    fail(`--resume is a \`backpass propose\` flag (got \`backpass ${commandName}\`)`);
-    console.error("  run `backpass propose --resume` to annotate the staged synthesis");
     return 2;
   }
 

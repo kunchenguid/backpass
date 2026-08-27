@@ -15,14 +15,10 @@ import { sha256 } from "./state.js";
  * under `.backpass/synthesis/` holding only the memory file and the skills directory.
  * The agent reads the real repository by absolute path for grounding; what it changes in
  * the copy is measured here (`measureWorkspace`) and becomes the proposal the human
- * reviews. The copy is wiped and rebuilt on every synthesis - with one exception:
- * `backpass propose --resume` re-opens the copy an earlier run left behind
- * (`restoreWorkspace`), which is what the `synthesis.json` manifest written here is for.
+ * reviews. The copy is wiped and rebuilt on every synthesis.
  */
 
 export const WORKSPACE_DIRNAME = "synthesis";
-/** The manifest's shape. A tree written by a different shape is refused, never rebuilt over. */
-export const WORKSPACE_MANIFEST_VERSION = 2;
 
 export function workspaceRoot(state) {
   return path.join(state.root, WORKSPACE_DIRNAME);
@@ -31,14 +27,8 @@ export function workspaceRoot(state) {
 /**
  * Build a fresh staging copy. `originals` records every file placed there, so the
  * measurement can tell a modified file from a created or deleted one.
- *
- * The same record is written next to the copy as `synthesis.json`, because `originals`
- * is what the measurement is *against*: without it a later process looking at the tree
- * could not tell an edit from the file it started as. That manifest is what makes
- * `backpass propose --resume` possible, and what lets it refuse a tree whose repo has
- * moved on rather than measure against the wrong baseline.
  */
-export function prepareWorkspace({ state, repo, memoryFile, skillsDir, harnessCounts = {}, summary = null }) {
+export function prepareWorkspace({ state, repo, memoryFile, skillsDir }) {
   const root = workspaceRoot(state);
   fs.rmSync(root, { recursive: true, force: true });
   fs.mkdirSync(root, { recursive: true });
@@ -49,7 +39,6 @@ export function prepareWorkspace({ state, repo, memoryFile, skillsDir, harnessCo
   fs.writeFileSync(memoryTarget, memoryFile.text);
   originals.set(memoryFile.path, memoryFile.text);
 
-  const skills = [];
   const skillsSource = path.join(repo.root, skillsDir);
   if (fs.existsSync(skillsSource) && fs.statSync(skillsSource).isDirectory()) {
     for (const relative of walkFiles(skillsSource)) {
@@ -57,144 +46,12 @@ export function prepareWorkspace({ state, repo, memoryFile, skillsDir, harnessCo
       const to = path.join(root, skillsDir, relative);
       fs.mkdirSync(path.dirname(to), { recursive: true });
       fs.copyFileSync(from, to);
-      const text = fs.readFileSync(from, "utf8");
-      const staged = path.posix.join(skillsDir, relative);
-      originals.set(staged, text);
-      skills.push({ path: staged, hash: sha256(text) });
+      originals.set(path.posix.join(skillsDir, relative), fs.readFileSync(from, "utf8"));
     }
   }
   fs.mkdirSync(path.join(root, skillsDir), { recursive: true });
 
-  state.writeWorkspaceManifest({
-    version: WORKSPACE_MANIFEST_VERSION,
-    stagedAt: new Date().toISOString(),
-    repoRoot: repo.root,
-    repoName: repo.name,
-    memoryPath: memoryFile.path,
-    memoryHash: memoryFile.hash,
-    skillsDir,
-    skills,
-    harnessCounts,
-    summary,
-  });
-
   return { root, memoryPath: memoryFile.path, skillsDir, originals };
-}
-
-/**
- * Re-open the staging copy a previous run left behind, without touching a byte of it.
- *
- * Returns `{ workspace, manifest }`, or `{ refusal }` naming what is incompatible. Every
- * check is a read: a tree that cannot be resumed is left exactly as it is, because it is
- * the only copy of an expensive editing turn and the human may still want it.
- */
-export function restoreWorkspace({ state, repo, memoryFile, skillsDir }) {
-  const root = workspaceRoot(state);
-  const manifest = state.readWorkspaceManifest();
-
-  if (!fs.existsSync(root)) {
-    return { refusal: { message: "there is no staged synthesis to resume", hint: "run `backpass propose` first" } };
-  }
-  if (!manifest) {
-    // A tree staged before the manifest existed. What it was measured against is not
-    // recoverable, and guessing the baseline is how a hunk lands on text it never saw.
-    return {
-      refusal: {
-        message: `the staged synthesis in ${root} has no record of what it was measured against`,
-        hint: "it was staged before backpass kept one; run `backpass propose` and a failure of that run will be resumable - nothing was deleted",
-      },
-    };
-  }
-  if (manifest.version !== WORKSPACE_MANIFEST_VERSION) {
-    return {
-      refusal: {
-        message: `the staged synthesis in ${root} was written by a different version of backpass (manifest v${manifest.version})`,
-        hint: "run `backpass propose` for a fresh synthesis; nothing was deleted",
-      },
-    };
-  }
-  if (manifest.repoRoot !== repo.root) {
-    return {
-      refusal: {
-        message: `the staged synthesis belongs to ${manifest.repoRoot}, not ${repo.root}`,
-        hint: "resume it from that checkout; nothing was deleted",
-      },
-    };
-  }
-  if (manifest.memoryPath !== memoryFile.path || manifest.skillsDir !== skillsDir) {
-    return {
-      refusal: {
-        message:
-          `the staged synthesis targets ${manifest.memoryPath} with skills in ${manifest.skillsDir}, ` +
-          `but this run targets ${memoryFile.path} with skills in ${skillsDir}`,
-        hint: "re-run without the differing flags, or run `backpass propose` for a fresh synthesis",
-      },
-    };
-  }
-  if (manifest.memoryHash !== memoryFile.hash) {
-    return {
-      refusal: {
-        message:
-          `${memoryFile.path} changed after the staged synthesis was measured ` +
-          `(${manifest.memoryHash} -> ${memoryFile.hash}), so its edits no longer describe the file on disk`,
-        hint: "run `backpass propose` to re-synthesize against the current file; the staged copy was left untouched",
-      },
-    };
-  }
-  if (!manifest.summary?.analyzedSessions) {
-    return {
-      refusal: {
-        message: "the staged synthesis has no usable snapshot of the evidence it was built from",
-        hint: "run `backpass propose` for a fresh synthesis; nothing was deleted",
-      },
-    };
-  }
-
-  const originals = new Map([[memoryFile.path, memoryFile.text]]);
-  for (const entry of manifest.skills || []) {
-    const source = path.join(repo.root, entry.path);
-    if (!fs.existsSync(source)) {
-      return {
-        refusal: {
-          message: `${entry.path} was in the repository when the synthesis was staged and is gone now`,
-          hint: "run `backpass propose` to re-synthesize against the current repository; the staged copy was left untouched",
-        },
-      };
-    }
-    const text = fs.readFileSync(source, "utf8");
-    if (sha256(text) !== entry.hash) {
-      return {
-        refusal: {
-          message: `${entry.path} changed after the staged synthesis was measured`,
-          hint: "run `backpass propose` to re-synthesize against the current repository; the staged copy was left untouched",
-        },
-      };
-    }
-    originals.set(entry.path, text);
-  }
-
-  if (!fs.existsSync(path.join(root, memoryFile.path))) {
-    return {
-      refusal: {
-        message: `the staged synthesis in ${root} is incomplete: ${memoryFile.path} is missing from it`,
-        hint: "run `backpass propose` for a fresh synthesis; nothing was deleted",
-      },
-    };
-  }
-
-  for (const relative of walkFiles(path.join(root, skillsDir))) {
-    const staged = path.posix.join(skillsDir, relative);
-    if (!originals.has(staged) && fs.existsSync(path.join(repo.root, staged))) {
-      return {
-        refusal: {
-          message: `${staged} was created in the repository after this synthesis was staged`,
-          hint: "move or remove the conflicting file, or run `backpass propose` for a fresh synthesis; nothing was deleted",
-        },
-      };
-    }
-  }
-
-  return { workspace: { root, memoryPath: memoryFile.path, skillsDir, originals }, manifest };
 }
 
 function walkFiles(dir, prefix = "") {

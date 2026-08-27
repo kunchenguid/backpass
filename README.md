@@ -212,12 +212,8 @@ for different things:
   attempt and can trigger a re-prompt. Only a parseable, gate-rejected answer writes a
   rejected proposal, stamped with the attempt that produced it.
 
-When a run does fail, the advice it prints comes from the condition it ended on, and the
-staging copy is preserved. `backpass propose --resume` re-measures that existing tree and
-annotates it in a fresh session without discovery, analysis, or another editing turn. It
-refuses incompatible state without deleting or partially applying it, including a changed
-memory file, changed baseline skill, conflicting created skill, different checkout or
-target, or missing baseline evidence snapshot.
+When a run does fail, the advice it prints comes from the condition it ended on. Run
+`backpass propose` again to start a fresh synthesis.
 
 Token deltas shown to you are measured by backpass from the actual text - never taken from
 the model's own arithmetic.
@@ -326,7 +322,6 @@ pointer-aware:
 | `backpass scan`             | collect samples only: the transcript table with a confidence column                      |
 | `backpass analyze`          | calculate loss: the tier-1 pass over pending transcripts                                 |
 | `backpass propose`          | aggregate gradients + gradient descent: the tier-2 pass from cached evidence             |
-| `backpass propose --resume` | annotate the preserved staged synthesis in a fresh session, without a new edit turn      |
 | `backpass apply`            | review and write the accepted edits                                                      |
 | `backpass status`           | cache state, failed transcripts, budget bars                                             |
 | `backpass init`             | write `.backpassrc.json`, exclude `.backpass/` locally                                   |
@@ -435,7 +430,6 @@ Everything mutable lives in `.backpass/`, kept out of git via the repo's local e
   evidence-summary.json  aggregated gradients
   proposal.json          the latest parseable gradient-descent step (absent if none was produced)
   synthesis/             the staging copy the gradient-descent agent edited (memory file + skills)
-  synthesis.json         its baseline and evidence snapshot for safe `propose --resume`
   prompts/               the exact prompts of the last run
   agent-probe-cache.json which harnesses were available and logged in, and when
   rejections.json        edits you turned down, and the evidence behind them

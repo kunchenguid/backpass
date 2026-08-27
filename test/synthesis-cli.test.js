@@ -240,7 +240,7 @@ test("a run that ends on an empty turn says so, and never reads an older proposa
   assert.match(run.stderr, /carries no verbatim evidence quote/);
 
   // The advice is about the condition the run actually ended on.
-  assert.match(run.stderr, /backpass propose --resume/);
+  assert.match(run.stderr, /run `backpass propose` again to start a fresh synthesis session/);
   assert.doesNotMatch(run.stderr, /stronger synthesis model/);
   assert.doesNotMatch(run.stderr, /--budget/);
   assert.doesNotMatch(run.stderr, /--max-edits/);
@@ -257,73 +257,6 @@ test("a run that ends on an empty turn says so, and never reads an older proposa
   assert.ok(staged["AGENTS.md"].includes("## Incident response"));
   assert.ok(staged[".agents/skills/release-checklist/SKILL.md"]);
   assert.ok(staged[".agents/skills/incident-response/SKILL.md"]);
-});
-
-test("propose --resume annotates the preserved tree from its own evidence snapshot", () => {
-  const dir = makeCliRepo({ memory: MEMORY });
-  const failed = runCli(dir, ["propose", ...PIN], {
-    script: {
-      edit: EDIT_TURN,
-      annotations: [
-        { reply: { edits: [extract(["H1", "H2", "H3"], "extract two playbooks", { evidence: [] })] } },
-        SPLIT_THE_COPY,
-        { empty: true },
-        { empty: true },
-      ],
-    },
-  });
-  assert.equal(failed.status, 1);
-  const before = stagedTree(dir);
-
-  // A later run may replace the general summary file. Resume must use the evidence saved
-  // with this staging baseline rather than silently annotating old edits with new evidence.
-  fs.writeFileSync(
-    path.join(dir, ".backpass", "evidence-summary.json"),
-    JSON.stringify({ analyzedSessions: 99, instructions: [], totals: { gapClusters: 0 } }),
-  );
-  const resumed = runCli(dir, ["propose", "--resume", ...PIN], {
-    script: { edit: {}, annotations: [{ reply: SPLIT_ANSWER }] },
-  });
-
-  assert.equal(resumed.status, 0, `the resume should succeed:\n${resumed.output}`);
-  assert.equal(resumed.editTurns(), 0, "the staged edits are not regenerated");
-  assert.equal(resumed.annotateTurns(), 1);
-  assert.deepEqual(stagedTree(dir), before, "annotation preserves the staged tree byte for byte");
-  assert.match(resumed.stdout, /2 edit\(s\) from 3 session\(s\)/);
-  const [prompt] = annotatePrompts(dir);
-  assert.ok(prompt.includes("joining a synthesis run already in progress"));
-  assert.ok(prompt.includes("session 1 re-derived the release steps by hand"));
-  assert.ok(proposalOf(dir).notes.some((note) => /resumed the staged synthesis/.test(note)));
-});
-
-test("propose --resume refuses incompatible state without deleting it or opening a session", () => {
-  const empty = makeCliRepo({ memory: MEMORY });
-  const wrongCommand = runCli(empty, ["--resume", ...PIN], { script: { edit: {}, annotations: [] } });
-  assert.equal(wrongCommand.status, 2);
-  assert.match(wrongCommand.stderr, /--resume is a `backpass propose` flag/);
-  assert.equal(wrongCommand.calls().length, 0);
-
-  const missing = runCli(empty, ["propose", "--resume", ...PIN], { script: { edit: {}, annotations: [] } });
-  assert.equal(missing.status, 1);
-  assert.match(missing.stderr, /cannot resume: there is no staged synthesis to resume/);
-  assert.equal(missing.calls().length, 0);
-
-  const dir = makeCliRepo({ memory: MEMORY });
-  const failed = runCli(dir, ["propose", ...PIN], {
-    script: { edit: EDIT_TURN, annotations: [{ reply: "not json" }] },
-  });
-  assert.equal(failed.status, 1);
-  const staged = stagedTree(dir);
-  fs.appendFileSync(path.join(dir, "AGENTS.md"), "\n- A concurrent rule.\n");
-
-  const refused = runCli(dir, ["propose", "--resume", ...PIN], {
-    script: { edit: {}, annotations: [{ reply: COALESCED_ANSWER }] },
-  });
-  assert.equal(refused.status, 1);
-  assert.match(refused.stderr, /cannot resume: AGENTS\.md changed after the staged synthesis was measured/);
-  assert.match(refused.stderr, /staged copy was left untouched/);
-  assert.equal(refused.calls().length, 0);
-  assert.deepEqual(stagedTree(dir), staged);
 });
 
 test("a failed synthesis invalidates an older applicable proposal", () => {
