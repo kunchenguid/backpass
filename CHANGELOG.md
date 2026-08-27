@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.7](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.6...backpass-v0.1.7) (2026-08-27)
+
+
+### Bug Fixes
+
+* **apply:** prevent partial writes from stale proposals ([#47](https://github.com/kunchenguid/backpass/issues/47)) ([2f0df29](https://github.com/kunchenguid/backpass/commit/2f0df29e3394a8321502e79774b04024fe84419b))
+
 ## [0.1.6](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.5...backpass-v0.1.6) (2026-08-26)
 
 
