@@ -257,8 +257,9 @@ before writing anything apply checks the file is still that version. If it chang
 you pulled, or edited it by hand, or another agent did - the edits no longer describe what
 is on disk, so nothing is written at all and you are told to run `backpass` again to
 re-propose against the current file. Within a run the same rule holds per file: it takes
-every accepted edit or none of them, and a skill is only created once the edit that points
-at it has landed.
+every accepted edit or none of them. Skills are written only after every edit has composed,
+and before the memory file, so a later write failure cannot leave the memory file pointing
+at a missing skill.
 
 ```sh
 backpass apply --no-ui     # same decision, in the terminal

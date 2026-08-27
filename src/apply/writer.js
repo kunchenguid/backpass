@@ -92,9 +92,8 @@ function overBudgetWarning(relative, budget) {
  * against that file's single pre-write image. Any of them failing writes nothing and
  * records no rejection.
  *
- * A file is therefore applied all at once or not at all, and a skill is written only
- * when the memory-file edit that points at it lands - otherwise the repo would hold the
- * same instructions twice, once inline and once in a skill nothing references.
+ * A file is therefore applied all at once or not at all. Skills are written only after
+ * every accepted edit has composed, and before the files that reference them.
  */
 export function applyDecisions({ proposal, decisions, repo, state, config, dryRun = false }) {
   const accepted = proposal.edits.filter((e) => decisions[e.id] === "accepted");
@@ -111,7 +110,7 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     rejectionsRecorded: false,
   };
 
-  if (accepted.length) {
+  if (accepted.length || rejected.length) {
     const drift = memoryFileDrift(proposal, repo);
     if (drift) {
       results.failed.push(drift);
@@ -177,16 +176,20 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     for (const id of applied) landed.add(id);
   }
 
+  if (results.failed.length) return results;
+
   // Skills go in before the memory file. A skill nothing points at yet is inert, while a
   // memory file pointing at a skill that is not there is actively wrong - so if a skill
   // cannot be written, the files that would reference it are left alone.
   const skillFailures = [];
+  const writtenSkillPaths = [];
   for (const edit of accepted) {
     if (edit.kind !== "extract" || !edit.skill) continue;
     if (!landed.has(edit.id)) continue;
     try {
       const layout = dryRun ? { created: [], warnings: [] } : writeSkill(repo.root, edit.skill);
       results.skills.push({ path: edit.skill.path, dryRun, created: layout.created });
+      if (!dryRun) writtenSkillPaths.push(edit.skill.path);
       for (const w of layout.warnings) if (!results.warnings.includes(w)) results.warnings.push(w);
     } catch (err) {
       skillFailures.push({ file: edit.skill.path, edit: edit.id, error: err.message });
@@ -195,6 +198,11 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
 
   if (skillFailures.length) {
     results.failed.push(...skillFailures);
+    if (writtenSkillPaths.length) {
+      results.failed.push({
+        error: `skill paths already written in this round: ${writtenSkillPaths.join(", ")}; remove them before retrying`,
+      });
+    }
     for (const { relative } of planned) {
       results.failed.push({
         file: relative,
