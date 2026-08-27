@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 
 import { applyEdit, projectWithDecisions } from "../proposal.js";
 import { memoryTextHash } from "../memory.js";
@@ -103,6 +104,33 @@ function overBudgetWarning(relative, budget) {
     `${relative} is still ${formatTokens(budget.over)} tokens over the ${formatTokens(budget.capTokens)}-token ` +
     "budget; run `backpass` again for the next shrink step"
   );
+}
+
+function atomicReplace(absolute, text) {
+  const temp = path.join(path.dirname(absolute), `.${path.basename(absolute)}.backpass-${randomUUID()}`);
+  const mode = fs.statSync(absolute).mode & 0o7777;
+  let fd;
+  let ownership;
+  try {
+    fd = fs.openSync(temp, "wx");
+    ownership = [{ absolute: temp, identity: { dev: fs.fstatSync(fd).dev, ino: fs.fstatSync(fd).ino } }];
+    fs.fchmodSync(fd, mode);
+    fs.writeFileSync(fd, text);
+    fs.fsyncSync(fd);
+    fs.closeSync(fd);
+    fd = undefined;
+    fs.renameSync(temp, absolute);
+  } catch (err) {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        fd = undefined;
+      }
+    }
+    removeOwnedSkillPaths(ownership ?? []);
+    throw err;
+  }
 }
 
 /**
@@ -283,19 +311,38 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     return results;
   }
 
-  for (const { relative, absolute, before, text, applied } of planned) {
+  const orderedPlanned = [...planned].sort((a, b) => {
+    const aMemory = a.relative === proposal.memoryFile.path;
+    const bMemory = b.relative === proposal.memoryFile.path;
+    return Number(aMemory) - Number(bMemory);
+  });
+  const committed = [];
+  for (const item of orderedPlanned) {
+    const { relative, absolute, before, text, applied } = item;
     const budget = relative === proposal.memoryFile.path ? budgetStatus(before, text, config.budgetTokens) : null;
 
     try {
-      if (!dryRun) fs.writeFileSync(absolute, text);
+      if (!dryRun) atomicReplace(absolute, text);
     } catch (err) {
       results.failed.push({
         file: relative,
         error: `${relative} could not be written: ${err.message}`,
       });
+      for (const written of [...committed].reverse()) {
+        try {
+          atomicReplace(written.absolute, written.before);
+        } catch (rollbackError) {
+          results.failed.push({
+            file: written.relative,
+            error: `${written.relative} could not be rolled back: ${rollbackError.message}`,
+          });
+        }
+      }
+      results.written = [];
       rollbackSkills();
       return results;
     }
+    committed.push(item);
     results.written.push({ file: relative, edits: applied, budget, dryRun });
 
     // Shrinking over several runs is the design, so this is a heading, not a failure.

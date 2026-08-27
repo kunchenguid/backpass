@@ -280,17 +280,78 @@ test("a later skill write failure rolls back skills written earlier in the same 
   assert.equal(fs.existsSync(path.join(dir, ".claude")), false, "the new loading layout was rolled back too");
 });
 
-test("a memory write failure rolls back skills written earlier in the same apply", () => {
+test("a later file failure rolls back earlier files and leaves memory untouched", () => {
   const dir = initRepo();
   const proposal = proposeExtractions(dir);
   const memory = path.join(dir, "AGENTS.md");
   const before = fs.readFileSync(memory, "utf8");
-  fs.chmodSync(memory, 0o444);
-
-  const applied = runApply(
-    dir,
-    proposal.edits.map((e) => e.id),
+  const existing = path.join(dir, "existing.md");
+  const lockedDir = path.join(dir, "locked");
+  const locked = path.join(lockedDir, "existing.md");
+  fs.writeFileSync(existing, "before\n");
+  fs.mkdirSync(lockedDir);
+  fs.writeFileSync(locked, "locked before\n");
+  proposal.edits.push(
+    {
+      id: "e3",
+      kind: "rewrite",
+      file: "existing.md",
+      find: "before\n",
+      replace: "after\n",
+    },
+    {
+      id: "e4",
+      kind: "rewrite",
+      file: "locked/existing.md",
+      find: "locked before\n",
+      replace: "locked after\n",
+    },
   );
+  fs.writeFileSync(path.join(dir, ".backpass/proposal.json"), JSON.stringify(proposal));
+  fs.chmodSync(lockedDir, 0o555);
+
+  let applied;
+  try {
+    applied = runApply(
+      dir,
+      proposal.edits.map((e) => e.id),
+    );
+  } finally {
+    fs.chmodSync(lockedDir, 0o755);
+  }
+
+  assert.equal(applied.status, 1, `apply should report the later write failure:\n${applied.output}`);
+  assert.match(applied.output, /locked\/existing\.md could not be written/);
+  assert.equal(fs.readFileSync(existing, "utf8"), "before\n", "the earlier file write was rolled back");
+  assert.equal(fs.readFileSync(locked, "utf8"), "locked before\n");
+  assert.equal(fs.readFileSync(memory, "utf8"), before, "the memory file stayed byte-identical");
+  assert.equal(fs.existsSync(path.join(dir, ".agents/skills/ci-details/SKILL.md")), false);
+  assert.equal(fs.existsSync(path.join(dir, ".agents/skills/release-details/SKILL.md")), false);
+  assert.equal(
+    fs.readdirSync(dir).some((name) => name.includes(".backpass-")),
+    false,
+  );
+});
+
+test("a memory write failure rolls back skills without truncating memory", () => {
+  const dir = initRepo();
+  const proposal = proposeExtractions(dir);
+  const memory = path.join(dir, "AGENTS.md");
+  const before = fs.readFileSync(memory, "utf8");
+  fs.mkdirSync(path.join(dir, ".agents/skills"), { recursive: true });
+  fs.mkdirSync(path.join(dir, ".claude"));
+  fs.symlinkSync("../.agents/skills", path.join(dir, ".claude/skills"), "dir");
+  fs.chmodSync(dir, 0o555);
+
+  let applied;
+  try {
+    applied = runApply(
+      dir,
+      proposal.edits.map((e) => e.id),
+    );
+  } finally {
+    fs.chmodSync(dir, 0o755);
+  }
 
   assert.equal(applied.status, 1, `apply should report the memory write failure:\n${applied.output}`);
   assert.match(applied.output, /AGENTS\.md could not be written/);
@@ -298,6 +359,10 @@ test("a memory write failure rolls back skills written earlier in the same apply
   assert.equal(fs.readFileSync(memory, "utf8"), before, "the memory file stayed byte-identical");
   assert.equal(fs.existsSync(path.join(dir, ".agents/skills/ci-details/SKILL.md")), false);
   assert.equal(fs.existsSync(path.join(dir, ".agents/skills/release-details/SKILL.md")), false);
+  assert.equal(
+    fs.readdirSync(dir).some((name) => name.includes(".backpass-")),
+    false,
+  );
 });
 
 test("apply names a memory file left over budget without refusing the shrink", () => {
