@@ -68,6 +68,11 @@ function log() {
   fs.appendFileSync(process.env.FAKE_ACPX_LOG, JSON.stringify(entry) + "\\n");
 }
 
+if (argv.includes("status")) {
+  process.stdout.write(JSON.stringify({ availableModels: script.availableModels || [] }) + "\\n");
+  log();
+  process.exit(0);
+}
 if (argv.includes("sessions") || argv.includes("set")) {
   if (argv.includes("new")) process.stdout.write("fake-session-id\\n");
   log();
@@ -90,6 +95,10 @@ if (entry.turn === "edit") {
   process.stdout.write("Edited the staging copy.\\n");
   process.stderr.write("[acpx] tokens: input=1000 output=20 total=1020\\n");
 } else {
+  if (script.failAgent && argv.includes(script.failAgent)) {
+    process.stderr.write("[acpx] error: RUNTIME AUTH_REQUIRED fake authentication failure\\n");
+    process.exit(1);
+  }
   const step = script.annotations[Math.min(state.annotate, script.annotations.length - 1)];
   state.annotate += 1;
   if (step.editFirst) applyEdits(step.editFirst);

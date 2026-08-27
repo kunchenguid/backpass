@@ -223,7 +223,6 @@ async function annotateLoop({
   noteOnce,
   overflow,
   progress,
-  ranWith,
   renderPreface,
   startFresh = false,
 }) {
@@ -258,13 +257,13 @@ async function annotateLoop({
     fs.writeFileSync(promptFile, prompt);
     progress("annotate", { attempt: attempts + 1, turn, changes: measured.changes.length });
 
-    const result = await holder.session.prompt({
+    const result = await holder.prompt({
       promptFile,
       approveAll: true,
       timeoutSeconds,
       promptRetries,
     });
-    usage.push(usageRecord(ranWith, result));
+    usage.push(usageRecord(holder.ranWith, result));
     for (const note of result.notes || []) noteOnce(note);
 
     // The agent may keep editing during an annotate turn; the ids it was answering about
@@ -275,7 +274,7 @@ async function annotateLoop({
       remeasures += 1;
       justRemeasured = true;
       violationsToShow = [];
-      if (remeasures > REMEASURE_TURNS) {
+      if (remeasures >= REMEASURE_TURNS) {
         terminal = { reason: "editing", violations: [KEPT_EDITING_VIOLATION] };
         break;
       }
@@ -422,12 +421,20 @@ export async function synthesizeProposal({ memoryFile, summary, config, repo, tr
   // through to the next ladder candidate; the switch is recorded in the notes so the
   // proposal's provenance is visible. Once the editing turn has run, later turns stay
   // on the same candidate - a run never silently switches models after real work.
-  /** @type {{ session: Awaited<ReturnType<typeof openSession>> | null }} */
-  const holder = { session: null };
+  /** @type {{ session: Awaited<ReturnType<typeof openSession>> | null, ranWith: string, prompt: Function }} */
+  const holder = {
+    session: null,
+    ranWith,
+    prompt(args) {
+      if (!this.session) throw new Error("synthesis session is not open");
+      return this.session.prompt(args);
+    },
+  };
   /** @type {ReturnType<typeof prepareWorkspace>} */
   let workspace = null;
   const editResult = await config.agents.withFallthrough("synthesis", async (current) => {
     ranWith = current.agent;
+    holder.ranWith = current.agent;
     chosen = current;
     if (current !== pick) notes.push(`synthesis fell through to ${current.agent} (${current.model})`);
     workspace = prepareWorkspace({ state, repo, memoryFile, skillsDir: overflow.dir, harnessCounts });
@@ -482,7 +489,6 @@ export async function synthesizeProposal({ memoryFile, summary, config, repo, tr
       noteOnce,
       overflow,
       progress,
-      ranWith,
       renderPreface: () => prefaceFor({ memoryFile, summary, config, repo, workspaceRoot: workspace.root }),
     });
   } finally {
@@ -525,12 +531,39 @@ export async function resumeAnnotation({ memoryFile, summary, config, repo, work
       `${pick.model ? ` (${pick.model})` : ""}` +
       `${pick.effort ? ` effort=${pick.effort}` : ""}`,
   );
-  const ranWith = pick.agent;
+  let chosen = pick;
+  let serial = 0;
+  const holder = {
+    session: null,
+    ranWith: pick.agent,
+    async prompt(args) {
+      if (this.session) return this.session.prompt(args);
+      return config.agents.withFallthrough("synthesis", async (current) => {
+        chosen = current;
+        this.ranWith = current.agent;
+        if (current !== pick) notes.push(`synthesis fell through to ${current.agent} (${current.model})`);
+        this.session = await openSession({
+          agent: current.agent,
+          model: current.model,
+          effort: current.effort,
+          sessionName,
+          cwd: workspace.root,
+        });
+        try {
+          return await this.session.prompt(args);
+        } catch (err) {
+          await this.session.close();
+          this.session = null;
+          throw err;
+        }
+      });
+    },
+  };
   const progress = (phase, extra = {}) =>
     emitProgress("synth:start", {
-      agent: ranWith,
-      model: pick.model,
-      effort: pick.effort,
+      agent: holder.ranWith,
+      model: chosen.model,
+      effort: chosen.effort,
       phase,
       maxEdits,
       sessionName,
@@ -541,20 +574,15 @@ export async function resumeAnnotation({ memoryFile, summary, config, repo, work
       ...extra,
     });
 
-  let serial = 0;
-  const freshSession = () =>
-    openSession({
-      agent: pick.agent,
-      model: pick.model,
-      effort: pick.effort,
-      sessionName: serial === 0 ? sessionName : `${sessionName}-r${serial}`,
-      cwd: workspace.root,
-    });
-
-  const holder = { session: await freshSession() };
   const nextSession = () => {
     serial += 1;
-    return freshSession();
+    return openSession({
+      agent: chosen.agent,
+      model: chosen.model,
+      effort: chosen.effort,
+      sessionName: `${sessionName}-r${serial}`,
+      cwd: workspace.root,
+    });
   };
 
   try {
@@ -574,11 +602,10 @@ export async function resumeAnnotation({ memoryFile, summary, config, repo, work
       noteOnce,
       overflow,
       progress,
-      ranWith,
       startFresh: true,
       renderPreface: () => prefaceFor({ memoryFile, summary, config, repo, workspaceRoot: workspace.root }),
     });
   } finally {
-    await holder.session.close();
+    await holder.session?.close();
   }
 }

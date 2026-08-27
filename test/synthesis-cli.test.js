@@ -161,6 +161,25 @@ test("a remeasurement is not a failed annotation: it costs no attempt, and the n
   assert.ok(prompts[3].includes("is not part of any edit"));
 });
 
+test("the remeasurement limit stops on the declared third file-moving turn", () => {
+  const dir = makeCliRepo({ memory: MEMORY });
+  const run = runCli(dir, ["propose", ...PIN], {
+    script: {
+      edit: EDIT_TURN,
+      annotations: [
+        SPLIT_THE_COPY,
+        { editFirst: { "AGENTS.md": { replace: [[SPLIT, POINTERS]] } }, reply: { edits: [] } },
+        SPLIT_THE_COPY,
+        { reply: SPLIT_ANSWER },
+      ],
+    },
+  });
+
+  assert.equal(run.status, 1, `the run should stop at the limit:\n${run.output}`);
+  assert.equal(run.annotateTurns(), 3);
+  assert.match(run.stderr, /kept editing the staging copy instead of annotating it \(3 re-measurements\)/);
+});
+
 test("an empty turn is retried once in a fresh session, with the evidence it would otherwise have lost", () => {
   const dir = makeCliRepo({ memory: MEMORY });
   const run = runCli(dir, ["propose", ...PIN], {
@@ -280,6 +299,34 @@ test("propose --resume annotates the staged synthesis in a fresh session, withou
   );
   assert.ok(proposal.notes.some((n) => /resumed the staged synthesis/.test(n)));
   assert.match(resumed.stdout, /2 edit\(s\) from 3 session\(s\)/);
+});
+
+test("propose --resume falls through when the first candidate fails its real annotation call", () => {
+  const dir = makeCliRepo({ memory: MEMORY });
+  const failed = runCli(dir, ["propose", ...PIN], {
+    script: { edit: EDIT_TURN, annotations: [{ empty: true }, { empty: true }] },
+  });
+  assert.equal(failed.status, 1);
+  fs.writeFileSync(
+    path.join(dir, ".backpassrc.json"),
+    JSON.stringify({ ladders: { synthesis: [{ model: "fake-model", agents: ["pi", "codex"] }] } }),
+  );
+
+  const resumed = runCli(dir, ["propose", "--resume"], {
+    script: {
+      edit: {},
+      annotations: [{ reply: COALESCED_ANSWER }],
+      availableModels: ["fake-model"],
+      failAgent: "pi",
+    },
+  });
+
+  assert.equal(resumed.status, 0, `the fallback candidate should complete the resume:\n${resumed.output}`);
+  const annotationCalls = resumed.calls().filter((call) => call.turn === "annotate");
+  assert.equal(annotationCalls.length, 2);
+  assert.ok(annotationCalls[0].argv.includes("pi"));
+  assert.ok(annotationCalls[1].argv.includes("codex"));
+  assert.ok(proposalOf(dir).notes.some((note) => /fell through to codex/.test(note)));
 });
 
 test("propose --resume refuses saved state it cannot annotate safely, and destroys none of it", () => {
