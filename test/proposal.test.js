@@ -798,6 +798,92 @@ test("an accepted extract writes the skill the agent drafted, in the canonical l
   assert.ok(fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8").includes("See the release-signing skill."));
 });
 
+test("memory drift during skill I/O removes the skill and preserves the concurrent edit", () => {
+  const skillText = "---\nname: node-setup\ndescription: Load before running any script.\n---\n\nuse nvm\n";
+  const { proposal, repo, state } = gate({
+    edit: (root) => {
+      writeIn(root, "AGENTS.md", (text) =>
+        text.replace("- Use Node 18 via nvm before running any script.", "- Load the node-setup skill."),
+      );
+      writeIn(root, ".agents/skills/node-setup/SKILL.md", skillText);
+    },
+    annotation: { edits: [claim(["H1", "H2"], { kind: "extract", title: "extract node setup" })] },
+  });
+  const memory = path.join(repo.root, "AGENTS.md");
+  const skill = path.join(repo.root, ".agents/skills/node-setup/SKILL.md");
+  const concurrent = MEMORY_TEXT.replace("- Prefer small commits.", "- Prefer tiny commits.");
+  const originalWrite = fs.writeFileSync;
+  fs.writeFileSync = function writeAndDrift(target, ...args) {
+    const result = originalWrite.call(this, target, ...args);
+    if (typeof target === "string" && path.resolve(target) === skill) originalWrite(memory, concurrent);
+    return result;
+  };
+
+  let results;
+  try {
+    results = applyDecisions({
+      proposal,
+      decisions: { e1: "accepted" },
+      repo,
+      state,
+      config: { budgetTokens: 5000 },
+    });
+  } finally {
+    fs.writeFileSync = originalWrite;
+  }
+
+  assert.match(results.failed[0].error, /changed after this proposal was made/);
+  assert.equal(fs.readFileSync(memory, "utf8"), concurrent);
+  assert.equal(fs.existsSync(skill), false);
+  assert.equal(fs.existsSync(path.join(repo.root, ".claude/skills")), false);
+  assert.deepEqual(results.skills, []);
+  assert.deepEqual(results.written, []);
+});
+
+test("a memory write failure compensates skills already written", () => {
+  const skillText = "---\nname: node-setup\ndescription: Load before running any script.\n---\n\nuse nvm\n";
+  const { proposal, repo, state } = gate({
+    edit: (root) => {
+      writeIn(root, "AGENTS.md", (text) =>
+        text.replace("- Use Node 18 via nvm before running any script.", "- Load the node-setup skill."),
+      );
+      writeIn(root, ".agents/skills/node-setup/SKILL.md", skillText);
+    },
+    annotation: { edits: [claim(["H1", "H2"], { kind: "extract", title: "extract node setup" })] },
+  });
+  const memory = path.join(repo.root, "AGENTS.md");
+  const skill = path.join(repo.root, ".agents/skills/node-setup/SKILL.md");
+  const originalWrite = fs.writeFileSync;
+  let refused = false;
+  fs.writeFileSync = function failMemoryOnce(target, ...args) {
+    if (!refused && typeof target === "string" && path.resolve(target) === memory) {
+      refused = true;
+      throw new Error("simulated memory write failure");
+    }
+    return originalWrite.call(this, target, ...args);
+  };
+
+  let results;
+  try {
+    results = applyDecisions({
+      proposal,
+      decisions: { e1: "accepted" },
+      repo,
+      state,
+      config: { budgetTokens: 5000 },
+    });
+  } finally {
+    fs.writeFileSync = originalWrite;
+  }
+
+  assert.match(results.failed[0].error, /simulated memory write failure/);
+  assert.equal(fs.readFileSync(memory, "utf8"), MEMORY_TEXT);
+  assert.equal(fs.existsSync(skill), false);
+  assert.equal(fs.existsSync(path.join(repo.root, ".claude/skills")), false);
+  assert.deepEqual(results.skills, []);
+  assert.deepEqual(results.written, []);
+});
+
 test("a dry run reports what it would write without touching the file", () => {
   const { proposal, repo, state } = gate({
     edit: memoryEdit((t) => t.replace("- Use Node 18 via nvm before running any script.\n", "")),
