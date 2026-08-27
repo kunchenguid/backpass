@@ -1,0 +1,51 @@
+$ backpass propose (gated answer followed by two empty turns)
+exit: 1
+· synthesizing with claude (fake-model) effort=high
+warn synthesis violated 1 gate(s); re-prompting with the exact violations
+warn synthesis ended its turn with no output; retrying the annotation once in a fresh session
+
+  x the synthesis harness ended its turn with no output at all - no JSON, no prose, no tool call
+
+  the rejected proposal was saved to /private/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/backpass-cli-RlxZzU/.backpass/proposal.json
+  it is from annotation attempt 1, not the turn above, and it lists:
+    - edit e1 ("extract two playbooks") carries no verbatim evidence quote
+error synthesis ended its turn with no output, in the run's session and again in a fresh one
+  the synthesis harness returned no text, so nothing about the model, the budget, or the edit cap was the constraint; run `backpass propose` again to start a fresh synthesis session
+
+$ backpass propose (fresh-session recovery)
+exit: 0; sessions opened: 2; edit turns: 1; annotation turns: 2
+proposal · backpass-cli-RlxZzU · AGENTS.md · 1 edit(s) from 3 session(s)
+  budget [................................] 39 -> 36 / 5,000 tok
+  evidence: 0 positive · 3 negative · 0 gap clusters
+
+  e1 EXTRACT  extract two playbooks (-3 tok, 3 transcript(s))
+
+  tier-2 tokens: input=2,000 output=80 total=2,080
+
+Review and apply with `backpass apply` (nothing has been written).
+· synthesizing with claude (fake-model) effort=high
+warn synthesis ended its turn with no output; retrying the annotation once in a fresh session
+
+$ backpass apply --no-open (accept merged extraction)
+exit: 0
+1 accepted · 0 rejected
+  wrote AGENTS.md (e1)
+    budget [................................] 39 -> 36 / 5,000 tok
+  wrote .agents/skills/incident-response/SKILL.md (new skill)
+    created .agents/skills
+    created .claude/skills -> ../.agents/skills
+  wrote .agents/skills/release-checklist/SKILL.md (new skill)
+· review surface: http://127.0.0.1:4387/session/51233fdaf6389690
+waiting for your decisions in the browser (Ctrl-C to abort; nothing is written until you send)
+
+Resulting AGENTS.md:
+# Demo agent memory
+
+## Playbooks
+- Release: .agents/skills/release-checklist/SKILL.md
+- Incidents: .agents/skills/incident-response/SKILL.md
+
+Created skills:
+- .agents/skills/release-checklist/SKILL.md: present
+- .agents/skills/incident-response/SKILL.md: present
+- .claude/skills: symlink
