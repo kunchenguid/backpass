@@ -239,7 +239,7 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
       results.skills.push({ path: skill.path, dryRun, created: layout.created });
       if (!dryRun) {
         writtenSkillPaths.push(skill.path);
-        ownedSkillPaths.push(...layout.ownership);
+        ownedSkillPaths.push(...("ownership" in layout && Array.isArray(layout.ownership) ? layout.ownership : []));
       }
       for (const w of layout.warnings) if (!results.warnings.includes(w)) results.warnings.push(w);
     } catch (err) {

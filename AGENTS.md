@@ -80,9 +80,10 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   moved staging tree is re-measured without spending an `ANNOTATE_TURNS` attempt (bounded
   by `REMEASURE_TURNS`); no adapter text is retried once in a new session; and only a
   non-empty answer spends an annotation attempt. Only a parseable, gate-rejected answer
-  writes `proposal.json`, stamped with `attempt`. `ProposalViolation` carries `reason` and
-  the `saved` proposal's own attempt/violations so a later empty turn is never reported as
-  that proposal's author. A new synthesis clears the prior proposal before its first model
+  writes a rejected `proposal.json` during the loop, stamped with `attempt`.
+  `ProposalViolation` carries `reason` and the `saved` proposal's own attempt/violations
+  so a later empty turn is never reported as that proposal's author. A new synthesis clears
+  the prior proposal before its first model
   call, so an empty-only failure cannot leave an older proposal applicable.
   `synthesisFailureHint` in `src/commands/propose.js` is
   where the advice for each terminal condition lives - never a blanket
