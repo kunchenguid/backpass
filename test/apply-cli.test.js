@@ -233,6 +233,28 @@ test("an unchanged memory file applies every accepted edit and its skills", () =
   assert.equal(porcelain(dir).includes(".backpass"), false, "run state stays out of the working tree");
 });
 
+test("a concurrently created skill refuses the whole apply before any write", () => {
+  const dir = initRepo();
+  const proposal = proposeExtractions(dir);
+  const memory = path.join(dir, "AGENTS.md");
+  const before = fs.readFileSync(memory, "utf8");
+  const concurrent = path.join(dir, ".agents/skills/release-details/SKILL.md");
+  fs.mkdirSync(path.dirname(concurrent), { recursive: true });
+  fs.writeFileSync(concurrent, "concurrent skill\n");
+
+  const applied = runApply(
+    dir,
+    proposal.edits.map((e) => e.id),
+  );
+
+  assert.equal(applied.status, 1, `apply should refuse the collision:\n${applied.output}`);
+  assert.match(applied.output, /release-details\/SKILL\.md already exists; nothing was written/);
+  assert.equal(fs.readFileSync(memory, "utf8"), before);
+  assert.equal(fs.readFileSync(concurrent, "utf8"), "concurrent skill\n");
+  assert.equal(fs.existsSync(path.join(dir, ".agents/skills/ci-details/SKILL.md")), false);
+  assert.equal(fs.existsSync(path.join(dir, ".claude")), false);
+});
+
 test("apply names a memory file left over budget without refusing the shrink", () => {
   const dir = initRepo();
   const proposal = proposeExtractions(dir);

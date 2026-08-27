@@ -347,6 +347,7 @@ async function annotateLoop({
 }
 
 export async function synthesizeProposal({ memoryFile, summary, config, repo, transcripts, runNote = "" }) {
+  config.state.clearProposal();
   const harnessCounts = harnessCountsOf(transcripts);
   const { state, rejections, overflow, skillFiles, maxEdits, common, context, promptDir } = synthesisSetup({
     memoryFile,

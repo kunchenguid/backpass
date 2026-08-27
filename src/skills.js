@@ -213,11 +213,11 @@ export function ensureSkillsLayout(repoRoot) {
 }
 
 /** Write an accepted skill extraction to disk, setting up the load layout on first use. */
-export function writeSkill(repoRoot, skill) {
+export function writeSkill(repoRoot, skill, { exclusive = false } = {}) {
   const inCanonical = skill.path === CANONICAL_SKILLS_DIR || skill.path.startsWith(`${CANONICAL_SKILLS_DIR}/`);
   const layout = inCanonical ? ensureSkillsLayout(repoRoot) : { created: [], warnings: [] };
   const target = path.join(repoRoot, skill.path);
   fs.mkdirSync(path.dirname(target), { recursive: true });
-  fs.writeFileSync(target, renderSkillFile(skill));
+  fs.writeFileSync(target, renderSkillFile(skill), { flag: exclusive ? "wx" : "w" });
   return { target, ...layout };
 }

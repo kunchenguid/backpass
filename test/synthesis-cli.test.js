@@ -252,7 +252,26 @@ test("a run that ends on an empty turn says so, and never reads an older proposa
     !proposal.violations.some((v) => /no output|parseable JSON/.test(v)),
     "the empty turn wrote nothing into the rejected proposal",
   );
+});
 
+test("a failed synthesis invalidates an older applicable proposal", () => {
+  const dir = makeCliRepo({ memory: MEMORY });
+  const succeeded = runCli(dir, ["propose", ...PIN], {
+    script: { edit: EDIT_TURN, annotations: [{ reply: COALESCED_ANSWER }] },
+  });
+  assert.equal(succeeded.status, 0, `the first proposal should succeed:\n${succeeded.output}`);
+  assert.equal(fs.existsSync(path.join(dir, ".backpass", "proposal.json")), true);
+
+  const failed = runCli(dir, ["propose", ...PIN], {
+    script: { edit: EDIT_TURN, annotations: [{ reply: "not json" }] },
+  });
+  assert.equal(failed.status, 1, `the second synthesis should fail:\n${failed.output}`);
+  assert.equal(fs.existsSync(path.join(dir, ".backpass", "proposal.json")), false);
+
+  const applied = runCli(dir, ["apply", "--no-open"]);
+  assert.equal(applied.status, 1);
+  assert.match(applied.stderr, /no proposal to apply/);
+  assert.equal(fs.readFileSync(path.join(dir, "AGENTS.md"), "utf8"), MEMORY);
 });
 
 test("skills whose removals merged into one change ship as one decision, and apply writes them together", () => {

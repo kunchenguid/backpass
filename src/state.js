@@ -113,6 +113,10 @@ export class State {
     this.writeJsonFile(this.proposalPath, proposal);
   }
 
+  clearProposal() {
+    fs.rmSync(this.proposalPath, { force: true });
+  }
+
   readRejections() {
     const value = this.readJsonFile(this.rejectionsPath, null);
     return value && value.version === 1 ? value : { version: 1, entries: {} };

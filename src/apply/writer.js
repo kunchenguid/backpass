@@ -102,12 +102,12 @@ function overBudgetWarning(relative, budget) {
  * The only place in backpass that writes to the repo.
  *
  * Everything upstream is read-only analysis; a run only changes the weights here, after
- * a human accepted specific edits. Three gates run before the first byte is written:
+ * a human accepted specific edits. Four gates run before the first byte is written:
  * the memory file must still be the file the proposal was measured against
  * (`memoryFileSnapshot`), the accepted subset must clear the same cap/shrink budget gate as
- * the full proposal (`budgetGateKind`), and every accepted edit for a file must compose
- * against that file's single pre-write image. Any of them failing writes nothing and
- * records no rejection.
+ * the full proposal (`budgetGateKind`), every accepted edit for a file must compose
+ * against that file's single pre-write image, and every created skill target must still be
+ * absent. Any of them failing writes nothing and records no rejection.
  *
  * A file is therefore applied all at once or not at all. Skills are written only after
  * every accepted edit has composed, and before the files that reference them.
@@ -202,22 +202,35 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
   // Skills go in before the memory file. A skill nothing points at yet is inert, while a
   // memory file pointing at a skill that is not there is actively wrong - so if a skill
   // cannot be written, the files that would reference it are left alone.
+  const plannedSkills = [];
+  const skillPaths = new Set();
+  for (const edit of accepted) {
+    if (edit.kind !== "extract" || !landed.has(edit.id)) continue;
+    for (const skill of editSkills(edit)) {
+      const absolute = path.join(repo.root, skill.path);
+      if (skillPaths.has(skill.path) || fs.existsSync(absolute)) {
+        results.failed.push({
+          file: skill.path,
+          edit: edit.id,
+          error: `${skill.path} already exists; nothing was written`,
+        });
+      }
+      skillPaths.add(skill.path);
+      plannedSkills.push({ edit, skill });
+    }
+  }
+  if (results.failed.length) return results;
+
   const skillFailures = [];
   const writtenSkillPaths = [];
-  for (const edit of accepted) {
-    if (edit.kind !== "extract") continue;
-    if (!landed.has(edit.id)) continue;
-    // One edit may create several skills when their removals were measured as one change;
-    // they land together, before the memory file that will point at all of them.
-    for (const skill of editSkills(edit)) {
-      try {
-        const layout = dryRun ? { created: [], warnings: [] } : writeSkill(repo.root, skill);
-        results.skills.push({ path: skill.path, dryRun, created: layout.created });
-        if (!dryRun) writtenSkillPaths.push(skill.path);
-        for (const w of layout.warnings) if (!results.warnings.includes(w)) results.warnings.push(w);
-      } catch (err) {
-        skillFailures.push({ file: skill.path, edit: edit.id, error: err.message });
-      }
+  for (const { edit, skill } of plannedSkills) {
+    try {
+      const layout = dryRun ? { created: [], warnings: [] } : writeSkill(repo.root, skill, { exclusive: true });
+      results.skills.push({ path: skill.path, dryRun, created: layout.created });
+      if (!dryRun) writtenSkillPaths.push(skill.path);
+      for (const w of layout.warnings) if (!results.warnings.includes(w)) results.warnings.push(w);
+    } catch (err) {
+      skillFailures.push({ file: skill.path, edit: edit.id, error: err.message });
     }
   }
 

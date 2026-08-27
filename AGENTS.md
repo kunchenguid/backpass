@@ -58,13 +58,12 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   every other stage is read-only analysis, which is what makes a run safe to interrupt.
   Bootstrap (`src/commands/bootstrap.js`, a repo with no memory file) is the one run that
   writes without the apply gate, and it only ever creates files, never overwrites.
-  For proposals carrying a memory-file hash, nothing is written until three gates pass:
+  For proposals carrying a memory-file hash, nothing is written until four gates pass:
   the memory file still exists and hashes to `proposal.memoryFile.hash` (`memoryFileSnapshot`,
   using `memoryTextHash` from `src/memory.js` so the check and the proposal cannot disagree), the
-  accepted subset clears
-  `budgetGateKind` (`src/tokens.js`), and every accepted edit for a file composes against
-  that file's one pre-write image. Any of them failing writes nothing and records no
-  rejection. A file is therefore applied whole or not at all, and a skill is written only
+  accepted subset clears `budgetGateKind` (`src/tokens.js`), every accepted edit for a file
+  composes against that file's one pre-write image, and every created skill target is still
+  absent. Any of them failing writes nothing and records no rejection. A file is therefore applied whole or not at all, and a skill is written only
   when the memory-file edit pointing at it has composed and is ready to land - skills go
   in first, so an interrupt or later write failure leaves an unreferenced skill rather
   than a memory file naming one that is missing.
@@ -84,7 +83,9 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   answer was judged by the gates (the only outcome that spends an attempt and writes a
   rejected `proposal.json`, stamped with `attempt`). `ProposalViolation` carries `reason`
   and the `saved` proposal's own attempt/violations so a later empty turn is never reported
-  as that proposal's author, and `synthesisFailureHint` in `src/commands/propose.js` is
+  as that proposal's author. A new synthesis clears the prior proposal before its first
+  model call, so an empty-only failure cannot leave an older proposal applicable.
+  `synthesisFailureHint` in `src/commands/propose.js` is
   where the advice for each terminal condition lives - never a blanket
   stronger-model/budget/max-edits line.
 - **An extract is one measured memory change plus the skill(s) it pays for.** `anchoredHunks`
