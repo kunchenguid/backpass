@@ -766,7 +766,8 @@ test("a failed later skill write names skill paths already written", () => {
   assert.equal(fs.existsSync(path.join(repo.root, ".agents/skills/node-setup/SKILL.md")), true);
   assert.ok(
     results.failed.some(
-      (failure) => /already written/.test(failure.error) && failure.error.includes(".agents/skills/node-setup/SKILL.md"),
+      (failure) =>
+        /already written/.test(failure.error) && failure.error.includes(".agents/skills/node-setup/SKILL.md"),
     ),
   );
 });

@@ -58,9 +58,10 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   every other stage is read-only analysis, which is what makes a run safe to interrupt.
   Bootstrap (`src/commands/bootstrap.js`, a repo with no memory file) is the one run that
   writes without the apply gate, and it only ever creates files, never overwrites.
-  Nothing is written until three gates pass: the memory file still exists and hashes to
-  `proposal.memoryFile.hash` (`memoryFileSnapshot`, using `memoryTextHash` from `src/memory.js`
-  so the check and the proposal cannot disagree), the accepted subset clears
+  For proposals carrying a memory-file hash, nothing is written until three gates pass:
+  the memory file still exists and hashes to `proposal.memoryFile.hash` (`memoryFileSnapshot`,
+  using `memoryTextHash` from `src/memory.js` so the check and the proposal cannot disagree), the
+  accepted subset clears
   `budgetGateKind` (`src/tokens.js`), and every accepted edit for a file composes against
   that file's one pre-write image. Any of them failing writes nothing and records no
   rejection. A file is therefore applied whole or not at all, and a skill is written only

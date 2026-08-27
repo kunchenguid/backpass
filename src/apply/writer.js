@@ -167,9 +167,7 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     }
 
     const before =
-      relative === proposal.memoryFile?.path && memoryText !== null
-        ? memoryText
-        : fs.readFileSync(absolute, "utf8");
+      relative === proposal.memoryFile?.path && memoryText !== null ? memoryText : fs.readFileSync(absolute, "utf8");
     let text = before;
     const applied = [];
     const failures = [];
