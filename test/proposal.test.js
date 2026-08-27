@@ -769,7 +769,7 @@ test("a skill is written only when the memory-file edit that points at it lands"
   assert.equal(fs.existsSync(path.join(repo.root, ".claude/skills")), false, "and no layout side effects");
 });
 
-test("a failed later skill write names skill paths already written", () => {
+test("a failed later skill write rolls back skill paths written earlier", () => {
   const skillText = "---\nname: node-setup\ndescription: Load before running any script.\n---\n\nuse nvm\n";
   const { proposal, repo, state } = gate({
     edit: (root) => {
@@ -804,11 +804,10 @@ test("a failed later skill write names skill paths already written", () => {
 
   assert.deepEqual(results.written, []);
   assert.equal(fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8"), MEMORY_TEXT);
-  assert.equal(fs.existsSync(path.join(repo.root, ".agents/skills/node-setup/SKILL.md")), true);
+  assert.equal(fs.existsSync(path.join(repo.root, ".agents/skills/node-setup/SKILL.md")), false);
   assert.ok(
     results.failed.some(
-      (failure) =>
-        /already written/.test(failure.error) && failure.error.includes(".agents/skills/node-setup/SKILL.md"),
+      (failure) => /rolled back/.test(failure.error) && failure.error.includes(".agents/skills/node-setup/SKILL.md"),
     ),
   );
 });

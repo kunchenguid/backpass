@@ -5,7 +5,7 @@ import { applyEdit, projectWithDecisions } from "../proposal.js";
 import { memoryTextHash } from "../memory.js";
 import { budgetGateKind, budgetStatus, formatTokens } from "../tokens.js";
 import { recordRejection } from "../state.js";
-import { editSkills, writeSkill } from "../skills.js";
+import { CANONICAL_SKILLS_DIR, CLAUDE_SKILLS_LINK, editSkills, writeSkill } from "../skills.js";
 
 function acceptedSubsetBudgetFailure({ proposal, accepted, repo, capTokens, memoryText }) {
   if (!accepted.length) return null;
@@ -96,6 +96,55 @@ function overBudgetWarning(relative, budget) {
     `${relative} is still ${formatTokens(budget.over)} tokens over the ${formatTokens(budget.capTokens)}-token ` +
     "budget; run `backpass` again for the next shrink step"
   );
+}
+
+function pathExists(relative) {
+  try {
+    fs.lstatSync(relative);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Capture only paths this batch can create, so a failed later skill can be rolled back safely. */
+function skillWriteRollback(repoRoot, plannedSkills) {
+  const targets = plannedSkills.map(({ skill }) => path.join(repoRoot, skill.path));
+  const missingDirs = new Set();
+  for (const target of targets) {
+    for (let dir = path.dirname(target); dir !== repoRoot && !pathExists(dir); dir = path.dirname(dir)) {
+      missingDirs.add(dir);
+    }
+  }
+
+  const createsCanonicalLayout = plannedSkills.some(
+    ({ skill }) => skill.path === CANONICAL_SKILLS_DIR || skill.path.startsWith(`${CANONICAL_SKILLS_DIR}/`),
+  );
+  const claudeLink = path.join(repoRoot, CLAUDE_SKILLS_LINK);
+  const claudeLinkWasMissing = createsCanonicalLayout && !pathExists(claudeLink);
+  if (claudeLinkWasMissing) {
+    for (let dir = path.dirname(claudeLink); dir !== repoRoot && !pathExists(dir); dir = path.dirname(dir)) {
+      missingDirs.add(dir);
+    }
+  }
+
+  return (writtenPaths, createdLayout) => {
+    // Only remove targets whose exclusive write completed. A target that appeared in the
+    // preflight-to-write race belongs to somebody else and must never be cleaned up here.
+    for (const relative of [...writtenPaths].reverse()) {
+      fs.rmSync(path.join(repoRoot, relative), { force: true });
+    }
+    if (claudeLinkWasMissing && [...createdLayout].some((item) => item.startsWith(`${CLAUDE_SKILLS_LINK} ->`))) {
+      fs.rmSync(claudeLink, { force: true });
+    }
+    for (const dir of [...missingDirs].sort((a, b) => b.length - a.length)) {
+      try {
+        fs.rmdirSync(dir);
+      } catch {
+        // Keep non-empty directories: something outside this batch now owns their contents.
+      }
+    }
+  };
 }
 
 /**
@@ -221,13 +270,18 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
   }
   if (results.failed.length) return results;
 
+  const rollbackSkillWrites = skillWriteRollback(repo.root, plannedSkills);
   const skillFailures = [];
   const writtenSkillPaths = [];
+  const createdSkillLayout = new Set();
   for (const { edit, skill } of plannedSkills) {
     try {
       const layout = dryRun ? { created: [], warnings: [] } : writeSkill(repo.root, skill, { exclusive: true });
       results.skills.push({ path: skill.path, dryRun, created: layout.created });
-      if (!dryRun) writtenSkillPaths.push(skill.path);
+      if (!dryRun) {
+        writtenSkillPaths.push(skill.path);
+        for (const created of layout.created) createdSkillLayout.add(created);
+      }
       for (const w of layout.warnings) if (!results.warnings.includes(w)) results.warnings.push(w);
     } catch (err) {
       skillFailures.push({ file: skill.path, edit: edit.id, error: err.message });
@@ -235,10 +289,12 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
   }
 
   if (skillFailures.length) {
+    rollbackSkillWrites(writtenSkillPaths, createdSkillLayout);
+    results.skills = [];
     results.failed.push(...skillFailures);
     if (writtenSkillPaths.length) {
       results.failed.push({
-        error: `skill paths already written in this round: ${writtenSkillPaths.join(", ")}; remove them before retrying`,
+        error: `rolled back skill paths written earlier in this round: ${writtenSkillPaths.join(", ")}`,
       });
     }
     for (const { relative } of planned) {

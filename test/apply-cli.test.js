@@ -255,6 +255,31 @@ test("a concurrently created skill refuses the whole apply before any write", ()
   assert.equal(fs.existsSync(path.join(dir, ".claude")), false);
 });
 
+test("a later skill write failure rolls back skills written earlier in the same apply", () => {
+  const dir = initRepo();
+  const proposal = proposeExtractions(dir);
+  const memory = path.join(dir, "AGENTS.md");
+  const before = fs.readFileSync(memory, "utf8");
+
+  // The exact skill target is absent at preflight, but its parent is a file. The first
+  // skill therefore writes successfully and the second fails while creating its parent.
+  const obstruction = path.join(dir, ".agents/skills/release-details");
+  fs.mkdirSync(path.dirname(obstruction), { recursive: true });
+  fs.writeFileSync(obstruction, "concurrent parent\n");
+
+  const applied = runApply(
+    dir,
+    proposal.edits.map((e) => e.id),
+  );
+
+  assert.equal(applied.status, 1, `apply should report the write failure:\n${applied.output}`);
+  assert.match(applied.output, /rolled back skill paths written earlier in this round/);
+  assert.equal(fs.readFileSync(memory, "utf8"), before, "the memory pointers were not written");
+  assert.equal(fs.existsSync(path.join(dir, ".agents/skills/ci-details/SKILL.md")), false);
+  assert.equal(fs.readFileSync(obstruction, "utf8"), "concurrent parent\n");
+  assert.equal(fs.existsSync(path.join(dir, ".claude")), false, "the new loading layout was rolled back too");
+});
+
 test("apply names a memory file left over budget without refusing the shrink", () => {
   const dir = initRepo();
   const proposal = proposeExtractions(dir);

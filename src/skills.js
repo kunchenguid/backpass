@@ -218,6 +218,30 @@ export function writeSkill(repoRoot, skill, { exclusive = false } = {}) {
   const layout = inCanonical ? ensureSkillsLayout(repoRoot) : { created: [], warnings: [] };
   const target = path.join(repoRoot, skill.path);
   fs.mkdirSync(path.dirname(target), { recursive: true });
-  fs.writeFileSync(target, renderSkillFile(skill), { flag: exclusive ? "wx" : "w" });
+  const text = renderSkillFile(skill);
+  if (!exclusive) {
+    fs.writeFileSync(target, text);
+    return { target, ...layout };
+  }
+
+  // Own the exclusive target from open through close. If writing fails after creation,
+  // remove only the inode this call opened; an EEXIST race never reaches that cleanup.
+  let fd;
+  try {
+    fd = fs.openSync(target, "wx");
+    fs.writeFileSync(fd, text);
+    fs.closeSync(fd);
+    fd = undefined;
+  } catch (err) {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        // Preserve the original write error.
+      }
+      fs.rmSync(target, { force: true });
+    }
+    throw err;
+  }
   return { target, ...layout };
 }

@@ -1,7 +1,9 @@
 import { foldEvidence } from "../fold.js";
 import { ledgerGapObservations, pruneGapLedger, recordGapObservations } from "../gap-ledger.js";
-import { synthesizeProposal } from "../synthesize.js";
+import { resumeAnnotation, synthesizeProposal } from "../synthesize.js";
 import { ProposalViolation } from "../proposal.js";
+import { resolveOverflowTarget } from "../skills.js";
+import { restoreWorkspace } from "../workspace.js";
 import { UserError, color, info, json, out } from "../logger.js";
 import { budgetBar, formatTokens } from "../tokens.js";
 import { emitProgress } from "../progress.js";
@@ -35,6 +37,10 @@ export async function foldForRun(ctx, memoryFile) {
 
 export async function runProposal(ctx, precomputed = null) {
   const { repo, config } = ctx;
+  // Starting a new proposal run invalidates the previous result immediately. Discovery,
+  // folding, and agent resolution can all fail before synthesis starts; none of those
+  // failures may leave an older proposal available to apply as if it came from this run.
+  config.state.clearProposal();
   const { file } = precomputed || primaryMemoryFile(repo, config);
   const transcripts = precomputed?.transcripts || (await discoverForRun(ctx)).transcripts;
 
@@ -62,6 +68,48 @@ export async function runProposal(ctx, precomputed = null) {
     config,
     repo,
     transcripts,
+  });
+
+  config.state.writeProposal(proposal);
+  return { proposal, summary, memoryFile: file };
+}
+
+/**
+ * `backpass propose --resume`: annotate the staging copy that is already on disk.
+ *
+ * A failed annotation loses the annotation, not the edits - those are in
+ * `.backpass/synthesis/`, and they cost the expensive turn of the run. This skips
+ * discovery, analysis, the fold, and the editing turn, re-measures that tree as it stands,
+ * and annotates it in a new session. Nothing here rebuilds or removes the tree: saved
+ * state that cannot be resumed safely is refused with the reason, and left where it is.
+ */
+export async function resumeProposal(ctx) {
+  const { repo, config } = ctx;
+  const { file } = primaryMemoryFile(repo, config);
+  const skillsDir = resolveOverflowTarget(repo.root, config.skillsDir).dir;
+
+  const { workspace, manifest, refusal } = restoreWorkspace({
+    state: config.state,
+    repo,
+    memoryFile: file,
+    skillsDir,
+  });
+  if (refusal) throw new UserError(`cannot resume: ${refusal.message}`, refusal.hint);
+
+  const summary = manifest.summary;
+
+  info(
+    `${color.cyan("·")} resuming the synthesis staged at ${manifest.stagedAt} · ` +
+      `${file.path} · ${summary.analyzedSessions} session(s) of evidence`,
+  );
+
+  const { proposal } = await resumeAnnotation({
+    memoryFile: file,
+    summary,
+    config,
+    repo,
+    workspace,
+    harnessCounts: manifest.harnessCounts || {},
   });
 
   config.state.writeProposal(proposal);
@@ -122,17 +170,20 @@ const isEditCapViolation = (v) => /per-run cap is \d+/.test(v);
  *
  * The old advice - a stronger model, a bigger budget, a higher edit cap - was printed for
  * every failure, including the ones where the model never spoke and the ones where the
- * budget was never the constraint. Each terminal condition has a different repair.
+ * budget was never the constraint. Each terminal condition has a different repair, and
+ * three of the four are cheap, because the editing turn's work is still on disk.
  */
 export function synthesisFailureHint(err) {
+  const resume =
+    "`backpass propose --resume` re-annotates the staged edits in a fresh session, without re-running the expensive editing turn";
   if (err.reason === "empty") {
-    return "the synthesis harness returned no text, so nothing about the model, the budget, or the edit cap was the constraint; run `backpass propose` again to start a fresh synthesis session";
+    return `the synthesis harness returned no text, so nothing about the model, the budget, or the edit cap was the constraint; ${resume}`;
   }
   if (err.reason === "unparseable") {
-    return "the model answered but not with a JSON object; run `backpass propose` again, or pin a different harness with --synthesis-agent";
+    return `the model answered but not with a JSON object; ${resume}, or pin a different harness with --synthesis-agent`;
   }
   if (err.reason === "editing") {
-    return "the agent kept rewriting the staging copy instead of describing it; run `backpass propose` again to start fresh";
+    return `the agent kept rewriting the staging copy instead of describing it; ${resume}`;
   }
   const violations = err.violations || [];
   if (violations.some(isBudgetViolation)) {
@@ -141,7 +192,7 @@ export function synthesisFailureHint(err) {
   if (violations.some(isEditCapViolation)) {
     return "the annotation proposed more edits than the per-run learning rate allows: raise --max-edits, or re-run and let the next pass take the rest";
   }
-  return "the gates above are what the next synthesis must satisfy; run `backpass propose` again";
+  return `the gates above are what the annotation must satisfy; ${resume}`;
 }
 
 /**
@@ -169,7 +220,7 @@ export function printSynthesisFailure(err, state) {
 
 export async function cmdPropose(ctx) {
   try {
-    const { proposal } = await runProposal(ctx);
+    const { proposal } = ctx.flags.resume ? await resumeProposal(ctx) : await runProposal(ctx);
     if (ctx.flags.json) {
       json(proposal);
       return 0;
