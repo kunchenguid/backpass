@@ -316,15 +316,15 @@ pointer-aware:
 
 ## CLI Reference
 
-| Command                     | What it does                                                                             |
-| --------------------------- | ---------------------------------------------------------------------------------------- |
-| `backpass`                  | collect samples → calculate loss → aggregate gradients → gradient descent. Never writes. |
-| `backpass scan`             | collect samples only: the transcript table with a confidence column                      |
-| `backpass analyze`          | calculate loss: the tier-1 pass over pending transcripts                                 |
-| `backpass propose`          | aggregate gradients + gradient descent: the tier-2 pass from cached evidence             |
-| `backpass apply`            | review and write the accepted edits                                                      |
-| `backpass status`           | cache state, failed transcripts, budget bars                                             |
-| `backpass init`             | write `.backpassrc.json`, exclude `.backpass/` locally                                   |
+| Command            | What it does                                                                             |
+| ------------------ | ---------------------------------------------------------------------------------------- |
+| `backpass`         | collect samples → calculate loss → aggregate gradients → gradient descent. Never writes. |
+| `backpass scan`    | collect samples only: the transcript table with a confidence column                      |
+| `backpass analyze` | calculate loss: the tier-1 pass over pending transcripts                                 |
+| `backpass propose` | aggregate gradients + gradient descent: the tier-2 pass from cached evidence             |
+| `backpass apply`   | review and write the accepted edits                                                      |
+| `backpass status`  | cache state, failed transcripts, budget bars                                             |
+| `backpass init`    | write `.backpassrc.json`, exclude `.backpass/` locally                                   |
 
 Run `backpass --help` for the full flag list.
 
