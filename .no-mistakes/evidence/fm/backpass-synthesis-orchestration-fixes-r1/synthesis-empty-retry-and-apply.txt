@@ -1,0 +1,42 @@
+$ backpass propose --synthesis-agent claude --synthesis-model fake-model
+proposal · backpass-cli-RhIn3m · AGENTS.md · 1 edit(s) from 3 session(s)
+  budget [................................] 28 -> 33 / 5,000 tok
+  evidence: 0 positive · 3 negative · 0 gap clusters
+
+  e1 EXTRACT  extract release checklist (+5 tok, 3 transcript(s))
+
+  tier-2 tokens: input=2,000 output=80 total=2,080
+
+Review and apply with `backpass apply` (nothing has been written).
+· synthesizing with claude (fake-model) effort=high
+warn synthesis ended its turn with no output; retrying the annotation once in a fresh session
+
+Observed persisted proposal:
+{
+  "exitStatus": 0,
+  "sessionsOpened": 2,
+  "annotationTurns": 2,
+  "attempt": 1,
+  "editCount": 1,
+  "skills": [
+    "release-checklist"
+  ]
+}
+
+$ backpass apply --no-open  # reviewer accepts e1
+1 accepted · 0 rejected
+  wrote AGENTS.md (e1)
+    budget [................................] 28 -> 33 / 5,000 tok
+  wrote .agents/skills/release-checklist/SKILL.md (new skill)
+    created .agents/skills
+    created .claude/skills -> ../.agents/skills
+· review surface: http://127.0.0.1:4387/session/51233fdaf6389690
+waiting for your decisions in the browser (Ctrl-C to abort; nothing is written until you send)
+
+Observed repository state after apply:
+{
+  "exitStatus": 0,
+  "memory": "# Demo memory\n\n## Release checklist\n\n- Release steps: .agents/skills/release-checklist/SKILL.md\n\n## Style\n\n- Keep prose concise.\n",
+  "skill": "---\nname: release-checklist\ndescription: Load before release work.\nuser-invocable: false\nmetadata:\n  internal: true\n---\n\n## Steps\n\n1. Tag the release commit.\n2. Push the tag.\n",
+  "claudeSkillsLink": "../.agents/skills"
+}
