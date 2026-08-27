@@ -280,6 +280,26 @@ test("a later skill write failure rolls back skills written earlier in the same 
   assert.equal(fs.existsSync(path.join(dir, ".claude")), false, "the new loading layout was rolled back too");
 });
 
+test("a memory write failure rolls back skills written earlier in the same apply", () => {
+  const dir = initRepo();
+  const proposal = proposeExtractions(dir);
+  const memory = path.join(dir, "AGENTS.md");
+  const before = fs.readFileSync(memory, "utf8");
+  fs.chmodSync(memory, 0o444);
+
+  const applied = runApply(
+    dir,
+    proposal.edits.map((e) => e.id),
+  );
+
+  assert.equal(applied.status, 1, `apply should report the memory write failure:\n${applied.output}`);
+  assert.match(applied.output, /AGENTS\.md could not be written/);
+  assert.match(applied.output, /rolled back skill paths written earlier in this round/);
+  assert.equal(fs.readFileSync(memory, "utf8"), before, "the memory file stayed byte-identical");
+  assert.equal(fs.existsSync(path.join(dir, ".agents/skills/ci-details/SKILL.md")), false);
+  assert.equal(fs.existsSync(path.join(dir, ".agents/skills/release-details/SKILL.md")), false);
+});
+
 test("apply names a memory file left over budget without refusing the shrink", () => {
   const dir = initRepo();
   const proposal = proposeExtractions(dir);

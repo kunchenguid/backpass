@@ -261,15 +261,19 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     }
   }
 
-  if (skillFailures.length) {
+  const rollbackSkills = () => {
     removeOwnedSkillPaths(ownedSkillPaths);
     results.skills = [];
-    results.failed.push(...skillFailures);
     if (writtenSkillPaths.length) {
       results.failed.push({
         error: `rolled back skill paths written earlier in this round: ${writtenSkillPaths.join(", ")}`,
       });
     }
+  };
+
+  if (skillFailures.length) {
+    results.failed.push(...skillFailures);
+    rollbackSkills();
     for (const { relative } of planned) {
       results.failed.push({
         file: relative,
@@ -282,7 +286,16 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
   for (const { relative, absolute, before, text, applied } of planned) {
     const budget = relative === proposal.memoryFile.path ? budgetStatus(before, text, config.budgetTokens) : null;
 
-    if (!dryRun) fs.writeFileSync(absolute, text);
+    try {
+      if (!dryRun) fs.writeFileSync(absolute, text);
+    } catch (err) {
+      results.failed.push({
+        file: relative,
+        error: `${relative} could not be written: ${err.message}`,
+      });
+      rollbackSkills();
+      return results;
+    }
     results.written.push({ file: relative, edits: applied, budget, dryRun });
 
     // Shrinking over several runs is the design, so this is a heading, not a failure.
