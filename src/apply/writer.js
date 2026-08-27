@@ -106,8 +106,7 @@ function overBudgetWarning(relative, budget) {
   );
 }
 
-function atomicReplace(absolute, text) {
-  const target = fs.realpathSync(absolute);
+function atomicReplace(target, text) {
   const temp = path.join(path.dirname(target), `.${path.basename(target)}.backpass-${randomUUID()}`);
   const mode = fs.statSync(target).mode & 0o7777;
   let fd;
@@ -246,6 +245,25 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     for (const id of applied) landed.add(id);
   }
 
+  const plannedTargets = new Map();
+  for (const item of planned) {
+    try {
+      item.resolved = fs.realpathSync(item.absolute);
+    } catch (err) {
+      results.failed.push({ file: item.relative, error: `${item.relative} could not be resolved: ${err.message}` });
+      continue;
+    }
+    const existing = plannedTargets.get(item.resolved);
+    if (existing) {
+      results.failed.push({
+        file: item.relative,
+        error: `${item.relative} resolves to the same target as ${existing.relative}; nothing was written`,
+      });
+      continue;
+    }
+    plannedTargets.set(item.resolved, item);
+  }
+
   if (results.failed.length) return results;
 
   // Skills go in before the memory file. A skill nothing points at yet is inert, while a
@@ -332,12 +350,12 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
   });
   const committed = [];
   for (const item of orderedPlanned) {
-    const { relative, absolute, before, text, applied } = item;
+    const { relative, resolved, before, text, applied } = item;
     const budget = relative === proposal.memoryFile.path ? budgetStatus(before, text, config.budgetTokens) : null;
 
     let commit = null;
     try {
-      if (!dryRun) commit = atomicReplace(absolute, text);
+      if (!dryRun) commit = atomicReplace(resolved, text);
     } catch (err) {
       results.failed.push({
         file: relative,

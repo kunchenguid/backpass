@@ -352,16 +352,15 @@ test("a later file failure rolls back earlier files and leaves memory untouched"
   );
 });
 
-test("rollback reports a conflict instead of overwriting a replaced file", () => {
+test("apply refuses accepted paths that resolve to the same target", () => {
   const dir = initRepo();
   const proposal = proposeExtractions(dir);
+  const memory = path.join(dir, "AGENTS.md");
+  const memoryBefore = fs.readFileSync(memory, "utf8");
   const existing = path.join(dir, "existing.md");
   const alias = path.join(dir, "alias.md");
-  const lockedDir = path.join(dir, "locked");
   fs.writeFileSync(existing, "before\n");
   fs.symlinkSync("existing.md", alias);
-  fs.mkdirSync(lockedDir);
-  fs.writeFileSync(path.join(lockedDir, "existing.md"), "locked before\n");
   proposal.edits.push(
     {
       id: "e3",
@@ -375,33 +374,21 @@ test("rollback reports a conflict instead of overwriting a replaced file", () =>
       kind: "rewrite",
       file: "alias.md",
       find: "before\n",
-      replace: "replacement write\n",
-    },
-    {
-      id: "e5",
-      kind: "rewrite",
-      file: "locked/existing.md",
-      find: "locked before\n",
-      replace: "locked after\n",
+      replace: "second write\n",
     },
   );
   fs.writeFileSync(path.join(dir, ".backpass/proposal.json"), JSON.stringify(proposal));
-  fs.chmodSync(lockedDir, 0o555);
 
-  let applied;
-  try {
-    applied = runApply(
-      dir,
-      proposal.edits.map((e) => e.id),
-    );
-  } finally {
-    fs.chmodSync(lockedDir, 0o755);
-  }
+  const applied = runApply(
+    dir,
+    proposal.edits.map((e) => e.id),
+  );
 
-  assert.equal(applied.status, 1, `apply should fail:\n${applied.output}`);
-  assert.match(applied.output, /existing\.md rollback conflict/);
-  assert.equal(fs.lstatSync(alias).isSymbolicLink(), true);
+  assert.equal(applied.status, 1, `apply should refuse the collision:\n${applied.output}`);
+  assert.match(applied.output, /alias\.md resolves to the same target as existing\.md; nothing was written/);
   assert.equal(fs.readFileSync(existing, "utf8"), "before\n");
+  assert.equal(fs.readFileSync(memory, "utf8"), memoryBefore);
+  assert.equal(fs.existsSync(path.join(dir, ".agents")), false);
 });
 
 test("a memory write failure rolls back skills without truncating memory", () => {
