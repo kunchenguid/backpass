@@ -128,7 +128,13 @@ function piInvocation({ requestedModel, requestedEffort, notes, cleanups, dispos
   const extra = [];
   if (requestedModel) extra.push("--model", requestedModel);
   if (requestedEffort) extra.push("--thinking", requestedEffort);
-  const real = "pi";
+  const real = resolveOnPath("pi");
+  if (!real || (process.platform === "win32" && /\.(?:cmd|bat)$/i.test(real))) {
+    throw new UserError(
+      `cannot apply ${describeOverride(requestedModel, requestedEffort)} as safe Pi process arguments on this platform`,
+      "install Pi as a directly executable binary, or omit the model and effort override",
+    );
+  }
   const { wrapperPath, dir } = writeArgvWrapper({ realCommand: real, extraArgs: extra, binName: "pi" });
   cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
   return {
@@ -143,6 +149,12 @@ function piInvocation({ requestedModel, requestedEffort, notes, cleanups, dispos
 }
 
 function grokInvocation({ requestedModel, requestedEffort, notes, cleanups, dispose }) {
+  if (process.platform === "win32") {
+    throw new UserError(
+      `cannot apply ${describeOverride(requestedModel, requestedEffort)} through acpx --agent on Windows`,
+      "pin pi, claude, codex, or opencode, or omit the model and effort override",
+    );
+  }
   const extra = [];
   if (requestedModel) extra.push("-m", requestedModel);
   if (requestedEffort) extra.push("--reasoning-effort", requestedEffort);
@@ -154,13 +166,13 @@ function grokInvocation({ requestedModel, requestedEffort, notes, cleanups, disp
       "install the grok CLI, or pin a different agent / omit the model and effort override",
     );
   }
-  const { wrapperPath, dir } = writeArgvWrapper({ realCommand: real, extraArgs: extra, binName: "grok" });
+  const { nodeCommand, dir } = writeArgvWrapper({ realCommand: real, extraArgs: extra, binName: "grok" });
   cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
   return {
     env: undefined,
     acpxModel: null,
     setEffortKey: null,
-    acpxAgentCommand: wrapperPath,
+    acpxAgentCommand: nodeCommand,
     requiredBuiltinAgent: null,
     notes,
     dispose,
@@ -175,11 +187,11 @@ function grokInvocation({ requestedModel, requestedEffort, notes, cleanups, disp
  */
 function writeArgvWrapper({ realCommand, extraArgs, binName }) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-harness-wrap-"));
-  const wrapperPath = path.join(dir, binName);
+  const scriptPath = path.join(dir, `${binName}.cjs`);
   const payload = JSON.stringify({ real: realCommand, extra: extraArgs });
   fs.writeFileSync(
-    wrapperPath,
-    `#!${process.execPath}
+    scriptPath,
+    `#!/usr/bin/env node
 const { spawn } = require("node:child_process");
 const { real, extra } = ${payload};
 const child = spawn(real, extra.concat(process.argv.slice(2)), { stdio: "inherit" });
@@ -216,16 +228,33 @@ child.on("exit", (code, signal) => {
 });
 `,
   );
-  fs.chmodSync(wrapperPath, 0o755);
-  return { wrapperPath, dir };
+  let wrapperPath = scriptPath;
+  if (process.platform === "win32") {
+    wrapperPath = path.join(dir, `${binName}.cmd`);
+    fs.writeFileSync(wrapperPath, `@echo off\r\n${cmdQuote(process.execPath)} ${cmdQuote(scriptPath)} %*\r\n`);
+  } else {
+    fs.chmodSync(scriptPath, 0o755);
+  }
+  return { wrapperPath, nodeCommand: renderCommandArgv([process.execPath, scriptPath]), dir };
+}
+
+function renderCommandArgv(argv) {
+  return argv.map((arg) => JSON.stringify(arg)).join(" ");
+}
+
+function cmdQuote(value) {
+  return `"${value.replaceAll("%", "%%").replaceAll('"', '""')}"`;
 }
 
 function resolveOnPath(bin) {
   if (path.isAbsolute(bin) && isExecutable(bin)) return bin;
+  const extensions = process.platform === "win32" ? (process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD").split(";") : [""];
   for (const dir of (process.env.PATH || "").split(path.delimiter)) {
     if (!dir) continue;
-    const candidate = path.join(dir, bin);
-    if (isExecutable(candidate)) return candidate;
+    for (const extension of extensions) {
+      const candidate = path.join(dir, process.platform === "win32" ? `${bin}${extension.toLowerCase()}` : bin);
+      if (isExecutable(candidate)) return candidate;
+    }
   }
   return null;
 }
@@ -233,7 +262,7 @@ function resolveOnPath(bin) {
 function isExecutable(file) {
   try {
     const st = fs.statSync(file);
-    return st.isFile() && Boolean(st.mode & 0o111);
+    return st.isFile() && (process.platform === "win32" || Boolean(st.mode & 0o111));
   } catch {
     return false;
   }

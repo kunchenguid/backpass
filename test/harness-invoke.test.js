@@ -109,7 +109,8 @@ function spawnWrappedPi() {
 function spawnOverriddenAgent() {
   const at = argv.indexOf("--agent");
   if (at < 0) return;
-  spawnSync(argv[at + 1], [], { stdio: "ignore", env: process.env });
+  const parts = (argv[at + 1].match(/"(?:\\\\.|[^"\\\\])*"/g) || []).map((part) => JSON.parse(part));
+  spawnSync(parts[0], parts.slice(1), { stdio: "ignore", env: process.env });
 }
 if (argv.includes("sessions") && argv.includes("new")) {
   if (process.env.FAKE_SESSIONS_UNSUPPORTED === "1") {
@@ -365,15 +366,15 @@ setInterval(() => {}, 1000);
   );
   fs.chmodSync(signalChild, 0o755);
 
+  const previousPath = process.env.PATH;
+  process.env.PATH = `${signalBin}${path.delimiter}${previousPath || ""}`;
   const invocation = prepareHarnessInvocation({ agent: "pi", model: "provider/model" });
+  process.env.PATH = previousPath;
 
   let wrapper;
   let childPid;
   try {
-    wrapper = spawn(invocation.env.PI_ACP_PI_COMMAND, [], {
-      stdio: "ignore",
-      env: { ...process.env, PATH: `${path.dirname(signalChild)}${path.delimiter}${process.env.PATH || ""}` },
-    });
+    wrapper = spawn(invocation.env.PI_ACP_PI_COMMAND, [], { stdio: "ignore" });
     for (let attempt = 0; attempt < 100 && !fs.existsSync(readyPath); attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
@@ -689,7 +690,9 @@ test("the Backpass CLI applies Grok model and effort as process arguments", () =
   resetLogsAndSettings();
   const before = Buffer.from(settingsBytes());
   const repo = makeCliRepo("grok-analysis");
-  const result = runBackpass(repo, analysisArgs("grok", "grok-4.6"));
+  const spacedTmp = path.join(repo, "temporary files with spaces");
+  fs.mkdirSync(spacedTmp);
+  const result = runBackpass(repo, analysisArgs("grok", "grok-4.6"), { TMPDIR: spacedTmp });
   assert.equal(result.status, 0, result.stderr);
   const calls = acpxCalls();
   assert.ok(calls.every((call) => !call.argv.includes("grok-build")));
