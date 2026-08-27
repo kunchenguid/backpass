@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.8](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.7...backpass-v0.1.8) (2026-08-27)
+
+
+### Bug Fixes
+
+* correct synthesis orchestration and apply rollback ([#52](https://github.com/kunchenguid/backpass/issues/52)) ([8466e65](https://github.com/kunchenguid/backpass/commit/8466e65b59874ea5ab045664591244296b6d9518))
+* keep harness model and effort overrides invocation-scoped ([#49](https://github.com/kunchenguid/backpass/issues/49)) ([c6d9ba8](https://github.com/kunchenguid/backpass/commit/c6d9ba8179e16fb9f720213afd705b5acb2ec88f))
+
 ## [0.1.7](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.6...backpass-v0.1.7) (2026-08-27)
 
 
