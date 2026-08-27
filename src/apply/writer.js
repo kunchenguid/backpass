@@ -7,14 +7,14 @@ import { budgetGateKind, budgetStatus, formatTokens } from "../tokens.js";
 import { recordRejection } from "../state.js";
 import { writeSkill } from "../skills.js";
 
-function acceptedSubsetBudgetFailure({ proposal, accepted, repo, capTokens }) {
+function acceptedSubsetBudgetFailure({ proposal, accepted, repo, capTokens, memoryText }) {
   if (!accepted.length) return null;
 
   const relative = proposal.memoryFile.path;
   const absolute = path.join(repo.root, relative);
-  if (!fs.existsSync(absolute)) return null;
+  if (memoryText === null && !fs.existsSync(absolute)) return null;
 
-  const before = fs.readFileSync(absolute, "utf8");
+  const before = memoryText ?? fs.readFileSync(absolute, "utf8");
   const { budget } = projectWithDecisions(
     before,
     accepted,
@@ -46,31 +46,48 @@ function acceptedSubsetBudgetFailure({ proposal, accepted, repo, capTokens }) {
  * Freshness before mutation.
  *
  * Every hunk was cut from one exact image of the memory file, and the proposal records
- * that image's hash. If the file has changed since - an upstream merge, a hand edit,
- * another agent - then the hunks describe text that may no longer exist, and the ones
+ * that image's hash. If the file has disappeared or changed since - an upstream merge,
+ * a hand edit, another agent - then the hunks describe text that may no longer exist, and the ones
  * that still happen to match would leave the file half-descended: part of a shrink plan
  * applied against a file the plan was never measured against. So the run is refused
  * before it writes anything, and the fix is to re-measure, not to salvage.
  *
  * A proposal saved before this field existed carries no hash and is left alone.
  */
-function memoryFileDrift(proposal, repo) {
+function memoryFileSnapshot(proposal, repo) {
   const expected = proposal.memoryFile?.hash;
   const relative = proposal.memoryFile?.path;
-  if (!expected || !relative) return null;
+  if (!relative) return { text: null };
 
   const absolute = path.join(repo.root, relative);
-  if (!fs.existsSync(absolute)) return null;
+  if (!fs.existsSync(absolute)) {
+    if (!expected) return { text: null };
+    return {
+      text: null,
+      failure: {
+        file: relative,
+        error:
+          `${relative} no longer exists, so its edits no longer describe the file on disk; nothing was written. ` +
+          `Run \`backpass\` to re-propose against the current repository.`,
+      },
+    };
+  }
 
-  const observed = memoryTextHash(fs.readFileSync(absolute, "utf8"));
-  if (observed === expected) return null;
+  const text = fs.readFileSync(absolute, "utf8");
+  if (!expected) return { text };
+
+  const observed = memoryTextHash(text);
+  if (observed === expected) return { text };
 
   return {
-    file: relative,
-    error:
-      `${relative} changed after this proposal was made (${expected} -> ${observed}), so its edits ` +
-      `no longer describe the file on disk; nothing was written. Run \`backpass\` to re-propose ` +
-      `against the current ${relative}.`,
+    text,
+    failure: {
+      file: relative,
+      error:
+        `${relative} changed after this proposal was made (${expected} -> ${observed}), so its edits ` +
+        `no longer describe the file on disk; nothing was written. Run \`backpass\` to re-propose ` +
+        `against the current ${relative}.`,
+    },
   };
 }
 
@@ -87,7 +104,7 @@ function overBudgetWarning(relative, budget) {
  * Everything upstream is read-only analysis; a run only changes the weights here, after
  * a human accepted specific edits. Three gates run before the first byte is written:
  * the memory file must still be the file the proposal was measured against
- * (`memoryFileDrift`), the accepted subset must clear the same cap/shrink budget gate as
+ * (`memoryFileSnapshot`), the accepted subset must clear the same cap/shrink budget gate as
  * the full proposal (`budgetGateKind`), and every accepted edit for a file must compose
  * against that file's single pre-write image. Any of them failing writes nothing and
  * records no rejection.
@@ -110,12 +127,14 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     rejectionsRecorded: false,
   };
 
+  let memoryText = null;
   if (accepted.length || rejected.length) {
-    const drift = memoryFileDrift(proposal, repo);
-    if (drift) {
-      results.failed.push(drift);
+    const snapshot = memoryFileSnapshot(proposal, repo);
+    if (snapshot.failure) {
+      results.failed.push(snapshot.failure);
       return results;
     }
+    memoryText = snapshot.text;
   }
 
   const budgetFailure = acceptedSubsetBudgetFailure({
@@ -123,6 +142,7 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     accepted,
     repo,
     capTokens: config.budgetTokens,
+    memoryText,
   });
   if (budgetFailure) {
     results.failed.push(budgetFailure);
@@ -146,7 +166,10 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
       continue;
     }
 
-    const before = fs.readFileSync(absolute, "utf8");
+    const before =
+      relative === proposal.memoryFile?.path && memoryText !== null
+        ? memoryText
+        : fs.readFileSync(absolute, "utf8");
     let text = before;
     const applied = [];
     const failures = [];

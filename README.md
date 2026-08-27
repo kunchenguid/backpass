@@ -253,9 +253,10 @@ a compatible set and try again. If the run shrinks the file but leaves it above 
 that is progress, not a failure: it is written, and the remaining overage is printed.
 
 Apply is all-or-nothing. Every edit was cut from one exact version of your memory file, so
-before writing anything apply checks the file is still that version. If it changed since -
-you pulled, or edited it by hand, or another agent did - the edits no longer describe what
-is on disk, so nothing is written at all and you are told to run `backpass` again to
+before writing anything apply checks the file still exists and is still that version. If it
+was removed or changed since - you pulled, edited it by hand, or another agent did - the
+edits no longer describe what is on disk, so nothing is written at all and you are told to
+run `backpass` again to
 re-propose against the current file. Within a run the same rule holds per file: it takes
 every accepted edit or none of them. Skills are written only after every edit has composed,
 and before the memory file, so a later write failure cannot leave the memory file pointing

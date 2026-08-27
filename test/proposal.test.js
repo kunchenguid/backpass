@@ -657,6 +657,29 @@ test("memory drift also refuses an all-rejected decision without recording it", 
   assert.match(results.failed[0].error, /changed after this proposal was made/);
 });
 
+test("a missing memory file refuses an all-rejected decision without recording it", () => {
+  const { proposal, repo, state } = gate({
+    edit: memoryEdit((text) => text.replace("- Prefer small commits.", "- Prefer small, reviewable commits.")),
+    annotation: { edits: [claim(["H1"], { title: "sharpen the commit rule" })] },
+  });
+  const memory = path.join(repo.root, "AGENTS.md");
+  fs.rmSync(memory);
+
+  const results = applyDecisions({
+    proposal,
+    decisions: { e1: "rejected" },
+    repo,
+    state,
+    config: { budgetTokens: 5000 },
+  });
+
+  assert.deepEqual(results.written, []);
+  assert.equal(results.rejectionsRecorded, false);
+  assert.equal(Object.keys(state.readRejections().entries).length, 0);
+  assert.match(results.failed[0].error, /AGENTS\.md no longer exists/);
+  assert.match(results.failed[0].error, /Run `backpass`/);
+});
+
 test("an unchanged memory file still applies, so the freshness check costs nothing", () => {
   const { proposal, repo, state } = gate({
     edit: memoryEdit((t) => t.replace("- Prefer small commits.", "- Prefer small, reviewable commits.")),
