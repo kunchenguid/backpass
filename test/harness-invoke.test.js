@@ -429,7 +429,9 @@ setInterval(() => {}, 1000);
     if (childPid) {
       try {
         process.kill(childPid, "SIGKILL");
-      } catch {}
+      } catch {
+        // The child may already have exited after the wrapper was killed.
+      }
     }
     invocation.dispose();
   }
@@ -675,12 +677,7 @@ test("the Backpass CLI applies Pi overlays without changing persistent defaults"
   assert.equal(settingsBytes().compare(before), 0);
   const spawned = jsonl(piLog);
   assert.ok(spawned.length >= 1);
-  assert.deepEqual(spawned[0].slice(0, 4), [
-    "--model",
-    "openai-codex/gpt-5.6-sol",
-    "--thinking",
-    "high",
-  ]);
+  assert.deepEqual(spawned[0].slice(0, 4), ["--model", "openai-codex/gpt-5.6-sol", "--thinking", "high"]);
   assert.deepEqual(spawned[0].slice(4), ["--mode", "rpc", "--no-themes"]);
   assertBareDefaults(before);
 });
@@ -795,7 +792,9 @@ test("the Backpass CLI keeps Pi synthesis overlays invocation-scoped", () => {
   const spawned = jsonl(piLog);
   assert.ok(spawned.some((args) => args[1] === "openai-codex/gpt-5.6-luna" && args[3] === "medium"));
   assert.ok(spawned.some((args) => args[1] === "openai-codex/gpt-5.6-sol" && args[3] === "high"));
-  assert.ok(!acpxCalls().some((call) => call.argv.includes("set") && ["model", "thought_level"].includes(setKey(call))));
+  assert.ok(
+    !acpxCalls().some((call) => call.argv.includes("set") && ["model", "thought_level"].includes(setKey(call))),
+  );
   assert.equal(settingsBytes().compare(before), 0);
   assertBareDefaults(before);
 });

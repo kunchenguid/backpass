@@ -172,9 +172,7 @@ function baseArgs({ cwd, model, timeoutSeconds, approveReads, approveAll = false
 }
 
 function invocationAgentArgs(invocation, agent) {
-  return invocation.acpxAgentCommand
-    ? ["--agent", invocation.acpxAgentCommand]
-    : [acpxAgentName(agent)];
+  return invocation.acpxAgentCommand ? ["--agent", invocation.acpxAgentCommand] : [acpxAgentName(agent)];
 }
 
 async function verifyHarnessInvocation(invocation, cwd) {

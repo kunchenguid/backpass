@@ -137,8 +137,8 @@ async function analyzeOne({ transcript, memoryFile, config, repo, slot = 0 }) {
       timeoutSeconds: config.timeoutSeconds,
       promptRetries: config.promptRetries,
     };
-    // Effort is a session config option, so an effortful analysis call needs a
-    // (fresh, per-transcript) session; without effort the plain one-shot is cheaper.
+    // Route effortful calls through a fresh per-transcript session so each harness's
+    // invocation-scoped overlay or safe fallback is applied; otherwise one-shot is cheaper.
     if (!pick.effort) return execOneShot(call);
     callCounter += 1;
     return sessionPrompt({
