@@ -74,7 +74,7 @@ COMMANDS
              gradient descent. Never writes.
   scan       collect samples only: which transcripts belong to this repo, and how we know
   analyze    calculate loss: one cheap model call per new transcript (tier 1)
-  propose    aggregate gradients, then gradient descent: one high-reasoning call
+  propose    aggregate gradients, then high-reasoning gradient descent
              turning the aggregated evidence into edits (tier 2)
   apply      review the proposal and write the accepted edits (the only writer)
   status     cache state, evidence counts, and the budget bar

@@ -279,11 +279,13 @@ that version. If it was removed or changed since - you pulled, edited it by hand
 agent did - the edits no longer describe what is on disk, so nothing is written and you are
 told to run `backpass` again to re-propose against the current file. Within a run every file
 is composed from one version: it takes every accepted edit or none of them. Apply also
-refuses the whole write if any created skill target already exists.
+refuses the whole write if any created skill target already exists or two accepted paths
+resolve to the same file.
 
-Skills are written only after every edit has composed, and before the memory file, so a
-write failure cannot leave the memory file pointing at a missing skill. If one skill write
-fails after another succeeded, apply rolls back the skills it wrote earlier in that round.
+Skills and non-memory files are written only after every edit has composed, with the memory
+file committed last. A later write failure rolls back files, skills, and loading-layout
+entries created earlier in that round. If another process changes a committed file before
+rollback reaches it, apply leaves that change untouched and reports the rollback conflict.
 
 For compatibility, proposals created by older backpass versions that do not contain a
 memory-file hash skip the freshness check. Regenerate such a proposal before applying it if

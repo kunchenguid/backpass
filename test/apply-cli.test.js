@@ -143,7 +143,7 @@ function proposeExtractions(dir) {
   assert.deepEqual(violations, [], "the fixture proposal must clear the gates");
   assert.equal(proposal.edits.length, 2);
   staged.state.writeProposal(proposal);
-  return proposal;
+  return /** @type {any} */ (proposal);
 }
 
 /** Run `backpass apply` for real, with the fake review surface accepting every edit. */
@@ -164,7 +164,7 @@ function applyInvocation(dir, editIds) {
     args: [CLI, "apply", "--no-open"],
     options: {
       cwd: dir,
-      encoding: "utf8",
+      encoding: /** @type {BufferEncoding} */ ("utf8"),
       env: {
         ...process.env,
         NO_COLOR: "1",

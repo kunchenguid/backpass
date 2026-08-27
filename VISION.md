@@ -61,7 +61,7 @@ When coverage and accuracy are in tension, accuracy wins.
 
 ## Failure is loud and named
 
-A gate violation re-prompts with the exact breach, then fails the run and saves the rejected proposal, and never silently truncates to fit.
+A parseable proposal with gate violations is saved with its provenance before the exact breaches are re-prompted; any terminal failure is named, and the run never silently truncates to fit.
 A missing capability is named along with the command that would fix it, and `n/a` is not an acceptable thing to print at a person.
 A gap in capability is fixed or reported, never papered over with a weaker path that quietly produces worse results.
 A drifted store must never look identical to a repo with no history.

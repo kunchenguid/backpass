@@ -13,8 +13,8 @@ import { measureWorkspace, prepareWorkspace, repoFingerprint } from "./workspace
 import { UserError, color, info, warn } from "./logger.js";
 
 /**
- * Stage 3 of the pipeline (design section 3): one high-reasoning session that turns
- * folded evidence into concrete edits.
+ * Stage 3 of the pipeline (design section 3): high-reasoning synthesis that turns folded
+ * evidence into concrete edits.
  *
  * The agent never describes an edit for backpass to locate - it makes the edit, with its
  * harness's own file tools, in a staging copy of the memory file (`src/workspace.js`).

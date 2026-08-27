@@ -127,7 +127,7 @@ function atomicReplace(target, text) {
       try {
         fs.closeSync(fd);
       } catch {
-        fd = undefined;
+        // Preserve the original write error.
       }
     }
     removeOwnedSkillPaths(ownership ?? []);
@@ -170,12 +170,13 @@ function removeEmptyDirectories(directories) {
  * The only place in backpass that writes to the repo.
  *
  * Everything upstream is read-only analysis; a run only changes the weights here, after
- * a human accepted specific edits. Four gates run before the first byte is written:
+ * a human accepted specific edits. Five gates run before the first byte is written:
  * the memory file must still be the file the proposal was measured against
  * (`memoryFileSnapshot`), the accepted subset must clear the same cap/shrink budget gate as
  * the full proposal (`budgetGateKind`), every accepted edit for a file must compose
- * against that file's single pre-write image, and every created skill target must still be
- * absent. Any of them failing writes nothing and records no rejection.
+ * against that file's single pre-write image, every created skill target must still be
+ * absent, and accepted paths must resolve to distinct targets. Any of them failing writes
+ * nothing and records no rejection.
  *
  * A file is therefore applied all at once or not at all. Skills are written only after
  * every accepted edit has composed, and before the files that reference them.
@@ -266,14 +267,16 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
   }
 
   const plannedTargets = new Map();
+  const resolvedPlanned = [];
   for (const item of planned) {
+    let resolved;
     try {
-      item.resolved = fs.realpathSync(item.absolute);
+      resolved = fs.realpathSync(item.absolute);
     } catch (err) {
       results.failed.push({ file: item.relative, error: `${item.relative} could not be resolved: ${err.message}` });
       continue;
     }
-    const existing = plannedTargets.get(item.resolved);
+    const existing = plannedTargets.get(resolved);
     if (existing) {
       results.failed.push({
         file: item.relative,
@@ -281,7 +284,9 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
       });
       continue;
     }
-    plannedTargets.set(item.resolved, item);
+    const resolvedItem = { ...item, resolved };
+    plannedTargets.set(resolved, resolvedItem);
+    resolvedPlanned.push(resolvedItem);
   }
 
   if (results.failed.length) return results;
@@ -357,7 +362,7 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     return results;
   }
 
-  const orderedPlanned = [...planned].sort((a, b) => {
+  const orderedPlanned = [...resolvedPlanned].sort((a, b) => {
     const aMemory = a.relative === proposal.memoryFile.path;
     const bMemory = b.relative === proposal.memoryFile.path;
     return Number(aMemory) - Number(bMemory);

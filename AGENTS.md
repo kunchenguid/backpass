@@ -58,20 +58,22 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   every other stage is read-only analysis, which is what makes a run safe to interrupt.
   Bootstrap (`src/commands/bootstrap.js`, a repo with no memory file) is the one run that
   writes without the apply gate, and it only ever creates files, never overwrites.
-  For proposals carrying a memory-file hash, nothing is written until four gates pass:
+  For proposals carrying a memory-file hash, nothing is written until five gates pass:
   the memory file still exists and hashes to `proposal.memoryFile.hash` (`memoryFileSnapshot`,
   using `memoryTextHash` from `src/memory.js` so the check and the proposal cannot disagree), the
   accepted subset clears `budgetGateKind` (`src/tokens.js`), every accepted edit for a file
   composes against that file's one pre-write image, and every created skill target is still
-  absent. Any of them failing writes nothing and records no rejection. A file is therefore applied whole or not at all, and a skill is written only
-  when the memory-file edit pointing at it has composed and is ready to land - skills go
-  in first, and a later skill failure rolls back the ones this round already wrote, so a
-  failed apply never leaves a memory file naming a skill that is missing.
+  absent. Any of them failing writes nothing and records no rejection. Accepted paths are
+  resolved before mutation, and duplicate resolved targets refuse the whole apply. Each file
+  is therefore applied whole or not at all. Skills and non-memory files land before the
+  memory file; a later failure rolls back files, skills, and loading-layout entries created
+  by the round. A rollback never overwrites a file whose identity or contents changed after
+  this round committed it - that conflict is reported and the concurrent version is kept.
 - **Synthesis edits natively, in a staging copy, never by describing text.** The agent
   gets `--approve-all` with `cwd` = `.backpass/synthesis/` (`prepareWorkspace`), which holds
   only the memory file and the skills dir; backpass measures the copy (`measureWorkspace`,
-  `anchoredHunks`) and the agent annotates the measured changes by id in a second turn of
-  the same session. The model never supplies `find` text - every hunk is cut from the raw
+  `anchoredHunks`) and the agent annotates the measured changes by id, initially in the
+  same session. The model never supplies `find` text - every hunk is cut from the raw
   file, widened until unique, so a hunk can only go stale by the file itself changing after
   the proposal, which apply refuses rather than part-applies. Never pass
   `approveAll` with the repo as `cwd`; the repo is fingerprinted and a harness that
