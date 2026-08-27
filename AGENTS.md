@@ -76,15 +76,14 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   the proposal, which apply refuses rather than part-applies. Never pass
   `approveAll` with the repo as `cwd`; the repo is fingerprinted and a harness that
   writes there fails the run loudly.
-- **An annotate turn has three outcomes, and conflating them is the 0.1.7 failure mode**
-  (`annotateLoop` in `src/synthesize.js`): the staging tree moved (re-measure and re-ask -
-  costs no `ANNOTATE_TURNS` attempt, bounded by `REMEASURE_TURNS`), the adapter returned
-  no text at all (retry once in a NEW session - the old context is the suspect), or the
-  answer was judged by the gates (the only outcome that spends an attempt and writes a
-  rejected `proposal.json`, stamped with `attempt`). `ProposalViolation` carries `reason`
-  and the `saved` proposal's own attempt/violations so a later empty turn is never reported
-  as that proposal's author. A new synthesis clears the prior proposal before its first
-  model call, so an empty-only failure cannot leave an older proposal applicable.
+- **Annotate-loop outcomes stay distinct** (`annotateLoop` in `src/synthesize.js`): a
+  moved staging tree is re-measured without spending an `ANNOTATE_TURNS` attempt (bounded
+  by `REMEASURE_TURNS`); no adapter text is retried once in a new session; and only a
+  non-empty answer spends an annotation attempt. Only a parseable, gate-rejected answer
+  writes `proposal.json`, stamped with `attempt`. `ProposalViolation` carries `reason` and
+  the `saved` proposal's own attempt/violations so a later empty turn is never reported as
+  that proposal's author. A new synthesis clears the prior proposal before its first model
+  call, so an empty-only failure cannot leave an older proposal applicable.
   `synthesisFailureHint` in `src/commands/propose.js` is
   where the advice for each terminal condition lives - never a blanket
   stronger-model/budget/max-edits line.

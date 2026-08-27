@@ -166,9 +166,9 @@ a sighting retires once the memory file gains an instruction that covers it, and
 sightings expire after `gapLedgerMaxAge` (default 90d). Until a gap corroborates it stays
 out of the proposal entirely.
 
-### 5. Gradient descent - one session, native edits
+### 5. Gradient descent - native edits
 
-A single high-reasoning session turns the aggregated gradients into concrete edits: ADD,
+A high-reasoning synthesis session turns the aggregated gradients into concrete edits: ADD,
 REMOVE, REWRITE, or EXTRACT→SKILL. The agent does not describe edits for backpass to
 splice in - it makes them, with its harness's own file tools, in a **staging copy** of the
 memory file under `.backpass/synthesis/` (the repo itself is read-only to it, for
@@ -195,10 +195,10 @@ accepted in halves - so when several sections leave together, their skills arriv
 extract with several skills, which is one honest accept/reject decision. Skills whose
 removals were measured separately stay separate decisions, and bundling them is refused.
 
-A violation triggers a re-prompt naming the exact breach (at most two). If those also
-fail, backpass **fails loudly** and saves the rejected proposal. It never silently
-truncates. A harness that writes past the staging copy into the repo is an error, never
-an apply.
+A malformed answer or gate violation triggers a re-prompt naming the exact breach (at
+most two). If those also fail, backpass **fails loudly** and preserves the latest parseable
+rejected proposal, if one was produced. It never silently truncates. A harness that writes
+past the staging copy into the repo is an error, never an apply.
 
 Not every annotate turn is an answer, and the three cases are kept apart because they call
 for different things:
@@ -208,8 +208,9 @@ for different things:
 - **the turn came back empty** - the harness returned success with no text at all. Nothing
   was said, so there is nothing to correct: the annotation is retried once in a **new**
   session, since the accumulated context of the old one is the likeliest cause.
-- **the answer was judged** - only this uses a re-prompt, and only this writes a rejected
-  proposal, stamped with the attempt that produced it.
+- **the turn returned text** - malformed JSON or a gate violation uses an annotation
+  attempt and can trigger a re-prompt. Only a parseable, gate-rejected answer writes a
+  rejected proposal, stamped with the attempt that produced it.
 
 When a run does fail, the advice it prints comes from the condition it ended on. Retry
 `backpass propose` to synthesize again from cached evidence, or rerun analysis first when
@@ -278,7 +279,8 @@ exact version of your memory file, so apply first checks the file still exists a
 that version. If it was removed or changed since - you pulled, edited it by hand, or another
 agent did - the edits no longer describe what is on disk, so nothing is written and you are
 told to run `backpass` again to re-propose against the current file. Within a run every file
-is composed from one version: it takes every accepted edit or none of them.
+is composed from one version: it takes every accepted edit or none of them. Apply also
+refuses the whole write if any created skill target already exists.
 
 Skills are written only after every edit has composed, and before the memory file, so a
 write failure cannot leave the memory file pointing at a missing skill. If one skill write

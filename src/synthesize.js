@@ -24,11 +24,11 @@ import { UserError, color, info, warn } from "./logger.js";
  *   annotate  backpass measures the copy against the original (`src/diff.js`) and shows
  *             the changes by id; the agent attaches kind, title, rationale, and evidence
  *
- * The annotation is what the mechanical gates validate (`buildProposal`); on a violation
- * the agent is re-prompted with the exact breaches, at most ANNOTATE_TURNS times in all,
- * then backpass fails loudly and saves the rejected proposal rather than quietly trimming
- * it (design section 6). The repo is fingerprinted before and checked after: a harness
- * that wrote past the staging copy is an error, never a silent apply.
+ * The annotation is what the mechanical gates validate (`buildProposal`); malformed or
+ * gated answers spend at most ANNOTATE_TURNS attempts and are re-prompted with the exact
+ * breaches. Backpass then fails loudly and preserves the latest parseable rejected proposal
+ * rather than quietly trimming it (design section 6). The repo is fingerprinted before and
+ * checked after: a harness that wrote past the staging copy is an error, never a silent apply.
  *
  * Three things an annotate turn can be are deliberately kept apart, because they call for
  * different responses and produce different advice at the end of a failed run:
@@ -41,8 +41,8 @@ import { UserError, color, info, warn } from "./logger.js";
  *                        spoke, so there is nothing to correct - the annotation is retried
  *                        once in a NEW session, since the accumulated context of the old
  *                        one is the likeliest reason it collapsed.
- *   the answer was judged the model spoke and the gates ruled. Only this consumes an
- *                        annotation attempt, and only this writes a rejected proposal.
+ *   the turn had text    a malformed or gated answer consumes an annotation attempt. Only
+ *                        a parseable, gate-rejected answer writes a rejected proposal.
  */
 
 /** Annotation attempts per run: the first answer plus re-prompts with the exact violations. */
@@ -155,9 +155,8 @@ function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts }) {
 
 /**
  * The header a fresh annotation session needs. An in-session annotate turn inherits the
- * repository, the budget, and the evidence from the editing turn that preceded it; a
- * session that never saw that turn - the retry after an empty reply - would otherwise
- * be asked to quote evidence it has never been shown.
+ * repository, the budget, and the evidence from its earlier turns; a session opened after
+ * an empty reply would otherwise be asked to quote evidence it has never been shown.
  */
 function prefaceFor({ memoryFile, summary, config, repo, workspaceRoot }) {
   return render(loadPrompt("annotate-preface"), {
@@ -485,4 +484,3 @@ export async function synthesizeProposal({ memoryFile, summary, config, repo, tr
     await holder.session.close();
   }
 }
-
