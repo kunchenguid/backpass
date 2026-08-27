@@ -233,6 +233,25 @@ test("an unchanged memory file applies every accepted edit and its skills", () =
   assert.equal(porcelain(dir).includes(".backpass"), false, "run state stays out of the working tree");
 });
 
+test("a symlinked memory file updates its target without replacing the link", () => {
+  const dir = initRepo();
+  const memory = path.join(dir, "AGENTS.md");
+  const target = path.join(dir, "MEMORY.md");
+  fs.renameSync(memory, target);
+  fs.symlinkSync("MEMORY.md", memory);
+  const proposal = proposeExtractions(dir);
+
+  const applied = runApply(
+    dir,
+    proposal.edits.map((e) => e.id),
+  );
+
+  assert.equal(applied.status, 0, `apply should succeed:\n${applied.output}`);
+  assert.equal(fs.lstatSync(memory).isSymbolicLink(), true);
+  assert.equal(fs.readlinkSync(memory), "MEMORY.md");
+  assert.match(fs.readFileSync(target, "utf8"), /- Load `ci-details` for this topic\./);
+});
+
 test("a concurrently created skill refuses the whole apply before any write", () => {
   const dir = initRepo();
   const proposal = proposeExtractions(dir);
@@ -331,6 +350,58 @@ test("a later file failure rolls back earlier files and leaves memory untouched"
     fs.readdirSync(dir).some((name) => name.includes(".backpass-")),
     false,
   );
+});
+
+test("rollback reports a conflict instead of overwriting a replaced file", () => {
+  const dir = initRepo();
+  const proposal = proposeExtractions(dir);
+  const existing = path.join(dir, "existing.md");
+  const alias = path.join(dir, "alias.md");
+  const lockedDir = path.join(dir, "locked");
+  fs.writeFileSync(existing, "before\n");
+  fs.symlinkSync("existing.md", alias);
+  fs.mkdirSync(lockedDir);
+  fs.writeFileSync(path.join(lockedDir, "existing.md"), "locked before\n");
+  proposal.edits.push(
+    {
+      id: "e3",
+      kind: "rewrite",
+      file: "existing.md",
+      find: "before\n",
+      replace: "first write\n",
+    },
+    {
+      id: "e4",
+      kind: "rewrite",
+      file: "alias.md",
+      find: "before\n",
+      replace: "replacement write\n",
+    },
+    {
+      id: "e5",
+      kind: "rewrite",
+      file: "locked/existing.md",
+      find: "locked before\n",
+      replace: "locked after\n",
+    },
+  );
+  fs.writeFileSync(path.join(dir, ".backpass/proposal.json"), JSON.stringify(proposal));
+  fs.chmodSync(lockedDir, 0o555);
+
+  let applied;
+  try {
+    applied = runApply(
+      dir,
+      proposal.edits.map((e) => e.id),
+    );
+  } finally {
+    fs.chmodSync(lockedDir, 0o755);
+  }
+
+  assert.equal(applied.status, 1, `apply should fail:\n${applied.output}`);
+  assert.match(applied.output, /existing\.md rollback conflict/);
+  assert.equal(fs.lstatSync(alias).isSymbolicLink(), true);
+  assert.equal(fs.readFileSync(existing, "utf8"), "before\n");
 });
 
 test("a memory write failure rolls back skills without truncating memory", () => {

@@ -107,19 +107,22 @@ function overBudgetWarning(relative, budget) {
 }
 
 function atomicReplace(absolute, text) {
-  const temp = path.join(path.dirname(absolute), `.${path.basename(absolute)}.backpass-${randomUUID()}`);
-  const mode = fs.statSync(absolute).mode & 0o7777;
+  const target = fs.realpathSync(absolute);
+  const temp = path.join(path.dirname(target), `.${path.basename(target)}.backpass-${randomUUID()}`);
+  const mode = fs.statSync(target).mode & 0o7777;
   let fd;
   let ownership;
   try {
     fd = fs.openSync(temp, "wx");
-    ownership = [{ absolute: temp, identity: { dev: fs.fstatSync(fd).dev, ino: fs.fstatSync(fd).ino } }];
+    const stat = fs.fstatSync(fd);
+    ownership = [{ absolute: temp, identity: { dev: stat.dev, ino: stat.ino } }];
     fs.fchmodSync(fd, mode);
     fs.writeFileSync(fd, text);
     fs.fsyncSync(fd);
     fs.closeSync(fd);
     fd = undefined;
-    fs.renameSync(temp, absolute);
+    fs.renameSync(temp, target);
+    return { absolute: target, identity: ownership[0].identity, text };
   } catch (err) {
     if (fd !== undefined) {
       try {
@@ -130,6 +133,17 @@ function atomicReplace(absolute, text) {
     }
     removeOwnedSkillPaths(ownership ?? []);
     throw err;
+  }
+}
+
+function commitStillCurrent(commit) {
+  let stat;
+  try {
+    stat = fs.lstatSync(commit.absolute);
+    if (stat.dev !== commit.identity.dev || stat.ino !== commit.identity.ino) return false;
+    return fs.readFileSync(commit.absolute, "utf8") === commit.text;
+  } catch {
+    return false;
   }
 }
 
@@ -321,16 +335,24 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     const { relative, absolute, before, text, applied } = item;
     const budget = relative === proposal.memoryFile.path ? budgetStatus(before, text, config.budgetTokens) : null;
 
+    let commit = null;
     try {
-      if (!dryRun) atomicReplace(absolute, text);
+      if (!dryRun) commit = atomicReplace(absolute, text);
     } catch (err) {
       results.failed.push({
         file: relative,
         error: `${relative} could not be written: ${err.message}`,
       });
       for (const written of [...committed].reverse()) {
+        if (!commitStillCurrent(written.commit)) {
+          results.failed.push({
+            file: written.relative,
+            error: `${written.relative} rollback conflict: the file changed after this apply wrote it; left untouched`,
+          });
+          continue;
+        }
         try {
-          atomicReplace(written.absolute, written.before);
+          atomicReplace(written.commit.absolute, written.before);
         } catch (rollbackError) {
           results.failed.push({
             file: written.relative,
@@ -342,7 +364,7 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
       rollbackSkills();
       return results;
     }
-    committed.push(item);
+    committed.push({ ...item, commit });
     results.written.push({ file: relative, edits: applied, budget, dryRun });
 
     // Shrinking over several runs is the design, so this is a heading, not a failure.
