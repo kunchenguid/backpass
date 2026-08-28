@@ -1361,3 +1361,49 @@ test("an extract cannot smuggle the adjacent deletion: its skills must carry eve
     violations.join("\n"),
   );
 });
+
+test("a mixed removal reaching EOF without a trailing newline stays one merged hunk", () => {
+  // The reachable layout from review: at the file's true tail, span's tail rule makes
+  // the final sub-hunk's leading newline the same character as its predecessor's
+  // trailing newline, so split decisions would compose in only one order. The split
+  // must fail soft to the merged hunk, where the extract gate still tells the truth.
+  const text = [
+    "# Memory",
+    "",
+    "## Doomed",
+    "",
+    "- Delete this instruction.",
+    "",
+    "## Carried",
+    "",
+    "- Keep this instruction in a skill.",
+  ].join("\n");
+  const skill = [
+    "---",
+    "name: carried",
+    "description: Carries the tail section.",
+    "---",
+    "",
+    "## Carried",
+    "",
+    "- Keep this instruction in a skill.",
+    "",
+  ].join("\n");
+  const staged = gate({
+    text,
+    edit: (root) => {
+      writeIn(root, "AGENTS.md", () => "# Memory\n");
+      writeIn(root, ".agents/skills/carried/SKILL.md", skill);
+    },
+    annotation: { edits: [claim(["H1", "H2"], { kind: "extract", title: "tail extraction" })] },
+    context: { summary: betaRows({ harmSessions: 0 }) },
+  });
+
+  const memoryHunks = staged.measured.changes.filter((change) => change.kind === "hunk");
+  assert.equal(memoryHunks.length, 1, "no split at the unanchorable tail seam");
+  assert.match(memoryHunks[0].find, /## Doomed[\s\S]*## Carried/);
+  assert.ok(
+    staged.violations.some((violation) => /do not carry/.test(violation)),
+    "the merged hunk still cannot smuggle the deletion through the extract gate",
+  );
+});

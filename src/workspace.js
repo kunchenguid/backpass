@@ -132,6 +132,16 @@ export function recoveredLineCounts(texts) {
  * widening it with context could overlap its sibling, so the merged hunk is kept instead).
  */
 export function splitRemovalHunk(hunk, { oldText, oldLines, recovered }) {
+  // A removal that reaches the file's true tail cannot be split into independent
+  // sub-hunks: `span`'s tail rule gives the final sub-hunk a LEADING newline, and that
+  // is the same character its predecessor owns as its trailing newline. Applying one
+  // decision then consumes the separator the other one's `find` needs, so the pair
+  // composes in only one order - which breaks the any-subset-any-order contract the
+  // writer relies on. No non-overlapping anchoring exists at that seam; keep the
+  // merged hunk instead (a file ending in "\n" is unaffected: its final split("\n")
+  // element is the empty string, which no text removal reaches).
+  if (hunk.oldEnd === oldLines.length) return null;
+
   const lineKinds = new Map();
   for (let lineNo = hunk.oldStart; lineNo <= hunk.oldEnd; lineNo += 1) {
     const normalized = normalizeRecoveryLine(oldLines[lineNo - 1]);
