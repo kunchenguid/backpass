@@ -158,5 +158,6 @@ test("growing the corpus past the cap keeps most of the prior sample cached, not
     second.summary.cached >= 100 - 20,
     `expected at least 80 cached out of the prior 100, got ${second.summary.cached}`,
   );
+  assert.ok(second.summary.analyzed > 0, "at least one newly discovered session won a slot");
   assert.equal(second.summary.cached + second.summary.analyzed, 100);
 });

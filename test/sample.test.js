@@ -149,6 +149,7 @@ test("growing the corpus is sticky: previously sampled transcripts stay sampled 
   // new items displace old ones, never the reverse, so the intersection is bounded below
   // by count - inserted.
   const inserted = transcripts(20, 200, { offset: 1000 });
+  const insertedIds = new Set(inserted.map((t) => t.id));
   const grown = [...base.slice(0, 60), ...inserted, ...base.slice(60)];
   assert.equal(grown.length, 167);
 
@@ -162,8 +163,8 @@ test("growing the corpus is sticky: previously sampled transcripts stay sampled 
   );
 
   // Not a fluke of an unusually small displacement: some genuine competition happened.
-  const newlyKept = after.filter((t) => t.id.startsWith("t1")).length;
-  assert.ok(newlyKept > 0, "at least one new transcript should have won a slot");
+  const newlyKept = after.filter((t) => insertedIds.has(t.id)).length;
+  assert.ok(newlyKept > 0, "at least one inserted transcript should have won a slot");
 });
 
 test("raising the cap only adds to the sample; it never drops what a smaller cap already kept", () => {
