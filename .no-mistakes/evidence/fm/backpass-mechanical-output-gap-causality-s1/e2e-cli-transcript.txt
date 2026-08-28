@@ -1,0 +1,65 @@
+$ backpass propose --synthesis-agent claude --synthesis-model fake-model
+exit: 0
+proposal · backpass-cli-YIh2nQ · AGENTS.md · 1 edit(s) from 3 session(s)
+  budget [................................] 25 -> 28 / 5,000 tok
+  evidence: 0 positive · 3 negative · 0 gap clusters
+
+  e1 EXTRACT  Extract release checklist (+3 tok, 3 transcript(s))
+
+  tier-2 tokens: input=1,500 output=50 total=1,550
+
+Review and apply with `backpass apply` (nothing has been written).
+· synthesizing with claude (fake-model) effort=high
+
+proposal decisions:
+[
+  {
+    "id": "e1",
+    "kind": "extract",
+    "title": "Extract release checklist",
+    "skills": [
+      ".agents/skills/release/SKILL.md"
+    ]
+  }
+]
+
+evidence delivered to synthesis agent:
+- [AG-001] +0 -3 harm-sessions=3 sessions=3 relevance=100.0% cost=7tok
+    - [harm] "session 1 re-derived the release steps by hand" :: following the stale steps wasted a turn (claude · claude:s · unknown date)
+    - [harm] "session 2 re-derived the release steps by hand" :: following the stale steps wasted a turn (claude · claude:s · unknown date)
+    - [harm] "session 3 re-derived the release steps by hand" :: following the stale steps wasted a turn (claude · claude:s · unknown date)
+
+$ backpass apply --no-open  # reviewer accepts e1
+exit: 0
+1 accepted · 0 rejected
+  wrote AGENTS.md (e1)
+    budget [................................] 25 -> 28 / 5,000 tok
+  wrote .agents/skills/release/SKILL.md (new skill)
+    created .agents/skills
+    created .claude/skills -> ../.agents/skills
+· review surface: http://127.0.0.1:4387/session/51233fdaf6389690
+waiting for your decisions in the browser (Ctrl-C to abort; nothing is written until you send)
+
+final AGENTS.md:
+# Demo memory
+
+## Release checklist
+
+- See .agents/skills/release/SKILL.md.
+
+## Style
+
+- Keep output concise.
+
+created skill:
+---
+name: release
+description: Load before release work.
+user-invocable: false
+metadata:
+  internal: true
+---
+
+## Release checklist
+
+- Tag the release commit.
