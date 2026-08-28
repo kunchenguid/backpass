@@ -649,17 +649,17 @@ test("antigravity adapter merges repeated history entries preserving earliest ti
   fs.copyFileSync(path.join(FIXTURES, "antigravity-session.jsonl"), path.join(brainDir, "transcript.jsonl"));
 
   const historyFile = path.join(fakeRoot, "history.jsonl");
-  // Turn 1: has earliest timestamp, but workspace is empty/null
+  // Turn 1: has earliest timestamp and initial workspace
   fs.appendFileSync(
     historyFile,
     JSON.stringify({
       display: "prompt 1",
       timestamp: 1_700_000_000_000,
-      workspace: null,
+      workspace: "/repo/initial",
       conversationId: "conv-multi",
     }) + "\n",
   );
-  // Turn 2: supplies workspace, later timestamp
+  // Turn 2: updates workspace to /repo/multi with later timestamp
   fs.appendFileSync(
     historyFile,
     JSON.stringify({
@@ -669,7 +669,7 @@ test("antigravity adapter merges repeated history entries preserving earliest ti
       conversationId: "conv-multi",
     }) + "\n",
   );
-  // Turn 3: omits workspace again
+  // Turn 3: omits workspace
   fs.appendFileSync(
     historyFile,
     JSON.stringify({

@@ -36,7 +36,7 @@ function loadHistoryMap(historyFile) {
   for (const entry of entries) {
     if (!entry || !entry.conversationId) continue;
     const existing = map.get(entry.conversationId);
-    const workspace = existing?.workspace || entry.workspace || null;
+    const workspace = entry.workspace || existing?.workspace || null;
     const entryTs =
       typeof entry.timestamp === "number" ? entry.timestamp : entry.timestamp ? Date.parse(entry.timestamp) : null;
     const timestamp = existing?.timestamp ?? entryTs;
