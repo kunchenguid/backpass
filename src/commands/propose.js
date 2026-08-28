@@ -56,6 +56,12 @@ export async function foldForRun(ctx, memoryFile, memoryHash) {
   return summary;
 }
 
+export function accountForConsolidationUsage(proposal, summary) {
+  if (summary.consolidation?.usage) {
+    proposal.usage = [summary.consolidation.usage, ...(proposal.usage || [])];
+  }
+}
+
 export async function runProposal(ctx, precomputed = null) {
   const { repo, config } = ctx;
   // Starting a new proposal run invalidates the previous result immediately. Discovery,
@@ -91,9 +97,7 @@ export async function runProposal(ctx, precomputed = null) {
     transcripts,
   });
 
-  // The consolidation call is part of this proposal's cost; account for it with the
-  // synthesis turns rather than letting it vanish.
-  if (summary.consolidation?.usage) proposal.usage = [summary.consolidation.usage, ...(proposal.usage || [])];
+  accountForConsolidationUsage(proposal, summary);
   config.state.writeProposal(proposal);
   return { proposal, summary, memoryFile: file };
 }

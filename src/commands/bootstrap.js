@@ -8,7 +8,7 @@ import { ProposalViolation } from "../proposal.js";
 import { synthesizeProposal } from "../synthesize.js";
 import { budgetBar, formatTokens } from "../tokens.js";
 import { discoverForRun } from "./scan.js";
-import { foldForRun, printProposal } from "./propose.js";
+import { accountForConsolidationUsage, foldForRun, printProposal } from "./propose.js";
 
 /**
  * Bootstrap: the default run when the repo has no memory file at all.
@@ -41,6 +41,7 @@ export async function bootstrapRun(ctx, deps = {}) {
   const discover = deps.discover || discoverForRun;
   const analyze = deps.analyze || analyzeTranscripts;
   const synthesize = deps.synthesize || synthesizeProposal;
+  const fold = deps.fold || foldForRun;
   const { canonical, pointer } = bootstrapTargets(config.memoryFiles);
 
   const { transcripts, perHarness } = await discover(ctx);
@@ -101,7 +102,7 @@ export async function bootstrapRun(ctx, deps = {}) {
       `${result.summary.skipped} too short · ${result.summary.failed} failed`,
   );
 
-  const folded = await foldForRun(ctx, memoryFile, memoryHash);
+  const folded = await fold(ctx, memoryFile, memoryHash);
   config.state.writeSummary(folded);
   emitProgress("fold:done", {
     instructions: folded.instructions.length,
@@ -121,6 +122,7 @@ export async function bootstrapRun(ctx, deps = {}) {
       transcripts,
       runNote: BOOTSTRAP_RUN_NOTE,
     });
+    accountForConsolidationUsage(proposal, folded);
     const decisions = Object.fromEntries(proposal.edits.map((e) => [e.id, "accepted"]));
     const applied = applyDecisions({ proposal, decisions, repo, state: config.state, config });
     proposal.appliedAt = new Date().toISOString();

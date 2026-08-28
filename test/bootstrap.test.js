@@ -7,6 +7,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { bootstrapRun } from "../src/commands/bootstrap.js";
+import { foldForRun } from "../src/commands/propose.js";
 import { renderPointer, renderStarterMemory } from "../src/bootstrap.js";
 import { loadConfig } from "../src/config.js";
 import { UserError, setLoggerSink } from "../src/logger.js";
@@ -180,14 +181,21 @@ test("with transcripts: analysis gaps become the first evidence-backed instructi
   const repo = makeRepo();
   const ctx = makeCtx(repo);
   const captured = { config: ctx.config, repo };
+  const consolidationUsage = { agent: "claude", usage: { input: 200, output: 10, total: 210 } };
+  const fold = async (...args) => {
+    const summary = await foldForRun(...args);
+    summary.consolidation = { merged: 1, usage: consolidationUsage };
+    return summary;
+  };
   const { result, lines } = await withSink(() =>
-    bootstrapRun(ctx, { discover: discoverTwo, analyze: fakeAnalyze, synthesize: fakeSynthesize(captured) }),
+    bootstrapRun(ctx, { discover: discoverTwo, analyze: fakeAnalyze, fold, synthesize: fakeSynthesize(captured) }),
   );
 
   assert.ok(lines.some((l) => /bootstrapping AGENTS\.md from 2 transcript\(s\) \+ defaults/.test(l)));
   assert.match(captured.runNote, /seeded from generic defaults/);
   assert.equal(captured.gapClusters, 1, "the two sessions' gaps folded into one cluster");
   assert.equal(result.seededFrom, "transcripts + defaults");
+  assert.deepEqual(result.proposal.usage, [consolidationUsage]);
   assert.deepEqual(
     result.applied.written.map((w) => w.file),
     ["AGENTS.md"],
