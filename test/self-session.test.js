@@ -18,6 +18,7 @@ const { discoverTranscripts } = await import("../src/discovery/index.js");
 const { renderPrompt, SELF_SESSION_SENTINEL } = await import("../src/prompts.js");
 const { isSelfSession } = await import("../src/discovery/self.js");
 const { loadConfig } = await import("../src/config.js");
+const { transcriptIdentity } = await import("../src/transcript.js");
 
 const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-self-repo-"));
 const realRoot = fs.realpathSync(repoRoot);
@@ -164,7 +165,11 @@ test("discovery excludes backpass-originated sessions from every acpx-backed har
   assert.equal(perHarness.pi.matched, 2);
   assert.equal(perHarness.codex.matched, 1);
   assert.equal(perHarness.claude.matched, 1);
-  for (const t of transcripts) assert.equal(t.association.tier, 1);
+  for (const t of transcripts) {
+    assert.equal(t.association.tier, 1);
+    assert.equal(t.identity, transcriptIdentity(t));
+  }
+  assert.equal(new Set(transcripts.map((t) => t.identity)).size, transcripts.length);
 });
 
 test("the exclusion survives the scan cache (a cached descriptor is still checked)", async () => {

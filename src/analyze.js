@@ -9,6 +9,7 @@ import { renderPrompt } from "./prompts.js";
 import { evidenceKey, isEvidenceFresh, safeFileName } from "./state.js";
 import { emitProgress } from "./progress.js";
 import { UserError, color, info, warn } from "./logger.js";
+import { transcriptIdentity } from "./transcript.js";
 
 /**
  * Stage 1 of the pipeline (design section 3): one cheap model call per transcript,
@@ -80,7 +81,7 @@ export function transcriptLabel(transcript) {
 }
 
 function promptPathFor(state, transcript) {
-  return path.join(state.applyDir, "..", "prompts", `${safeFileName(transcript.id)}.md`);
+  return path.join(state.applyDir, "..", "prompts", `${safeFileName(transcriptIdentity(transcript))}.md`);
 }
 
 async function analyzeOne({ transcript, memoryFile, config, repo, slot = 0 }) {
@@ -197,7 +198,7 @@ export async function analyzeTranscripts({ transcripts, memoryFile, config, repo
   const priorHashes = new Set();
 
   for (const transcript of transcripts) {
-    const existing = state.readEvidence(transcript.id);
+    const existing = state.readEvidence(transcript);
     if (!force && isEvidenceFresh(existing, transcript, memoryHash)) {
       summary.cached += 1;
       continue;
@@ -248,6 +249,7 @@ export async function analyzeTranscripts({ transcripts, memoryFile, config, repo
       transcript: {
         harness: transcript.harness,
         id: transcript.id,
+        identity: transcriptIdentity(transcript),
         path: transcript.path,
         mtimeMs: transcript.mtimeMs,
         bytes: transcript.bytes,
@@ -272,11 +274,11 @@ export async function analyzeTranscripts({ transcripts, memoryFile, config, repo
       const result = await analyzeOne({ transcript, memoryFile, config, repo, slot });
       if (result.status === "skipped") {
         summary.skipped += 1;
-        state.writeEvidence(transcript.id, { ...base, status: "skipped", reason: result.reason });
+        state.writeEvidence(transcript, { ...base, status: "skipped", reason: result.reason });
       } else {
         summary.analyzed += 1;
         summary.usage.push(result.usage);
-        state.writeEvidence(transcript.id, {
+        state.writeEvidence(transcript, {
           ...base,
           status: "ok",
           stats: result.distilled.stats,
@@ -292,7 +294,7 @@ export async function analyzeTranscripts({ transcripts, memoryFile, config, repo
       // Per-transcript fail-soft: recorded, listed by `backpass status`, retried next run.
       summary.failed += 1;
       warn(`${transcript.harness} ${transcriptLabel(transcript)}: ${err.message}`);
-      state.writeEvidence(transcript.id, { ...base, status: "failed", error: err.message });
+      state.writeEvidence(transcript, { ...base, status: "failed", error: err.message });
     } finally {
       done += 1;
       emitProgress("analyze:tick", {

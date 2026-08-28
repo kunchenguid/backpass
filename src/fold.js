@@ -55,7 +55,7 @@ export function foldEvidence(evidenceRecords, { minGapEvidence = 2, memoryFile =
       for (const item of record[polarity] || []) {
         const entry = touch(item.instruction);
         entry[polarity] += 1;
-        entry.sessions.add(record.transcript.id);
+        entry.sessions.add(record.transcript.identity || record.transcript.id);
         entry.quotes.push({ polarity, text: item.quote, effect: item.effect, moment: item.moment, source });
         if (polarity === "positive") positiveCount += 1;
         else negativeCount += 1;
@@ -69,7 +69,7 @@ export function foldEvidence(evidenceRecords, { minGapEvidence = 2, memoryFile =
         quote: gap.quote,
         recurrenceRisk: gap.recurrenceRisk,
         source,
-        sessionId: record.transcript.id,
+        sessionId: record.transcript.identity || record.transcript.id,
       });
     }
   }

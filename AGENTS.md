@@ -44,8 +44,8 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   fail-soft: an unreadable store warns and is skipped, never throws.
 - **`src/sample.js` sampling is deterministic and sticky, never seeded from `Math.random()`.**
   Past `maxTranscripts`, each transcript's draw (`sampleUnit`) is a keyed hash of its own
-  durable identity (`sampleIdentity`: `harness` + discovery `id`, never array position or
-  title) and `config.seed` - never a shared PRNG stream stepped once per transcript. That
+  canonical identity (`transcriptIdentity`: harness + native id + durable source, never
+  array position or title) and `config.seed` - never a shared PRNG stream stepped once per transcript. That
   makes an unchanged rerun select the identical sample (proven by cache-reuse in
   `test/sample-reuse.test.js`, not by reading source) and keeps a transcript's slot stable
   as the corpus grows: a top-`count` selection by fixed per-transcript key is a pure

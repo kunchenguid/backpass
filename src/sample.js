@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 
 import { parseMaxTranscripts, parseSince } from "./config.js";
 import { color, info } from "./logger.js";
+import { transcriptIdentity } from "./transcript.js";
 
 /**
  * Recency-weighted capping of the discovered transcript set.
@@ -24,8 +25,8 @@ import { color, info } from "./logger.js";
  * (and, with `config.seed` defaulting to null, the CLI reseeded from `Math.random()` on
  * every invocation, so even an unchanged rerun drew a different sample - see the
  * `sample-reuse` regression tests). Instead each transcript's `u` is `sampleUnit`, a
- * keyed hash of that transcript's own durable identity (`harness` + discovery `id`,
- * never its array position) plus the configured seed. That makes sampling: (1)
+ * keyed hash of that transcript's canonical discovery identity, never its array
+ * position, plus the configured seed. That makes sampling: (1)
  * deterministic and sticky by default, with no persisted state - the same corpus and
  * config always draw the same `u` per transcript; (2) stable under growth - a transcript
  * already in the corpus keeps the exact same `u` (and so the same key, modulo its own
@@ -40,30 +41,16 @@ import { color, info } from "./logger.js";
 export const DEFAULT_SAMPLE_HALF_LIFE = "14d";
 
 /**
- * A transcript's durable sampling identity. `harness` + discovery `id` is assigned once
- * from the transcript's own content (a session id, a DB row's primary key, or - only as
- * a last resort - its file's own basename) and never from where it lands in the
- * discovered array, so this identity outlives insertions, deletions, and reorderings of
- * the rest of the corpus. `path` is a defensive fallback for records missing `id`
- * entirely; title is deliberately excluded - duplicate-looking titles must not collide.
- */
-export function sampleIdentity(transcript) {
-  return `${transcript.harness ?? ""} ${transcript.id ?? transcript.path ?? ""}`;
-}
-
-/**
  * Deterministic draw in [0, 1) for one transcript: a SHA-256 of its durable identity
  * keyed by `seed` (or a fixed default when unseeded), so it depends only on that
  * transcript and the configured seed - never on discovery order, the cap, or which other
- * transcripts are present. Two transcripts that ever legitimately share an identity
- * (a bug elsewhere, since `harness` + `id` is meant to be unique) draw the same `u` and
- * therefore the same key; the sort below then falls back to comparing identities so the
- * outcome is still fully deterministic rather than depending on array position.
+ * transcripts are present. Discovery removes duplicate canonical identities, while
+ * distinct identities that happen to draw equal keys are ordered by identity.
  */
 export function sampleUnit(transcript, seed) {
   const digest = crypto
     .createHash("sha256")
-    .update(`${seed ?? "default"} ${sampleIdentity(transcript)}`, "utf8")
+    .update(`${seed ?? "default"} ${transcriptIdentity(transcript)}`, "utf8")
     .digest();
   return digest.readUInt32BE(0) / 0x100000000;
 }
@@ -104,7 +91,7 @@ export function sampleTranscripts(
     const u = sampleUnit(transcript, seed) || Number.EPSILON;
     return {
       index,
-      identity: sampleIdentity(transcript),
+      identity: transcriptIdentity(transcript),
       key: -Math.log(u) / recencyWeight(transcript, { now, halfLifeMs }),
     };
   });

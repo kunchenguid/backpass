@@ -86,7 +86,8 @@ export function recordGapObservations(ledger, evidenceRecords, { now = new Date(
   for (const record of evidenceRecords) {
     if (!record || record.status !== "ok" || !record.memoryPath) continue;
     const transcript = record.transcript || {};
-    if (!transcript.id) continue;
+    const sessionIdentity = transcript.identity || transcript.id;
+    if (!sessionIdentity) continue;
     for (const gap of record.gaps || []) {
       if (!gap || !gap.proposedInstruction) continue;
       let entry = findGapEntry(ledger, record.memoryPath, gap.proposedInstruction);
@@ -102,8 +103,8 @@ export function recordGapObservations(ledger, evidenceRecords, { now = new Date(
         // Keep the shortest phrasing: it generalizes best (same rule as the in-run fold).
         entry.proposedInstruction = gap.proposedInstruction;
       }
-      const prior = entry.sessions[transcript.id];
-      entry.sessions[transcript.id] = {
+      const prior = entry.sessions[sessionIdentity];
+      entry.sessions[sessionIdentity] = {
         firstObservedAt: prior?.firstObservedAt || observedAt,
         observedAt,
         sessionStartedAt: transcript.startedAt ?? prior?.sessionStartedAt ?? null,

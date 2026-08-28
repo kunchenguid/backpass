@@ -12,6 +12,7 @@ import { isSelfSession } from "./self.js";
 import { sinceCutoff } from "../config.js";
 import { emitProgress } from "../progress.js";
 import { warn } from "../logger.js";
+import { transcriptIdentity } from "../transcript.js";
 
 export const ADAPTERS = {
   claude,
@@ -52,6 +53,7 @@ export async function discoverTranscripts({ repo, config, strict = false, harnes
   const cache = config.state.readScanCache();
 
   const transcripts = [];
+  const identities = new Set();
   const perHarness = {};
   let cacheDirty = false;
 
@@ -82,15 +84,20 @@ export async function discoverTranscripts({ repo, config, strict = false, harnes
               cacheDirty = true;
             },
           });
-      transcripts.push(...found);
-      stats.matched = found.length;
+      const unique = found.filter((transcript) => {
+        if (identities.has(transcript.identity)) return false;
+        identities.add(transcript.identity);
+        return true;
+      });
+      transcripts.push(...unique);
+      stats.matched = unique.length;
       emitProgress("discover:harness:done", {
         harness,
         scanned: stats.scanned,
         cached: stats.cached,
         matched: stats.matched,
         self: stats.self,
-        tiers: tierCounts(found),
+        tiers: tierCounts(unique),
       });
     } catch (err) {
       stats.error = err.message;
@@ -197,7 +204,7 @@ function discoverFiles(adapter, { repo, config, cutoffMs, strict, stats, cache, 
 }
 
 function toTranscript(adapter, row, association, id) {
-  return {
+  const transcript = {
     harness: adapter.name,
     id: `${adapter.name}-${id}`,
     nativeId: id,
@@ -213,6 +220,8 @@ function toTranscript(adapter, row, association, id) {
     association,
     extra: row.extra || {},
   };
+  transcript.identity = transcriptIdentity(transcript);
+  return transcript;
 }
 
 /** Read one transcript through its adapter and normalize it to distiller events. */

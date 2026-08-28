@@ -4,8 +4,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { capTranscripts, recencyWeight, sampleIdentity, sampleTranscripts, sampleUnit } from "../src/sample.js";
+import { capTranscripts, recencyWeight, sampleTranscripts, sampleUnit } from "../src/sample.js";
 import { CONFIG_FILENAME, loadConfig, parseMaxTranscripts } from "../src/config.js";
+import { transcriptIdentity } from "../src/transcript.js";
 import { UserError, setLoggerSink } from "../src/logger.js";
 
 const DAY = 86_400_000;
@@ -61,25 +62,20 @@ test("sampleUnit is deterministic per transcript identity, uniform, and seed-sen
   assert.equal(new Set(seq).size, seq.length, "distinct identities draw distinct values in practice");
 });
 
-test("sampleIdentity is durable: harness + id, unaffected by title, path fallback only when id is missing", () => {
-  assert.equal(
-    sampleIdentity({ harness: "claude", id: "s1", title: "Fix the bug" }),
-    sampleIdentity({
-      harness: "claude",
-      id: "s1",
-      title: "Totally different title",
-    }),
+test("transcript identity combines harness, native id, and durable source without using titles", () => {
+  const original = { harness: "claude", nativeId: "s1", path: "/store/a.jsonl", title: "Fix the bug" };
+  assert.equal(transcriptIdentity(original), transcriptIdentity({ ...original, title: "Totally different title" }));
+  assert.notEqual(
+    transcriptIdentity(original),
+    transcriptIdentity({ ...original, harness: "codex" }),
+    "the same native id under a different harness is a different identity",
   );
   assert.notEqual(
-    sampleIdentity({ harness: "claude", id: "s1" }),
-    sampleIdentity({ harness: "codex", id: "s1" }),
-    "the same id under a different harness is a different identity",
+    transcriptIdentity(original),
+    transcriptIdentity({ ...original, path: "/store/b.jsonl" }),
+    "colliding native ids at different sources remain distinct",
   );
-  assert.equal(
-    sampleIdentity({ harness: "claude", id: undefined, path: "/x/y.jsonl" }),
-    sampleIdentity({ harness: "claude", path: "/x/y.jsonl" }),
-    "path is the fallback identity when id is absent",
-  );
+  assert.equal(transcriptIdentity(original), transcriptIdentity({ ...original, identity: transcriptIdentity(original) }));
 });
 
 test("weight halves every half-life and never reaches zero", () => {
@@ -200,21 +196,19 @@ test("every supported harness's id namespace is sampled independently, never ded
   assert.equal(new Set(kept.map((t) => t.harness)).size, kept.length);
 });
 
-test("two transcripts that legitimately share an identity tie deterministically instead of depending on array position", () => {
-  // Undated so their weight (1e-9, the floor) is far below the dated `distinct` set's,
-  // guaranteeing their keys are the two largest and one of them is exactly what the cap
-  // forces out - this isolates the tie-break itself from the recency weighting.
+test("colliding native ids select the same source regardless of discovery order", () => {
   const distinct = transcripts(8, 60);
-  const dupA = { harness: "claude", id: "dup" };
-  const dupB = { harness: "claude", id: "dup" };
-  const set = [...distinct, dupA, dupB];
-  const a = sampleTranscripts(set, 9, { now: NOW });
-  const b = sampleTranscripts(set, 9, { now: NOW });
-  assert.deepEqual(a, b, "the tie resolves the same way every time");
-  assert.ok(
-    a.includes(dupA) !== a.includes(dupB),
-    "exactly one of the colliding pair is kept when the cap forces a choice",
-  );
+  const dupA = { harness: "claude", nativeId: "dup", id: "claude-dup", path: "/store/a.jsonl" };
+  const dupB = { harness: "claude", nativeId: "dup", id: "claude-dup", path: "/store/b.jsonl" };
+  const selectedCollision = (set) =>
+    sampleTranscripts(set, 9, { now: NOW })
+      .filter((transcript) => transcript.nativeId === "dup")
+      .map((transcript) => transcriptIdentity(transcript));
+
+  const forward = selectedCollision([...distinct, dupA, dupB]);
+  const reversed = selectedCollision([dupB, dupA, ...distinct]);
+  assert.equal(forward.length, 1, "the cap forces exactly one colliding native id out");
+  assert.deepEqual(reversed, forward, "reordering cannot change which durable source survives");
 });
 
 test("recent transcripts are favored over old ones", () => {

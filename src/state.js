@@ -5,6 +5,7 @@ import crypto from "node:crypto";
 import { STATE_DIRNAME } from "./config.js";
 import { warn } from "./logger.js";
 import { ensureLocalExclude } from "./repo.js";
+import { transcriptIdentity } from "./transcript.js";
 
 /** The line every command writes to the repo's local git exclude for the state dir. */
 export const STATE_EXCLUDE_LINE = `${STATE_DIRNAME}/`;
@@ -16,7 +17,7 @@ export const STATE_EXCLUDE_LINE = `${STATE_DIRNAME}/`;
  * the tracked `.gitignore`:
  *
  *   scan-cache.json        path+mtime+size -> association verdict (design section 2.2)
- *   evidence/<id>.json     per-transcript tier-1 analysis output (design section 3)
+ *   evidence/<identity>.json per-transcript tier-1 analysis output (design section 3)
  *   evidence-summary.json  folded evidence (stage 2)
  *   proposal.json          latest parseable tier-2 synthesis; absent if none was produced (stage 3)
  *   rejections.json        edits the human rejected, and the evidence weight behind them
@@ -76,16 +77,34 @@ export class State {
     this.writeJsonFile(this.scanCachePath, cache);
   }
 
-  evidencePath(transcriptId) {
-    return path.join(this.evidenceDir, `${safeFileName(transcriptId)}.json`);
+  evidencePath(transcript) {
+    const identity = transcript && typeof transcript === "object" ? transcriptIdentity(transcript) : transcript;
+    return path.join(this.evidenceDir, `${safeFileName(identity)}.json`);
   }
 
-  readEvidence(transcriptId) {
-    return this.readJsonFile(this.evidencePath(transcriptId), null);
+  readEvidence(transcript) {
+    const currentPath = this.evidencePath(transcript);
+    const current = this.readJsonFile(currentPath, null);
+    if (current || !transcript || typeof transcript !== "object") return current;
+
+    const legacyPath = this.evidencePath(transcript.id);
+    if (legacyPath === currentPath) return null;
+    const legacy = this.readJsonFile(legacyPath, null);
+    if (!legacy?.transcript || transcriptIdentity(legacy.transcript) !== transcriptIdentity(transcript)) return null;
+
+    const legacyKey = `${transcript.mtimeMs}:${transcript.bytes}:${legacy.memoryHash}`;
+    const migrated = {
+      ...legacy,
+      transcript: { ...legacy.transcript, identity: transcriptIdentity(transcript) },
+      key: legacy.key === legacyKey ? evidenceKey(transcript, legacy.memoryHash) : legacy.key,
+    };
+    this.writeJsonFile(currentPath, migrated);
+    fs.rmSync(legacyPath, { force: true });
+    return migrated;
   }
 
-  writeEvidence(transcriptId, evidence) {
-    this.writeJsonFile(this.evidencePath(transcriptId), evidence);
+  writeEvidence(transcript, evidence) {
+    this.writeJsonFile(this.evidencePath(transcript), evidence);
   }
 
   listEvidence() {
@@ -163,7 +182,7 @@ export function sha256(text) {
  * the memory-file hash it was judged against. Either changing invalidates the evidence.
  */
 export function evidenceKey(transcript, memoryHash) {
-  return `${transcript.mtimeMs}:${transcript.bytes}:${memoryHash}`;
+  return `${transcriptIdentity(transcript)}:${transcript.mtimeMs}:${transcript.bytes}:${memoryHash}`;
 }
 
 /**

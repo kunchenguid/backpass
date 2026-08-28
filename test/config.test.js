@@ -121,9 +121,25 @@ test("state round-trips through disk and survives a corrupt file", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-state-"));
   const state = new State(dir).ensure();
 
-  state.writeEvidence("claude-abc", { status: "ok", key: "k" });
-  assert.equal(state.readEvidence("claude-abc").key, "k");
-  assert.equal(state.listEvidence().length, 1);
+  const sourceA = { harness: "claude", nativeId: "abc", id: "claude-abc", path: "/store/a.jsonl" };
+  const sourceB = { harness: "claude", nativeId: "abc", id: "claude-abc", path: "/store/b.jsonl" };
+  state.writeEvidence(sourceA, { status: "ok", key: "a" });
+  state.writeEvidence(sourceB, { status: "ok", key: "b" });
+  assert.equal(state.readEvidence(sourceA).key, "a");
+  assert.equal(state.readEvidence(sourceB).key, "b");
+  assert.notEqual(state.evidencePath(sourceA), state.evidencePath(sourceB));
+
+  const legacy = { harness: "pi", id: "pi-old", path: "/store/old.jsonl", mtimeMs: 11, bytes: 22 };
+  state.writeEvidence(legacy.id, {
+    status: "ok",
+    transcript: legacy,
+    memoryHash: "sha256:old",
+    key: "11:22:sha256:old",
+  });
+  const migrated = state.readEvidence({ ...legacy, nativeId: "old" });
+  assert.equal(migrated.key, evidenceKey({ ...legacy, nativeId: "old" }, "sha256:old"));
+  assert.equal(fs.existsSync(state.evidencePath(legacy.id)), false);
+  assert.equal(state.listEvidence().length, 3);
 
   state.writeScanCache({ version: 1, entries: { a: { mtimeMs: 1, bytes: 2, descriptor: null } } });
   assert.equal(Object.keys(state.readScanCache().entries).length, 1);
