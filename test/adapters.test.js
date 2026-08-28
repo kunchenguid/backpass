@@ -12,6 +12,7 @@ import * as pi from "../src/discovery/adapters/pi.js";
 import * as grok from "../src/discovery/adapters/grok.js";
 import * as cursorCli from "../src/discovery/adapters/cursor-cli.js";
 import * as hermes from "../src/discovery/adapters/hermes.js";
+import * as antigravity from "../src/discovery/adapters/antigravity.js";
 import { statOrNull } from "../src/discovery/adapters/shared.js";
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
@@ -547,5 +548,158 @@ test("hermes adapter recovers v26 cli cwd from sessions.cwd when system_prompt i
     assert.equal(toolCall.name, "terminal");
     assert.equal(toolCall.input.command, "pwd");
     assert.equal(toolCall.result, "/repo/demo");
+  });
+});
+
+test("antigravity adapter classifies a session from transcript header or extra metadata", () => {
+  const file = path.join(FIXTURES, "antigravity-session.jsonl");
+  const candidate = candidateFor(file);
+  const descriptor = antigravity.classify(candidate);
+
+  assert.equal(descriptor.id, "a3dec7b4-9b79-4bc1-acb9-2c300095fa00");
+  assert.equal(descriptor.cwd, "/repo/demo");
+  assert.equal(descriptor.gitBranch, null);
+  assert.deepEqual(descriptor.remotes, []);
+  assert.equal(descriptor.startedAt, Date.parse("2026-08-01T10:00:00.000Z"));
+  assert.equal(descriptor.model, "gemini-3.7-flash");
+});
+
+test("antigravity adapter reads user/assistant turns, folds tool results, drops system/checkpoint turns", () => {
+  const file = path.join(FIXTURES, "antigravity-session.jsonl");
+  const { events, model } = antigravity.read({ path: file });
+
+  assert.equal(model, "gemini-3.7-flash");
+  assert.deepEqual(
+    messages(events).map((m) => `${m.role}: ${m.text}`),
+    ["user: Open a PR for the parser fix.", "assistant: I'll run the tests first.", "assistant: Opened PR #2731."],
+  );
+
+  const [toolCall] = tools(events);
+  assert.equal(toolCall.name, "run_command");
+  assert.deepEqual(toolCall.input, { CommandLine: "npm test" });
+  assert.equal(toolCall.result, "2 passing");
+  assert.equal(toolCall.status, "completed");
+
+  assert.ok(!JSON.stringify(events).includes("history metadata"), "history metadata must be dropped");
+  assert.ok(!JSON.stringify(events).includes("checkpoint metadata"), "checkpoint metadata must be dropped");
+  assert.ok(!JSON.stringify(events).includes("Running tests before PR"), "thinking must be dropped");
+});
+
+function withAntigravityHome(dir, fn) {
+  const prevHome = process.env.HOME;
+  const prevAgyHome = process.env.ANTIGRAVITY_HOME;
+  if (dir) process.env.ANTIGRAVITY_HOME = dir;
+  else delete process.env.ANTIGRAVITY_HOME;
+  const restore = () => {
+    process.env.HOME = prevHome;
+    if (prevAgyHome === undefined) delete process.env.ANTIGRAVITY_HOME;
+    else process.env.ANTIGRAVITY_HOME = prevAgyHome;
+  };
+  try {
+    const result = fn();
+    if (result && typeof result.then === "function") return result.finally(restore);
+    restore();
+    return result;
+  } catch (err) {
+    restore();
+    throw err;
+  }
+}
+
+function writeAntigravityStore(root, conversationId, { workspace = "/repo/demo", timestamp = 1_787_908_601_161 } = {}) {
+  const brainDir = path.join(root, "brain", conversationId, ".system_generated", "logs");
+  fs.mkdirSync(brainDir, { recursive: true });
+  fs.copyFileSync(path.join(FIXTURES, "antigravity-session.jsonl"), path.join(brainDir, "transcript.jsonl"));
+
+  const historyFile = path.join(root, "history.jsonl");
+  const historyEntry = JSON.stringify({
+    display: "Open a PR for the parser fix.",
+    timestamp,
+    workspace,
+    conversationId,
+  });
+  fs.appendFileSync(historyFile, historyEntry + "\n");
+}
+
+test("antigravity adapter enumerates transcripts and resolves workspace from history.jsonl", () => {
+  const fakeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-antigravity-store-"));
+  writeAntigravityStore(fakeRoot, "conv-1", { workspace: "/repo/first", timestamp: 1_700_000_000_000 });
+  writeAntigravityStore(fakeRoot, "conv-2", { workspace: "/repo/second", timestamp: 1_700_100_000_000 });
+
+  withAntigravityHome(fakeRoot, () => {
+    const candidates = antigravity.enumerate();
+    assert.equal(candidates.length, 2);
+
+    const conv1 = candidates.find((c) => c.extra.conversationId === "conv-1");
+    assert.ok(conv1);
+    assert.equal(conv1.extra.cwd, "/repo/first");
+    assert.equal(conv1.extra.startedAt, 1_700_000_000_000);
+
+    const descriptor = antigravity.classify(conv1);
+    assert.equal(descriptor.id, "conv-1");
+    assert.equal(descriptor.cwd, "/repo/first");
+    assert.equal(descriptor.startedAt, 1_700_000_000_000);
+  });
+});
+
+test("antigravity adapter merges repeated history entries preserving earliest timestamp and non-null workspace", () => {
+  const fakeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-antigravity-multiturn-"));
+  const brainDir = path.join(fakeRoot, "brain", "conv-multi", ".system_generated", "logs");
+  fs.mkdirSync(brainDir, { recursive: true });
+  fs.copyFileSync(path.join(FIXTURES, "antigravity-session.jsonl"), path.join(brainDir, "transcript.jsonl"));
+
+  const historyFile = path.join(fakeRoot, "history.jsonl");
+  // Turn 1: has earliest timestamp and initial workspace
+  fs.appendFileSync(
+    historyFile,
+    JSON.stringify({
+      display: "prompt 1",
+      timestamp: 1_700_000_000_000,
+      workspace: "/repo/initial",
+      conversationId: "conv-multi",
+    }) + "\n",
+  );
+  // Turn 2: updates workspace to /repo/multi with later timestamp
+  fs.appendFileSync(
+    historyFile,
+    JSON.stringify({
+      display: "prompt 2",
+      timestamp: 1_700_000_050_000,
+      workspace: "/repo/multi",
+      conversationId: "conv-multi",
+    }) + "\n",
+  );
+  // Turn 3: omits workspace
+  fs.appendFileSync(
+    historyFile,
+    JSON.stringify({
+      display: "prompt 3",
+      timestamp: 1_700_000_100_000,
+      workspace: null,
+      conversationId: "conv-multi",
+    }) + "\n",
+  );
+
+  withAntigravityHome(fakeRoot, () => {
+    const [candidate] = antigravity.enumerate();
+    assert.ok(candidate);
+    assert.equal(candidate.extra.cwd, "/repo/multi");
+    assert.equal(candidate.extra.startedAt, 1_700_000_000_000);
+
+    const descriptor = antigravity.classify(candidate);
+    assert.equal(descriptor.cwd, "/repo/multi");
+    assert.equal(descriptor.startedAt, 1_700_000_000_000);
+  });
+});
+
+test("antigravity adapter is fail-soft on missing, empty, or unreadable store roots", () => {
+  const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-antigravity-empty-"));
+  withAntigravityHome(emptyDir, () => {
+    assert.deepEqual(antigravity.enumerate(), []);
+  });
+
+  const missingDir = path.join(os.tmpdir(), "backpass-antigravity-nonexistent-" + Date.now());
+  withAntigravityHome(missingDir, () => {
+    assert.deepEqual(antigravity.enumerate(), []);
   });
 });

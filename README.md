@@ -32,7 +32,7 @@ The loop only closes when a human happens to remember a failure and edits the fi
 what happened in them, and proposes evidence-backed edits to your memory file - under a
 token budget, gated by you.
 
-- **Local-first** - Reads the transcript stores of seven agent harnesses directly from disk.
+- **Local-first** - Reads the transcript stores of eight agent harnesses directly from disk.
   No API, no upload; transcripts never leave your machine except into an agent you already
   authenticated, and obvious secrets are redacted before they do.
 - **Evidence-gated** - Every proposed edit carries verbatim quotes from real sessions, a
@@ -78,17 +78,18 @@ backpass apply     # review each edit, accept or reject, then write
 
 ### 1. Collect samples - which sessions belong to this repo
 
-backpass reads the local transcript stores of seven harnesses directly. No API, no upload.
+backpass reads the local transcript stores of eight harnesses directly. No API, no upload.
 
-| Harness        | Store                                          | Repo tie                                            |
-| -------------- | ---------------------------------------------- | --------------------------------------------------- |
-| **claude**     | `~/.claude/projects/<munged-cwd>/<uuid>.jsonl` | per-line `cwd`                                      |
-| **codex**      | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | `cwd` + recorded `git.repository_url`               |
-| **pi**         | `~/.pi/agent/sessions/<escaped-cwd>/*.jsonl`   | session-header `cwd`                                |
-| **opencode**   | `~/.local/share/opencode/opencode.db` (sqlite) | `session.directory`                                 |
-| **grok**       | `~/.grok/sessions/<encoded-cwd>/<uuid>/`       | `summary.json` `cwd` + `git_remotes`                |
-| **cursor CLI** | `~/.cursor/chats/<md5(cwd)>/<uuid>/`           | `meta.json` `cwd`                                   |
-| **hermes**     | `~/.hermes/state.db` (sqlite)                  | session cwd, with CLI prompt / ACP config fallbacks |
+| Harness         | Store                                                                                       | Repo tie                                            |
+| --------------- | ------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| **claude**      | `~/.claude/projects/<munged-cwd>/<uuid>.jsonl`                                              | per-line `cwd`                                      |
+| **codex**       | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`                                              | `cwd` + recorded `git.repository_url`               |
+| **pi**          | `~/.pi/agent/sessions/<escaped-cwd>/*.jsonl`                                                | session-header `cwd`                                |
+| **opencode**    | `~/.local/share/opencode/opencode.db` (sqlite)                                              | `session.directory`                                 |
+| **grok**        | `~/.grok/sessions/<encoded-cwd>/<uuid>/`                                                    | `summary.json` `cwd` + `git_remotes`                |
+| **cursor CLI**  | `~/.cursor/chats/<md5(cwd)>/<uuid>/`                                                        | `meta.json` `cwd`                                   |
+| **hermes**      | `~/.hermes/state.db` (sqlite)                                                               | session cwd, with CLI prompt / ACP config fallbacks |
+| **antigravity** | `~/.gemini/antigravity-cli/brain/<conversation-id>/.system_generated/logs/transcript.jsonl` | `history.jsonl` `workspace`                         |
 
 Claude collection covers `$CLAUDE_CONFIG_DIR/projects` alongside the default store, so a
 relocated config dir does not hide its sessions. The variable is read from backpass's own
@@ -424,7 +425,7 @@ CLI flags on top:
     ]
   },
   "discovery": {
-    "harnesses": ["claude", "codex", "pi", "opencode", "grok", "cursor", "hermes"],
+    "harnesses": ["claude", "codex", "pi", "opencode", "grok", "cursor", "hermes", "antigravity"],
     "since": "30d",
     "worktreeGlobs": [],
     "minUserTurns": 2
