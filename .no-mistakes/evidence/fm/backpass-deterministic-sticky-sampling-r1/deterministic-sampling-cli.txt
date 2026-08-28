@@ -1,0 +1,4 @@
+Backpass public CLI reproduction: 147 discovered sessions, default cap 100
+{"run":1,"total":100,"analyzed":100,"cached":0,"cumulativeAnalysisModelCalls":100}
+{"run":2,"total":100,"analyzed":0,"cached":100,"cumulativeAnalysisModelCalls":100}
+New analysis model calls on unchanged rerun: 0
