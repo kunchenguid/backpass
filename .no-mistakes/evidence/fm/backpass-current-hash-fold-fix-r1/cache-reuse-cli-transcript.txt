@@ -1,0 +1,19 @@
+
+## First analysis
+· analyzing 1 transcript(s) with pi effort=medium at jobs=1
+  1/1 analyzed
+{"total":1,"analyzed":1,"reused":0,"staleMemoryHash":0}
+
+## Unchanged second analysis
+{"total":1,"analyzed":0,"reused":1,"staleMemoryHash":0}
+
+## After editing AGENTS.md without --force
+· 1 transcript(s) have evidence from a previous memory-file set (sha256:3f8e98e4730414f6 -> sha256:3e7b5ebf1e53a00c); that evidence is stale, not missing, and reuse resumes once this pass re-judges it against the current memory-file set
+· analyzing 1 transcript(s) with pi effort=medium at jobs=1
+  1/1 analyzed
+{"total":1,"analyzed":1,"reused":0,"staleMemoryHash":1}
+
+## Explicit --force
+· analyzing 1 transcript(s) with pi effort=medium at jobs=1
+  1/1 analyzed
+{"total":1,"analyzed":1,"reused":0,"staleMemoryHash":0}
