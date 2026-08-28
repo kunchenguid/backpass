@@ -1,0 +1,16 @@
+
+1. First analysis
+{"total":1,"analyzed":1,"cached":0,"staleMemoryHash":0}
+
+2. Unchanged rerun
+{"total":1,"analyzed":0,"cached":1,"staleMemoryHash":0}
+
+3. AGENTS.md edited, no --force
+{"total":1,"analyzed":1,"cached":0,"staleMemoryHash":1}
+· 1 transcript(s) have evidence from a previous AGENTS.md (sha256:<hash> -> sha256:<hash>); that evidence is stale, not missing, and reuse resumes once this pass re-judges it against the current file
+
+4. Unchanged after refreshed evidence
+{"total":1,"analyzed":0,"cached":1,"staleMemoryHash":0}
+
+5. Forced rerun
+{"total":1,"analyzed":1,"cached":0,"staleMemoryHash":0}
