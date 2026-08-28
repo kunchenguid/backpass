@@ -159,6 +159,26 @@ test("state round-trips through disk and survives a corrupt file", () => {
   assert.deepEqual(state.readScanCache(), { version: 1, entries: {} }, "a corrupt cache resets instead of crashing");
 });
 
+test("an interrupted legacy evidence migration still reuses the cached analysis", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-state-migration-"));
+  const state = new State(dir).ensure();
+  const legacy = { harness: "pi", id: "pi-old", path: "/store/old.jsonl", mtimeMs: 11, bytes: 22 };
+  const transcript = { ...legacy, nativeId: "old" };
+  const memoryHash = "sha256:old";
+
+  state.writeEvidence(legacy.id, {
+    status: "ok",
+    transcript: legacy,
+    memoryHash,
+    key: `11:22:${memoryHash}`,
+  });
+  fs.renameSync(state.evidencePath(legacy.id), state.evidencePath(transcript));
+
+  const recovered = state.readEvidence(transcript);
+  assert.equal(isEvidenceFresh(recovered, transcript, memoryHash), true);
+  assert.equal(state.readEvidence(transcript).key, evidenceKey(transcript, memoryHash));
+});
+
 test("transcript ids are turned into safe filenames", () => {
   assert.equal(safeFileName("claude-abc/../../etc/passwd"), "claude-abc_.._.._etc_passwd");
   assert.equal(safeFileName("opencode:ses_25de1e"), "opencode_ses_25de1e");

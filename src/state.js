@@ -93,19 +93,20 @@ export class State {
     const legacy = this.readJsonFile(legacyPath, null);
     const legacyMatches = legacy?.transcript && transcriptIdentity(legacy.transcript) === identity;
     if (current) {
+      const currentMatches = current.transcript && transcriptIdentity(current.transcript) === identity;
+      const migrated = currentMatches ? migrateEvidenceRecord(current, transcript, identity) : current;
+      if (migrated !== current) this.writeJsonFile(currentPath, migrated);
       if (legacyMatches) fs.rmSync(legacyPath, { force: true });
-      return current;
+      return migrated;
     }
     if (!legacyMatches) return null;
 
-    const legacyKey = `${transcript.mtimeMs}:${transcript.bytes}:${legacy.memoryHash}`;
-    const migrated = {
-      ...legacy,
-      transcript: { ...legacy.transcript, identity },
-      key: legacy.key === legacyKey ? evidenceKey(transcript, legacy.memoryHash) : legacy.key,
-    };
-    fs.renameSync(legacyPath, currentPath);
+    const migrated = migrateEvidenceRecord(legacy, transcript, identity);
+    // Publish the upgraded record atomically before removing the legacy path. If the
+    // process stops between these operations, the next read prefers the valid canonical
+    // record and merely cleans up the duplicate.
     this.writeJsonFile(currentPath, migrated);
+    fs.rmSync(legacyPath, { force: true });
     return migrated;
   }
 
@@ -189,6 +190,17 @@ export function safeFileName(id) {
 
 export function sha256(text) {
   return crypto.createHash("sha256").update(text, "utf8").digest("hex");
+}
+
+function migrateEvidenceRecord(record, transcript, identity) {
+  const legacyKey = `${transcript.mtimeMs}:${transcript.bytes}:${record.memoryHash}`;
+  const key = record.key === legacyKey ? evidenceKey(transcript, record.memoryHash) : record.key;
+  if (record.transcript?.identity === identity && record.key === key) return record;
+  return {
+    ...record,
+    transcript: { ...record.transcript, identity },
+    key,
+  };
 }
 
 /**
