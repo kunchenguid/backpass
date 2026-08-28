@@ -10,7 +10,7 @@ import { bootstrapRun } from "../src/commands/bootstrap.js";
 import { renderPointer, renderStarterMemory } from "../src/bootstrap.js";
 import { loadConfig } from "../src/config.js";
 import { setLoggerSink } from "../src/logger.js";
-import { isPointerTo, parseMemoryUnits } from "../src/memory.js";
+import { isPointerTo, memorySetHash, memoryTextHash, parseMemoryUnits } from "../src/memory.js";
 import { State } from "../src/state.js";
 
 const CLI = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../bin/backpass");
@@ -208,6 +208,16 @@ test("with transcripts: analysis gaps become the first evidence-backed instructi
     ["## Learnings", "## Maintaining this file"],
   );
   assert.equal(fs.readFileSync(path.join(repo.root, "CLAUDE.md"), "utf8"), renderPointer("AGENTS.md"));
+
+  const bootstrapHash = memorySetHash([
+    { path: "AGENTS.md", hash: memoryTextHash(renderStarterMemory({ repo })) },
+    { path: "CLAUDE.md", hash: memoryTextHash(renderPointer("AGENTS.md")) },
+  ]);
+  assert.deepEqual(
+    ctx.config.state.listEvidence().map((e) => e.memoryHash),
+    [bootstrapHash, bootstrapHash],
+    "bootstrap evidence uses the effective memory-set hash that a later proposal fold expects",
+  );
 
   // The applied proposal is marked so `backpass apply` cannot replay it onto the new file.
   const saved = ctx.config.state.readProposal();

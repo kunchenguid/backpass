@@ -2,6 +2,7 @@ import { analyzeTranscripts } from "../analyze.js";
 import { applyDecisions, writeBootstrapFiles } from "../apply/writer.js";
 import { bootstrapTargets, renderPointer, starterMemoryFile } from "../bootstrap.js";
 import { color, info, json, out, warn } from "../logger.js";
+import { resolveMemoryFiles } from "../memory.js";
 import { emitProgress } from "../progress.js";
 import { ProposalViolation } from "../proposal.js";
 import { synthesizeProposal } from "../synthesize.js";
@@ -52,6 +53,7 @@ export async function bootstrapRun(ctx, deps = {}) {
   const seed = [{ path: canonical, text: starter.text }];
   if (pointer) seed.push({ path: pointer, text: renderPointer(canonical) });
   const seeded = writeBootstrapFiles(repo.root, seed);
+  const memoryHash = resolveMemoryFiles(repo.root, config.memoryFiles).hash;
   for (const w of seeded.written) info(`${color.green("·")} wrote ${w.file}`);
   for (const s of seeded.skipped) warn(`${s.file} ${s.reason} - left untouched`);
 
@@ -81,7 +83,7 @@ export async function bootstrapRun(ctx, deps = {}) {
     memoryFile: starter,
     config,
     repo,
-    memoryHash: starter.hash,
+    memoryHash,
     force: Boolean(ctx.flags.force),
   });
   info(
@@ -89,7 +91,7 @@ export async function bootstrapRun(ctx, deps = {}) {
       `${result.summary.skipped} too short · ${result.summary.failed} failed`,
   );
 
-  const folded = await foldForRun(ctx, starter, starter.hash);
+  const folded = await foldForRun(ctx, starter, memoryHash);
   config.state.writeSummary(folded);
   emitProgress("fold:done", {
     instructions: folded.instructions.length,
