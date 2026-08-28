@@ -4,6 +4,8 @@ import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
+import { memorySetHash, memoryTextHash } from "../../src/memory.js";
+
 /**
  * The synthesis pass driven through the real CLI, against a stand-in acpx.
  *
@@ -132,12 +134,16 @@ export function makeCliRepo({ memory, sessions = 3, files = {} }) {
 
   const evidenceDir = path.join(dir, ".backpass", "evidence");
   fs.mkdirSync(evidenceDir, { recursive: true });
+  // Real evidence always carries the set hash it was judged against (`foldForRun` filters
+  // on it); match what the CLI computes for this repo's memory files so fold picks it up.
+  const memoryHash = memorySetHash([{ path: "AGENTS.md", hash: memoryTextHash(memory) }]);
   for (let i = 1; i <= sessions; i += 1) {
     fs.writeFileSync(
       path.join(evidenceDir, `claude_s${i}.json`),
       JSON.stringify({
         status: "ok",
         memoryPath: "AGENTS.md",
+        memoryHash,
         transcript: { harness: "claude", id: `claude:s${i}`, path: `/dev/null/s${i}`, mtimeMs: 1, bytes: 10 },
         positive: [],
         negative: [

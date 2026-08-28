@@ -76,7 +76,8 @@ function memoryFileSnapshot(proposal, repo) {
         file: relative,
         error:
           `${relative} no longer exists, so its edits no longer describe the file on disk; nothing was written. ` +
-          `Run \`backpass\` to re-propose against the current repository.`,
+          `Run \`backpass\` to re-propose against the current repository - that pass reanalyzes transcripts ` +
+          `against the file that exists now, it does not reuse the judgments behind this proposal.`,
       },
     };
   }
@@ -94,7 +95,8 @@ function memoryFileSnapshot(proposal, repo) {
       error:
         `${relative} changed after this proposal was made (${expected} -> ${observed}), so its edits ` +
         `no longer describe the file on disk; nothing was written. Run \`backpass\` to re-propose ` +
-        `against the current ${relative}.`,
+        `against the current ${relative} - that pass reanalyzes transcripts against the new file, it does ` +
+        `not reuse the stale judgments behind this proposal.`,
     },
   };
 }

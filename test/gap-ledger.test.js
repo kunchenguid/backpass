@@ -42,9 +42,9 @@ function harness(overrides = {}) {
 }
 
 /** One backpass run: the evidence files on disk at the time, then the fold. */
-async function run(h, records, file = memoryFile()) {
+async function run(h, records, file = memoryFile(), memoryHash = "h1") {
   for (const r of records) h.state.writeEvidence(r.transcript.id, r);
-  return foldForRun(h.ctx, file);
+  return foldForRun(h.ctx, file, memoryHash);
 }
 
 const GAP = "Read docs/db.md before writing queries.";
@@ -57,8 +57,14 @@ test("a gap seen once now and once on a later run accumulates to two sessions an
   assert.equal(first.totals.droppedGapSingletons, 1);
 
   // Later run: s1's evidence was rewritten against a changed memory file and the model
-  // no longer mentions the gap; a new session s2 reports it in different words.
-  const second = await run(h, [record("claude-s1", [], { memoryHash: "h2" }), record("claude-s2", [GAP_REPHRASED])]);
+  // no longer mentions the gap; a new session s2 reports it in different words, both
+  // analyzed against the new hash.
+  const second = await run(
+    h,
+    [record("claude-s1", [], { memoryHash: "h2" }), record("claude-s2", [GAP_REPHRASED], { memoryHash: "h2" })],
+    memoryFile(),
+    "h2",
+  );
   assert.equal(second.gaps.length, 1, "the gap graduates once two distinct sessions have reported it");
   assert.equal(second.gaps[0].sessions, 2);
   assert.equal(second.gaps[0].proposedInstruction, GAP, "the shortest phrasing is canonical");
@@ -129,7 +135,12 @@ test("re-analysis of a session does not restart its expiry clock", async () => {
   const h = harness({ gapLedgerMaxAge: "90d" });
   await run(h, [record("claude-s1", [GAP])]);
   age(h, 120);
-  const summary = await run(h, [record("claude-s1", [GAP], { memoryHash: "h2" }), record("claude-s2", [GAP])]);
+  const summary = await run(
+    h,
+    [record("claude-s1", [GAP], { memoryHash: "h2" }), record("claude-s2", [GAP], { memoryHash: "h2" })],
+    memoryFile(),
+    "h2",
+  );
   assert.equal(summary.gaps.length, 0, "the re-seen old sighting keeps its original first-seen time");
 });
 

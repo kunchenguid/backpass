@@ -185,7 +185,16 @@ async function pool(items, limit, worker) {
 export async function analyzeTranscripts({ transcripts, memoryFile, config, repo, memoryHash, force = false }) {
   const state = config.state;
   const pending = [];
-  const summary = { total: transcripts.length, cached: 0, analyzed: 0, skipped: 0, failed: 0, usage: [] };
+  const summary = {
+    total: transcripts.length,
+    cached: 0,
+    analyzed: 0,
+    skipped: 0,
+    failed: 0,
+    usage: [],
+    staleMemoryHash: 0,
+  };
+  const priorHashes = new Set();
 
   for (const transcript of transcripts) {
     const existing = state.readEvidence(transcript.id);
@@ -193,7 +202,21 @@ export async function analyzeTranscripts({ transcripts, memoryFile, config, repo
       summary.cached += 1;
       continue;
     }
+    // Distinguish "no prior evidence" from "prior evidence exists, but it was judged
+    // against a memory file that no longer matches" - a re-analysis here, not a miss.
+    if (existing?.status === "ok" && existing.memoryHash && existing.memoryHash !== memoryHash) {
+      summary.staleMemoryHash += 1;
+      priorHashes.add(existing.memoryHash);
+    }
     pending.push(transcript);
+  }
+
+  if (summary.staleMemoryHash) {
+    info(
+      `${color.yellow("·")} ${summary.staleMemoryHash} transcript(s) have evidence from a previous ` +
+        `${memoryFile.path} (${[...priorHashes].join(", ")} -> ${memoryHash}); that evidence is stale, not ` +
+        `missing, and reuse resumes once this pass re-judges it against the current file`,
+    );
   }
 
   if (!pending.length) {
