@@ -13,7 +13,7 @@ A visible violation outranks any number of "it went fine" observations, because 
 A new instruction needs corroboration from at least two distinct sessions, and one session never counts twice however often it is re-analyzed.
 Removing an instruction takes the same corroboration adding one does, and only harm from following it counts, because a rule that was merely skipped argues for reinforcement rather than deletion.
 Corroboration accumulates across runs in a ledger rather than resetting each run, so a gap seen today and again next week still graduates.
-Whether two sightings are one gap is judged against their quotes rather than scored by word overlap, because models paraphrase and a paraphrase must never hide recurrence.
+Whether two sightings are one gap is judged from their evidence rather than scored by word overlap, because models paraphrase and a paraphrase must never hide recurrence.
 A mistake that belongs to the task harness around a session is counted and set aside, never written into the project's file.
 An uncorroborated gap never becomes a proposal, though counting one is fair where that helps a person understand a run.
 One bad session never rewrites the weights, because a single session can go wrong for reasons that have nothing to do with the file.

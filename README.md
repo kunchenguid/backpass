@@ -164,8 +164,9 @@ analysis is shown the ledger's open gaps so it can cite an existing gap id inste
 coining a paraphrase of it.
 
 **Every claim must carry a verbatim quote.** Quoteless items are discarded - the single
-most important defence against a model confabulating influence. Negative evidence (a
-visible violation) is weighted highest.
+most important defence against a model confabulating influence. Negative evidence is
+weighted highest, but its class determines what it supports: non-compliance supports
+reinforcement, while only harm supports removal.
 
 Results are cached per transcript, keyed to both the transcript's content _and_ the effective
 memory-file set hash: edit the weights and the evidence correctly re-computes; change nothing
@@ -186,14 +187,14 @@ dropped. One bad session never rewrites the weights.
 
 Whether two sightings are one gap is a judgment call, not a word-overlap score - models
 paraphrase, and a paraphrase that fails a lexical match would hide real recurrence.
-Identity is judged twice, both times anchored to quotes: the analysis turn cites an
-existing gap id when it sees a gap already on the books, and one bounded consolidation
-call per run sees the full open gap set and merges entries that are the same gap - which
-is what lets two sightings of a brand-new gap in the same run's parallel fan-out
-corroborate. A failed consolidation call degrades the run to lexical identity and says
-so; it never aborts. Orchestration-domain gaps are counted and reported but never
-cluster: mistakes about the task harness around a session do not become instructions in
-the project's memory file.
+Identity is judged twice: the quote-anchored analysis turn cites an existing gap id when
+it sees a gap already on the books, and, when at least two open entries exist, one bounded
+consolidation call sees the full open gap set and merges entries that describe the same
+mistake. That second judgment is what lets two sightings of a brand-new gap in the same
+run's parallel fan-out corroborate. A failed consolidation call degrades the run to
+lexical identity and says so; it never aborts. Orchestration-domain gaps are counted and
+reported but never cluster: mistakes about the task harness around a session do not
+become instructions in the project's memory file.
 
 Only evidence judged against the _current_ memory-file set hash is folded into a proposal. A
 transcript that fell out of this run's sample - the time window, `maxTranscripts`, or the
@@ -243,9 +244,10 @@ Neighbouring removals are merged into one measured change, and a merged change c
 accepted in halves - so when several sections leave together, their skills arrive as one
 extract with several skills, which is one honest accept/reject decision. Skills whose
 removals were measured separately stay separate decisions, and bundling them is refused.
-The one boundary the measurement always splits on is extraction vs deletion: a contiguous
-removal that mixes text carried into skills with text that simply vanishes is measured as
-two changes, so accepting the extraction never silently accepts the deletion beside it.
+The measurement splits a contiguous removal at an extraction-vs-deletion boundary when
+both resulting changes can be anchored safely, so accepting the extraction does not
+silently accept the deletion beside it. If either change cannot be anchored uniquely, it
+keeps the merged change rather than guessing.
 
 A malformed answer or gate violation triggers a re-prompt naming the exact breach (at
 most two). If those also fail, backpass **fails loudly** and preserves the latest parseable

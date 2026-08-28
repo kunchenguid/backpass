@@ -119,8 +119,7 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
 - **Negative evidence has a sign the pipeline must not lose.** Analysis classifies every
   negative (`harm` / `non-compliance` / `irrelevant`, `sanitizeEvidence` drops other
   values) and `renderEvidenceForPrompt` renders the class AND the `effect` text with each
-  quote - the no-mistakes postmortem traced a wrong deletion to that field being stripped.
-  Records from before the class existed carry none, and none never counts as harm.
+  quote. Records from before the class existed carry none, and none never counts as harm.
 - **Skills only count if a harness loads them.** Extractions target `.agents/skills` with
   `.claude/skills -> ../.agents/skills` as a symlink (`ensureSkillsLayout` in
   `src/skills.js`, run at write time); a bare `skills/` dir is never auto-detected and a
@@ -159,8 +158,8 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
 - **Gap identity is judged, not word-matched.** Bigram similarity cannot recognize real
   paraphrase (measured on production data: max cross-session score 0.34 vs the 0.45 bar),
   so it is only the fallback. The analysis turn cites open-gap ids (`matchesGap`, shown via
-  `renderOpenGapIndex`; an invalid citation falls back, never fails), and `foldForRun` runs
-  ONE consolidation call per run (`src/consolidate.js`) that merges paraphrased entries
+  `renderOpenGapIndex`; an invalid citation falls back, never fails), and, with at least two
+  open entries, `foldForRun` runs ONE consolidation call (`src/consolidate.js`) that merges paraphrased entries
   (`mergeGapEntries`) - record, consolidate, prune, in that order. Consolidation failure
   degrades to lexical identity with a warning, never an abort. Gaps also carry `domain`;
   `orchestration` sightings (task-harness mistakes, not this repo's engineering) are

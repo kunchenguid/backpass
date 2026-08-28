@@ -109,7 +109,7 @@ MODELS (two-tier: cheap analysis, smart synthesis - all through acpx)
 BUDGET AND SHAPE
   --budget <tokens>        always-loaded budget per memory file         [5000]
   --max-edits <n>          edits per run - the learning rate            [adaptive]
-  --min-gap-evidence <n>   sessions needed before a new instruction     [2]
+  --min-gap-evidence <n>   sessions needed to add or remove instruction [2]
   --memory-file <path>     memory file to optimize (repeatable)
   --skills-dir <path>      where skill extractions are written          [.agents/skills]
 

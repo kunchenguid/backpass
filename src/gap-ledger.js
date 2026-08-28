@@ -129,7 +129,9 @@ export function recordGapObservations(ledger, evidenceRecords, { now = new Date(
           sessions: {},
         };
       } else {
-        entry.phrasings = [...new Set([entry.proposedInstruction, ...(entry.phrasings || []), gap.proposedInstruction])];
+        entry.phrasings = [
+          ...new Set([entry.proposedInstruction, ...(entry.phrasings || []), gap.proposedInstruction]),
+        ];
         if (gap.proposedInstruction.length < entry.proposedInstruction.length) {
           // Keep the shortest phrasing: it generalizes best (same rule as the in-run fold).
           entry.proposedInstruction = gap.proposedInstruction;
