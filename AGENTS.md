@@ -158,7 +158,11 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   each wait state once and never per cycle. Session URLs are printed as `url: "http://..."`,
   so parse them with `extractUrl`, never a bare `\S+`. Browser launch is best effort
   (`src/apply/browser.js`): the printed URL is the contract. `test/fixtures/fake-lavish/`
-  stands in for the CLI via `BACKPASS_LAVISH_BIN` in tests.
+  stands in for the CLI via `BACKPASS_LAVISH_BIN` in tests. `injectPayload` in
+  `src/apply/lavish.js` must splice the templated `<script>` tag into `apply.html` with a
+  function replacer, never a string one: a string second argument to `String.prototype.replace`
+  interprets `$&`, `` $` ``, `$'`, and `$$` in it as replacement patterns, and the spliced
+  text embeds untrusted proposal/evidence prose that can contain those sequences verbatim.
 - Cursor IDE support is deliberately deferred to v1.1 (`--include-cursor-ide`, best effort);
   see the header of `src/discovery/adapters/cursor-ide.js` for why.
 

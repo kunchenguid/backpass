@@ -26,7 +26,10 @@ export function injectPayload(template, payload, toolVersion) {
     .replace(/\u2029/g, "\\u2029");
   const tag = `<script>window.__BACKPASS_PROPOSAL__ = ${json};</script>`;
   if (!template.includes("</head>")) return `${tag}\n${template}`;
-  return template.replace("</head>", `${tag}\n</head>`);
+  // A function replacer, not a string one: a string second argument to `replace` treats
+  // `$&`, `` $` ``, `$'`, and `$$` in it as replacement patterns, and `tag` embeds
+  // untrusted proposal text that can contain any of those sequences verbatim.
+  return template.replace("</head>", () => `${tag}\n</head>`);
 }
 
 export function renderApplySurface(proposal, state, toolVersion) {

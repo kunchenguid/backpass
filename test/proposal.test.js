@@ -13,9 +13,9 @@ import {
   SHRINK_MAX_EDITS,
 } from "../src/proposal.js";
 import { estimateTokens } from "../src/tokens.js";
-import { isSuppressedByRejection, recordRejection } from "../src/state.js";
+import { isSuppressedByRejection, recordRejection, State } from "../src/state.js";
 import { applyDecisions } from "../src/apply/writer.js";
-import { injectPayload, parseDecisions } from "../src/apply/lavish.js";
+import { injectPayload, parseDecisions, renderApplySurface } from "../src/apply/lavish.js";
 import { extractJson, parseTokenLine, stripAcpxNoise } from "../src/acpx.js";
 import { makeRepo, stageAndMeasure, writeIn } from "./helpers/staging.js";
 
@@ -868,6 +868,78 @@ test("the apply surface receives one payload, with markup in the data neutralise
   assert.ok(!html.includes("</script><img"), "injected markup must not break out of the script tag");
   assert.ok(html.includes("\\u003c/script"));
   assert.ok(html.indexOf("__BACKPASS_PROPOSAL__") < html.indexOf("</head>"));
+});
+
+// A string second argument to `String.prototype.replace` treats `$&`, `` $` ``, `$'`, and
+// `$$` as replacement-pattern tokens, not literal text. Proposal evidence is untrusted
+// human/model prose and can contain any of these verbatim (a possessive "the tool$'s
+// state", a shell snippet with "$(...)" abbreviated as "$`...`", a price "$$5"), so the
+// injector must treat the whole payload as opaque data regardless of its content.
+const REPLACEMENT_TOKEN_PAYLOADS = {
+  "dollar-apostrophe": "the agent read the tool$'s cached state",
+  "dollar-ampersand": "grep matched $& in the log line",
+  "dollar-backtick": "ran a subshell command: $`date`",
+  "doubled-dollar": "the invoice showed a $$5 line item",
+  combination: "$$ then $& then $`x` then it's $'s turn, all in one line",
+  "evidence-shaped": [
+    "Session AG-014: the agent tried $'hi\\x27' to test ANSI-C quoting,",
+    "then noted the budget was $$50 over and the diff matched $& in its own grep,",
+    "before falling back to a subshell: $`date`.",
+  ].join(" "),
+};
+
+function extractInjectedPayload(html) {
+  const match = /window\.__BACKPASS_PROPOSAL__ = (.*);<\/script>/.exec(html);
+  assert.ok(match, `no injected payload found in:\n${html}`);
+  return JSON.parse(match[1]);
+}
+
+for (const [name, title] of Object.entries(REPLACEMENT_TOKEN_PAYLOADS)) {
+  test(`injectPayload treats a ${name} evidence payload as opaque data`, () => {
+    const template = "<html><head><title>t</title></head><body>ORIGINAL BODY MARKER</body></html>";
+    const payload = { edits: [{ title, evidence: [{ quote: title }] }] };
+    const html = injectPayload(template, payload, "0.1.0");
+
+    assert.equal((html.match(/<body>/g) || []).length, 1, "template suffix must not duplicate");
+    assert.equal((html.match(/<\/html>/g) || []).length, 1, "template suffix must not duplicate");
+    assert.equal((html.match(/<\/head>/g) || []).length, 1, "injection point must not duplicate");
+    assert.equal((html.match(/ORIGINAL BODY MARKER/g) || []).length, 1, "body content must not duplicate");
+
+    const parsed = extractInjectedPayload(html);
+    assert.deepEqual(parsed, { ...payload, toolVersion: "0.1.0" }, "the full payload must survive unchanged");
+  });
+}
+
+test("replacement tokens combined with markup still get both defenses", () => {
+  const template = "<html><head></head><body>MARKER</body></html>";
+  const title = "</script><img onerror=alert(1)> and a possessive tool$'s state, plus $$ $&";
+  const html = injectPayload(template, { edits: [{ title }] }, "0.1.0");
+
+  assert.equal((html.match(/<body>/g) || []).length, 1, "template suffix must not duplicate");
+  assert.equal((html.match(/MARKER/g) || []).length, 1, "body content must not duplicate");
+  assert.ok(!html.includes("</script><img"), "injected markup must not break out of the script tag");
+  assert.deepEqual(extractInjectedPayload(html), { edits: [{ title }], toolVersion: "0.1.0" });
+});
+
+test("renderApplySurface writes one valid document through the real template", () => {
+  const repo = makeRepo();
+  const state = new State(repo.root);
+  const payload = {
+    edits: [
+      { title: REPLACEMENT_TOKEN_PAYLOADS["combination"] },
+      { title: REPLACEMENT_TOKEN_PAYLOADS["evidence-shaped"] },
+    ],
+  };
+
+  const target = renderApplySurface(payload, state, "0.1.0");
+  const html = fs.readFileSync(target, "utf8");
+
+  assert.equal((html.match(/<!doctype html>/gi) || []).length, 1, "must be a single document");
+  assert.equal((html.match(/<body[ >]/gi) || []).length, 1, "template suffix must not duplicate");
+  assert.equal((html.match(/<\/html>/gi) || []).length, 1, "template suffix must not duplicate");
+  assert.equal((html.match(/<\/head>/gi) || []).length, 1, "injection point must not duplicate");
+
+  assert.deepEqual(extractInjectedPayload(html), { ...payload, toolVersion: "0.1.0" });
 });
 
 test("the decision vector from the review surface is parsed back into decisions", () => {
