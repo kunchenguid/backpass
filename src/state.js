@@ -85,21 +85,27 @@ export class State {
   readEvidence(transcript) {
     const currentPath = this.evidencePath(transcript);
     const current = this.readJsonFile(currentPath, null);
-    if (current || !transcript || typeof transcript !== "object") return current;
+    if (!transcript || typeof transcript !== "object") return current;
 
+    const identity = transcriptIdentity(transcript);
     const legacyPath = this.evidencePath(transcript.id);
-    if (legacyPath === currentPath) return null;
+    if (legacyPath === currentPath) return current;
     const legacy = this.readJsonFile(legacyPath, null);
-    if (!legacy?.transcript || transcriptIdentity(legacy.transcript) !== transcriptIdentity(transcript)) return null;
+    const legacyMatches = legacy?.transcript && transcriptIdentity(legacy.transcript) === identity;
+    if (current) {
+      if (legacyMatches) fs.rmSync(legacyPath, { force: true });
+      return current;
+    }
+    if (!legacyMatches) return null;
 
     const legacyKey = `${transcript.mtimeMs}:${transcript.bytes}:${legacy.memoryHash}`;
     const migrated = {
       ...legacy,
-      transcript: { ...legacy.transcript, identity: transcriptIdentity(transcript) },
+      transcript: { ...legacy.transcript, identity },
       key: legacy.key === legacyKey ? evidenceKey(transcript, legacy.memoryHash) : legacy.key,
     };
+    fs.renameSync(legacyPath, currentPath);
     this.writeJsonFile(currentPath, migrated);
-    fs.rmSync(legacyPath, { force: true });
     return migrated;
   }
 
@@ -109,11 +115,19 @@ export class State {
 
   listEvidence() {
     if (!fs.existsSync(this.evidenceDir)) return [];
-    return fs
+    const records = fs
       .readdirSync(this.evidenceDir)
-      .filter((f) => f.endsWith(".json"))
-      .map((f) => this.readJsonFile(path.join(this.evidenceDir, f), null))
-      .filter(Boolean);
+      .filter((file) => file.endsWith(".json"))
+      .map((file) => ({ file, record: this.readJsonFile(path.join(this.evidenceDir, file), null) }))
+      .filter(({ record }) => Boolean(record));
+    const unique = new Map();
+    for (const item of records) {
+      const identity = item.record.transcript ? transcriptIdentity(item.record.transcript) : `file:${item.file}`;
+      const canonical = item.record.transcript ? path.basename(this.evidencePath(item.record.transcript)) : item.file;
+      const existing = unique.get(identity);
+      if (!existing || item.file === canonical) unique.set(identity, item);
+    }
+    return [...unique.values()].map(({ record }) => record);
   }
 
   readSummary() {

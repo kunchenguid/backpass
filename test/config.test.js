@@ -139,7 +139,18 @@ test("state round-trips through disk and survives a corrupt file", () => {
   const migrated = state.readEvidence({ ...legacy, nativeId: "old" });
   assert.equal(migrated.key, evidenceKey({ ...legacy, nativeId: "old" }, "sha256:old"));
   assert.equal(fs.existsSync(state.evidencePath(legacy.id)), false);
-  assert.equal(state.listEvidence().length, 3);
+
+  state.writeEvidence(legacy.id, {
+    status: "ok",
+    transcript: legacy,
+    memoryHash: "sha256:old",
+    key: "11:22:sha256:old",
+  });
+  const listed = state.listEvidence();
+  assert.equal(listed.length, 3, "an interrupted migration cannot duplicate folded evidence");
+  assert.equal(listed.find((evidence) => evidence.transcript?.id === legacy.id).key, migrated.key);
+  assert.equal(state.readEvidence({ ...legacy, nativeId: "old" }).key, migrated.key);
+  assert.equal(fs.existsSync(state.evidencePath(legacy.id)), false);
 
   state.writeScanCache({ version: 1, entries: { a: { mtimeMs: 1, bytes: 2, descriptor: null } } });
   assert.equal(Object.keys(state.readScanCache().entries).length, 1);
