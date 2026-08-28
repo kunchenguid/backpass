@@ -251,7 +251,10 @@ test("bootstrap aborts analysis when the canonical memory file appears during di
   );
 
   assert.equal(analyzed, false);
-  assert.equal(fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8"), "# Concurrent instructions\n\n- Keep this file.\n");
+  assert.equal(
+    fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8"),
+    "# Concurrent instructions\n\n- Keep this file.\n",
+  );
   assert.deepEqual(ctx.config.state.listEvidence(), []);
 });
 
