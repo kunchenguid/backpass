@@ -1,6 +1,6 @@
 {
   "name": "backpass",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "packageManager": "pnpm@11.5.0",
   "description": "Gradient descent for your agent memory - analyzes past agent session transcripts and proposes evidence-backed edits to AGENTS.md / CLAUDE.md",
   "type": "module",

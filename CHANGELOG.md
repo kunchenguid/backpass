@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.10](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.9...backpass-v0.1.10) (2026-08-28)
+
+
+### Bug Fixes
+
+* **discovery:** discover BB-managed Pi sessions ([#58](https://github.com/kunchenguid/backpass/issues/58)) ([450c1a2](https://github.com/kunchenguid/backpass/commit/450c1a20ecb1a4655c56adcbea20c5f12b9d98f2))
+
 ## [0.1.9](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.8...backpass-v0.1.9) (2026-08-28)
 
 
