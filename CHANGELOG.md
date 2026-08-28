@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.12](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.11...backpass-v0.1.12) (2026-08-28)
+
+
+### Features
+
+* judge gap identity and safeguard instruction removals ([#64](https://github.com/kunchenguid/backpass/issues/64)) ([85d5105](https://github.com/kunchenguid/backpass/commit/85d51055568cd106f516acca0df5f20603ede939))
+
+
+### Bug Fixes
+
+* keep EOF-reaching mixed removals merged ([#65](https://github.com/kunchenguid/backpass/issues/65)) ([8b5f625](https://github.com/kunchenguid/backpass/commit/8b5f6252c728f6181d56f889b699b2a890cf2471))
+* make transcript sampling deterministic and sticky ([#62](https://github.com/kunchenguid/backpass/issues/62)) ([d177b06](https://github.com/kunchenguid/backpass/commit/d177b06a5fa6767391f17a26efeab862b4bc258a))
+
 ## [0.1.11](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.10...backpass-v0.1.11) (2026-08-28)
 
 
