@@ -642,6 +642,56 @@ test("antigravity adapter enumerates transcripts and resolves workspace from his
   });
 });
 
+test("antigravity adapter merges repeated history entries preserving earliest timestamp and non-null workspace", () => {
+  const fakeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-antigravity-multiturn-"));
+  const brainDir = path.join(fakeRoot, "brain", "conv-multi", ".system_generated", "logs");
+  fs.mkdirSync(brainDir, { recursive: true });
+  fs.copyFileSync(path.join(FIXTURES, "antigravity-session.jsonl"), path.join(brainDir, "transcript.jsonl"));
+
+  const historyFile = path.join(fakeRoot, "history.jsonl");
+  // Turn 1: has earliest timestamp, but workspace is empty/null
+  fs.appendFileSync(
+    historyFile,
+    JSON.stringify({
+      display: "prompt 1",
+      timestamp: 1_700_000_000_000,
+      workspace: null,
+      conversationId: "conv-multi",
+    }) + "\n",
+  );
+  // Turn 2: supplies workspace, later timestamp
+  fs.appendFileSync(
+    historyFile,
+    JSON.stringify({
+      display: "prompt 2",
+      timestamp: 1_700_000_050_000,
+      workspace: "/repo/multi",
+      conversationId: "conv-multi",
+    }) + "\n",
+  );
+  // Turn 3: omits workspace again
+  fs.appendFileSync(
+    historyFile,
+    JSON.stringify({
+      display: "prompt 3",
+      timestamp: 1_700_000_100_000,
+      workspace: null,
+      conversationId: "conv-multi",
+    }) + "\n",
+  );
+
+  withAntigravityHome(fakeRoot, () => {
+    const [candidate] = antigravity.enumerate();
+    assert.ok(candidate);
+    assert.equal(candidate.extra.cwd, "/repo/multi");
+    assert.equal(candidate.extra.startedAt, 1_700_000_000_000);
+
+    const descriptor = antigravity.classify(candidate);
+    assert.equal(descriptor.cwd, "/repo/multi");
+    assert.equal(descriptor.startedAt, 1_700_000_000_000);
+  });
+});
+
 test("antigravity adapter is fail-soft on missing, empty, or unreadable store roots", () => {
   const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-antigravity-empty-"));
   withAntigravityHome(emptyDir, () => {

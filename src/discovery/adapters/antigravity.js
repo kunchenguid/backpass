@@ -35,11 +35,13 @@ function loadHistoryMap(historyFile) {
   const entries = readJsonl(historyFile);
   for (const entry of entries) {
     if (!entry || !entry.conversationId) continue;
-    map.set(entry.conversationId, {
-      workspace: entry.workspace || null,
-      timestamp:
-        typeof entry.timestamp === "number" ? entry.timestamp : entry.timestamp ? Date.parse(entry.timestamp) : null,
-    });
+    const existing = map.get(entry.conversationId);
+    const workspace = existing?.workspace || entry.workspace || null;
+    const entryTs =
+      typeof entry.timestamp === "number" ? entry.timestamp : entry.timestamp ? Date.parse(entry.timestamp) : null;
+    const timestamp = existing?.timestamp ?? entryTs;
+
+    map.set(entry.conversationId, { workspace, timestamp });
   }
   return map;
 }
