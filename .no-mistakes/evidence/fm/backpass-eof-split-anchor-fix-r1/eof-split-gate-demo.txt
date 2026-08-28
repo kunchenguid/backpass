@@ -1,0 +1,8 @@
+End-user synthesis measurement and proposal-gate demonstration
+Original ends with newline: false
+Measured memory removal decisions: 1
+Merged anchor covers doomed section: true
+Merged anchor covers carried section: true
+Created skill measured separately: true
+Proposal gate result:
+REFUSED: edit e1 ("tail extraction") removes text its created skill(s) do not carry (first: "## Doomed"); an extraction preserves every line it removes - revert that text, or make its deletion a separate "remove" edit
