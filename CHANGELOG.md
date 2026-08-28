@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.11](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.10...backpass-v0.1.11) (2026-08-28)
+
+
+### Bug Fixes
+
+* **apply:** stop replacement-token expansion from corrupting apply.html ([#60](https://github.com/kunchenguid/backpass/issues/60)) ([f5d3c3a](https://github.com/kunchenguid/backpass/commit/f5d3c3addec9d3b9b900ab000da7fb01019a3187))
+
 ## [0.1.10](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.9...backpass-v0.1.10) (2026-08-28)
 
 
