@@ -128,8 +128,8 @@ export function recoveredLineCounts(texts) {
  * skill carries whole sections.
  *
  * Returns the sub-hunks, or null when there is nothing to split (one kind only) or the
- * split cannot be anchored safely (a sub-hunk's bare text is not unique in the file -
- * widening it with context could overlap its sibling, so the merged hunk is kept instead).
+ * sub-hunks cannot be given unique, non-overlapping spans, in which case the merged hunk
+ * is kept instead.
  */
 export function splitRemovalHunk(hunk, { oldText, oldLines, recovered }) {
   // A removal that reaches the file's true tail cannot be split into independent
