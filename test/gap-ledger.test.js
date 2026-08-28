@@ -85,6 +85,23 @@ test("the same session is never double-counted across runs", async () => {
   assert.deepEqual(Object.keys(entries[0].sessions), ["claude-s1"]);
 });
 
+test("a legacy session-id observation migrates without counting the identity as a second session", async () => {
+  const h = harness();
+  await run(h, [record("claude-s1", [GAP])]);
+  const before = h.state.readGapLedger();
+  const beforeEntry = Object.values(before.entries)[0];
+  const firstObservedAt = beforeEntry.sessions["claude-s1"].firstObservedAt;
+
+  const migrated = record("claude-s1", [GAP_REPHRASED]);
+  migrated.transcript.identity = "stable-identity-s1";
+  const summary = await run(h, [migrated]);
+
+  assert.equal(summary.gaps.length, 0, "one upgraded session must remain a singleton");
+  const entry = Object.values(h.state.readGapLedger().entries)[0];
+  assert.deepEqual(Object.keys(entry.sessions), ["stable-identity-s1"]);
+  assert.equal(entry.sessions["stable-identity-s1"].firstObservedAt, firstObservedAt);
+});
+
 test("a genuine one-off never graduates, however many runs see it", async () => {
   const h = harness();
   for (let i = 0; i < 5; i += 1) {

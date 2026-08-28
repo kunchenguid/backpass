@@ -103,11 +103,19 @@ export function recordGapObservations(ledger, evidenceRecords, { now = new Date(
         // Keep the shortest phrasing: it generalizes best (same rule as the in-run fold).
         entry.proposedInstruction = gap.proposedInstruction;
       }
-      const prior = entry.sessions[sessionIdentity];
+      const identityPrior = entry.sessions[sessionIdentity];
+      const aliasPrior = transcript.id && transcript.id !== sessionIdentity ? entry.sessions[transcript.id] : null;
+      const priors = [identityPrior, aliasPrior].filter(Boolean);
+      const firstObservedAt = priors
+        .map((observation) => observation.firstObservedAt || observation.observedAt)
+        .filter((value) => Number.isFinite(Date.parse(value)))
+        .sort((a, b) => Date.parse(a) - Date.parse(b))[0];
+      if (aliasPrior) delete entry.sessions[transcript.id];
       entry.sessions[sessionIdentity] = {
-        firstObservedAt: prior?.firstObservedAt || observedAt,
+        firstObservedAt: firstObservedAt || observedAt,
         observedAt,
-        sessionStartedAt: transcript.startedAt ?? prior?.sessionStartedAt ?? null,
+        sessionStartedAt:
+          transcript.startedAt ?? identityPrior?.sessionStartedAt ?? aliasPrior?.sessionStartedAt ?? null,
         memoryHash: record.memoryHash || null,
         source: gapSource(transcript),
         mistake: gap.mistake,
