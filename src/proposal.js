@@ -1,6 +1,7 @@
 import { renderHunkLines } from "./diff.js";
 import { editSkills } from "./skills.js";
 import { budgetGateKind, budgetStatus, estimateTokens } from "./tokens.js";
+import { normalizeRecoveryLine, recoveredLineSet } from "./workspace.js";
 
 /**
  * The proposal model: what a synthesis pass is allowed to produce, and the mechanical
@@ -101,6 +102,25 @@ function normalizeEvidence(evidence) {
 function countSources(evidence) {
   if (!Array.isArray(evidence)) return 0;
   return new Set(evidence.map((e) => e?.source).filter(Boolean)).size;
+}
+
+/** The del-line texts of a hunk that are not carried by `lineSet` (blank lines ignored). */
+function unrecoveredRemovedLines(hunk, lineSet) {
+  const missing = [];
+  for (const line of hunk.lines || []) {
+    if (line.type !== "del") continue;
+    const normalized = normalizeRecoveryLine(line.text);
+    if (normalized && !lineSet.has(normalized)) missing.push(line.text);
+  }
+  return missing;
+}
+
+/**
+ * The memory units a pure-removal hunk deletes. For a pure removal every file line in
+ * [oldStart, oldEnd] is removed, so this is a plain range intersection with unit lines.
+ */
+function unitsRemovedBy(hunk, memoryFile) {
+  return memoryFile.units.filter((unit) => unit.startLine <= hunk.oldEnd && unit.endLine >= hunk.oldStart);
 }
 
 /** Overlapping count: a run of identical lines must not pass as unique. */
@@ -308,6 +328,19 @@ export function buildProposal(rawResult, context) {
         violations.push(`edit ${edit.id}: ${unusable.file} needs YAML frontmatter with \`name:\` and \`description:\``);
         continue;
       }
+      // An extraction moves text; it never doubles as a deletion. Every line its hunks
+      // remove must land in the skills it creates - a real deletion goes in its own
+      // remove edit, where the removal-evidence floor below can judge it on its own.
+      const carried = recoveredLineSet(created.map((c) => c.text));
+      const missing = hunks.flatMap((h) => unrecoveredRemovedLines(h, carried));
+      if (missing.length) {
+        violations.push(
+          `edit ${edit.id} ("${edit.title}") removes text its created skill(s) do not carry ` +
+            `(first: "${missing[0].trim().slice(0, 80)}"); an extraction preserves every line it removes - ` +
+            `revert that text, or make its deletion a separate "remove" edit`,
+        );
+        continue;
+      }
     } else if (created.length) {
       violations.push(`edit ${edit.id}: only kind "extract" may include a created file (${created[0].id})`);
       continue;
@@ -321,6 +354,34 @@ export function buildProposal(rawResult, context) {
           `${config.minGapEvidence} are required`,
       );
       continue;
+    }
+
+    // A removal is measured the same way: a hunk that only deletes text, outside an
+    // extraction, deletes instructions - whatever the edit's kind says. Deleting an
+    // instruction needs the same corroboration adding one does, and only negatives the
+    // analysis classified as `harm` (following the rule caused damage) count toward it.
+    // Non-compliance is the rule failing to steer; it never justifies deletion. This is
+    // the removal-evidence floor; the >= 20%-relevance placement table stays guidance.
+    if (edit.kind !== "extract" && files[0] === memoryFile.path) {
+      const rows = new Map((summary?.instructions ?? []).map((row) => [row.instruction, row]));
+      const unsupported = [];
+      for (const hunk of hunks) {
+        if (!hunk.removed || hunk.added) continue;
+        for (const unit of unitsRemovedBy(hunk, memoryFile)) {
+          const harm = rows.get(unit.id)?.harmSessions ?? 0;
+          if (harm < config.minGapEvidence) unsupported.push({ unit, harm });
+        }
+      }
+      if (unsupported.length) {
+        const worst = unsupported[0];
+        violations.push(
+          `edit ${edit.id} ("${edit.title}") deletes [${worst.unit.id}] "${worst.unit.text.slice(0, 80)}" backed by ` +
+            `${worst.harm} session(s) of harm-class negative evidence; removing an instruction needs ` +
+            `${config.minGapEvidence}, and non-compliance never counts - revert the deletion` +
+            (unsupported.length > 1 ? ` (${unsupported.length} unit(s) affected)` : ""),
+        );
+        continue;
+      }
     }
 
     const file = files[0];

@@ -70,10 +70,12 @@ function budgetRule(memoryFile, config, maxEdits) {
       `This file is ALREADY ${Math.abs(remaining)} tokens OVER budget, so this run is a SHRINK ` +
       `PLAN. You are NOT expected to reach ${config.budgetTokens} tokens in one run - the ` +
       `${maxEdits}-edit cap for this run makes that impossible and later runs continue the work. ` +
-      `What is required is real progress: the edit set MUST be net-negative, so lead with the ` +
-      `highest-cost instructions that have no positive evidence, and with skill extractions of ` +
-      `long narrow sections. Any addition must name the removal that pays for it. Make the ` +
-      `largest honest reduction you can justify from the evidence.`
+      `What is required is real progress: the edit set MUST be net-negative, so lead with skill ` +
+      `extractions of long, narrow, crisply-triggered sections - extraction frees the same ` +
+      `always-loaded tokens and loses nothing, and it never needs removal evidence. Deleting an ` +
+      `instruction outright still needs its harm-evidence floor; the budget never lowers that ` +
+      `bar. Any addition must name the removal or extraction that pays for it. Make the largest ` +
+      `honest reduction you can justify from the evidence.`
     );
   }
   if (remaining < config.budgetTokens * 0.15) {

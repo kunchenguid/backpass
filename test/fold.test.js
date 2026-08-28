@@ -123,10 +123,14 @@ test("failed and skipped analyses are excluded from the fold", () => {
   assert.equal(summary.totals.positive, 1);
 });
 
-test("the rendered evidence block carries counts, relevance and quotes into the prompt", () => {
+test("the rendered evidence block carries counts, relevance, quotes, effects and classes into the prompt", () => {
   const summary = foldEvidence(
     [
-      record("s1", { negative: [{ instruction: "AG-002", quote: "used a bare #2731", effect: "follow-up needed" }] }),
+      record("s1", {
+        negative: [
+          { instruction: "AG-002", quote: "used a bare #2731", effect: "follow-up needed", class: "non-compliance" },
+        ],
+      }),
       record("s2", { negative: [{ instruction: "AG-002", quote: "again a bare number" }] }),
     ],
     { memoryFile },
@@ -134,7 +138,33 @@ test("the rendered evidence block carries counts, relevance and quotes into the 
 
   const rendered = renderEvidenceForPrompt(summary);
   assert.match(rendered, /Sessions analyzed: 2/);
-  assert.match(rendered, /\[AG-002\] \+0 -2 sessions=2 relevance=100\.0%/);
-  assert.match(rendered, /used a bare #2731/);
+  assert.match(rendered, /\[AG-002\] \+0 -2 harm-sessions=0 sessions=2 relevance=100\.0%/);
+  // The synthesis model must see what a negative MEANS, not only its sign: the effect
+  // text and the harm/non-compliance class both survive into the prompt.
+  assert.match(rendered, /- \[non-compliance\] "used a bare #2731" :: follow-up needed/);
+  assert.match(rendered, /- \[unclassified\] "again a bare number"/);
+  assert.match(rendered, /`non-compliance` = the agent ignored it/);
   assert.match(rendered, /none above the evidence threshold/);
+});
+
+test("harm-class negatives are counted per distinct session, and only explicit harm counts", () => {
+  const summary = foldEvidence(
+    [
+      record("s1", {
+        negative: [
+          { instruction: "AG-001", quote: "q1", class: "harm" },
+          { instruction: "AG-001", quote: "q1b", class: "harm" },
+          { instruction: "AG-002", quote: "q2", class: "non-compliance" },
+        ],
+      }),
+      record("s2", { negative: [{ instruction: "AG-001", quote: "q3", class: "harm" }] }),
+      record("s3", { negative: [{ instruction: "AG-001", quote: "q4" }] }),
+    ],
+    { memoryFile },
+  );
+
+  const rows = new Map(summary.instructions.map((row) => [row.instruction, row]));
+  assert.equal(rows.get("AG-001").harmSessions, 2, "two distinct sessions, however many harm items each filed");
+  assert.equal(rows.get("AG-001").negative, 4);
+  assert.equal(rows.get("AG-002").harmSessions, 0, "non-compliance and unclassified never count as harm");
 });

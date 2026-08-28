@@ -137,3 +137,51 @@ test("sanitizeEvidence tolerates a malformed model response", () => {
   assert.deepEqual(clean, { positive: [], negative: [], gaps: [], usedRawTranscript: false });
   assert.deepEqual(sanitizeEvidence({ positive: "not an array" }).positive, []);
 });
+
+test("a negative's class survives only as one of the judged values, and never invents harm", () => {
+  const clean = sanitizeEvidence({
+    negative: [
+      { instruction: "AG-001", quote: "followed the stale pin and broke the build", class: "harm" },
+      { instruction: "AG-002", quote: "skipped the failing-test-first step", class: "non-compliance" },
+      { instruction: "AG-003", quote: "an unrelated grumble about tooling", class: "irrelevant" },
+      { instruction: "AG-004", quote: "a record from before the field existed" },
+      { instruction: "AG-005", quote: "a made-up value must not pass", class: "catastrophic" },
+    ],
+  });
+  assert.deepEqual(
+    clean.negative.map((item) => item.class),
+    ["harm", "non-compliance", "irrelevant", undefined, undefined],
+  );
+});
+
+test("a gap's domain defaults to project, and a citation is kept only when it looks like a ledger id", () => {
+  const clean = sanitizeEvidence({
+    gaps: [
+      {
+        proposedInstruction: "Bind the attestation to the exact head SHA.",
+        quote: "published an attestation for the wrong commit",
+        domain: "project",
+        matchesGap: "d5ff4883e71499f5",
+      },
+      {
+        proposedInstruction: "Stop after the report on scout tasks.",
+        quote: "opened a PR during a scout task",
+        domain: "orchestration",
+        matchesGap: "not-a-ledger-id",
+      },
+      {
+        proposedInstruction: "A legacy gap with neither field.",
+        quote: "walked migrations for 18 turns",
+        domain: "somewhere-else",
+      },
+    ],
+  });
+  assert.deepEqual(
+    clean.gaps.map((gap) => [gap.domain, gap.matchesGap]),
+    [
+      ["project", "d5ff4883e71499f5"],
+      ["orchestration", undefined],
+      ["project", undefined],
+    ],
+  );
+});

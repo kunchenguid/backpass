@@ -150,7 +150,8 @@ export function makeCliRepo({ memory, sessions = 3, files = {} }) {
           {
             instruction: "AG-001",
             quote: `session ${i} re-derived the release steps by hand`,
-            effect: "wasted a turn",
+            effect: "following the stale steps wasted a turn",
+            class: "harm",
             moment: "turn 4",
           },
         ],

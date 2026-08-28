@@ -39,14 +39,20 @@ Hard rules - a violation fails the whole proposal:
 4. **New instructions need evidence from at least {{MIN_GAP_EVIDENCE}} distinct
    sessions.** `transcripts` is how many distinct sessions back the edit; an edit that
    only adds text is a new instruction whatever its `kind` says.
-5. `kind: "extract"` is an edit whose changes are one or more created `SKILL.md` files
-   plus the change(s) to {{MEMORY_PATH}} that pay for them. One skill per extract is the
-   normal shape. Several skills belong in ONE extract exactly when their removals landed
-   in a **single** measured change: adjacent removals are merged into one change, and a
-   merged change cannot be accepted in halves. If each skill has its own measured change,
-   give each its own extract. Any other kind must not include a created file, and an edit
-   changes one file only.
-6. **Budget:** {{BUDGET_RULE}}
+5. **Removing an instruction outright needs harm evidence from at least
+   {{MIN_GAP_EVIDENCE}} distinct sessions** (`harm-sessions` in the evidence). Only
+   `harm` negatives argue against an instruction; `non-compliance` never justifies a
+   deletion. A change that only deletes text and is not part of an extract is a removal
+   whatever its `kind` says - if it lacks the evidence, revert it in the file first.
+6. `kind: "extract"` is an edit whose changes are one or more created `SKILL.md` files
+   plus the change(s) to {{MEMORY_PATH}} that pay for them. **The skills must carry every
+   line those changes remove** - a deletion is never part of an extract; give it its own
+   `remove` edit. One skill per extract is the normal shape. Several skills belong in ONE
+   extract exactly when their removals landed in a **single** measured change: adjacent
+   removals are merged into one change, and a merged change cannot be accepted in halves.
+   If each skill has its own measured change, give each its own extract. Any other kind
+   must not include a created file, and an edit changes one file only.
+7. **Budget:** {{BUDGET_RULE}}
 
 If you still need to change the files, do that first and then answer; backpass
 re-measures after this reply and shows you the new ids if anything moved. Re-measuring

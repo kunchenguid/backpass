@@ -124,7 +124,12 @@ const tighten = (changes) => ({
 function summaryFor(sessions = 3) {
   return {
     analyzedSessions: sessions,
-    instructions: [],
+    // The removal fixtures delete AG-001/AG-002 (the first two sharp-edge bullets);
+    // the removal-evidence floor needs harm-class corroboration for them.
+    instructions: [
+      { instruction: "AG-001", positive: 0, negative: 2, harmSessions: 2, sessions: 2, relevance: 0.5, quotes: [] },
+      { instruction: "AG-002", positive: 0, negative: 2, harmSessions: 2, sessions: 2, relevance: 0.5, quotes: [] },
+    ],
     gaps: [],
     totals: { positive: 1, negative: 2, gapClusters: 0, droppedGapSingletons: 0 },
   };

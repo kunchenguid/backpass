@@ -6,6 +6,7 @@ import { distill } from "./distill.js";
 import { readTranscript } from "./discovery/index.js";
 import { renderInstructionIndex } from "./memory.js";
 import { renderPrompt } from "./prompts.js";
+import { renderOpenGapIndex } from "./gap-ledger.js";
 import { evidenceKey, isEvidenceFresh, safeFileName } from "./state.js";
 import { emitProgress } from "./progress.js";
 import { UserError, color, info, warn } from "./logger.js";
@@ -33,6 +34,9 @@ function noteOnce(note) {
   warn(note);
 }
 
+/** Negative evidence carries one of these classes; anything else is dropped as unjudged. */
+export const NEGATIVE_CLASSES = ["harm", "non-compliance", "irrelevant"];
+
 /** Evidence items without a verbatim quote are dropped - the rubric's central rule. */
 export function sanitizeEvidence(parsed) {
   const clean = { positive: [], negative: [], gaps: [], usedRawTranscript: Boolean(parsed?.usedRawTranscript) };
@@ -43,23 +47,33 @@ export function sanitizeEvidence(parsed) {
   for (const key of ["positive", "negative"]) {
     for (const item of Array.isArray(parsed[key]) ? parsed[key] : []) {
       if (!hasQuote(item) || typeof item.instruction !== "string") continue;
-      clean[key].push({
+      const entry = {
         instruction: item.instruction.trim(),
         moment: String(item.moment ?? "").slice(0, 80),
         effect: String(item.effect ?? "").slice(0, 400),
         quote: item.quote.trim().slice(0, 600),
-      });
+      };
+      // The class is what keeps "the agent skipped the rule" from being read as "the
+      // rule caused harm" downstream. Only an explicit judged value is kept; records
+      // from before the field existed simply carry none, and none never counts as harm.
+      if (key === "negative" && NEGATIVE_CLASSES.includes(item.class)) entry.class = item.class;
+      clean[key].push(entry);
     }
   }
 
   for (const item of Array.isArray(parsed.gaps) ? parsed.gaps : []) {
     if (!hasQuote(item) || typeof item.proposedInstruction !== "string") continue;
-    clean.gaps.push({
+    const gap = {
       mistake: String(item.mistake ?? "").slice(0, 400),
       proposedInstruction: item.proposedInstruction.trim().slice(0, 400),
       recurrenceRisk: ["high", "medium", "low"].includes(item.recurrenceRisk) ? item.recurrenceRisk : "medium",
       quote: item.quote.trim().slice(0, 600),
-    });
+      domain: item.domain === "orchestration" ? "orchestration" : "project",
+    };
+    if (typeof item.matchesGap === "string" && /^[0-9a-f]{16}$/.test(item.matchesGap.trim())) {
+      gap.matchesGap = item.matchesGap.trim();
+    }
+    clean.gaps.push(gap);
   }
 
   return clean;
@@ -84,7 +98,7 @@ function promptPathFor(state, transcript) {
   return path.join(state.applyDir, "..", "prompts", `${safeFileName(transcriptIdentity(transcript))}.md`);
 }
 
-async function analyzeOne({ transcript, memoryFile, config, repo, slot = 0 }) {
+async function analyzeOne({ transcript, memoryFile, config, repo, slot = 0, openGapIndex = "(none yet)" }) {
   const raw = await readTranscript(transcript);
   const distilled = distill(raw.events, {
     ...transcript,
@@ -120,6 +134,7 @@ async function analyzeOne({ transcript, memoryFile, config, repo, slot = 0 }) {
   const prompt = renderPrompt("analysis", {
     MEMORY_PATH: memoryFile.path,
     INSTRUCTION_INDEX: renderInstructionIndex(memoryFile),
+    OPEN_GAPS: openGapIndex,
     TRACE: distilled.trace,
   });
 
@@ -242,6 +257,10 @@ export async function analyzeTranscripts({ transcripts, memoryFile, config, repo
       `${pick.model ? ` (${pick.model})` : ""}${pick.effort ? ` effort=${pick.effort}` : ""} at jobs=${config.jobs}`,
   );
 
+  // Rendered once per run: the ledger's open gaps, so each analysis can cite an existing
+  // gap id instead of coining a paraphrase of it (`matchesGap` in the reply schema).
+  const openGapIndex = renderOpenGapIndex(state.readGapLedger(), memoryFile.path);
+
   let done = 0;
   const evidenceTotals = { positive: 0, negative: 0, gaps: 0 };
   await pool(pending, config.jobs, async (transcript, _index, slot) => {
@@ -271,7 +290,7 @@ export async function analyzeTranscripts({ transcripts, memoryFile, config, repo
     });
 
     try {
-      const result = await analyzeOne({ transcript, memoryFile, config, repo, slot });
+      const result = await analyzeOne({ transcript, memoryFile, config, repo, slot, openGapIndex });
       if (result.status === "skipped") {
         summary.skipped += 1;
         state.writeEvidence(transcript, { ...base, status: "skipped", reason: result.reason });

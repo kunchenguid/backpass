@@ -11,7 +11,8 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   why, so a change that argues one of those calls should go the other way starts there.
 - `README.md` documents the user-facing surface; `src/cli.js` is the authoritative flag list.
 - The pipeline is one stage per module, in order: `src/discovery/` -> `src/sample.js` (cap) -> `src/distill.js` ->
-  `src/analyze.js` -> `src/fold.js` -> `src/synthesize.js` (with `src/workspace.js` + `src/diff.js`) ->
+  `src/analyze.js` -> `src/consolidate.js` (gap-identity merge, inside `foldForRun`) -> `src/fold.js` ->
+  `src/synthesize.js` (with `src/workspace.js` + `src/diff.js`) ->
   `src/proposal.js` -> `src/apply/`. Each module's header comment explains its role; read those
   before changing a stage.
 - **User-facing step names are the training-loop terms**, not the module names: discover =
@@ -106,6 +107,20 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   half-accepted. `buildProposal` allows N skills only when they share ONE hunk; separately
   measured skills must stay separate edits. Edits carry `skills: []`; read them through
   `editSkills` (`src/skills.js`), which also understands the pre-0.1.8 single `skill`.
+- **Extraction and deletion never share one decision.** `measureWorkspace` splits a pure
+  removal that mixes skill-carried and vanishing text at that boundary (`splitRemovalHunk`;
+  a split that cannot anchor uniquely keeps the merged hunk instead of guessing). In
+  `buildProposal`, an extract's skills must carry every line its hunks remove
+  (dash-and-whitespace-folded, `normalizeRecoveryLine`), and any other edit whose hunk only
+  deletes memory-file text is a removal whatever its kind: each deleted unit needs
+  `minGapEvidence` distinct sessions of `class: "harm"` negatives (`harmSessions` in the
+  fold). Non-compliance never satisfies the floor; the >= 20%-relevance placement table
+  stays prompt guidance by the captain's explicit decision - do not harden it.
+- **Negative evidence has a sign the pipeline must not lose.** Analysis classifies every
+  negative (`harm` / `non-compliance` / `irrelevant`, `sanitizeEvidence` drops other
+  values) and `renderEvidenceForPrompt` renders the class AND the `effect` text with each
+  quote - the no-mistakes postmortem traced a wrong deletion to that field being stripped.
+  Records from before the class existed carry none, and none never counts as harm.
 - **Skills only count if a harness loads them.** Extractions target `.agents/skills` with
   `.claude/skills -> ../.agents/skills` as a symlink (`ensureSkillsLayout` in
   `src/skills.js`, run at write time); a bare `skills/` dir is never auto-detected and a
@@ -141,6 +156,16 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   Record this run's evidence _before_ pruning - old evidence files stay on disk and would
   re-add an expired or covered sighting otherwise. Uncorroborated gaps stay hidden; never
   surface singletons to the prompt or report.
+- **Gap identity is judged, not word-matched.** Bigram similarity cannot recognize real
+  paraphrase (measured on production data: max cross-session score 0.34 vs the 0.45 bar),
+  so it is only the fallback. The analysis turn cites open-gap ids (`matchesGap`, shown via
+  `renderOpenGapIndex`; an invalid citation falls back, never fails), and `foldForRun` runs
+  ONE consolidation call per run (`src/consolidate.js`) that merges paraphrased entries
+  (`mergeGapEntries`) - record, consolidate, prune, in that order. Consolidation failure
+  degrades to lexical identity with a warning, never an abort. Gaps also carry `domain`;
+  `orchestration` sightings (task-harness mistakes, not this repo's engineering) are
+  counted in `totals.orchestrationGapSightings` and excluded from clustering, so they can
+  never reach a proposal - there is deliberately no orchestrator-memory write path.
 - **backpass must never analyze itself.** Its own acpx calls are filed by each harness
   under the repo's cwd, a tier-1 match. Every prompt starts with `SELF_SESSION_SENTINEL`
   (`src/prompts.js`) and discovery drops transcripts whose first user message begins with

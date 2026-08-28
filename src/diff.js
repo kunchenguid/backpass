@@ -161,7 +161,7 @@ export function rawHunks(ops) {
  * Occurrences may overlap (a run of identical lines): counting them non-overlapping
  * would call a window unique while the first match sits somewhere else entirely.
  */
-function countOccurrences(haystack, needle) {
+export function countOccurrences(haystack, needle) {
   if (!needle) return 0;
   let count = 0;
   let at = haystack.indexOf(needle);
@@ -178,7 +178,7 @@ function countOccurrences(haystack, needle) {
  * newline *before* it instead. Both sides of a hunk share tail-ness (the suffix after the
  * change is identical), so `find` and `replace` built this way splice cleanly.
  */
-function span(lines, start, end) {
+export function span(lines, start, end) {
   if (end <= start) return "";
   const body = lines.slice(start, end).join("\n");
   if (end === lines.length) return `${start > 0 ? "\n" : ""}${body}`;

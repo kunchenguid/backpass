@@ -69,12 +69,21 @@ analyzed sessions in which an instruction drew any evidence at all.
    speculative one.
 2. **New instructions need evidence from at least {{MIN_GAP_EVIDENCE}} distinct
    sessions.** One bad session never rewrites the weights.
-3. **Every edit must be backed by at least one verbatim quote** from the evidence. You
+3. **Removing an instruction outright needs harm evidence from at least
+   {{MIN_GAP_EVIDENCE}} distinct sessions** (`harm-sessions` in the evidence rows).
+   Only `harm` negatives - following the instruction caused damage - argue against an
+   instruction. `non-compliance` means it failed to steer: reinforce it, reposition it,
+   or improve its trigger, never delete it for being ignored. Text you delete that does
+   not land in a created skill is a removal, whatever the edit is called.
+4. **An extraction preserves every line it removes** in the SKILL.md it creates. A
+   deletion is never part of an extract: it is its own `remove` edit, decided on its
+   own evidence.
+5. **Every edit must be backed by at least one verbatim quote** from the evidence. You
    will attach the quotes in the next step, so only make changes you can back.
-4. **Budget:** {{BUDGET_RULE}}
-5. Prefer removing a dead instruction over adding a new one. Instructions with high
-   token cost and zero positive evidence across many sessions are the best removals.
-6. Change only `./{{MEMORY_PATH}}` and files under `./{{SKILLS_DIR}}/`. Never delete a
+6. **Budget:** {{BUDGET_RULE}}
+7. Prefer extracting a long, narrow, crisply-triggered section over deleting anything:
+   extraction frees the same always-loaded tokens and loses nothing.
+8. Change only `./{{MEMORY_PATH}}` and files under `./{{SKILLS_DIR}}/`. Never delete a
    file. Do not create notes, scripts, or scratch files.
 
 ## Where an instruction belongs

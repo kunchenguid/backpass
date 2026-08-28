@@ -15,10 +15,23 @@ import { sha256 } from "./state.js";
  *
  * Identity and freshness rules:
  *
- *  - A gap's identity is its proposed instruction, matched by the same bigram similarity
- *    the in-run clustering uses (`GAP_SIMILARITY_THRESHOLD`), against the ledger's
- *    canonical phrasing (the shortest seen). The entry id is a hash of the first phrasing
- *    and never changes, so rephrasing does not split an entry.
+ *  - A gap's identity is judged first and matched lexically second. The analysis turn is
+ *    shown the ledger's open entries (`renderOpenGapIndex`) and cites an entry id
+ *    (`matchesGap`) when its gap is one already on the books; a valid citation wins
+ *    outright, because word overlap cannot recognize a paraphrase and the analysis model
+ *    has both sentences in front of it. Without a citation, bigram similarity
+ *    (`GAP_SIMILARITY_THRESHOLD`) against the canonical phrasing (the shortest seen) is
+ *    the fallback. The entry id is a hash of the first phrasing and never changes, so
+ *    rephrasing does not split an entry. Two entries later judged to be one gap are
+ *    merged by the pre-synthesis consolidation pass (`mergeGapEntries`, driven by
+ *    `src/consolidate.js`), which is what lets two same-run parallel sightings - neither
+ *    of which could cite the other - still corroborate.
+ *  - Every observation carries the `domain` the analysis judged: `project` for mistakes
+ *    about this repository's own engineering, `orchestration` for mistakes about the
+ *    task-management layer around it (briefs, scout scope, status records, approvals).
+ *    Orchestration sightings are recorded for legibility but never counted toward
+ *    corroboration and never surface in a proposal; a missing domain counts as project,
+ *    so evidence from before the field existed keeps its old behavior.
  *  - Sessions are keyed by transcript id (harness + native session id), so re-analyzing
  *    or re-sampling the same session overwrites its observation and never adds a count.
  *  - A gap is a fact about its session: re-analysis that no longer mentions it is model
@@ -90,7 +103,13 @@ export function recordGapObservations(ledger, evidenceRecords, { now = new Date(
     if (!sessionIdentity) continue;
     for (const gap of record.gaps || []) {
       if (!gap || !gap.proposedInstruction) continue;
-      let entry = findGapEntry(ledger, record.memoryPath, gap.proposedInstruction);
+      // A citation from the analysis turn wins over word overlap: the model saw both
+      // sentences and judged them the same gap. An id that names nothing (stale index,
+      // typo) falls back to the lexical match rather than failing the record.
+      const cited = gap.matchesGap ? ledger.entries[gap.matchesGap] : null;
+      let entry =
+        (cited && cited.memoryPath === record.memoryPath ? cited : null) ||
+        findGapEntry(ledger, record.memoryPath, gap.proposedInstruction);
       if (!entry) {
         const id = gapEntryId(record.memoryPath, gap.proposedInstruction);
         entry = ledger.entries[id] = {
@@ -121,6 +140,7 @@ export function recordGapObservations(ledger, evidenceRecords, { now = new Date(
         mistake: gap.mistake,
         quote: gap.quote,
         recurrenceRisk: gap.recurrenceRisk,
+        domain: gap.domain === "orchestration" ? "orchestration" : "project",
       };
       recorded += 1;
     }
@@ -176,8 +196,69 @@ export function ledgerGapObservations(ledger, memoryPath) {
         mistake: obs.mistake,
         quote: obs.quote,
         recurrenceRisk: obs.recurrenceRisk,
+        domain: obs.domain === "orchestration" ? "orchestration" : "project",
       });
     }
   }
   return observations;
+}
+
+/**
+ * The ledger's open entries for one memory path, rendered for the analysis prompt so the
+ * model can cite an existing gap instead of coining a paraphrase of it. An accumulator,
+ * not a detector: a gap nobody has reported yet is simply absent, and the analysis
+ * reports it fresh.
+ */
+export function renderOpenGapIndex(ledger, memoryPath, { max = 200 } = {}) {
+  const entries = Object.values(ledger.entries).filter((e) => e.memoryPath === memoryPath);
+  if (!entries.length) return "(none yet)";
+  const lines = entries.slice(0, max).map((e) => `[gap:${e.id}] ${e.proposedInstruction}`);
+  if (entries.length > max) lines.push(`... ${entries.length - max} more`);
+  return lines.join("\n");
+}
+
+/**
+ * Merge groups of ledger entries the consolidation pass judged to be one gap. Each group
+ * keeps the entry with the most sessions (its id stays citable), unions the session maps
+ * without ever double-counting a session (an observation already present keeps its
+ * earliest firstObservedAt), and keeps the shortest phrasing as canonical - the same rule
+ * recording uses. Unknown ids, cross-path groups, and groups that shrink below two known
+ * entries are dropped rather than guessed at. Returns how many entries were absorbed.
+ */
+export function mergeGapEntries(ledger, groups) {
+  let absorbed = 0;
+  const claimed = new Set();
+  for (const group of Array.isArray(groups) ? groups : []) {
+    const ids = [...new Set((Array.isArray(group) ? group : []).map(String))].filter(
+      (id) => ledger.entries[id] && !claimed.has(id),
+    );
+    if (ids.length < 2) continue;
+    const paths = new Set(ids.map((id) => ledger.entries[id].memoryPath));
+    if (paths.size !== 1) continue;
+    for (const id of ids) claimed.add(id);
+
+    const entries = ids.map((id) => ledger.entries[id]);
+    const target = entries.reduce((best, e) =>
+      Object.keys(e.sessions).length > Object.keys(best.sessions).length ? e : best,
+    );
+    for (const entry of entries) {
+      if (entry === target) continue;
+      for (const [sessionId, obs] of Object.entries(entry.sessions)) {
+        const prior = target.sessions[sessionId];
+        if (!prior) {
+          target.sessions[sessionId] = obs;
+        } else {
+          const earlier =
+            Date.parse(obs.firstObservedAt || obs.observedAt) < Date.parse(prior.firstObservedAt || prior.observedAt);
+          if (earlier) prior.firstObservedAt = obs.firstObservedAt || obs.observedAt;
+        }
+      }
+      if (entry.proposedInstruction.length < target.proposedInstruction.length) {
+        target.proposedInstruction = entry.proposedInstruction;
+      }
+      delete ledger.entries[entry.id];
+      absorbed += 1;
+    }
+  }
+  return absorbed;
 }

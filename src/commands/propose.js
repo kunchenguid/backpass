@@ -1,3 +1,4 @@
+import { consolidateGapLedger } from "../consolidate.js";
 import { foldEvidence } from "../fold.js";
 import { ledgerGapObservations, pruneGapLedger, recordGapObservations } from "../gap-ledger.js";
 import { synthesizeProposal } from "../synthesize.js";
@@ -33,14 +34,26 @@ export async function foldForRun(ctx, memoryFile, memoryHash) {
 
   const ledger = state.readGapLedger();
   recordGapObservations(ledger, relevant);
+  // Consolidate after recording, so the pass sees this run's sightings too: two
+  // sessions coining the same brand-new gap in one parallel fan-out can only line up
+  // here. One bounded judged call; a failure degrades to lexical identity and the run
+  // continues. Prune afterwards so a merged-then-covered gap retires as one entry.
+  const consolidation = await consolidateGapLedger({
+    ledger,
+    memoryPath: memoryFile.path,
+    config: ctx.config,
+    repo: ctx.repo,
+  });
   pruneGapLedger(ledger, { memoryFile, memoryPath: memoryFile.path, maxAge: gapLedgerMaxAge });
   state.writeGapLedger(ledger);
 
-  return foldEvidence(relevant, {
+  const summary = foldEvidence(relevant, {
     minGapEvidence,
     memoryFile,
     gapObservations: ledgerGapObservations(ledger, memoryFile.path),
   });
+  summary.consolidation = consolidation;
+  return summary;
 }
 
 export async function runProposal(ctx, precomputed = null) {
@@ -78,6 +91,9 @@ export async function runProposal(ctx, precomputed = null) {
     transcripts,
   });
 
+  // The consolidation call is part of this proposal's cost; account for it with the
+  // synthesis turns rather than letting it vanish.
+  if (summary.consolidation?.usage) proposal.usage = [summary.consolidation.usage, ...(proposal.usage || [])];
   config.state.writeProposal(proposal);
   return { proposal, summary, memoryFile: file };
 }

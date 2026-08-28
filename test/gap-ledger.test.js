@@ -7,7 +7,8 @@ import path from "node:path";
 import { State } from "../src/state.js";
 import { parseMemoryUnits } from "../src/memory.js";
 import { foldForRun } from "../src/commands/propose.js";
-import { foldEvidence } from "../src/fold.js";
+import { foldEvidence, renderEvidenceForPrompt } from "../src/fold.js";
+import { gapEntryId, mergeGapEntries } from "../src/gap-ledger.js";
 
 const MEMORY_PATH = "AGENTS.md";
 const DAY = 86_400_000;
@@ -24,11 +25,12 @@ function record(id, gaps, { startedAt = Date.parse("2026-08-01T00:00:00Z"), memo
     memoryHash,
     positive: [],
     negative: [],
-    gaps: gaps.map((proposedInstruction) => ({
-      proposedInstruction,
+    gaps: gaps.map((gap) => ({
+      proposedInstruction: typeof gap === "string" ? gap : gap.proposedInstruction,
       mistake: "re-derived it",
       quote: `quote from ${id}`,
       recurrenceRisk: "high",
+      ...(typeof gap === "string" ? {} : gap),
     })),
   };
 }
@@ -188,4 +190,106 @@ test("foldEvidence without a ledger keeps the per-run behavior", () => {
     memoryFile: memoryFile(),
   });
   assert.equal(summary.gaps.length, 0, "one session reporting twice is still one session");
+});
+
+// ---------- judged identity: analysis citations ----------
+
+const PARAPHRASE = "Consult the database schema documentation prior to composing any SQL.";
+
+test("an analysis that cites an existing gap id corroborates it, however different the words", async () => {
+  const h = harness();
+  await run(h, [record("claude-s1", [GAP])]);
+  const entryId = gapEntryId(MEMORY_PATH, GAP);
+  assert.ok(h.state.readGapLedger().entries[entryId], "the first sighting created the citable entry");
+
+  // A later session phrases the same gap so differently that no lexical match exists;
+  // its analysis saw the open-gap index and cited the id instead.
+  const summary = await run(h, [record("codex-s2", [{ proposedInstruction: PARAPHRASE, matchesGap: entryId }])]);
+  assert.equal(summary.gaps.length, 1, "the citation is what lines the two sightings up");
+  assert.equal(summary.gaps[0].sessions, 2);
+  assert.equal(Object.keys(h.state.readGapLedger().entries).length, 1, "no split entry for the paraphrase");
+});
+
+test("a citation to an id the ledger does not hold falls back to lexical identity", async () => {
+  const h = harness();
+  const summary = await run(h, [record("claude-s1", [{ proposedInstruction: GAP, matchesGap: "00000000deadbeef" }])]);
+  assert.equal(summary.gaps.length, 0);
+  const entries = Object.values(h.state.readGapLedger().entries);
+  assert.equal(entries.length, 1, "the sighting still lands as a fresh entry");
+  assert.equal(entries[0].proposedInstruction, GAP);
+});
+
+// ---------- orchestration-domain gaps stay out of project proposals ----------
+
+test("orchestration-domain gaps are counted but never cluster into a proposal", async () => {
+  const h = harness();
+  const orchestration = { proposedInstruction: "Stop after the report on scout tasks.", domain: "orchestration" };
+  const summary = await run(h, [record("claude-s1", [orchestration]), record("codex-s2", [orchestration])]);
+
+  assert.equal(summary.gaps.length, 0, "two sessions corroborate it, and it still never becomes a proposal");
+  assert.equal(summary.totals.orchestrationGapSightings, 2, "but the run stays legible about what it excluded");
+  assert.match(renderEvidenceForPrompt(summary), /2 orchestration-domain sighting\(s\).*excluded/);
+
+  // The same shape in the project domain clusters as usual - the exclusion is the
+  // domain, not the text.
+  const control = harness();
+  const project = { proposedInstruction: "Stop after the report on scout tasks.", domain: "project" };
+  const clustered = await run(control, [record("claude-s1", [project]), record("codex-s2", [project])]);
+  assert.equal(clustered.gaps.length, 1);
+});
+
+// ---------- consolidation-pass merges (the mechanical half) ----------
+
+function ledgerWith(...entries) {
+  const ledger = { version: 1, entries: {} };
+  for (const { id, text, sessions, memoryPath = MEMORY_PATH } of entries) {
+    ledger.entries[id] = {
+      id,
+      memoryPath,
+      proposedInstruction: text,
+      sessions: Object.fromEntries(
+        sessions.map((s) => [
+          s,
+          { firstObservedAt: "2026-08-01T00:00:00.000Z", observedAt: "2026-08-01T00:00:00.000Z" },
+        ]),
+      ),
+    };
+  }
+  return ledger;
+}
+
+test("mergeGapEntries unions sessions without double-counting and keeps the shortest phrasing", () => {
+  const ledger = ledgerWith(
+    { id: "a".repeat(16), text: "A long and winding phrasing of the same gap.", sessions: ["s1", "shared"] },
+    { id: "b".repeat(16), text: "The short phrasing.", sessions: ["s2", "shared"] },
+  );
+  const absorbed = mergeGapEntries(ledger, [["a".repeat(16), "b".repeat(16)]]);
+
+  assert.equal(absorbed, 1);
+  const entries = Object.values(ledger.entries);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].proposedInstruction, "The short phrasing.");
+  assert.deepEqual(Object.keys(entries[0].sessions).sort(), ["s1", "s2", "shared"], "a session never counts twice");
+});
+
+test("mergeGapEntries drops what it cannot verify instead of guessing", () => {
+  const ledger = ledgerWith(
+    { id: "a".repeat(16), text: "One gap.", sessions: ["s1"] },
+    { id: "b".repeat(16), text: "Another gap.", sessions: ["s2"] },
+    { id: "c".repeat(16), text: "A gap for another file.", sessions: ["s3"], memoryPath: "CLAUDE.md" },
+  );
+
+  assert.equal(mergeGapEntries(ledger, [["a".repeat(16), "0".repeat(16)]]), 0, "an unknown id shrinks the group");
+  assert.equal(mergeGapEntries(ledger, [["a".repeat(16), "c".repeat(16)]]), 0, "cross-path groups are refused");
+  assert.equal(mergeGapEntries(ledger, "not an array"), 0);
+  assert.equal(Object.keys(ledger.entries).length, 3, "nothing merged, nothing lost");
+
+  // An id already claimed by one group cannot be claimed again by a later one.
+  const twice = mergeGapEntries(ledger, [
+    ["a".repeat(16), "b".repeat(16)],
+    ["b".repeat(16), "c".repeat(16)],
+  ]);
+  assert.equal(twice, 1, "only the first group merged");
+  assert.ok(!ledger.entries["b".repeat(16)], "b was absorbed into a");
+  assert.ok(ledger.entries["c".repeat(16)], "c stayed untouched");
 });

@@ -51,7 +51,22 @@ function config(overrides = {}) {
 function gate({ text = MEMORY_TEXT, files = {}, edit, annotation, config: cfg = config(), context = {} }) {
   const repo = makeRepo({ "AGENTS.md": text, ...files });
   const staged = stageAndMeasure({ repo, skillsDir: cfg.skillsDir, edit });
-  const summary = { analyzedSessions: 4, totals: { positive: 3, negative: 2, gapClusters: 1 } };
+  // Default: every unit carries harm-class corroboration, so removal fixtures whose
+  // subject is not the removal-evidence floor sail through it. Floor tests pass their
+  // own summary through `context`.
+  const summary = {
+    analyzedSessions: 4,
+    totals: { positive: 3, negative: 2, gapClusters: 1 },
+    instructions: Array.from({ length: 20 }, (_, i) => ({
+      instruction: `AG-${String(i + 1).padStart(3, "0")}`,
+      positive: 0,
+      negative: 4,
+      harmSessions: 4,
+      sessions: 4,
+      relevance: 1,
+      quotes: [],
+    })),
+  };
   const result = buildProposal(annotation, {
     memoryFile: staged.memoryFile,
     config: cfg,
@@ -274,14 +289,20 @@ test("a proposal that would exceed the budget fails the gate", () => {
   assert.ok(violations.some((v) => /over the 100-token budget/.test(v)));
 });
 
-const skillFile = (name) => `---\nname: ${name}\ndescription: Load before ${name}.\n---\n\n## Steps\n\n1. do it\n`;
+// An extraction must carry every line it removes; `carried` is that line (or lines).
+const skillFile = (name, carried = "") =>
+  `---\nname: ${name}\ndescription: Load before ${name}.\n---\n\n## Steps\n\n1. do it\n${carried}`;
 
 test("an extract is the created SKILL.md file(s) grouped with the memory change that pays for them", () => {
   const extractEdit = (root) => {
     writeIn(root, "AGENTS.md", (t) =>
       t.replace("- Use Node 18 via nvm before running any script.", "- See the release-signing skill."),
     );
-    writeIn(root, ".agents/skills/release-signing/SKILL.md", skillFile("release-signing"));
+    writeIn(
+      root,
+      ".agents/skills/release-signing/SKILL.md",
+      skillFile("release-signing", "- Use Node 18 via nvm before running any script.\n"),
+    );
   };
 
   const good = gate({
@@ -291,7 +312,13 @@ test("an extract is the created SKILL.md file(s) grouped with the memory change 
   assert.deepEqual(good.violations, []);
   assert.deepEqual(
     good.proposal.edits[0].skills.map((s) => [s.path, s.name, s.body]),
-    [[".agents/skills/release-signing/SKILL.md", "release-signing", "## Steps\n\n1. do it"]],
+    [
+      [
+        ".agents/skills/release-signing/SKILL.md",
+        "release-signing",
+        "## Steps\n\n1. do it\n- Use Node 18 via nvm before running any script.",
+      ],
+    ],
   );
   assert.equal(good.proposal.stats.skillExtractions, 1);
 
@@ -323,8 +350,12 @@ test("skills whose removals were measured as one change may share an extract; se
           "- See the commit-style and node-setup skills.\n",
         ),
       );
-      writeIn(root, ".agents/skills/commit-style/SKILL.md", skillFile("commit-style"));
-      writeIn(root, ".agents/skills/node-setup/SKILL.md", skillFile("node-setup"));
+      writeIn(root, ".agents/skills/commit-style/SKILL.md", skillFile("commit-style", "- Prefer small commits.\n"));
+      writeIn(
+        root,
+        ".agents/skills/node-setup/SKILL.md",
+        skillFile("node-setup", "- Use Node 18 via nvm before running any script.\n"),
+      );
     },
     annotation: { edits: [claim(["H1", "H2", "H3"], { kind: "extract", title: "extract two playbooks" })] },
   });
@@ -343,8 +374,16 @@ test("skills whose removals were measured as one change may share an extract; se
           .replace("- Whenever a PR is mentioned, include its URL.", "- See the url-policy skill.")
           .replace("- Use Node 18 via nvm before running any script.", "- See the node-setup skill."),
       );
-      writeIn(root, ".agents/skills/url-policy/SKILL.md", skillFile("url-policy"));
-      writeIn(root, ".agents/skills/node-setup/SKILL.md", skillFile("node-setup"));
+      writeIn(
+        root,
+        ".agents/skills/url-policy/SKILL.md",
+        skillFile("url-policy", "- Whenever a PR is mentioned, include its URL.\n"),
+      );
+      writeIn(
+        root,
+        ".agents/skills/node-setup/SKILL.md",
+        skillFile("node-setup", "- Use Node 18 via nvm before running any script.\n"),
+      );
     },
     annotation: { edits: [claim(["H1", "H2", "H3", "H4"], { kind: "extract", title: "extract both" })] },
   });
@@ -744,7 +783,8 @@ test("an unchanged memory file still applies, so the freshness check costs nothi
 });
 
 test("a skill is written only when the memory-file edit that points at it lands", () => {
-  const skillText = "---\nname: node-setup\ndescription: Load before running any script.\n---\n\nuse nvm\n";
+  const skillText =
+    "---\nname: node-setup\ndescription: Load before running any script.\n---\n\nuse nvm\n- Use Node 18 via nvm before running any script.\n";
   const { proposal, repo, state } = gate({
     edit: (root) => {
       writeIn(root, "AGENTS.md", (t) =>
@@ -770,7 +810,8 @@ test("a skill is written only when the memory-file edit that points at it lands"
 });
 
 test("a failed later skill write rolls back skill paths written earlier", () => {
-  const skillText = "---\nname: node-setup\ndescription: Load before running any script.\n---\n\nuse nvm\n";
+  const skillText =
+    "---\nname: node-setup\ndescription: Load before running any script.\n---\n\nuse nvm\n- Use Node 18 via nvm before running any script.\n";
   const { proposal, repo, state } = gate({
     edit: (root) => {
       writeIn(root, "AGENTS.md", (text) =>
@@ -814,7 +855,7 @@ test("a failed later skill write rolls back skill paths written earlier", () => 
 
 test("an accepted extract writes the skill the agent drafted, in the canonical layout", () => {
   const skillText =
-    "---\nname: release-signing\ndescription: Load before tagging a release.\n---\n\n## Steps\n\n1. sign\n";
+    "---\nname: release-signing\ndescription: Load before tagging a release.\n---\n\n- Use Node 18 via nvm before running any script.\n\n## Steps\n\n1. sign\n";
   const { proposal, repo, state } = gate({
     edit: (root) => {
       writeIn(root, "AGENTS.md", (t) =>
@@ -1057,5 +1098,177 @@ test("the cap-exceeded violation fires above the effective adaptive cap, not the
   assert.ok(
     above.violations.some((v) => v.includes(`per-run cap is ${cap}`)),
     above.violations.join("\n"),
+  );
+});
+
+// ---------- the removal-evidence floor, and what deliberately stays soft ----------
+
+const TWO_SECTIONS = [
+  "# T",
+  "",
+  "## Alpha",
+  "",
+  "- Alpha one is a rule about the build.",
+  "- Alpha two is a rule about the tests.",
+  "",
+  "## Beta",
+  "",
+  "- Beta one is a rule about releases.",
+  "- Beta two is a rule about signing.",
+  "",
+  "## Keep",
+  "",
+  "- Stay here.",
+  "",
+].join("\n");
+
+const BETA_BLOCK = "## Beta\n\n- Beta one is a rule about releases.\n- Beta two is a rule about signing.\n\n";
+const ALPHA_AND_BETA =
+  "## Alpha\n\n- Alpha one is a rule about the build.\n- Alpha two is a rule about the tests.\n\n" + BETA_BLOCK;
+const ALPHA_SKILL =
+  "---\nname: alpha\ndescription: Load before build work.\n---\n\n" +
+  "## Alpha\n\n- Alpha one is a rule about the build.\n- Alpha two is a rule about the tests.\n";
+
+/** Summary rows for the two Beta units, with the class mix under test. */
+const betaRows = ({ harmSessions }) => ({
+  analyzedSessions: 10,
+  totals: { positive: 0, negative: 5, gapClusters: 0 },
+  instructions: ["AG-003", "AG-004"].map((id) => ({
+    instruction: id,
+    positive: 0,
+    negative: 5,
+    harmSessions,
+    sessions: 5,
+    relevance: 0.5,
+    quotes: [],
+  })),
+});
+
+test("non-compliance never satisfies the removal-evidence floor; harm does", () => {
+  const dropBeta = memoryEdit((t) => t.replace(BETA_BLOCK, ""));
+  const annotation = { edits: [claim(["H1"], { kind: "remove", title: "drop the beta rules" })] };
+
+  // Five sessions violated the Beta rules; not one shows harm from following them.
+  const skipped = gate({
+    text: TWO_SECTIONS,
+    edit: dropBeta,
+    annotation,
+    context: { summary: betaRows({ harmSessions: 0 }) },
+  });
+  assert.equal(skipped.proposal.edits.length, 0);
+  assert.ok(
+    skipped.violations.some((v) => /harm-class negative evidence/.test(v) && /non-compliance never counts/.test(v)),
+    skipped.violations.join("\n"),
+  );
+
+  // The same deletion with two sessions of harm-class evidence clears the floor.
+  const harmed = gate({
+    text: TWO_SECTIONS,
+    edit: dropBeta,
+    annotation,
+    context: { summary: betaRows({ harmSessions: 2 }) },
+  });
+  assert.deepEqual(harmed.violations, []);
+  assert.equal(harmed.proposal.edits.length, 1);
+});
+
+test("a removal is measured, not declared: relabeling the edit does not dodge the floor", () => {
+  const { violations } = gate({
+    text: TWO_SECTIONS,
+    edit: memoryEdit((t) => t.replace(BETA_BLOCK, "")),
+    annotation: { edits: [claim(["H1"], { kind: "rewrite", title: "tidy the beta section" })] },
+    context: { summary: betaRows({ harmSessions: 0 }) },
+  });
+  assert.ok(
+    violations.some((v) => /harm-class negative evidence/.test(v)),
+    violations.join("\n"),
+  );
+});
+
+test("the declined 20%-relevance retention rule is guidance, not a gate: extraction needs no such clearance", () => {
+  // The highest-relevance, purely-positive instruction in the corpus can still be
+  // extracted with zero violations - the captain kept retention as prompt guidance.
+  const { violations, proposal } = gate({
+    text: TWO_SECTIONS,
+    edit: (root) => {
+      writeIn(root, "AGENTS.md", (t) =>
+        t.replace(
+          "## Alpha\n\n- Alpha one is a rule about the build.\n- Alpha two is a rule about the tests.\n",
+          "## Alpha\n\n- See the alpha skill.\n",
+        ),
+      );
+      writeIn(root, ".agents/skills/alpha/SKILL.md", ALPHA_SKILL);
+    },
+    annotation: { edits: [claim(["H1", "H2"], { kind: "extract", title: "extract alpha" })] },
+    context: {
+      summary: {
+        analyzedSessions: 20,
+        totals: { positive: 17, negative: 0, gapClusters: 0 },
+        instructions: ["AG-001", "AG-002"].map((id) => ({
+          instruction: id,
+          positive: 17,
+          negative: 0,
+          harmSessions: 0,
+          sessions: 17,
+          relevance: 0.85,
+          quotes: [],
+        })),
+      },
+    },
+  });
+  assert.deepEqual(violations, [], "no retention gate exists in code, by decision");
+  assert.equal(proposal.edits.length, 1);
+});
+
+// ---------- adjacent extraction and deletion stay separate decisions ----------
+
+test("a removal mixing extracted and deleted text is measured as two changes, split at the decision boundary", () => {
+  const staged = gate({
+    text: TWO_SECTIONS,
+    edit: (root) => {
+      writeIn(root, "AGENTS.md", (t) => t.replace(ALPHA_AND_BETA, ""));
+      writeIn(root, ".agents/skills/alpha/SKILL.md", ALPHA_SKILL);
+    },
+    annotation: {
+      edits: [
+        claim(["H1", "H3"], { kind: "extract", title: "extract alpha" }),
+        claim(["H2"], { kind: "remove", title: "drop the beta rules" }),
+      ],
+    },
+    context: { summary: betaRows({ harmSessions: 2 }) },
+  });
+
+  const memoryHunks = staged.measured.changes.filter((c) => c.kind === "hunk");
+  assert.equal(memoryHunks.length, 2, "one contiguous removal, two decisions, two measured changes");
+  assert.ok(memoryHunks[0].find.includes("## Alpha") && !memoryHunks[0].find.includes("## Beta"));
+  assert.ok(memoryHunks[1].find.includes("## Beta") && !memoryHunks[1].find.includes("## Alpha"));
+
+  assert.deepEqual(staged.violations, []);
+  assert.equal(staged.proposal.edits.length, 2);
+
+  // Independently applicable in every combination the reviewer may choose.
+  const onlyExtract = projectWithDecisions(TWO_SECTIONS, staged.proposal.edits, ["e1"], 5000);
+  assert.ok(!onlyExtract.text.includes("## Alpha") && onlyExtract.text.includes("## Beta"));
+  const onlyRemove = projectWithDecisions(TWO_SECTIONS, staged.proposal.edits, ["e2"], 5000);
+  assert.ok(onlyRemove.text.includes("## Alpha") && !onlyRemove.text.includes("## Beta"));
+  const both = projectWithDecisions(TWO_SECTIONS, staged.proposal.edits, ["e1", "e2"], 5000);
+  assert.ok(!both.text.includes("## Alpha") && !both.text.includes("## Beta") && both.text.includes("## Keep"));
+});
+
+test("an extract cannot smuggle the adjacent deletion: its skills must carry every removed line", () => {
+  const { violations } = gate({
+    text: TWO_SECTIONS,
+    edit: (root) => {
+      writeIn(root, "AGENTS.md", (t) => t.replace(ALPHA_AND_BETA, ""));
+      writeIn(root, ".agents/skills/alpha/SKILL.md", ALPHA_SKILL);
+    },
+    annotation: { edits: [claim(["H1", "H2", "H3"], { kind: "extract", title: "extract alpha and more" })] },
+    context: { summary: betaRows({ harmSessions: 0 }) },
+  });
+  assert.ok(
+    violations.some(
+      (v) => /removes text its created skill\(s\) do not carry/.test(v) && /separate "remove" edit/.test(v),
+    ),
+    violations.join("\n"),
   );
 });

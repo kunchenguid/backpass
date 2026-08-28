@@ -84,7 +84,26 @@ const SPLIT = [
   "",
 ].join("\n");
 
-const skill = (name) => `---\nname: ${name}\ndescription: Load before ${name} work.\n---\n\n## Steps\n\n1. do it\n`;
+/** An extraction must carry every line it removes, so the fixture skills carry theirs. */
+const SKILL_BODIES = {
+  "release-checklist": [
+    "## Release checklist",
+    "",
+    "- Tag the release commit with the version.",
+    "- Push the tag before the artifacts.",
+    "- Never hand-edit CHANGELOG.md.",
+    "",
+  ].join("\n"),
+  "incident-response": [
+    "## Incident response",
+    "",
+    "- Page the on-call before rolling back.",
+    "- Write the postmortem within two days.",
+    "- Link the postmortem from the incident channel.",
+    "",
+  ].join("\n"),
+};
+const skill = (name) => `---\nname: ${name}\ndescription: Load before ${name} work.\n---\n\n${SKILL_BODIES[name]}`;
 
 const EDIT_TURN = {
   "AGENTS.md": { replace: [[BOTH_SECTIONS, POINTERS]] },
@@ -286,6 +305,16 @@ test("skills whose removals merged into one change ship as one decision, and app
   });
 
   assert.equal(run.status, 0, `two skills against one merged change is a legal extract:\n${run.output}`);
+
+  // The loss signal reaches the deciding model whole: the negative's class and its
+  // effect text are in the synthesis prompt, not just a sign and a bare quote.
+  const editPrompt = fs.readFileSync(path.join(dir, ".backpass", "prompts", "synthesis-edit.md"), "utf8");
+  assert.match(
+    editPrompt,
+    /- \[harm\] "session 1 re-derived the release steps by hand" :: following the stale steps wasted a turn/,
+  );
+  assert.match(editPrompt, /harm-sessions=3/);
+
   const proposal = proposalOf(dir);
   assert.equal(proposal.edits.length, 1, "one merged change cannot be accepted in halves, so it is one decision");
   assert.equal(proposal.edits[0].hunks.length, 1);
