@@ -84,7 +84,7 @@ backpass reads the local transcript stores of seven harnesses directly. No API, 
 | -------------- | ---------------------------------------------- | --------------------------------------------------- |
 | **claude**     | `~/.claude/projects/<munged-cwd>/<uuid>.jsonl` | per-line `cwd`                                      |
 | **codex**      | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | `cwd` + recorded `git.repository_url`               |
-| **pi**         | `~/.pi/agent/sessions/<escaped-cwd>/*.jsonl`   | session-header `cwd`                                |
+| **pi**         | standalone and BB-managed Pi JSONL stores      | session-header `cwd`                                |
 | **opencode**   | `~/.local/share/opencode/opencode.db` (sqlite) | `session.directory`                                 |
 | **grok**       | `~/.grok/sessions/<encoded-cwd>/<uuid>/`       | `summary.json` `cwd` + `git_remotes`                |
 | **cursor CLI** | `~/.cursor/chats/<md5(cwd)>/<uuid>/`           | `meta.json` `cwd`                                   |
@@ -94,6 +94,11 @@ Claude collection covers `$CLAUDE_CONFIG_DIR/projects` alongside the default sto
 relocated config dir does not hide its sessions. The variable is read from backpass's own
 environment: if you reach that profile through an alias that only prefixes `claude`, set it
 for the backpass run too (`CLAUDE_CONFIG_DIR=~/.claude-work backpass`, or export it).
+
+Pi collection covers standalone sessions under `~/.pi/agent/sessions/` and BB-managed Pi
+sessions under `~/.bb/pi-bridge-sessions/`. It also honors `PI_CODING_AGENT_DIR`,
+`PI_CODING_AGENT_SESSION_DIR`, `BB_DATA_DIR`, and `BB_PI_BRIDGE_SESSION_DIR` when they are
+set in backpass's environment. Roots that resolve to the same directory are scanned once.
 
 Hermes collection includes CLI and ACP sessions only. Gateway, cron, and WhatsApp sessions
 are excluded because their recorded cwd belongs to the shared gateway process, not a project.

@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 
 import {
@@ -13,7 +14,9 @@ import {
 } from "./shared.js";
 
 /**
- * pi: ~/.pi/agent/sessions/<escaped-cwd>/<ISO-ts>_<uuid>.jsonl
+ * Pi writes standalone sessions under
+ * `~/.pi/agent/sessions/<escaped-cwd>/<ISO-ts>_<uuid>.jsonl`. BB's Pi bridge writes the
+ * same JSONL shape directly under `<bb-data-dir>/pi-bridge-sessions/`.
  *
  * Line 1 is `{type:"session", cwd, id}`. Entries form a parent/child tree but arrive in
  * order, so a linear read is faithful. `model_change` / `thinking_level_change` records
@@ -26,13 +29,62 @@ export function storeRoot() {
   return home(".pi", "agent", "sessions");
 }
 
+function expandEnvPath(value) {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  if (trimmed === "~") return home();
+  if (trimmed.startsWith("~/")) return path.join(home(), trimmed.slice(2));
+  return path.resolve(trimmed);
+}
+
+function realpathOrResolve(value) {
+  try {
+    return fs.realpathSync(value);
+  } catch {
+    return path.resolve(value);
+  }
+}
+
+function storeSpecs() {
+  const specs = [
+    { path: storeRoot(), nested: true },
+    { path: home(".bb", "pi-bridge-sessions"), nested: false },
+  ];
+  const piAgentDir = expandEnvPath(process.env.PI_CODING_AGENT_DIR);
+  if (piAgentDir) specs.push({ path: path.join(piAgentDir, "sessions"), nested: true });
+  const piSessionDir = expandEnvPath(process.env.PI_CODING_AGENT_SESSION_DIR);
+  if (piSessionDir) specs.push({ path: piSessionDir, nested: false });
+  const bbDataDir = expandEnvPath(process.env.BB_DATA_DIR);
+  if (bbDataDir) specs.push({ path: path.join(bbDataDir, "pi-bridge-sessions"), nested: false });
+  const bridgeDir = expandEnvPath(process.env.BB_PI_BRIDGE_SESSION_DIR);
+  if (bridgeDir) specs.push({ path: bridgeDir, nested: false });
+
+  const unique = new Map();
+  for (const spec of specs) {
+    const key = realpathOrResolve(spec.path);
+    if (!unique.has(key)) unique.set(key, spec);
+  }
+  return [...unique.values()];
+}
+
+export function storeRoots() {
+  return storeSpecs().map((spec) => spec.path);
+}
+
 export function enumerate() {
   const out = [];
-  for (const dir of listDirs(storeRoot())) {
-    for (const file of listFiles(dir, ".jsonl")) {
+  const seen = new Set();
+  for (const spec of storeSpecs()) {
+    const files = spec.nested
+      ? listDirs(spec.path).flatMap((dir) => listFiles(dir, ".jsonl"))
+      : listFiles(spec.path, ".jsonl");
+    for (const file of files) {
+      const key = realpathOrResolve(file);
+      if (seen.has(key)) continue;
+      seen.add(key);
       const stat = statOrNull(file);
       if (!stat) continue;
-      out.push({ key: file, path: file, mtimeMs: stat.mtimeMs, bytes: stat.size });
+      out.push({ key, path: file, mtimeMs: stat.mtimeMs, bytes: stat.size });
     }
   }
   return out;

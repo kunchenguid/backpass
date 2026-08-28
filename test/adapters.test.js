@@ -13,6 +13,7 @@ import * as grok from "../src/discovery/adapters/grok.js";
 import * as cursorCli from "../src/discovery/adapters/cursor-cli.js";
 import * as hermes from "../src/discovery/adapters/hermes.js";
 import { statOrNull } from "../src/discovery/adapters/shared.js";
+import { associate } from "../src/discovery/association.js";
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
 
@@ -131,6 +132,142 @@ test("pi adapter reads the session header and drops thinking blocks", () => {
   const [toolCall] = tools(events);
   assert.equal(toolCall.name, "bash");
   assert.equal(toolCall.result, "nothing to commit");
+});
+
+function writePiSession(file, { id, cwd }) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(
+    file,
+    `${JSON.stringify({ type: "session", version: 3, id, timestamp: "2026-08-27T00:00:00.000Z", cwd })}\n`,
+  );
+}
+
+function withPiStoreEnv(
+  { homeDir, piAgentDir = undefined, piSessionDir = undefined, bbDataDir = undefined, bridgeDir = undefined },
+  fn,
+) {
+  const previous = {
+    HOME: process.env.HOME,
+    PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR,
+    PI_CODING_AGENT_SESSION_DIR: process.env.PI_CODING_AGENT_SESSION_DIR,
+    BB_DATA_DIR: process.env.BB_DATA_DIR,
+    BB_PI_BRIDGE_SESSION_DIR: process.env.BB_PI_BRIDGE_SESSION_DIR,
+  };
+  process.env.HOME = homeDir;
+  for (const [key, value] of Object.entries({
+    PI_CODING_AGENT_DIR: piAgentDir,
+    PI_CODING_AGENT_SESSION_DIR: piSessionDir,
+    BB_DATA_DIR: bbDataDir,
+    BB_PI_BRIDGE_SESSION_DIR: bridgeDir,
+  })) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+  try {
+    return fn();
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+test("pi adapter enumerates standalone and BB-managed session roots without duplicates", () => {
+  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-pi-home-"));
+  const piAgentDir = path.join(fakeHome, "pi-agent");
+  const piSessionDir = path.join(fakeHome, "pi-session-override");
+  const bbDataDir = path.join(fakeHome, "bb-data");
+  const bridgeDir = path.join(fakeHome, "bridge-override");
+  writePiSession(path.join(fakeHome, ".pi", "agent", "sessions", "-repo-demo", "standalone.jsonl"), {
+    id: "standalone",
+    cwd: "/repo/demo",
+  });
+  writePiSession(path.join(piAgentDir, "sessions", "-repo-demo", "custom-agent.jsonl"), {
+    id: "custom-agent",
+    cwd: "/repo/demo",
+  });
+  writePiSession(path.join(piSessionDir, "custom-session.jsonl"), {
+    id: "custom-session",
+    cwd: "/repo/demo",
+  });
+  writePiSession(path.join(fakeHome, ".bb", "pi-bridge-sessions", "default-bb.jsonl"), {
+    id: "default-bb",
+    cwd: "/repo/demo",
+  });
+  writePiSession(path.join(bbDataDir, "pi-bridge-sessions", "custom-data.jsonl"), {
+    id: "custom-data",
+    cwd: "/repo/demo",
+  });
+  writePiSession(path.join(bridgeDir, "direct-override.jsonl"), {
+    id: "direct-override",
+    cwd: "/repo/demo",
+  });
+
+  withPiStoreEnv({ homeDir: fakeHome, piAgentDir, piSessionDir, bbDataDir, bridgeDir }, () => {
+    assert.deepEqual(
+      pi
+        .enumerate()
+        .map((candidate) => path.basename(candidate.path))
+        .sort(),
+      [
+        "custom-agent.jsonl",
+        "custom-data.jsonl",
+        "custom-session.jsonl",
+        "default-bb.jsonl",
+        "direct-override.jsonl",
+        "standalone.jsonl",
+      ],
+    );
+  });
+
+  const defaultBridgeDir = path.join(fakeHome, ".bb", "pi-bridge-sessions");
+  withPiStoreEnv(
+    {
+      homeDir: fakeHome,
+      piAgentDir: path.join(fakeHome, ".pi", "agent"),
+      bbDataDir: path.join(fakeHome, ".bb"),
+      bridgeDir: defaultBridgeDir,
+    },
+    () => {
+      assert.equal(
+        pi.enumerate().filter((candidate) => path.basename(candidate.path) === "default-bb.jsonl").length,
+        1,
+        "the same BB root exposed by defaults and environment is scanned once",
+      );
+    },
+  );
+});
+
+test("BB-managed Pi cwd values use the existing live and deleted worktree association", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-pi-association-"));
+  const live = path.join(root, "live", "hexdeck");
+  const deleted = path.join(root, "deleted", "hexdeck");
+  const bridgeDir = path.join(root, "bb", "pi-bridge-sessions");
+  fs.mkdirSync(live, { recursive: true });
+  writePiSession(path.join(bridgeDir, "live.jsonl"), { id: "live", cwd: live });
+  writePiSession(path.join(bridgeDir, "deleted.jsonl"), { id: "deleted", cwd: deleted });
+
+  withPiStoreEnv({ homeDir: path.join(root, "home"), bridgeDir }, () => {
+    const descriptors = new Map(
+      pi.enumerate().map((candidate) => [path.basename(candidate.path), pi.classify(candidate)]),
+    );
+    const liveRealpath = fs.realpathSync(live);
+    const repo = { name: "hexdeck", worktrees: [liveRealpath], remotes: [] };
+    assert.deepEqual(associate(descriptors.get("live.jsonl"), repo), {
+      tier: 1,
+      confidence: "exact",
+      reason: `cwd is worktree ${liveRealpath}`,
+    });
+    assert.deepEqual(
+      associate(descriptors.get("deleted.jsonl"), repo, { worktreeGlobs: [path.join(root, "deleted", "**")] }),
+      {
+        tier: 3,
+        confidence: "path",
+        reason: "dead path ending in /hexdeck",
+      },
+    );
+  });
 });
 
 test("grok adapter reads remotes from summary.json and tool calls off the assistant record", () => {
