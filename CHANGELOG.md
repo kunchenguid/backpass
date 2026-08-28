@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.9](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.8...backpass-v0.1.9) (2026-08-28)
+
+
+### Bug Fixes
+
+* scope evidence reuse to the current memory hash ([#54](https://github.com/kunchenguid/backpass/issues/54)) ([2fc6dbf](https://github.com/kunchenguid/backpass/commit/2fc6dbf48648f921879935a521535f55d77205e4))
+
 ## [0.1.8](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.7...backpass-v0.1.8) (2026-08-27)
 
 
