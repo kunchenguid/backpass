@@ -53,9 +53,10 @@ export const DEFAULT_CONFIG = {
    */
   gapLedgerMaxAge: "90d",
   /**
-   * Cap on transcripts analyzed per run; past it a recency-weighted sample is drawn
-   * (`src/sample.js`). `0` or "all" disables the cap. `sampleHalfLife` is the age at
-   * which a transcript's sampling weight halves; `seed` makes the sample reproducible.
+   * Cap on transcripts analyzed per run; past it a deterministic, recency-weighted sample
+   * is drawn (`src/sample.js`). `0` or "all" disables the cap. `sampleHalfLife` is the age
+   * at which a transcript's sampling weight halves; `seed` selects a different reproducible
+   * sample.
    */
   maxTranscripts: 100,
   sampleHalfLife: "14d",

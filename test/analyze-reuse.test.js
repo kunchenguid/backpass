@@ -212,9 +212,7 @@ test("old-hash leftover evidence cannot change the current fold's session count,
     );
     const ledger = state.readGapLedger();
     const sessionsSeen = Object.values(ledger.entries).flatMap((e) => Object.keys(e.sessions));
-    const currentA = state
-      .listEvidence()
-      .find((e) => e.transcript.path === fileA && e.memoryHash === resolved.hash);
+    const currentA = state.listEvidence().find((e) => e.transcript.path === fileA && e.memoryHash === resolved.hash);
     assert.deepEqual(
       sessionsSeen,
       [currentA.transcript.identity],

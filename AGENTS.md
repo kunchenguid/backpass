@@ -43,14 +43,15 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   its on-disk shape, fix the adapter and its fixture/test together. Adapters must stay
   fail-soft: an unreadable store warns and is skipped, never throws.
 - **`src/sample.js` sampling is deterministic and sticky, never seeded from `Math.random()`.**
-  Past `maxTranscripts`, each transcript's draw (`sampleUnit`) is a keyed hash of its own
-  canonical identity (`transcriptIdentity`: harness + native id + durable source, never
-  array position or title) and `config.seed` - never a shared PRNG stream stepped once per transcript. That
-  makes an unchanged rerun select the identical sample (proven by cache-reuse in
-  `test/sample-reuse.test.js`, not by reading source) and keeps a transcript's slot stable
-  as the corpus grows: a top-`count` selection by fixed per-transcript key is a pure
-  threshold, so inserting new transcripts can only ever displace existing ones, never
-  reshuffle everyone. Never reintroduce an index- or array-position-derived draw here.
+  Past `maxTranscripts`, each transcript's draw (`sampleUnit`) is a hash of its own canonical
+  identity (`transcriptIdentity`: harness + native id + durable source, never array position
+  or title) and `config.seed` - never a shared PRNG stream stepped once per transcript. That
+  prevents reruns from randomly reshuffling the sample (cache reuse is proven in
+  `test/sample-reuse.test.js`, not by reading source) and keeps a transcript's draw stable
+  as the corpus grows. Recency weights may still evolve with wall-clock time. A top-`count`
+  selection by fixed per-transcript draw means inserting new transcripts can only displace
+  existing ones, never reshuffle their draws. Never reintroduce an index- or
+  array-position-derived draw here.
 - **Hermes is first-class but source-filtered.** `src/discovery/adapters/hermes.js` reads
   `~/.hermes/state.db` (`HERMES_HOME`). Only `cli` and `acp` sessions are ingested;
   gateway/cron rows share a process cwd and would pollute association. v26 stores CLI cwd

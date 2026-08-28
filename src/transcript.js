@@ -8,5 +8,8 @@ export function transcriptIdentity(transcript) {
     nativeId = nativeId.slice(harness.length + 1);
   }
   const source = String(transcript?.path ?? "");
-  return crypto.createHash("sha256").update(JSON.stringify([harness, nativeId, source]), "utf8").digest("hex");
+  return crypto
+    .createHash("sha256")
+    .update(JSON.stringify([harness, nativeId, source]), "utf8")
+    .digest("hex");
 }

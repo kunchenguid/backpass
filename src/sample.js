@@ -24,9 +24,9 @@ import { transcriptIdentity } from "./transcript.js";
  * the array, so an unrelated insertion or a reordering would reshuffle everyone's draw
  * (and, with `config.seed` defaulting to null, the CLI reseeded from `Math.random()` on
  * every invocation, so even an unchanged rerun drew a different sample - see the
- * `sample-reuse` regression tests). Instead each transcript's `u` is `sampleUnit`, a
- * keyed hash of that transcript's canonical discovery identity, never its array
- * position, plus the configured seed. That makes sampling: (1)
+ * `sample-reuse` regression tests). Instead each transcript's `u` is `sampleUnit`, a hash
+ * of that transcript's canonical discovery identity, never its array position, plus the
+ * configured seed. That makes sampling: (1)
  * deterministic and sticky by default, with no persisted state - the same corpus and
  * config always draw the same `u` per transcript; (2) stable under growth - a transcript
  * already in the corpus keeps the exact same `u` (and so the same key, modulo its own
@@ -42,8 +42,8 @@ export const DEFAULT_SAMPLE_HALF_LIFE = "14d";
 
 /**
  * Deterministic draw in [0, 1) for one transcript: a SHA-256 of its durable identity
- * keyed by `seed` (or a fixed default when unseeded), so it depends only on that
- * transcript and the configured seed - never on discovery order, the cap, or which other
+ * and `seed` (or a fixed default when unseeded), so it depends only on that transcript and
+ * the configured seed - never on discovery order, the cap, or which other
  * transcripts are present. Discovery removes duplicate canonical identities, while
  * distinct identities that happen to draw equal keys are ordered by identity.
  */

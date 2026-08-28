@@ -87,9 +87,9 @@ COLLECT SAMPLES
   --strict                 deterministic associations only (tiers 1 and 2)
   --include-cursor-ide     also scan the Cursor IDE store (best-effort, v1.1 preview)
   --limit <n>              analyze at most N transcripts this run (newest first)
-  --max-transcripts <n>    cap per run; past it a recency-weighted random sample
+  --max-transcripts <n>    cap per run; past it a recency-weighted sticky sample
                            is analyzed. 0 or "all" disables the cap          [100]
-  --seed <n>               make the transcript sample reproducible
+  --seed <n>               draw a different reproducible transcript sample
 
 MODELS (two-tier: cheap analysis, smart synthesis - all through acpx)
   By default each pass auto-picks the first harness in its ladder that is installed,

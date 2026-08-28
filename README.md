@@ -146,10 +146,12 @@ ones stay represented in proportion. When this happens the run says so on stderr
 (`discovered 340 transcript(s), analyzing a recency-weighted sample of 100`).
 
 The draw is deterministic and sticky: it is derived from each transcript's own durable
-identity, not from a random seed, so an unchanged rerun selects the identical sample (no
-wasted model calls) and a transcript keeps its slot as the corpus grows - new sessions
-just compete for room on the same footing. Pass `--max-transcripts all` to analyze every
-transcript, or `--seed <n>` to draw a different, equally reproducible sample.
+identity, not from a fresh random seed, so rerunning does not trigger a fresh draw that
+randomly reshuffles the sample and wastes model calls. Existing transcripts keep their
+draws as the corpus grows, while new sessions compete for room on the same footing. Recency
+weights still evolve as transcripts age, so the selected set can change over time. Pass
+`--max-transcripts all` to analyze every transcript, or `--seed <n>` to draw a different,
+equally reproducible sample.
 
 Each distilled trace goes to a cheap model with the memory file and a rubric. It returns
 strict JSON: which instructions helped, which were violated, and what mistakes no current
@@ -420,6 +422,7 @@ CLI flags on top:
   "gapLedgerMaxAge": "90d",
   "maxTranscripts": 100,
   "sampleHalfLife": "14d",
+  "seed": null,
   "analysis": { "agent": null, "model": null, "effort": null },
   "synthesis": { "agent": null, "model": null, "effort": null },
   "ladders": {

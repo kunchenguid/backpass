@@ -75,7 +75,10 @@ test("transcript identity combines harness, native id, and durable source withou
     transcriptIdentity({ ...original, path: "/store/b.jsonl" }),
     "colliding native ids at different sources remain distinct",
   );
-  assert.equal(transcriptIdentity(original), transcriptIdentity({ ...original, identity: transcriptIdentity(original) }));
+  assert.equal(
+    transcriptIdentity(original),
+    transcriptIdentity({ ...original, identity: transcriptIdentity(original) }),
+  );
 });
 
 test("weight halves every half-life and never reaches zero", () => {
