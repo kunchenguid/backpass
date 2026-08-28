@@ -47,22 +47,28 @@ function realpathOrResolve(value) {
 
 function storeSpecs() {
   const specs = [
-    { path: storeRoot(), nested: true },
-    { path: home(".bb", "pi-bridge-sessions"), nested: false },
+    { path: storeRoot(), direct: false, nested: true },
+    { path: home(".bb", "pi-bridge-sessions"), direct: true, nested: false },
   ];
   const piAgentDir = expandEnvPath(process.env.PI_CODING_AGENT_DIR);
-  if (piAgentDir) specs.push({ path: path.join(piAgentDir, "sessions"), nested: true });
+  if (piAgentDir) specs.push({ path: path.join(piAgentDir, "sessions"), direct: false, nested: true });
   const piSessionDir = expandEnvPath(process.env.PI_CODING_AGENT_SESSION_DIR);
-  if (piSessionDir) specs.push({ path: piSessionDir, nested: false });
+  if (piSessionDir) specs.push({ path: piSessionDir, direct: true, nested: false });
   const bbDataDir = expandEnvPath(process.env.BB_DATA_DIR);
-  if (bbDataDir) specs.push({ path: path.join(bbDataDir, "pi-bridge-sessions"), nested: false });
+  if (bbDataDir) specs.push({ path: path.join(bbDataDir, "pi-bridge-sessions"), direct: true, nested: false });
   const bridgeDir = expandEnvPath(process.env.BB_PI_BRIDGE_SESSION_DIR);
-  if (bridgeDir) specs.push({ path: bridgeDir, nested: false });
+  if (bridgeDir) specs.push({ path: bridgeDir, direct: true, nested: false });
 
   const unique = new Map();
   for (const spec of specs) {
     const key = realpathOrResolve(spec.path);
-    if (!unique.has(key)) unique.set(key, spec);
+    const existing = unique.get(key);
+    if (existing) {
+      existing.direct ||= spec.direct;
+      existing.nested ||= spec.nested;
+    } else {
+      unique.set(key, spec);
+    }
   }
   return [...unique.values()];
 }
@@ -75,9 +81,10 @@ export function enumerate() {
   const out = [];
   const seen = new Set();
   for (const spec of storeSpecs()) {
-    const files = spec.nested
-      ? listDirs(spec.path).flatMap((dir) => listFiles(dir, ".jsonl"))
-      : listFiles(spec.path, ".jsonl");
+    const files = [
+      ...(spec.direct ? listFiles(spec.path, ".jsonl") : []),
+      ...(spec.nested ? listDirs(spec.path).flatMap((dir) => listFiles(dir, ".jsonl")) : []),
+    ];
     for (const file of files) {
       const key = realpathOrResolve(file);
       if (seen.has(key)) continue;

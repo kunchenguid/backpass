@@ -239,6 +239,30 @@ test("pi adapter enumerates standalone and BB-managed session roots without dupl
   );
 });
 
+test("pi adapter merges flat and nested scans for one sessions root", () => {
+  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-pi-overlap-"));
+  const piAgentDir = path.join(fakeHome, ".pi", "agent");
+  const sessionsDir = path.join(piAgentDir, "sessions");
+  writePiSession(path.join(sessionsDir, "direct.jsonl"), {
+    id: "direct",
+    cwd: "/repo/demo",
+  });
+  writePiSession(path.join(sessionsDir, "-repo-demo", "nested.jsonl"), {
+    id: "nested",
+    cwd: "/repo/demo",
+  });
+
+  withPiStoreEnv({ homeDir: fakeHome, piAgentDir, piSessionDir: sessionsDir }, () => {
+    assert.deepEqual(
+      pi
+        .enumerate()
+        .map((candidate) => path.basename(candidate.path))
+        .sort(),
+      ["direct.jsonl", "nested.jsonl"],
+    );
+  });
+});
+
 test("BB-managed Pi cwd values use the existing live and deleted worktree association", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-pi-association-"));
   const live = path.join(root, "live", "hexdeck");
