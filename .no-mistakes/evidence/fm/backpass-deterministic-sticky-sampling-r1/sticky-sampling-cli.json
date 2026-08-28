@@ -1,0 +1,28 @@
+{
+  "scenario": "Public backpass CLI, default 100-session cap over 147 discovered Pi transcripts",
+  "invocation": "backpass analyze --harness pi --since all --analysis-agent pi --jobs 4 --json",
+  "runs": [
+    {
+      "label": "initial run",
+      "exitStatus": 0,
+      "summary": {
+        "total": 100,
+        "analyzed": 100,
+        "cached": 0,
+        "failed": 0
+      },
+      "analysisModelCallsThisRun": 100
+    },
+    {
+      "label": "unchanged rerun",
+      "exitStatus": 0,
+      "summary": {
+        "total": 100,
+        "analyzed": 0,
+        "cached": 100,
+        "failed": 0
+      },
+      "analysisModelCallsThisRun": 0
+    }
+  ]
+}
