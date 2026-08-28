@@ -8,7 +8,7 @@ import { State } from "../src/state.js";
 import { parseMemoryUnits } from "../src/memory.js";
 import { foldForRun } from "../src/commands/propose.js";
 import { foldEvidence, renderEvidenceForPrompt } from "../src/fold.js";
-import { gapEntryId, mergeGapEntries, recordGapObservations } from "../src/gap-ledger.js";
+import { gapEntryId, mergeGapEntries, pruneGapLedger, recordGapObservations } from "../src/gap-ledger.js";
 
 const MEMORY_PATH = "AGENTS.md";
 const DAY = 86_400_000;
@@ -294,6 +294,24 @@ test("merged gap identities remain durable as the canonical phrasing changes", (
   assert.equal(ledger.entries[firstId].proposedInstruction, shortest);
   assert.deepEqual(Object.keys(ledger.entries[firstId].sessions).sort(), ["s1", "s2", "s3", "s4", "s5", "s6"]);
   assert.equal(ledger.entries[firstId].sessions.s1.firstObservedAt, "2026-08-01T00:00:00.000Z");
+});
+
+test("coverage by any judged phrasing retires a merged gap", () => {
+  const first = "Always inspect schema documentation before SQL.";
+  const shortest = "Check DB docs.";
+  const firstId = gapEntryId(MEMORY_PATH, first);
+  const shortestId = gapEntryId(MEMORY_PATH, shortest);
+  const ledger = ledgerWith(
+    { id: firstId, text: first, sessions: ["s1", "s2"] },
+    { id: shortestId, text: shortest, sessions: ["s3"] },
+  );
+
+  mergeGapEntries(ledger, [[firstId, shortestId]]);
+  const covered = memoryFile(`# T\n\n- ${first}\n`);
+  const stats = pruneGapLedger(ledger, { memoryFile: covered, memoryPath: MEMORY_PATH, maxAge: "all" });
+
+  assert.equal(stats.covered, 3);
+  assert.deepEqual(ledger.entries, {});
 });
 
 test("mergeGapEntries drops what it cannot verify instead of guessing", () => {

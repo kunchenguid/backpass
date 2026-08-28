@@ -1,7 +1,7 @@
 import { renderHunkLines } from "./diff.js";
 import { editSkills } from "./skills.js";
 import { budgetGateKind, budgetStatus, estimateTokens } from "./tokens.js";
-import { normalizeRecoveryLine, recoveredLineSet } from "./workspace.js";
+import { normalizeRecoveryLine, recoveredLineCounts } from "./workspace.js";
 
 /**
  * The proposal model: what a synthesis pass is allowed to produce, and the mechanical
@@ -104,13 +104,16 @@ function countSources(evidence) {
   return new Set(evidence.map((e) => e?.source).filter(Boolean)).size;
 }
 
-/** The del-line texts of a hunk that are not carried by `lineSet` (blank lines ignored). */
-function unrecoveredRemovedLines(hunk, lineSet) {
+/** The del-line texts of a hunk that are not carried by `lineCounts` (blank lines ignored). */
+function unrecoveredRemovedLines(hunk, lineCounts) {
   const missing = [];
   for (const line of hunk.lines || []) {
     if (line.type !== "del") continue;
     const normalized = normalizeRecoveryLine(line.text);
-    if (normalized && !lineSet.has(normalized)) missing.push(line.text);
+    if (!normalized) continue;
+    const remaining = lineCounts.get(normalized) || 0;
+    if (remaining > 0) lineCounts.set(normalized, remaining - 1);
+    else missing.push(line.text);
   }
   return missing;
 }
@@ -331,7 +334,7 @@ export function buildProposal(rawResult, context) {
       // An extraction moves text; it never doubles as a deletion. Every line its hunks
       // remove must land in the skills it creates - a real deletion goes in its own
       // remove edit, where the removal-evidence floor below can judge it on its own.
-      const carried = recoveredLineSet(created.map((c) => c.text));
+      const carried = recoveredLineCounts(created.map((c) => c.text));
       const missing = hunks.flatMap((h) => unrecoveredRemovedLines(h, carried));
       if (missing.length) {
         violations.push(

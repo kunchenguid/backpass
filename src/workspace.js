@@ -107,16 +107,16 @@ export function normalizeRecoveryLine(line) {
     .trim();
 }
 
-/** The normalized non-blank lines of a set of file texts, for recovery membership tests. */
-export function recoveredLineSet(texts) {
-  const set = new Set();
+/** The normalized non-blank lines of a set of file texts, with occurrence counts. */
+export function recoveredLineCounts(texts) {
+  const counts = new Map();
   for (const text of texts) {
     for (const line of String(text ?? "").split("\n")) {
       const normalized = normalizeRecoveryLine(line);
-      if (normalized) set.add(normalized);
+      if (normalized) counts.set(normalized, (counts.get(normalized) || 0) + 1);
     }
   }
-  return set;
+  return counts;
 }
 
 /**
@@ -132,25 +132,40 @@ export function recoveredLineSet(texts) {
  * widening it with context could overlap its sibling, so the merged hunk is kept instead).
  */
 export function splitRemovalHunk(hunk, { oldText, oldLines, recovered }) {
+  const lineKinds = new Map();
+  for (let lineNo = hunk.oldStart; lineNo <= hunk.oldEnd; lineNo += 1) {
+    const normalized = normalizeRecoveryLine(oldLines[lineNo - 1]);
+    if (!normalized) continue;
+    const remaining = recovered.get(normalized) || 0;
+    lineKinds.set(lineNo, remaining > 0 ? "recovered" : "deleted");
+    if (remaining > 0) recovered.set(normalized, remaining - 1);
+  }
+
   for (const unit of parseMemoryUnits(oldText)) {
     const start = Math.max(unit.startLine, hunk.oldStart);
     const end = Math.min(unit.endLine, hunk.oldEnd);
     if (start > end) continue;
     const kinds = new Set();
     for (let lineNo = start; lineNo <= end; lineNo += 1) {
-      const normalized = normalizeRecoveryLine(oldLines[lineNo - 1]);
-      if (normalized) kinds.add(recovered.has(normalized) ? "recovered" : "deleted");
+      if (lineKinds.has(lineNo)) kinds.add(lineKinds.get(lineNo));
     }
     if (kinds.size > 1) return null;
+  }
+
+  for (let lineNo = hunk.oldStart; lineNo <= hunk.oldEnd; lineNo += 1) {
+    if (!/^#{1,6}\s+/.test(oldLines[lineNo - 1] || "")) continue;
+    let contentLine = lineNo + 1;
+    while (contentLine <= hunk.oldEnd && !normalizeRecoveryLine(oldLines[contentLine - 1])) contentLine += 1;
+    if (contentLine > hunk.oldEnd || /^#{1,6}\s+/.test(oldLines[contentLine - 1] || "")) continue;
+    if (lineKinds.get(lineNo) !== lineKinds.get(contentLine)) return null;
   }
 
   // Group the removed lines into maximal runs by recovery; blank lines never start a
   // run and attach to whichever run surrounds them.
   const runs = [];
   for (let lineNo = hunk.oldStart; lineNo <= hunk.oldEnd; lineNo += 1) {
-    const normalized = normalizeRecoveryLine(oldLines[lineNo - 1]);
-    if (!normalized) continue;
-    const kind = recovered.has(normalized) ? "recovered" : "deleted";
+    const kind = lineKinds.get(lineNo);
+    if (!kind) continue;
     const current = runs[runs.length - 1];
     if (current && current.kind === kind) current.last = lineNo;
     else runs.push({ kind, first: lineNo, last: lineNo });
@@ -225,17 +240,20 @@ export function measureWorkspace(workspace) {
   // measured change and stays independently decidable.
   const createdTexts = changes.filter((c) => c.kind === "created").map((c) => c.text);
   if (createdTexts.length) {
-    const recovered = recoveredLineSet(createdTexts);
+    const recovered = recoveredLineCounts(createdTexts);
     const oldText = originals.get(memoryPath) ?? "";
     const oldLines = oldText.split("\n");
-    for (let index = changes.length - 1; index >= 0; index -= 1) {
-      const change = changes[index];
-      if (change.kind !== "hunk" || change.file !== memoryPath || !change.removed || change.added) continue;
-      const subHunks = splitRemovalHunk(change, { oldText, oldLines, recovered });
-      if (subHunks) {
-        changes.splice(index, 1, ...subHunks.map((sub) => ({ kind: "hunk", file: memoryPath, ...sub })));
+    const measured = [];
+    for (const change of changes) {
+      if (change.kind !== "hunk" || change.file !== memoryPath || !change.removed || change.added) {
+        measured.push(change);
+        continue;
       }
+      const subHunks = splitRemovalHunk(change, { oldText, oldLines, recovered });
+      if (subHunks) measured.push(...subHunks.map((sub) => ({ kind: "hunk", file: memoryPath, ...sub })));
+      else measured.push(change);
     }
+    changes.splice(0, changes.length, ...measured);
   }
 
   changes.forEach((change, index) => {

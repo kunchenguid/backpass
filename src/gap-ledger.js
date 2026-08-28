@@ -86,7 +86,8 @@ export function findGapEntry(ledger, memoryPath, proposedInstruction) {
   let bestScore = 0;
   for (const entry of Object.values(ledger.entries)) {
     if (entry.memoryPath !== memoryPath) continue;
-    const score = similarity(entry.proposedInstruction, proposedInstruction);
+    const phrasings = [...new Set([entry.proposedInstruction, ...(entry.phrasings || [])])];
+    const score = Math.max(...phrasings.map((phrasing) => similarity(phrasing, proposedInstruction)));
     if (score >= GAP_SIMILARITY_THRESHOLD && score > bestScore) {
       best = entry;
       bestScore = score;
@@ -124,11 +125,15 @@ export function recordGapObservations(ledger, evidenceRecords, { now = new Date(
           id: deterministicId,
           memoryPath: record.memoryPath,
           proposedInstruction: gap.proposedInstruction,
+          phrasings: [gap.proposedInstruction],
           sessions: {},
         };
-      } else if (gap.proposedInstruction.length < entry.proposedInstruction.length) {
-        // Keep the shortest phrasing: it generalizes best (same rule as the in-run fold).
-        entry.proposedInstruction = gap.proposedInstruction;
+      } else {
+        entry.phrasings = [...new Set([entry.proposedInstruction, ...(entry.phrasings || []), gap.proposedInstruction])];
+        if (gap.proposedInstruction.length < entry.proposedInstruction.length) {
+          // Keep the shortest phrasing: it generalizes best (same rule as the in-run fold).
+          entry.proposedInstruction = gap.proposedInstruction;
+        }
       }
       const identityPrior = entry.sessions[sessionIdentity];
       const aliasPrior = transcript.id && transcript.id !== sessionIdentity ? entry.sessions[transcript.id] : null;
@@ -170,7 +175,7 @@ export function pruneGapLedger(
 
   for (const [id, entry] of Object.entries(ledger.entries)) {
     const applies = memoryPath === null || entry.memoryPath === memoryPath;
-    if (applies && memoryFile && isCovered(memoryFile, entry.proposedInstruction)) {
+    if (applies && memoryFile && isCovered(memoryFile, entry)) {
       stats.covered += Object.keys(entry.sessions).length;
       delete ledger.entries[id];
       continue;
@@ -187,8 +192,11 @@ export function pruneGapLedger(
   return stats;
 }
 
-function isCovered(memoryFile, proposedInstruction) {
-  return (memoryFile.units || []).some((unit) => similarity(unit.text, proposedInstruction) >= GAP_COVERED_THRESHOLD);
+function isCovered(memoryFile, entry) {
+  const phrasings = [...new Set([entry.proposedInstruction, ...(entry.phrasings || [])])];
+  return (memoryFile.units || []).some((unit) =>
+    phrasings.some((phrasing) => similarity(unit.text, phrasing) >= GAP_COVERED_THRESHOLD),
+  );
 }
 
 /** Flatten the ledger into the observation list `foldEvidence` clusters over. */
@@ -262,6 +270,14 @@ export function mergeGapEntries(ledger, groups) {
         }
       }
       target.aliases = [...new Set([...(target.aliases || []), entry.id, ...(entry.aliases || [])])];
+      target.phrasings = [
+        ...new Set([
+          target.proposedInstruction,
+          ...(target.phrasings || []),
+          entry.proposedInstruction,
+          ...(entry.phrasings || []),
+        ]),
+      ];
       if (entry.proposedInstruction.length < target.proposedInstruction.length) {
         target.proposedInstruction = entry.proposedInstruction;
       }

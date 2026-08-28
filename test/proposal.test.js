@@ -1295,6 +1295,55 @@ test("a recovery transition inside a multiline instruction keeps the removal ind
   assert.ok(staged.violations.some((violation) => /do not carry/.test(violation)));
 });
 
+test("one carried copy cannot recover two identical removed instructions", () => {
+  const text = "# Memory\n\n## Rules\n\n- Repeat this rule.\n- Repeat this rule.\n";
+  const skill = [
+    "---",
+    "name: repeated-rule",
+    "description: Carries one repeated rule.",
+    "---",
+    "",
+    "- Repeat this rule.",
+    "",
+  ].join("\n");
+  const staged = gate({
+    text,
+    edit: (root) => {
+      writeIn(root, "AGENTS.md", (memory) => memory.replace("- Repeat this rule.\n- Repeat this rule.\n", ""));
+      writeIn(root, ".agents/skills/repeated-rule/SKILL.md", skill);
+    },
+    annotation: { edits: [claim(["H1", "H2"], { kind: "extract", title: "extract one repeated rule" })] },
+  });
+
+  assert.equal(staged.measured.changes.filter((change) => change.kind === "hunk").length, 1);
+  assert.ok(staged.violations.some((violation) => /do not carry/.test(violation)));
+});
+
+test("a recovered heading cannot be separated from its deleted instruction", () => {
+  const text = "# Memory\n\n## Extracted\n\n- This instruction vanishes.\n\n## Deleted\n\n- Delete this too.\n";
+  const skill = [
+    "---",
+    "name: heading-only",
+    "description: Carries only a heading.",
+    "---",
+    "",
+    "## Extracted",
+    "",
+  ].join("\n");
+  const staged = gate({
+    text,
+    edit: (root) => {
+      writeIn(root, "AGENTS.md", () => "# Memory\n");
+      writeIn(root, ".agents/skills/heading-only/SKILL.md", skill);
+    },
+    annotation: { edits: [claim(["H1", "H2"], { kind: "extract", title: "heading-only extraction" })] },
+  });
+
+  const memoryHunks = staged.measured.changes.filter((change) => change.kind === "hunk");
+  assert.equal(memoryHunks.length, 1);
+  assert.match(memoryHunks[0].find, /## Extracted[\s\S]*This instruction vanishes/);
+});
+
 test("an extract cannot smuggle the adjacent deletion: its skills must carry every removed line", () => {
   const { violations } = gate({
     text: TWO_SECTIONS,
