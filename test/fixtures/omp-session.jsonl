@@ -1,0 +1,10 @@
+{"type":"title","v":1,"title":"Understand src changes","source":"auto","updatedAt":"2026-08-20T10:05:00.000Z"}
+{"type":"session","version":3,"id":"omp-1234","timestamp":"2026-08-20T10:00:00.000Z","cwd":"/repo/demo"}
+{"type":"thinking_level_change","id":"tlc-1","parentId":null,"timestamp":"2026-08-20T10:00:00.100Z","thinkingLevel":"xhigh","configured":"xhigh"}
+{"type":"model_change","id":"mc-1","parentId":null,"timestamp":"2026-08-20T10:00:01.000Z","model":"openai-codex/gpt-5.5"}
+{"type":"message","id":"m1","parentId":null,"timestamp":"2026-08-20T10:01:00.000Z","message":{"role":"user","content":[{"type":"text","text":"What changed in the parser?"}]}}
+{"type":"message","id":"m2","parentId":"m1","timestamp":"2026-08-20T10:01:10.000Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"internal reasoning must not survive"},{"type":"toolCall","id":"call_1","name":"bash","arguments":{"command":"npm test"}},{"type":"text","text":"Running the tests first."}]}}
+{"type":"message","id":"m3","parentId":"m2","timestamp":"2026-08-20T10:01:12.000Z","message":{"role":"toolResult","toolCallId":"call_1","toolName":"bash","content":[{"type":"text","text":"2 passing"}],"details":{"wallTimeMs":96}}}
+{"type":"message","id":"m4","parentId":"m3","timestamp":"2026-08-20T10:02:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Tests pass; the parser fix is safe."}]}}
+{"type":"message","id":"m5","parentId":"m4","timestamp":"2026-08-20T10:02:10.000Z","message":{"role":"assistant","content":[{"type":"toolCall","id":"call_2","name":"bash","arguments":{"command":"npm run deploy"}}]}}
+{"type":"message","id":"m6","parentId":"m5","timestamp":"2026-08-20T10:02:12.000Z","message":{"role":"toolResult","toolCallId":"call_2","toolName":"bash","isError":true,"content":[{"type":"text","text":"deployment failed"}]}}

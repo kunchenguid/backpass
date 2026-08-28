@@ -1,6 +1,7 @@
 import * as claude from "./adapters/claude.js";
 import * as codex from "./adapters/codex.js";
 import * as pi from "./adapters/pi.js";
+import * as omp from "./adapters/omp.js";
 import * as grok from "./adapters/grok.js";
 import * as opencode from "./adapters/opencode.js";
 import * as hermes from "./adapters/hermes.js";
@@ -13,9 +14,16 @@ import { sinceCutoff } from "../config.js";
 import { emitProgress } from "../progress.js";
 import { warn } from "../logger.js";
 
+// Existing adapters keep their compatible cache entries. An adapter that changes
+// its classifier declares a private epoch; version 2 is retained only to read
+// entries written by the short-lived global-version implementation.
+const DEFAULT_CLASSIFIER_VERSION = 1;
+const LEGACY_GLOBAL_CLASSIFIER_VERSION = 2;
+
 export const ADAPTERS = {
   claude,
   codex,
+  omp,
   pi,
   grok,
   opencode,
@@ -32,9 +40,10 @@ export function getAdapter(harness) {
  * Discovery (design section 2).
  *
  * For file-backed stores the expensive step is reading each transcript's header, so
- * results are memoised in `.backpass/scan-cache.json` keyed by path + mtime + size.
- * Re-scans are then O(new files) - which matters: codex alone had 10,317 rollouts on
- * the machine this was designed against.
+ * results are memoised in `.backpass/scan-cache.json` by path + mtime + size, with
+ * adapter-specific classifier epochs invalidating entries when behavior changes.
+ * Re-scans are then O(new files) until an adapter's epoch changes - which matters:
+ * codex alone had 10,317 rollouts on the machine this was designed against.
  *
  * SQLite-backed stores (opencode, hermes, cursor IDE) answer the same question with one
  * indexed query, so they skip the cache entirely.
@@ -94,7 +103,8 @@ export async function discoverTranscripts({ repo, config, strict = false, harnes
       });
     } catch (err) {
       stats.error = err.message;
-      warn(`${harness}: transcript store unreadable (${err.message}) - harness skipped`);
+      const status = err.storeStatus || "unreadable";
+      warn(`${harness}: transcript store ${status} (${err.message}) - harness skipped`);
       emitProgress("discover:harness:done", { harness, error: err.message });
     }
   }
@@ -140,6 +150,7 @@ async function discoverDirect(adapter, { repo, config, cutoffMs, strict, stats }
 function discoverFiles(adapter, { repo, config, cutoffMs, strict, stats, cache, markDirty }) {
   const candidates = adapter.enumerate({ cutoffMs, repo, config });
   const out = [];
+  const classifierVersion = adapter.classifierVersion ?? DEFAULT_CLASSIFIER_VERSION;
 
   for (const candidate of candidates) {
     if (cutoffMs && candidate.mtimeMs < cutoffMs) continue;
@@ -159,12 +170,24 @@ function discoverFiles(adapter, { repo, config, cutoffMs, strict, stats, cache, 
     const cached = cache.entries[cacheKey];
     let descriptor;
 
-    if (cached && cached.mtimeMs === candidate.mtimeMs && cached.bytes === candidate.bytes) {
+    if (
+      cached &&
+      cacheVersionMatches(cached.classifierVersion, adapter, classifierVersion) &&
+      cached.mtimeMs === candidate.mtimeMs &&
+      cached.bytes === candidate.bytes &&
+      usableDescriptor(cached.descriptor)
+    ) {
       stats.cached += 1;
       descriptor = cached.descriptor;
     } else {
       descriptor = adapter.classify(candidate, { repo, config }) || null;
-      cache.entries[cacheKey] = { mtimeMs: candidate.mtimeMs, bytes: candidate.bytes, descriptor };
+      if (!usableDescriptor(descriptor)) descriptor = null;
+      cache.entries[cacheKey] = {
+        classifierVersion,
+        mtimeMs: candidate.mtimeMs,
+        bytes: candidate.bytes,
+        descriptor,
+      };
       markDirty();
     }
 
@@ -194,6 +217,29 @@ function discoverFiles(adapter, { repo, config, cutoffMs, strict, stats, cache, 
   }
 
   return out;
+}
+
+function cacheVersionMatches(cachedVersion, adapter, classifierVersion) {
+  if (cachedVersion === classifierVersion) return true;
+  // Base-release cache entries had no epoch. The old global v2 entries are also
+  // compatible for adapters that have not declared a private epoch.
+  return (
+    adapter.classifierVersion === undefined &&
+    (cachedVersion === undefined || cachedVersion === LEGACY_GLOBAL_CLASSIFIER_VERSION)
+  );
+}
+
+/** Cached descriptors are persisted across releases; reject old malformed shapes before association. */
+function usableDescriptor(descriptor) {
+  return (
+    descriptor === null ||
+    (descriptor &&
+      typeof descriptor === "object" &&
+      typeof descriptor.id === "string" &&
+      descriptor.id.length > 0 &&
+      typeof descriptor.cwd === "string" &&
+      descriptor.cwd.length > 0)
+  );
 }
 
 function toTranscript(adapter, row, association, id) {

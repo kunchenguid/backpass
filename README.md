@@ -32,7 +32,7 @@ The loop only closes when a human happens to remember a failure and edits the fi
 what happened in them, and proposes evidence-backed edits to your memory file - under a
 token budget, gated by you.
 
-- **Local-first** - Reads the transcript stores of seven agent harnesses directly from disk.
+- **Local-first** - Reads the transcript stores of eight agent harnesses directly from disk.
   No API, no upload; transcripts never leave your machine except into an agent you already
   authenticated, and obvious secrets are redacted before they do.
 - **Evidence-gated** - Every proposed edit carries verbatim quotes from real sessions, a
@@ -78,13 +78,14 @@ backpass apply     # review each edit, accept or reject, then write
 
 ### 1. Collect samples - which sessions belong to this repo
 
-backpass reads the local transcript stores of seven harnesses directly. No API, no upload.
+backpass reads the local transcript stores of eight harnesses directly. No API, no upload.
 
 | Harness        | Store                                          | Repo tie                                            |
 | -------------- | ---------------------------------------------- | --------------------------------------------------- |
 | **claude**     | `~/.claude/projects/<munged-cwd>/<uuid>.jsonl` | per-line `cwd`                                      |
 | **codex**      | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | `cwd` + recorded `git.repository_url`               |
 | **pi**         | `~/.pi/agent/sessions/<escaped-cwd>/*.jsonl`   | session-header `cwd`                                |
+| **omp**        | `~/.omp/agent/sessions/<escaped-cwd>/*.jsonl`  | session-header `cwd`                                |
 | **opencode**   | `~/.local/share/opencode/opencode.db` (sqlite) | `session.directory`                                 |
 | **grok**       | `~/.grok/sessions/<encoded-cwd>/<uuid>/`       | `summary.json` `cwd` + `git_remotes`                |
 | **cursor CLI** | `~/.cursor/chats/<md5(cwd)>/<uuid>/`           | `meta.json` `cwd`                                   |
@@ -108,12 +109,13 @@ Association runs in three tiers:
 3. **Tier 3 - best-effort.** A dead path whose last segment is the repo's directory name,
    or one matching a glob you configured. Labelled as such, and excluded by `--strict`.
 
-Collection is incremental. Codex alone can hold 10,000+ rollouts, so verdicts are cached in
-`.backpass/scan-cache.json` by path, mtime and size - re-scans cost only the new files.
-A harness whose store is missing or has drifted into an unrecognised shape produces a
-warning and is skipped; the run continues. backpass's own loss and gradient-descent calls land
-in these same stores under the repo's cwd; every prompt it sends is tagged, and tagged
-sessions are excluded from the corpus (the `SELF` column in `backpass scan`).
+Collection is incremental. Codex alone can hold 10,000+ rollouts, so classify results are
+cached in `.backpass/scan-cache.json` by adapter, path, file mtime/size, and classifier version.
+Re-scans cost only new files or entries invalidated by a classifier change. A harness whose
+store is missing or has drifted into an unrecognised shape produces a warning and is skipped;
+the run continues. backpass's own loss and gradient-descent calls land in these same stores
+under the repo's cwd; every prompt it sends is tagged, and tagged sessions are excluded from the
+corpus (the `SELF` column in `backpass scan`).
 
 ```sh
 backpass scan --since 7d --strict
@@ -424,7 +426,7 @@ CLI flags on top:
     ]
   },
   "discovery": {
-    "harnesses": ["claude", "codex", "pi", "opencode", "grok", "cursor", "hermes"],
+    "harnesses": ["claude", "codex", "omp", "pi", "opencode", "grok", "cursor", "hermes"],
     "since": "30d",
     "worktreeGlobs": [],
     "minUserTurns": 2
@@ -433,6 +435,10 @@ CLI flags on top:
 }
 ```
 
+Note: setting `discovery.harnesses` explicitly **replaces** the default list rather than
+merging with it. Configs pinned before omp existed keep the prior seven-harness array;
+add `"omp"` to the array to opt existing repos in.
+
 ### State
 
 Everything mutable lives in `.backpass/`, kept out of git via the repo's local exclude
@@ -440,7 +446,7 @@ Everything mutable lives in `.backpass/`, kept out of git via the repo's local e
 
 ```
 .backpass/
-  scan-cache.json        collect-samples verdicts by path + mtime + size
+  scan-cache.json        incremental collect-samples cache (see cache behavior above)
   evidence/<id>.json     per-transcript loss
   evidence-summary.json  aggregated gradients
   proposal.json          the latest parseable gradient-descent step (absent if none was produced)

@@ -9,10 +9,13 @@ import { DatabaseSync } from "node:sqlite";
 import * as claude from "../src/discovery/adapters/claude.js";
 import * as codex from "../src/discovery/adapters/codex.js";
 import * as pi from "../src/discovery/adapters/pi.js";
+import * as omp from "../src/discovery/adapters/omp.js";
 import * as grok from "../src/discovery/adapters/grok.js";
 import * as cursorCli from "../src/discovery/adapters/cursor-cli.js";
 import * as hermes from "../src/discovery/adapters/hermes.js";
 import { statOrNull } from "../src/discovery/adapters/shared.js";
+import { ALL_HARNESSES } from "../src/config.js";
+import { ADAPTERS } from "../src/discovery/index.js";
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
 
@@ -131,6 +134,190 @@ test("pi adapter reads the session header and drops thinking blocks", () => {
   const [toolCall] = tools(events);
   assert.equal(toolCall.name, "bash");
   assert.equal(toolCall.result, "nothing to commit");
+});
+
+test("omp adapter finds the session header after the leading title line", () => {
+  // Pinned against a real ~10k-file OMP store: most files start with a
+  // {type:"title"} line; the session header only follows it.
+  const file = path.join(FIXTURES, "omp-session.jsonl");
+  const descriptor = omp.classify(candidateFor(file));
+  assert.ok(descriptor, "title-first sessions must classify, not be skipped");
+  assert.equal(descriptor.id, "omp-1234");
+  assert.equal(descriptor.cwd, "/repo/demo");
+  assert.equal(descriptor.title, "Understand src changes", "title line is surfaced");
+  assert.deepEqual(descriptor.remotes, []);
+  assert.equal(descriptor.startedAt, Date.parse("2026-08-20T10:00:00.000Z"));
+});
+
+test("omp adapter surfaces titles stored on the session header", () => {
+  const file = path.join(FIXTURES, "omp-session-header-title.jsonl");
+  const descriptor = omp.classify(candidateFor(file));
+
+  assert.equal(descriptor.title, "Review parser changes");
+});
+
+test("omp classify falls back to the filename for a malformed session id", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-omp-badid-"));
+  const file = path.join(dir, "session.jsonl");
+  fs.writeFileSync(
+    file,
+    [
+      JSON.stringify({
+        type: "session",
+        version: 3,
+        id: { unexpected: true },
+        timestamp: "2026-08-20T10:00:00.000Z",
+        cwd: "/repo/demo",
+      }),
+    ].join("\n"),
+  );
+  try {
+    const descriptor = omp.classify(candidateFor(file));
+    assert.equal(descriptor.id, "session", "discovery ids must stay strings even when the store is malformed");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("omp adapter reads model_change.model, drops thinking, and folds tool results", () => {
+  const file = path.join(FIXTURES, "omp-session.jsonl");
+  const { events, model } = omp.read({ path: file });
+  assert.equal(model, "openai-codex/gpt-5.5");
+  assert.deepEqual(
+    messages(events).map((m) => `${m.role}: ${m.text}`),
+    [
+      "user: What changed in the parser?",
+      "assistant: Running the tests first.",
+      "assistant: Tests pass; the parser fix is safe.",
+    ],
+  );
+  assert.ok(!JSON.stringify(events).includes("internal reasoning"), "thinking must be dropped");
+  const [toolCall, failedToolCall] = tools(events);
+  assert.equal(toolCall.name, "bash");
+  assert.equal(toolCall.input.command, "npm test");
+  assert.equal(toolCall.result, "2 passing");
+  assert.equal(toolCall.status, "completed");
+  assert.equal(failedToolCall.status, "error");
+});
+
+test("omp stays wired as a harness and adapter", () => {
+  // Fails if anyone removes the omp registration from either surface.
+  assert.ok(ADAPTERS.omp, "omp must stay registered in ADAPTERS");
+  assert.ok(ALL_HARNESSES.includes("omp"), "omp must stay in ALL_HARNESSES");
+});
+
+test("omp classify falls back to mtime when the session timestamp is invalid", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-omp-badts-"));
+  const file = path.join(dir, "session.jsonl");
+  fs.writeFileSync(
+    file,
+    [
+      JSON.stringify({ type: "title", title: "bad clock" }),
+      JSON.stringify({ type: "session", version: 3, id: "omp-badts", timestamp: "not-a-date", cwd: "/repo/demo" }),
+    ].join("\n"),
+  );
+  try {
+    const descriptor = omp.classify(candidateFor(file));
+    assert.equal(descriptor.id, "omp-badts");
+    assert.equal(descriptor.startedAt, candidateFor(file).mtimeMs, "NaN timestamps fail soft to mtime");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("omp read drops orphan tool results instead of misattributing them", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-omp-orphan-"));
+  const file = path.join(dir, "session.jsonl");
+  fs.writeFileSync(
+    file,
+    [
+      JSON.stringify({
+        type: "session",
+        version: 3,
+        id: "omp-orphan",
+        timestamp: "2026-08-20T10:00:00.000Z",
+        cwd: "/repo/demo",
+      }),
+      JSON.stringify({
+        type: "message",
+        id: "o1",
+        message: {
+          role: "toolResult",
+          toolCallId: "call_truncated_away",
+          content: [{ type: "text", text: "stale result" }],
+        },
+      }),
+      JSON.stringify({
+        type: "message",
+        id: "o2",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "toolCall", id: "call_present", name: "bash", arguments: { command: "npm run build" } },
+            { type: "text", text: "Building." },
+          ],
+        },
+      }),
+    ].join("\n"),
+  );
+  try {
+    const { events } = omp.read({ path: file });
+    const [toolCall] = tools(events);
+    assert.equal(toolCall.name, "bash");
+    assert.equal(toolCall.input.command, "npm run build");
+    assert.equal(toolCall.result, undefined, "a result whose call was truncated away must not attach to another call");
+    assert.ok(!JSON.stringify(events).includes("stale result"));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("omp read deduplicates repeated tool-call ids before attaching a result", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-omp-duplicate-"));
+  const file = path.join(dir, "session.jsonl");
+  const duplicateCall = { type: "toolCall", id: "call_duplicate", name: "bash", arguments: { command: "npm test" } };
+  const conflictingDuplicateCall = { ...duplicateCall, arguments: { command: "npm run deploy" } };
+  fs.writeFileSync(
+    file,
+    [
+      JSON.stringify({
+        type: "session",
+        version: 3,
+        id: "omp-duplicate",
+        timestamp: "2026-08-20T10:00:00.000Z",
+        cwd: "/repo/demo",
+      }),
+      JSON.stringify({
+        type: "message",
+        id: "d1",
+        message: { role: "assistant", content: [duplicateCall] },
+      }),
+      JSON.stringify({
+        type: "message",
+        id: "d2",
+        message: { role: "assistant", content: [conflictingDuplicateCall] },
+      }),
+      JSON.stringify({
+        type: "message",
+        id: "d3",
+        message: {
+          role: "toolResult",
+          toolCallId: "call_duplicate",
+          content: [{ type: "text", text: "failed" }],
+          isError: true,
+        },
+      }),
+    ].join("\n"),
+  );
+  try {
+    const duplicateCalls = tools(omp.read({ path: file }).events);
+    assert.equal(duplicateCalls.length, 1, "one persisted call id must produce one normalized tool event");
+    assert.deepEqual(duplicateCalls[0].input, { command: "npm test" });
+    assert.equal(duplicateCalls[0].result, "failed");
+    assert.equal(duplicateCalls[0].status, "error");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("grok adapter reads remotes from summary.json and tool calls off the assistant record", () => {
