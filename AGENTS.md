@@ -112,6 +112,18 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   `{ agent, usage|null }` (`usageRecord` in `src/acpx.js`) and `src/commands/usage.js` is
   the one place that prints them - never `n/a`: nothing when no call ran, the harness by
   name when it stayed silent.
+- **Fold and this-run gap-ledger ingest are scoped to the current memory-set hash.**
+  `foldForRun` (`src/commands/propose.js`) filters `state.listEvidence()` by `memoryPath`
+  AND `memoryHash === current set hash`, not path alone - a transcript that fell out of
+  this run's sample (window, cap, or the transcript itself gone) can leave an evidence file
+  on disk stamped with a stale hash, and it must not count toward `analyzedSessions`,
+  per-instruction scores, or this run's gap-ledger observations (positional `AG-nnn`
+  aliases can point at a different unit once the file changes). Nothing is migrated or
+  deleted: the file stays valid and reusable once its transcript is reanalyzed, or
+  immediately if the memory bytes return to that hash. `analyzeTranscripts` separately
+  reports `summary.staleMemoryHash` and names the old/new hash on stderr, so a full
+  reanalysis without `--force` after a memory edit reads as "the file changed," not as a
+  broken cache - the cache-hit path itself (unchanged file, no `--force`) is unaffected.
 - **Gap corroboration is counted across runs through `.backpass/gap-ledger.json`**
   (`src/gap-ledger.js`, wired in `foldForRun`): one sighting per (gap, transcript id), so a
   session never counts twice and a gap seen once per run still graduates at `minGapEvidence`.
