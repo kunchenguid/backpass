@@ -6,6 +6,7 @@ import * as opencode from "./adapters/opencode.js";
 import * as hermes from "./adapters/hermes.js";
 import * as cursorCli from "./adapters/cursor-cli.js";
 import * as cursorIde from "./adapters/cursor-ide.js";
+import * as antigravity from "./adapters/antigravity.js";
 
 import { associate, passesStrict } from "./association.js";
 import { isSelfSession } from "./self.js";
@@ -22,6 +23,7 @@ export const ADAPTERS = {
   hermes,
   cursor: cursorCli,
   "cursor-ide": cursorIde,
+  antigravity,
 };
 
 export function getAdapter(harness) {

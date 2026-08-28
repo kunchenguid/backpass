@@ -1,0 +1,6 @@
+{"step_index":0,"source":"SYSTEM","type":"CONVERSATION_HISTORY","created_at":"2026-08-01T10:00:00.000Z","content":"history metadata"}
+{"step_index":1,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-08-01T10:00:01.000Z","content":"Open a PR for the parser fix.","workspace":"/repo/demo","conversationId":"a3dec7b4-9b79-4bc1-acb9-2c300095fa00"}
+{"step_index":2,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-08-01T10:00:05.000Z","content":"I'll run the tests first.","thinking":"Running tests before PR","tool_calls":[{"id":"call_1","name":"run_command","args":{"CommandLine":"npm test"}}],"model":"gemini-3.7-flash"}
+{"step_index":3,"source":"MODEL","type":"GENERIC","status":"DONE","created_at":"2026-08-01T10:00:09.000Z","tool_call_id":"call_1","content":"2 passing"}
+{"step_index":4,"source":"SYSTEM","type":"CHECKPOINT","created_at":"2026-08-01T10:00:10.000Z","content":"checkpoint metadata"}
+{"step_index":5,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-08-01T10:00:20.000Z","content":"Opened PR #2731.","model":"gemini-3.7-flash"}
