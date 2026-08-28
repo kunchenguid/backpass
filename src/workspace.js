@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { anchoredHunks, countOccurrences, span } from "./diff.js";
+import { parseMemoryUnits } from "./memory.js";
 import { parseFrontmatter } from "./skills.js";
 import { sha256 } from "./state.js";
 
@@ -131,6 +132,18 @@ export function recoveredLineSet(texts) {
  * widening it with context could overlap its sibling, so the merged hunk is kept instead).
  */
 export function splitRemovalHunk(hunk, { oldText, oldLines, recovered }) {
+  for (const unit of parseMemoryUnits(oldText)) {
+    const start = Math.max(unit.startLine, hunk.oldStart);
+    const end = Math.min(unit.endLine, hunk.oldEnd);
+    if (start > end) continue;
+    const kinds = new Set();
+    for (let lineNo = start; lineNo <= end; lineNo += 1) {
+      const normalized = normalizeRecoveryLine(oldLines[lineNo - 1]);
+      if (normalized) kinds.add(recovered.has(normalized) ? "recovered" : "deleted");
+    }
+    if (kinds.size > 1) return null;
+  }
+
   // Group the removed lines into maximal runs by recovery; blank lines never start a
   // run and attach to whichever run surrounds them.
   const runs = [];

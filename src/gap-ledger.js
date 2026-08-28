@@ -74,6 +74,12 @@ export function gapEntryId(memoryPath, proposedInstruction) {
   return sha256(`${memoryPath}\n${normalize(proposedInstruction)}`).slice(0, 16);
 }
 
+function gapEntryById(ledger, id) {
+  const direct = ledger.entries[id];
+  if (direct) return direct;
+  return Object.values(ledger.entries).find((entry) => (entry.aliases || []).includes(id)) || null;
+}
+
 /** The ledger entry a proposed instruction belongs to, or null. */
 export function findGapEntry(ledger, memoryPath, proposedInstruction) {
   let best = null;
@@ -106,14 +112,16 @@ export function recordGapObservations(ledger, evidenceRecords, { now = new Date(
       // A citation from the analysis turn wins over word overlap: the model saw both
       // sentences and judged them the same gap. An id that names nothing (stale index,
       // typo) falls back to the lexical match rather than failing the record.
-      const cited = gap.matchesGap ? ledger.entries[gap.matchesGap] : null;
+      const cited = gap.matchesGap ? gapEntryById(ledger, gap.matchesGap) : null;
+      const deterministicId = gapEntryId(record.memoryPath, gap.proposedInstruction);
+      const deterministic = gapEntryById(ledger, deterministicId);
       let entry =
         (cited && cited.memoryPath === record.memoryPath ? cited : null) ||
-        findGapEntry(ledger, record.memoryPath, gap.proposedInstruction);
+        findGapEntry(ledger, record.memoryPath, gap.proposedInstruction) ||
+        (deterministic && deterministic.memoryPath === record.memoryPath ? deterministic : null);
       if (!entry) {
-        const id = gapEntryId(record.memoryPath, gap.proposedInstruction);
-        entry = ledger.entries[id] = {
-          id,
+        entry = ledger.entries[deterministicId] = {
+          id: deterministicId,
           memoryPath: record.memoryPath,
           proposedInstruction: gap.proposedInstruction,
           sessions: {},
@@ -253,6 +261,7 @@ export function mergeGapEntries(ledger, groups) {
           if (earlier) prior.firstObservedAt = obs.firstObservedAt || obs.observedAt;
         }
       }
+      target.aliases = [...new Set([...(target.aliases || []), entry.id, ...(entry.aliases || [])])];
       if (entry.proposedInstruction.length < target.proposedInstruction.length) {
         target.proposedInstruction = entry.proposedInstruction;
       }

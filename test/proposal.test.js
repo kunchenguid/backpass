@@ -1255,6 +1255,46 @@ test("a removal mixing extracted and deleted text is measured as two changes, sp
   assert.ok(!both.text.includes("## Alpha") && !both.text.includes("## Beta") && both.text.includes("## Keep"));
 });
 
+test("a recovery transition inside a multiline instruction keeps the removal indivisible", () => {
+  const text = [
+    "# Memory",
+    "",
+    "## Rules",
+    "",
+    "- Carry this instruction into a skill.",
+    "  This continuation is part of the same instruction.",
+    "- Delete this adjacent instruction.",
+    "",
+  ].join("\n");
+  const skill = [
+    "---",
+    "name: partial",
+    "description: Partial extraction fixture.",
+    "---",
+    "",
+    "- Carry this instruction into a skill.",
+    "",
+  ].join("\n");
+  const staged = gate({
+    text,
+    edit: (root) => {
+      writeIn(root, "AGENTS.md", (memory) =>
+        memory.replace(
+          "- Carry this instruction into a skill.\n  This continuation is part of the same instruction.\n- Delete this adjacent instruction.\n",
+          "",
+        ),
+      );
+      writeIn(root, ".agents/skills/partial/SKILL.md", skill);
+    },
+    annotation: { edits: [claim(["H1", "H2"], { kind: "extract", title: "partial extraction" })] },
+  });
+
+  const memoryHunks = staged.measured.changes.filter((change) => change.kind === "hunk");
+  assert.equal(memoryHunks.length, 1);
+  assert.match(memoryHunks[0].find, /Carry this instruction[\s\S]*continuation[\s\S]*Delete this adjacent/);
+  assert.ok(staged.violations.some((violation) => /do not carry/.test(violation)));
+});
+
 test("an extract cannot smuggle the adjacent deletion: its skills must carry every removed line", () => {
   const { violations } = gate({
     text: TWO_SECTIONS,
