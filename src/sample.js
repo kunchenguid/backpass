@@ -1,3 +1,5 @@
+import crypto from "node:crypto";
+
 import { parseMaxTranscripts, parseSince } from "./config.js";
 import { color, info } from "./logger.js";
 
@@ -14,7 +16,22 @@ import { color, info } from "./logger.js";
  * Sampling uses the Efraimidis-Spirakis one-pass scheme: key = -ln(u) / weight with
  * u ~ U(0, 1), keep the N smallest keys. That is exactly weighted sampling without
  * replacement (an exponential race with rate = weight), needs no rejection loop, and is
- * O(n log n). The RNG is a seedable splitmix32 so runs are reproducible with `--seed`.
+ * O(n log n).
+ *
+ * `u` is NOT drawn from a shared PRNG stream stepped once per transcript - that would
+ * make every transcript's draw depend on how many other transcripts came before it in
+ * the array, so an unrelated insertion or a reordering would reshuffle everyone's draw
+ * (and, with `config.seed` defaulting to null, the CLI reseeded from `Math.random()` on
+ * every invocation, so even an unchanged rerun drew a different sample - see the
+ * `sample-reuse` regression tests). Instead each transcript's `u` is `sampleUnit`, a
+ * keyed hash of that transcript's own durable identity (`harness` + discovery `id`,
+ * never its array position) plus the configured seed. That makes sampling: (1)
+ * deterministic and sticky by default, with no persisted state - the same corpus and
+ * config always draw the same `u` per transcript; (2) stable under growth - a transcript
+ * already in the corpus keeps the exact same `u` (and so the same key, modulo its own
+ * weight) when other transcripts are added, removed, or reordered; new transcripts just
+ * compete for slots on the same footing. `--seed` still selects a different, equally
+ * reproducible hash input.
  *
  * This module is pure: it never touches the cache, so evidence for a sampled transcript
  * is reused by the analyzer exactly as before.
@@ -22,18 +39,33 @@ import { color, info } from "./logger.js";
 
 export const DEFAULT_SAMPLE_HALF_LIFE = "14d";
 
-/** splitmix32: small, seedable, and uniform enough for sampling keys. */
-export function seededRandom(seed) {
-  let state = Number(seed) >>> 0 || 0x9e3779b9;
-  return () => {
-    state = (state + 0x9e3779b9) | 0;
-    let t = state ^ (state >>> 16);
-    t = Math.imul(t, 0x21f0aaad);
-    t ^= t >>> 15;
-    t = Math.imul(t, 0x735a2d97);
-    t ^= t >>> 15;
-    return (t >>> 0) / 4294967296;
-  };
+/**
+ * A transcript's durable sampling identity. `harness` + discovery `id` is assigned once
+ * from the transcript's own content (a session id, a DB row's primary key, or - only as
+ * a last resort - its file's own basename) and never from where it lands in the
+ * discovered array, so this identity outlives insertions, deletions, and reorderings of
+ * the rest of the corpus. `path` is a defensive fallback for records missing `id`
+ * entirely; title is deliberately excluded - duplicate-looking titles must not collide.
+ */
+export function sampleIdentity(transcript) {
+  return `${transcript.harness ?? ""} ${transcript.id ?? transcript.path ?? ""}`;
+}
+
+/**
+ * Deterministic draw in [0, 1) for one transcript: a SHA-256 of its durable identity
+ * keyed by `seed` (or a fixed default when unseeded), so it depends only on that
+ * transcript and the configured seed - never on discovery order, the cap, or which other
+ * transcripts are present. Two transcripts that ever legitimately share an identity
+ * (a bug elsewhere, since `harness` + `id` is meant to be unique) draw the same `u` and
+ * therefore the same key; the sort below then falls back to comparing identities so the
+ * outcome is still fully deterministic rather than depending on array position.
+ */
+export function sampleUnit(transcript, seed) {
+  const digest = crypto
+    .createHash("sha256")
+    .update(`${seed ?? "default"} ${sampleIdentity(transcript)}`, "utf8")
+    .digest();
+  return digest.readUInt32BE(0) / 0x100000000;
 }
 
 /** Epoch ms a transcript is dated to: the session start, else the file mtime. */
@@ -67,13 +99,16 @@ export function sampleTranscripts(
   { seed, now = Date.now(), halfLife = DEFAULT_SAMPLE_HALF_LIFE } = {},
 ) {
   if (count === null || transcripts.length <= count) return transcripts;
-  const random = seededRandom(seed ?? Math.floor(Math.random() * 0xffffffff));
   const halfLifeMs = parseSince(halfLife) ?? Infinity;
   const keyed = transcripts.map((transcript, index) => {
-    const u = random() || Number.EPSILON;
-    return { index, key: -Math.log(u) / recencyWeight(transcript, { now, halfLifeMs }) };
+    const u = sampleUnit(transcript, seed) || Number.EPSILON;
+    return {
+      index,
+      identity: sampleIdentity(transcript),
+      key: -Math.log(u) / recencyWeight(transcript, { now, halfLifeMs }),
+    };
   });
-  keyed.sort((a, b) => a.key - b.key);
+  keyed.sort((a, b) => a.key - b.key || (a.identity < b.identity ? -1 : a.identity > b.identity ? 1 : 0));
   const kept = new Set(keyed.slice(0, count).map((k) => k.index));
   return transcripts.filter((_, index) => kept.has(index));
 }

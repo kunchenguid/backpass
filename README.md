@@ -143,8 +143,13 @@ Calculating loss costs one call per transcript, so the set is capped first: past
 everything. Each transcript's weight halves every `sampleHalfLife` (default 14d), and the
 sample is drawn without replacement, so recent sessions are almost always kept and old
 ones stay represented in proportion. When this happens the run says so on stderr
-(`discovered 340 transcript(s), analyzing a recency-weighted sample of 100`); pass
-`--max-transcripts all` to analyze every transcript, or `--seed <n>` to reproduce a sample.
+(`discovered 340 transcript(s), analyzing a recency-weighted sample of 100`).
+
+The draw is deterministic and sticky: it is derived from each transcript's own durable
+identity, not from a random seed, so an unchanged rerun selects the identical sample (no
+wasted model calls) and a transcript keeps its slot as the corpus grows - new sessions
+just compete for room on the same footing. Pass `--max-transcripts all` to analyze every
+transcript, or `--seed <n>` to draw a different, equally reproducible sample.
 
 Each distilled trace goes to a cheap model with the memory file and a rubric. It returns
 strict JSON: which instructions helped, which were violated, and what mistakes no current
