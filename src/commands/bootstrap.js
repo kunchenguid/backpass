@@ -1,7 +1,7 @@
 import { analyzeTranscripts } from "../analyze.js";
 import { applyDecisions, writeBootstrapFiles } from "../apply/writer.js";
 import { bootstrapTargets, renderPointer, starterMemoryFile } from "../bootstrap.js";
-import { color, info, json, out, warn } from "../logger.js";
+import { UserError, color, info, json, out, warn } from "../logger.js";
 import { resolveMemoryFiles } from "../memory.js";
 import { emitProgress } from "../progress.js";
 import { ProposalViolation } from "../proposal.js";
@@ -53,15 +53,25 @@ export async function bootstrapRun(ctx, deps = {}) {
   const seed = [{ path: canonical, text: starter.text }];
   if (pointer) seed.push({ path: pointer, text: renderPointer(canonical) });
   const seeded = writeBootstrapFiles(repo.root, seed);
-  const memoryHash = resolveMemoryFiles(repo.root, config.memoryFiles).hash;
+  const resolved = resolveMemoryFiles(repo.root, config.memoryFiles);
   for (const w of seeded.written) info(`${color.green("·")} wrote ${w.file}`);
   for (const s of seeded.skipped) warn(`${s.file} ${s.reason} - left untouched`);
 
+  const canonicalSkipped = seeded.skipped.some((entry) => entry.file === canonical);
+  if (canonicalSkipped || resolved.primary?.path !== starter.path || resolved.primary?.text !== starter.text) {
+    throw new UserError(
+      `${canonical} changed while backpass was bootstrapping it`,
+      "run `backpass` again to analyze the memory file that now exists",
+    );
+  }
+  const memoryFile = resolved.primary;
+  const memoryHash = resolved.hash;
+
   emitProgress("memory", {
-    path: starter.path,
-    tokens: starter.tokens,
+    path: memoryFile.path,
+    tokens: memoryFile.tokens,
     budget: config.budgetTokens,
-    units: starter.units.length,
+    units: memoryFile.units.length,
   });
 
   const result = {
@@ -80,7 +90,7 @@ export async function bootstrapRun(ctx, deps = {}) {
 
   result.summary = await analyze({
     transcripts,
-    memoryFile: starter,
+    memoryFile,
     config,
     repo,
     memoryHash,
@@ -91,7 +101,7 @@ export async function bootstrapRun(ctx, deps = {}) {
       `${result.summary.skipped} too short · ${result.summary.failed} failed`,
   );
 
-  const folded = await foldForRun(ctx, starter, memoryHash);
+  const folded = await foldForRun(ctx, memoryFile, memoryHash);
   config.state.writeSummary(folded);
   emitProgress("fold:done", {
     instructions: folded.instructions.length,
@@ -104,7 +114,7 @@ export async function bootstrapRun(ctx, deps = {}) {
 
   try {
     const { proposal } = await synthesize({
-      memoryFile: starter,
+      memoryFile,
       summary: folded,
       config,
       repo,

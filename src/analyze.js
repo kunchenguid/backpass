@@ -203,7 +203,7 @@ export async function analyzeTranscripts({ transcripts, memoryFile, config, repo
       continue;
     }
     // Distinguish "no prior evidence" from "prior evidence exists, but it was judged
-    // against a memory file that no longer matches" - a re-analysis here, not a miss.
+    // against a memory-file set that no longer matches" - a re-analysis here, not a miss.
     if (existing?.status === "ok" && existing.memoryHash && existing.memoryHash !== memoryHash) {
       summary.staleMemoryHash += 1;
       priorHashes.add(existing.memoryHash);
@@ -214,8 +214,8 @@ export async function analyzeTranscripts({ transcripts, memoryFile, config, repo
   if (summary.staleMemoryHash) {
     info(
       `${color.yellow("·")} ${summary.staleMemoryHash} transcript(s) have evidence from a previous ` +
-        `${memoryFile.path} (${[...priorHashes].join(", ")} -> ${memoryHash}); that evidence is stale, not ` +
-        `missing, and reuse resumes once this pass re-judges it against the current file`,
+        `memory-file set (${[...priorHashes].join(", ")} -> ${memoryHash}); that evidence is stale, not ` +
+        `missing, and reuse resumes once this pass re-judges it against the current memory-file set`,
     );
   }
 

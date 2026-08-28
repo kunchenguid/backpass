@@ -165,7 +165,7 @@ test("editing AGENTS.md without --force reanalyzes and explains that prior evide
     "a memory-file edit invalidates the cache, exactly as documented",
   );
   assert.equal(third.summary.staleMemoryHash, 1, "the invalidation is attributed to the hash change, not a plain miss");
-  assert.match(third.stderr, /evidence from a previous AGENTS\.md/);
+  assert.match(third.stderr, /evidence from a previous memory-file set/);
   assert.match(third.stderr, /stale, not missing/);
   assert.match(third.stderr, /sha256:\w+ -> sha256:\w+/, "names the old and new hash");
 });
