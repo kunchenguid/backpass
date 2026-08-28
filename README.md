@@ -148,14 +148,14 @@ instruction covers.
 most important defence against a model confabulating influence. Negative evidence (a
 visible violation) is weighted highest.
 
-Results are cached per transcript, keyed to both the transcript's content _and_ the memory
-file's hash: edit the weights and the evidence correctly re-computes; change nothing and
-the next run is free. A memory-file edit therefore reanalyzes without `--force` - that is
+Results are cached per transcript, keyed to both the transcript's content _and_ the effective
+memory-file set hash: edit the weights and the evidence correctly re-computes; change nothing
+and the next run is free. A memory-file edit therefore reanalyzes without `--force` - that is
 not a cache miss, it is the cache doing its job - and the run says so on stderr, naming the
 old and new hash, so a "0 reused" line reads as "the file changed" rather than "reuse is
-broken." The old evidence is not lost: it stays on disk and counts again automatically,
-either once its transcript is reanalyzed against the current file or if the file's bytes
-ever go back to that hash.
+broken." Evidence files that are not refreshed remain on disk but are excluded while their
+hash is stale. They become eligible again if the memory-file set returns to that hash;
+evidence for transcripts included in the new analysis is replaced with fresh judgments.
 
 ### 4. Aggregate gradients - deterministic, no model
 
@@ -164,11 +164,12 @@ Evidence is grouped by instruction, giving each one a positive/negative count an
 gaps across sessions are clustered, and clusters seen in fewer than `minGapEvidence`
 sessions (default 2) are dropped. One bad session never rewrites the weights.
 
-Only evidence judged against the _current_ memory-file hash is folded into a proposal. A
+Only evidence judged against the _current_ memory-file set hash is folded into a proposal. A
 transcript that fell out of this run's sample - the time window, `maxTranscripts`, or the
 transcript itself being gone - can leave an older evidence file on disk under a hash the
-memory file no longer has; that file is left untouched, but it does not count toward this
-run's session total or instruction scores until it is current again.
+memory-file set no longer has; that file is left untouched, but it does not count toward this
+run's session total or instruction scores, or add a gap observation, until it is current
+again.
 
 Those sessions are counted across runs, not per run: every gap sighting is kept in
 `.backpass/gap-ledger.json` by gap and session, so a gap seen in one session today and in
@@ -290,8 +291,8 @@ that version. If it was removed or changed since - you pulled, edited it by hand
 agent did - the edits no longer describe what is on disk, so nothing is written and you are
 told to run `backpass` again to re-propose against the current file. That rerun reanalyzes
 transcripts against the file that exists now; it does not reuse the stale judgments behind
-the refused proposal. Within a run every file
-is composed from one version: it takes every accepted edit or none of them. Apply also
+the refused proposal. Within a run every file is composed from one version: it takes every
+accepted edit or none of them. Apply also
 refuses the whole write if any created skill target already exists or two accepted paths
 resolve to the same file.
 

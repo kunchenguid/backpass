@@ -217,5 +217,16 @@ test("old-hash leftover evidence cannot change the current fold's session count,
       ["pi-session-a"],
       "only the current-hash session is recorded into the ledger this run",
     );
+
+    fs.writeFileSync(path.join(dir, "AGENTS.md"), MEMORY);
+    const reverted = resolveMemoryFiles(dir, ["AGENTS.md", "CLAUDE.md"]);
+    return foldForRun(ctx, reverted.primary, reverted.hash).then((revertedSummary) => {
+      assert.equal(
+        revertedSummary.analyzedSessions,
+        1,
+        "the untouched session B evidence becomes reusable when its original memory bytes are current again",
+      );
+      assert.equal(revertedSummary.instructions.find((i) => i.instruction === "AG-001").positive, 1);
+    });
   });
 });

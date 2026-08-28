@@ -224,6 +224,11 @@ test("a memory file that changed after the proposal is left untouched by apply",
   assert.match(applied.output, new RegExp(proposal.memoryFile.hash), "names the image the edits were measured on");
   assert.match(applied.output, /nothing was written/);
   assert.match(applied.output, /Run `backpass`/, "names the command that regenerates against the current file");
+  assert.match(
+    applied.output,
+    /reanalyzes transcripts against the new file, it does not reuse the stale judgments/,
+    "explains that recovery does not reuse the proposal's stale analysis",
+  );
 });
 
 test("an unchanged memory file applies every accepted edit and its skills", () => {
