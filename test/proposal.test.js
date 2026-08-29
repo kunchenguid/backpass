@@ -279,6 +279,43 @@ test("token deltas and the projected budget are measured by backpass, not taken 
   );
 });
 
+test("the proposal carries the fold's gap-funnel counts for the apply surface", () => {
+  const edit = memoryEdit((t) => t.replace("- Use Node 18 via nvm before running any script.\n", ""));
+  const annotation = { edits: [claim(["H1"], { kind: "remove", title: "drop the stale Node pin" })] };
+
+  const funneled = gate({
+    edit,
+    annotation,
+    context: {
+      summary: {
+        analyzedSessions: 16,
+        totals: {
+          positive: 34,
+          negative: 7,
+          gapSightings: 9,
+          gapClusters: 0,
+          droppedGapSingletons: 3,
+          orchestrationGapSightings: 6,
+        },
+        instructions: Array.from({ length: 20 }, (_, i) => ({
+          instruction: `AG-${String(i + 1).padStart(3, "0")}`,
+          harmSessions: 4,
+        })),
+      },
+    },
+  });
+  assert.equal(funneled.proposal.stats.gapSightings, 9);
+  assert.equal(funneled.proposal.stats.orchestrationGapSightings, 6);
+  assert.equal(funneled.proposal.stats.droppedGapSingletons, 3);
+  assert.equal(funneled.proposal.stats.gapClusters, 0);
+
+  // A summary from before the counts existed yields null, never an invented zero.
+  const legacy = gate({ edit, annotation });
+  assert.equal(legacy.proposal.stats.gapSightings, null);
+  assert.equal(legacy.proposal.stats.orchestrationGapSightings, null);
+  assert.equal(legacy.proposal.stats.droppedGapSingletons, null);
+});
+
 test("a proposal that would exceed the budget fails the gate", () => {
   const big = "x".repeat(4800); // ~1,200 tok, over a tiny cap
   const { violations } = gate({

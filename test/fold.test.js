@@ -93,6 +93,46 @@ test("a gap seen in only one session is dropped - batch size greater than one", 
   assert.equal(summary.totals.droppedGapSingletons, 1);
 });
 
+test("the fold records the sightings it clustered over - the gap funnel's top", () => {
+  const fromRecords = foldEvidence(
+    [
+      record("s1", {
+        gaps: [
+          { proposedInstruction: "Always vendor the lockfile.", quote: "q", recurrenceRisk: "low" },
+          {
+            proposedInstruction: "Never bypass the release gate.",
+            quote: "q",
+            recurrenceRisk: "low",
+            domain: "orchestration",
+          },
+        ],
+      }),
+      record("s2", {
+        gaps: [{ proposedInstruction: "Always vendor the lockfile.", quote: "q", recurrenceRisk: "low" }],
+      }),
+    ],
+    { minGapEvidence: 2 },
+  );
+  assert.equal(fromRecords.totals.gapSightings, 3, "every sighting counts, orchestration included");
+  assert.equal(fromRecords.totals.orchestrationGapSightings, 1);
+  assert.equal(fromRecords.totals.gapClusters, 1);
+
+  // With a ledger the fold clusters over its observations, so the funnel counts those.
+  const fromLedger = foldEvidence([record("s1")], {
+    minGapEvidence: 2,
+    gapObservations: [
+      { proposedInstruction: "Always vendor the lockfile.", sessionId: "a", domain: "project" },
+      { proposedInstruction: "Always vendor the lockfile.", sessionId: "b", domain: "project" },
+      { proposedInstruction: "Never bypass the release gate.", sessionId: "a", domain: "orchestration" },
+      { proposedInstruction: "Pin the schema version.", sessionId: "c", domain: "project" },
+    ],
+  });
+  assert.equal(fromLedger.totals.gapSightings, 4);
+  assert.equal(fromLedger.totals.orchestrationGapSightings, 1);
+  assert.equal(fromLedger.totals.gapClusters, 1, "two sessions corroborate the lockfile gap");
+  assert.equal(fromLedger.totals.droppedGapSingletons, 1, "the schema gap stays below the floor");
+});
+
 test("the same gap repeated inside one session does not clear the threshold", () => {
   const summary = foldEvidence(
     [

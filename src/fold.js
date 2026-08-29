@@ -143,6 +143,10 @@ export function foldEvidence(evidenceRecords, { minGapEvidence = 2, memoryFile =
     totals: {
       positive: positiveCount,
       negative: negativeCount,
+      // The gap funnel's top: every sighting this fold clustered over (the pruned ledger
+      // when one is passed, this run's records otherwise). Orchestration sightings are the
+      // slice excluded before clustering; project-domain is the difference.
+      gapSightings: allObservations.length,
       gapClusters: gaps.length,
       droppedGapSingletons,
       orchestrationGapSightings,

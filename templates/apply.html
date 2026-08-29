@@ -126,6 +126,106 @@
         margin-top: 3px;
       }
 
+      /* ---------- gap funnel ---------- */
+      .wrap.has-funnel .statrow {
+        margin-bottom: 10px;
+      }
+      .funnel {
+        border: 1px solid var(--line);
+        background: var(--panel);
+        padding: 13px 18px 15px;
+        margin-bottom: 36px;
+      }
+      .funnel-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+      .funnel-head .t {
+        font-size: 13px;
+        color: var(--dim);
+      }
+      .funnel-head .floor {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--faint);
+      }
+      .funnel-row {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 26px;
+      }
+      .fstage {
+        min-width: 0;
+        position: relative;
+      }
+      .fstage:not(:last-child)::after {
+        content: "\203A";
+        position: absolute;
+        right: -17px;
+        top: 1px;
+        color: var(--faint);
+        font-family: var(--mono);
+        font-size: 14px;
+      }
+      .fstage .v {
+        font-family: var(--mono);
+        font-size: 17px;
+        font-weight: 500;
+        color: var(--text);
+      }
+      .fstage.zero .v {
+        color: var(--faint);
+      }
+      .fstage.lit .v {
+        color: var(--accent);
+      }
+      .fstage .k {
+        font-family: var(--mono);
+        font-size: 10px;
+        letter-spacing: 0.11em;
+        text-transform: uppercase;
+        color: var(--faint);
+        margin-top: 2px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .fstage .bar {
+        height: 4px;
+        background: var(--panel-2);
+        border: 1px solid var(--line-soft);
+        margin-top: 8px;
+        position: relative;
+      }
+      .fstage .bar i {
+        position: absolute;
+        inset: 0 auto 0 0;
+        background: rgba(110, 168, 255, 0.45);
+      }
+      .fstage.lit .bar i {
+        background: var(--accent);
+      }
+      .fstage .d {
+        font-family: var(--mono);
+        font-size: 10.5px;
+        color: var(--faint);
+        margin-top: 5px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .funnel-note {
+        margin-top: 12px;
+        padding-top: 10px;
+        border-top: 1px dashed var(--line-soft);
+        font-size: 12.5px;
+        color: var(--dim);
+      }
+
       /* ---------- budget gauge ---------- */
       .gauge-block {
         border: 1px solid var(--line);
@@ -572,6 +672,13 @@
           padding: 12px 16px;
           gap: 12px;
         }
+        .funnel-row {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 16px;
+        }
+        .fstage:not(:last-child)::after {
+          content: none;
+        }
       }
     </style>
   </head>
@@ -585,6 +692,15 @@
       <div class="runline" id="runline"></div>
 
       <div class="statrow" id="statrow"></div>
+
+      <div class="funnel" id="funnel" hidden>
+        <div class="funnel-head">
+          <span class="t">Gap funnel · counted across runs</span>
+          <span class="floor num" id="funnel-floor"></span>
+        </div>
+        <div class="funnel-row" id="funnel-row"></div>
+        <div class="funnel-note" id="funnel-note" hidden></div>
+      </div>
 
       <div class="gauge-block">
         <div class="gauge-head">
@@ -677,7 +793,7 @@
           ],
           [fmt(P.stats.positive), "positive evidence", "accent"],
           [fmt(P.stats.negative), "negative evidence", "reject"],
-          [fmt(P.stats.gapClusters), "gap clusters", "defer"],
+          [fmt(P.stats.gapClusters), "eligible gaps", "defer"],
           [fmt(P.stats.skillExtractions), "skill extractions", null],
         ];
         var statrow = document.getElementById("statrow");
@@ -688,6 +804,78 @@
           box.appendChild(el("div", "k", s[1]));
           statrow.appendChild(box);
         });
+
+        // ---- gap funnel ----
+        // What happened to the gap evidence, stage by stage: sightings recorded by
+        // analysis -> project-domain (orchestration excluded) -> distinct gaps after
+        // clustering -> eligible for a proposal. Every count is recorded by the fold
+        // (`totals` in evidence-summary.json); a proposal saved before the counts
+        // existed hides the funnel rather than showing zeros nobody measured.
+        var funnelNote = null;
+        if (typeof (P.stats || {}).gapSightings === "number") {
+          var floor = Number((P.config || {}).minGapEvidence) || 2;
+          var sighted = P.stats.gapSightings;
+          var orch = P.stats.orchestrationGapSightings || 0;
+          var projectSighted = Math.max(0, sighted - orch);
+          var eligibleGaps = P.stats.gapClusters || 0;
+          var droppedGaps = P.stats.droppedGapSingletons || 0;
+          var distinctGaps = eligibleGaps + droppedGaps;
+
+          var funnelStages = [
+            { v: sighted, k: "sightings", d: "recorded by analysis" },
+            { v: projectSighted, k: "project-domain", d: orch ? "−" + orch + " orchestration" : "" },
+            { v: distinctGaps, k: "distinct gaps", d: "after clustering" },
+            {
+              v: eligibleGaps,
+              k: "eligible to propose",
+              d: droppedGaps ? "−" + droppedGaps + " below floor" : "≥ " + floor + " sessions",
+              lit: true,
+            },
+          ];
+          var funnelRow = document.getElementById("funnel-row");
+          funnelStages.forEach(function (stage) {
+            var cell = el("div", "fstage" + (stage.v === 0 ? " zero" : stage.lit ? " lit" : ""));
+            cell.appendChild(el("div", "v num", fmt(stage.v)));
+            cell.appendChild(el("div", "k", stage.k));
+            var bar = el("div", "bar");
+            var fill = el("i");
+            fill.style.width = sighted > 0 ? Math.max((stage.v / sighted) * 100, stage.v > 0 ? 3 : 0) + "%" : "0%";
+            bar.appendChild(fill);
+            cell.appendChild(bar);
+            cell.appendChild(el("div", "d", stage.d || " "));
+            funnelRow.appendChild(cell);
+          });
+
+          if (!sighted) {
+            funnelNote = "Analysis reported no uncovered gaps.";
+          } else if (!eligibleGaps && droppedGaps) {
+            funnelNote =
+              droppedGaps +
+              " distinct gap" +
+              (droppedGaps === 1 ? " is" : "s are") +
+              " still below the " +
+              floor +
+              "-session corroboration floor - more transcripts may corroborate " +
+              (droppedGaps === 1 ? "it." : "them.");
+          } else if (!eligibleGaps && orch >= sighted) {
+            funnelNote =
+              "All " +
+              sighted +
+              " sighting" +
+              (sighted === 1 ? " was" : "s were") +
+              " orchestration-domain (caused by the orchestrating harness, not this repository) and " +
+              (sighted === 1 ? "is" : "are") +
+              " excluded by design.";
+          }
+          if (funnelNote) {
+            var noteEl = document.getElementById("funnel-note");
+            noteEl.textContent = funnelNote;
+            noteEl.hidden = false;
+          }
+          document.getElementById("funnel-floor").textContent = "corroboration floor · " + floor + " sessions";
+          document.getElementById("funnel").hidden = false;
+          document.querySelector(".wrap").classList.add("has-funnel");
+        }
 
         // ---- budget gauge ----
         document.getElementById("gauge-title").textContent = "Always-loaded budget · " + (P.memoryFile.path || "");
@@ -701,7 +889,11 @@
 
         if (!edits.length) {
           host.appendChild(
-            el("div", "empty", "No edits proposed. The evidence did not clear the thresholds this run."),
+            el(
+              "div",
+              "empty",
+              "No edits proposed. " + (funnelNote || "The evidence did not clear the thresholds this run."),
+            ),
           );
         }
 
