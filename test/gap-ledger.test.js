@@ -138,6 +138,24 @@ function age(h, days) {
   h.state.writeGapLedger(ledger);
 }
 
+test("a later uncited observation preserves the session's failed-trigger citation", () => {
+  const phrasing = "Wrap migrations in a transaction.";
+  const citedThenUncited = (id) =>
+    record(id, [
+      { proposedInstruction: phrasing, coveredBySkill: "db-schema" },
+      { proposedInstruction: phrasing },
+    ]);
+  const ledger = { version: 1, entries: {} };
+
+  recordGapObservations(ledger, [citedThenUncited("s1"), citedThenUncited("s2")]);
+  const observations = ledgerGapObservations(ledger, MEMORY_PATH, [{ name: "db-schema" }]);
+  const summary = foldEvidence([], { gapObservations: observations, minGapEvidence: 2 });
+
+  assert.equal(observations.length, 2);
+  assert.equal(summary.gaps[0].failedTriggerSkill, "db-schema");
+  assert.equal(summary.gaps[0].failedTriggerSessions, 2);
+});
+
 test("a sighting older than gapLedgerMaxAge expires instead of resurfacing indefinitely", async () => {
   const h = harness({ gapLedgerMaxAge: "90d" });
   await run(h, [record("claude-s1", [GAP])]);

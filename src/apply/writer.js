@@ -236,11 +236,35 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
   const skillsNow = loadSkills(repo.root, skillsDir);
   const descriptionTokensNow = skillDescriptionTokens(skillsNow);
 
-  // Freshness for every non-memory file an accepted edit targets, the same contract the
+  // Freshness for every non-memory file a decision targets, the same contract the
   // memory file gets: each hunk was cut from one exact image, and a file that changed
   // since no longer contains what the proposal describes - refuse, never patch blind.
   // Proposals from before the field existed carry no hashes and are left alone.
   const expectedTargetHashes = new Map((proposal.targetFiles ?? []).map((t) => [t.file, t.hash]));
+  const checkedTargets = new Set();
+  for (const edit of [...accepted, ...rejected]) {
+    const relative = edit.file;
+    if (!relative || relative === proposal.memoryFile?.path || checkedTargets.has(relative)) continue;
+    checkedTargets.add(relative);
+    const expected = expectedTargetHashes.get(relative);
+    if (!expected) continue;
+    const absolute = path.join(repo.root, relative);
+    if (!fs.existsSync(absolute)) {
+      results.failed.push({ file: relative, error: "file does not exist" });
+      continue;
+    }
+    const observed = memoryTextHash(fs.readFileSync(absolute, "utf8"));
+    if (observed !== expected) {
+      results.failed.push({
+        file: relative,
+        error:
+          `${relative} changed after this proposal was made (${expected} -> ${observed}), so its edits ` +
+          `no longer describe the file on disk; nothing was written. Run \`backpass\` to re-propose ` +
+          `against the current repository.`,
+      });
+    }
+  }
+  if (results.failed.length) return results;
 
   for (const edit of accepted) {
     if (!byFile.has(edit.file)) byFile.set(edit.file, []);
@@ -261,20 +285,6 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
 
     const before =
       relative === proposal.memoryFile?.path && memoryText !== null ? memoryText : fs.readFileSync(absolute, "utf8");
-    const expected = relative === proposal.memoryFile?.path ? null : expectedTargetHashes.get(relative);
-    if (expected) {
-      const observed = memoryTextHash(before);
-      if (observed !== expected) {
-        results.failed.push({
-          file: relative,
-          error:
-            `${relative} changed after this proposal was made (${expected} -> ${observed}), so its edits ` +
-            `no longer describe the file on disk; nothing was written. Run \`backpass\` to re-propose ` +
-            `against the current repository.`,
-        });
-        continue;
-      }
-    }
     let text = before;
     const applied = [];
     const failures = [];

@@ -1685,6 +1685,20 @@ test("a skill file that changed after the proposal refuses the apply; unchanged,
   assert.equal(fs.readFileSync(skillOnDisk, "utf8"), concurrent, "the concurrent version is kept");
   assert.equal(refused.rejectionsRecorded, false);
 
+  const staleRejection = build();
+  const rejectedSkill = path.join(staleRejection.repo.root, ".agents/skills/db/SKILL.md");
+  fs.writeFileSync(rejectedSkill, concurrent);
+  const rejected = applyDecisions({
+    proposal: staleRejection.proposal,
+    decisions: { e1: "rejected" },
+    repo: staleRejection.repo,
+    state: staleRejection.state,
+    config: { budgetTokens: 5000 },
+  });
+  assert.match(rejected.failed[0].error, /\.agents\/skills\/db\/SKILL\.md changed after this proposal was made/);
+  assert.equal(rejected.rejectionsRecorded, false);
+  assert.equal(Object.keys(staleRejection.state.readRejections().entries).length, 0);
+
   // Untouched, the same edit applies and the description lands on disk.
   const fresh = build();
   const applied = applyDecisions({

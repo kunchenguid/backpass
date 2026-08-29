@@ -146,6 +146,8 @@ export function recordGapObservations(ledger, evidenceRecords, { now = new Date(
         .filter((value) => Number.isFinite(Date.parse(value)))
         .sort((a, b) => Date.parse(a) - Date.parse(b))[0];
       if (aliasPrior) delete entry.sessions[transcript.id];
+      const coveredBySkill =
+        gap.coveredBySkill || priors.find((observation) => observation.coveredBySkill)?.coveredBySkill;
       entry.sessions[sessionIdentity] = {
         firstObservedAt: firstObservedAt || observedAt,
         observedAt,
@@ -160,7 +162,7 @@ export function recordGapObservations(ledger, evidenceRecords, { now = new Date(
         // A failed trigger: the analysis judged an existing skill's content to cover
         // this mistake. Absent when no skill covers it (including all pre-existing
         // observations), and absence never counts as a citation.
-        ...(gap.coveredBySkill ? { coveredBySkill: gap.coveredBySkill } : {}),
+        ...(coveredBySkill ? { coveredBySkill } : {}),
       };
       recorded += 1;
     }
