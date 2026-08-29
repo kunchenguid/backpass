@@ -888,11 +888,20 @@
           edits.length + " of " + ((P.config || {}).maxEditsPerRun || edits.length) + " (learning-rate cap)";
 
         if (!edits.length) {
+          var eligibleWithoutEdits = Number((P.stats || {}).gapClusters) || 0;
+          var emptyReason = funnelNote;
+          if (!emptyReason && eligibleWithoutEdits > 0) {
+            emptyReason =
+              fmt(eligibleWithoutEdits) +
+              " eligible gap" +
+              (eligibleWithoutEdits === 1 ? "" : "s") +
+              " reached synthesis, but no edit was proposed this run.";
+          }
           host.appendChild(
             el(
               "div",
               "empty",
-              "No edits proposed. " + (funnelNote || "The evidence did not clear the thresholds this run."),
+              "No edits proposed. " + (emptyReason || "The evidence did not clear the thresholds this run."),
             ),
           );
         }
