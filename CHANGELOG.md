@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.13](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.12...backpass-v0.1.13) (2026-08-29)
+
+
+### Features
+
+* **prompts:** make gap domain a causal test and soften the extraction nudge ([#67](https://github.com/kunchenguid/backpass/issues/67)) ([4ae93a6](https://github.com/kunchenguid/backpass/commit/4ae93a6aa00cab2ad128ae0cb342f8f39e06b7b7))
+
 ## [0.1.12](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.11...backpass-v0.1.12) (2026-08-28)
 
 
