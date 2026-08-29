@@ -12,7 +12,6 @@ import {
 import { crossSurfaceDuplicates } from "../overlap.js";
 import { budgetBar, budgetStatus, formatTokens } from "../tokens.js";
 import { table } from "./scan.js";
-import { DEFAULT_EFFORT } from "../config.js";
 import { candidateKey, isProbeEntryFresh, resolvedEffort } from "../agents.js";
 
 export async function cmdStatus(ctx) {
@@ -175,8 +174,10 @@ function describeRole(config, role) {
       return `${candidate.agent}/${entry.resolvedModel || candidate.model} (effort ${formatEffort(resolvedEffort(role, candidate.agent, config))}, auto - probed ${entry.checkedAt.slice(0, 16).replace("T", " ")})`;
     }
   }
+  const configured =
+    typeof config[role].effort === "string" && config[role].effort.trim() ? config[role].effort.trim() : null;
   return color.dim(
-    `auto - ${config.agents.ladder(role).length} candidates, none probed yet (effort ${config[role].effort || DEFAULT_EFFORT[role]})`,
+    `auto - ${config.agents.ladder(role).length} candidates, none probed yet (effort ${formatEffort(configured)})`,
   );
 }
 
