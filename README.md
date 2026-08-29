@@ -313,7 +313,9 @@ not duplicate content.
 
 `backpass apply` is the only command that writes. It serves a review surface through
 [`lavish-axi`](https://github.com/kunchenguid/lavish-axi): one card per edit with the diff,
-the evidence quotes and their sources, a live budget gauge, and ACCEPT / REJECT.
+the evidence quotes and their sources, a live budget gauge, and ACCEPT / REJECT. A compact
+gap funnel shows how accumulated sightings narrowed through domain filtering and clustering
+to the gaps eligible for a proposal; older proposals without recorded funnel counts omit it.
 
 The surface is a static template shipped in the package - the CLI injects one JSON payload,
 so it is instant, deterministic, and identical every run. Nothing there is model-generated.
