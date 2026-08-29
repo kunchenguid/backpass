@@ -156,6 +156,14 @@ test("the run hash is the memory surface: skill identity and descriptions move i
   assert.notEqual(v1.hash, noSkills.hash, "the skill layer is part of the judged surface");
   assert.equal(v1.skills.length, 1, "the loaded skills ride along with the hash they are part of");
 
+  const humanSkill = path.join(repo.root, ".claude/skills/review/SKILL.md");
+  fs.mkdirSync(path.dirname(humanSkill), { recursive: true });
+  fs.writeFileSync(humanSkill, skill("review trigger", "- review body", "review"));
+  const withHumanSkill = primaryMemoryFile(repo, config);
+  assert.equal(withHumanSkill.skills.length, 2, "a real Claude skill root joins the same project memory surface");
+  assert.notEqual(withHumanSkill.hash, v1.hash);
+  fs.rmSync(path.join(repo.root, ".claude"), { recursive: true });
+
   fs.writeFileSync(path.join(repo.root, ".agents/skills/db/SKILL.md"), skill("old trigger", "- body v2 changed"));
   const v2 = primaryMemoryFile(repo, config);
   assert.equal(v2.hash, v1.hash, "a body edit invalidates nothing - evidence is never judged against bodies");

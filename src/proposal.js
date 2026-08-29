@@ -478,7 +478,7 @@ export function buildProposal(rawResult, context) {
     }
     edit.applicable = true;
     edit.deltaTokens = estimateTokens(next) - estimateTokens(before);
-    edit.descriptionDelta = descriptionDeltaOf(edit, before, next, config.skillsDir);
+    edit.descriptionDelta = descriptionDeltaOf(edit, before, next, config.skillDirs || config.skillsDir);
     running.set(edit.file, next);
   }
 
@@ -548,6 +548,7 @@ export function buildProposal(rawResult, context) {
       maxEditsPerRun: maxEdits,
       minGapEvidence: config.minGapEvidence,
       skillsDir: config.skillsDir,
+      skillDirs: config.skillDirs,
       analysis: config.analysis,
       synthesis: config.synthesis,
     },

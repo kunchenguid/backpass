@@ -9,6 +9,7 @@ import {
   CLAUDE_SKILLS_LINK,
   CLAUDE_SKILLS_LINK_TARGET,
   ensureSkillsLayout,
+  loadProjectSkills,
   loadSkills,
   parseFrontmatter,
   renderSkillFile,
@@ -90,6 +91,28 @@ test("resolveOverflowTarget prefers .agents/skills and never auto-picks bare ski
   assert.equal(resolveOverflowTarget(bare, "skills").dir, "skills");
   // ...but one that does not exist falls back to the canonical dir.
   assert.equal(resolveOverflowTarget(bare, "nope/skills").dir, CANONICAL_SKILLS_DIR);
+});
+
+test("project skill discovery includes separate canonical and Claude roots without double-counting symlinks", () => {
+  const root = tmpRepo();
+  const canonical = path.join(root, CANONICAL_SKILLS_DIR, "generated", "SKILL.md");
+  const claude = path.join(root, CLAUDE_SKILLS_LINK, "hand-written", "SKILL.md");
+  fs.mkdirSync(path.dirname(canonical), { recursive: true });
+  fs.mkdirSync(path.dirname(claude), { recursive: true });
+  fs.writeFileSync(canonical, "---\nname: generated\ndescription: generated trigger\n---\n\nbody\n");
+  fs.writeFileSync(claude, "---\nname: hand-written\ndescription: human trigger\n---\n\nbody\n");
+
+  assert.deepEqual(
+    loadProjectSkills(root).map((skill) => skill.path),
+    [".agents/skills/generated/SKILL.md", ".claude/skills/hand-written/SKILL.md"],
+  );
+
+  fs.rmSync(path.join(root, CLAUDE_SKILLS_LINK), { recursive: true });
+  fs.symlinkSync(CLAUDE_SKILLS_LINK_TARGET, path.join(root, CLAUDE_SKILLS_LINK), "dir");
+  assert.deepEqual(
+    loadProjectSkills(root).map((skill) => skill.name),
+    ["generated"],
+  );
 });
 
 test("ensureSkillsLayout creates the dir and symlink when none exists and is idempotent", () => {

@@ -11,7 +11,7 @@ import {
   CLAUDE_SKILLS_LINK,
   editSkills,
   ensureSkillsLayout,
-  loadSkills,
+  loadProjectSkills,
   parseFrontmatter,
   removeOwnedSkillPaths,
   resolveOverflowTarget,
@@ -232,7 +232,7 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     repo.root,
     proposal.config?.skillsDir || config.skillsDir || CANONICAL_SKILLS_DIR,
   ).dir;
-  const skillsNow = loadSkills(repo.root, skillsDir);
+  const skillsNow = loadProjectSkills(repo.root, skillsDir);
   const descriptionTokensNow = skillDescriptionTokens(skillsNow);
 
   // Freshness for every non-memory file a decision targets, the same contract the

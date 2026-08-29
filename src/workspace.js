@@ -29,7 +29,7 @@ export function workspaceRoot(state) {
  * Build a fresh staging copy. `originals` records every file placed there, so the
  * measurement can tell a modified file from a created or deleted one.
  */
-export function prepareWorkspace({ state, repo, memoryFile, skillsDir }) {
+export function prepareWorkspace({ state, repo, memoryFile, skillsDir, skillDirs = [skillsDir] }) {
   const root = workspaceRoot(state);
   fs.rmSync(root, { recursive: true, force: true });
   fs.mkdirSync(root, { recursive: true });
@@ -40,19 +40,20 @@ export function prepareWorkspace({ state, repo, memoryFile, skillsDir }) {
   fs.writeFileSync(memoryTarget, memoryFile.text);
   originals.set(memoryFile.path, memoryFile.text);
 
-  const skillsSource = path.join(repo.root, skillsDir);
-  if (fs.existsSync(skillsSource) && fs.statSync(skillsSource).isDirectory()) {
+  for (const sourceDir of skillDirs) {
+    const skillsSource = path.join(repo.root, sourceDir);
+    if (!fs.existsSync(skillsSource) || !fs.statSync(skillsSource).isDirectory()) continue;
     for (const relative of walkFiles(skillsSource)) {
       const from = path.join(skillsSource, relative);
-      const to = path.join(root, skillsDir, relative);
+      const to = path.join(root, sourceDir, relative);
       fs.mkdirSync(path.dirname(to), { recursive: true });
       fs.copyFileSync(from, to);
-      originals.set(path.posix.join(skillsDir, relative), fs.readFileSync(from, "utf8"));
+      originals.set(path.posix.join(sourceDir, relative), fs.readFileSync(from, "utf8"));
     }
   }
   fs.mkdirSync(path.join(root, skillsDir), { recursive: true });
 
-  return { root, memoryPath: memoryFile.path, skillsDir, originals };
+  return { root, memoryPath: memoryFile.path, skillsDir, skillDirs, originals };
 }
 
 function walkFiles(dir, prefix = "") {
@@ -73,12 +74,15 @@ function walkFiles(dir, prefix = "") {
 
 /** A created file counts as a skill only in the layouts `loadSkills` reads. */
 export function isSkillFilePath(relative, skillsDir) {
-  const prefix = `${skillsDir}/`;
-  if (!relative.startsWith(prefix)) return false;
-  const inside = relative.slice(prefix.length);
-  const parts = inside.split("/");
-  if (parts.length === 1) return parts[0].endsWith(".md");
-  return parts.length === 2 && parts[1] === "SKILL.md";
+  const dirs = Array.isArray(skillsDir) ? skillsDir : [skillsDir];
+  return dirs.some((dir) => {
+    const prefix = `${dir}/`;
+    if (!relative.startsWith(prefix)) return false;
+    const inside = relative.slice(prefix.length);
+    const parts = inside.split("/");
+    if (parts.length === 1) return parts[0].endsWith(".md");
+    return parts.length === 2 && parts[1] === "SKILL.md";
+  });
 }
 
 /** Split a SKILL.md into the fields `writeSkill` needs; null when the frontmatter is unusable. */
@@ -212,7 +216,7 @@ export function splitRemovalHunk(hunk, { oldText, oldLines, recovered }) {
  * workspace yields identical ids.
  */
 export function measureWorkspace(workspace) {
-  const { root, memoryPath, skillsDir, originals } = workspace;
+  const { root, memoryPath, skillsDir, skillDirs = [skillsDir], originals } = workspace;
   /** @type {any[]} */
   const changes = [];
   const stray = [];
@@ -234,7 +238,7 @@ export function measureWorkspace(workspace) {
 
   for (const relative of [...present].sort()) {
     if (originals.has(relative)) continue;
-    if (!isSkillFilePath(relative, skillsDir)) {
+    if (!isSkillFilePath(relative, skillDirs)) {
       stray.push(relative);
       continue;
     }

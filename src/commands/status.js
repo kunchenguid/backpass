@@ -3,7 +3,12 @@ import path from "node:path";
 
 import { color, json, out } from "../logger.js";
 import { resolveMemoryFiles } from "../memory.js";
-import { loadSkills, resolveOverflowTarget, skillDescriptionTokens } from "../skills.js";
+import {
+  loadProjectSkills,
+  resolveOverflowTarget,
+  resolveProjectSkillDirs,
+  skillDescriptionTokens,
+} from "../skills.js";
 import { budgetBar, budgetStatus, formatTokens } from "../tokens.js";
 import { table } from "./scan.js";
 import { DEFAULT_EFFORT } from "../config.js";
@@ -24,7 +29,8 @@ export async function cmdStatus(ctx) {
   const proposal = state.readProposal();
   const rejections = state.readRejections();
   const overflow = resolveOverflowTarget(repo.root, config.skillsDir);
-  const skills = loadSkills(repo.root, overflow.dir);
+  const skillDirs = resolveProjectSkillDirs(repo.root, overflow.dir);
+  const skills = loadProjectSkills(repo.root, overflow.dir);
   const descriptionTokens = skillDescriptionTokens(skills);
 
   const budgets = files.map((file) => {
@@ -77,7 +83,7 @@ export async function cmdStatus(ctx) {
     const skillTokens = skills.reduce((n, s) => n + s.bodyTokens, 0);
     out(
       color.dim(
-        `  overflow: ${skills.length} skill(s) in ${overflow.dir} · ${formatTokens(skillTokens)} tok on trigger, ` +
+        `  overflow: ${skills.length} skill(s) in ${skillDirs.join(", ")} · ${formatTokens(skillTokens)} tok on trigger, ` +
           `${formatTokens(descriptionTokens)} tok always loaded`,
       ),
     );

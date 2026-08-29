@@ -1,7 +1,7 @@
 import { analyzeTranscripts } from "../analyze.js";
 import { UserError, color, info, json, out, warn } from "../logger.js";
 import { memorySurfaceHash, resolveMemoryFiles } from "../memory.js";
-import { loadSkills, resolveOverflowTarget, skillDescriptionTokens } from "../skills.js";
+import { loadProjectSkills, resolveOverflowTarget, skillDescriptionTokens } from "../skills.js";
 import { emitProgress } from "../progress.js";
 import { discoverForRun } from "./scan.js";
 import { printUsage } from "./usage.js";
@@ -40,7 +40,7 @@ export function primaryMemoryFile(repo, config) {
   }
   // Overflow-layout warnings are the synthesis stage's to print; this resolution is read-only.
   const overflow = resolveOverflowTarget(repo.root, config.skillsDir);
-  const skills = loadSkills(repo.root, overflow.dir);
+  const skills = loadProjectSkills(repo.root, overflow.dir);
   return {
     file: resolved.primary,
     all: resolved.all,

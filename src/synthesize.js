@@ -6,7 +6,13 @@ import { renderEvidenceForPrompt } from "./fold.js";
 import { renderInstructionIndex } from "./memory.js";
 import { renderPrompt, render, loadPrompt } from "./prompts.js";
 import { buildProposal, effectiveMaxEdits, ProposalViolation, renderChangesForPrompt } from "./proposal.js";
-import { loadSkills, renderSkillIndex, resolveOverflowTarget, skillDescriptionTokens } from "./skills.js";
+import {
+  loadProjectSkills,
+  renderSkillIndex,
+  resolveOverflowTarget,
+  resolveProjectSkillDirs,
+  skillDescriptionTokens,
+} from "./skills.js";
 import { isSuppressedByRejection } from "./state.js";
 import { emitProgress } from "./progress.js";
 import { measureWorkspace, prepareWorkspace, repoFingerprint } from "./workspace.js";
@@ -148,7 +154,8 @@ function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts }) {
   const rejections = state.readRejections();
   const overflow = resolveOverflowTarget(repo.root, config.skillsDir);
   for (const w of overflow.warnings) warn(w);
-  const skillFiles = loadSkills(repo.root, overflow.dir);
+  const skillDirs = resolveProjectSkillDirs(repo.root, overflow.dir);
+  const skillFiles = loadProjectSkills(repo.root, overflow.dir);
   const descriptionTokens = skillDescriptionTokens(skillFiles);
   const maxEdits = effectiveMaxEdits(memoryFile, config, descriptionTokens);
 
@@ -161,7 +168,7 @@ function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts }) {
 
   const context = {
     memoryFile,
-    config: { ...config, skillsDir: overflow.dir },
+    config: { ...config, skillsDir: overflow.dir, skillDirs },
     repo,
     summary,
     harnessCounts,
@@ -173,7 +180,18 @@ function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts }) {
   const promptDir = path.join(state.root, "prompts");
   fs.mkdirSync(promptDir, { recursive: true });
 
-  return { state, rejections, overflow, skillFiles, descriptionTokens, maxEdits, common, context, promptDir };
+  return {
+    state,
+    rejections,
+    overflow,
+    skillDirs,
+    skillFiles,
+    descriptionTokens,
+    maxEdits,
+    common,
+    context,
+    promptDir,
+  };
 }
 
 /**
@@ -372,14 +390,24 @@ async function annotateLoop({
 export async function synthesizeProposal({ memoryFile, summary, config, repo, transcripts, runNote = "" }) {
   config.state.clearProposal();
   const harnessCounts = harnessCountsOf(transcripts);
-  const { state, rejections, overflow, skillFiles, descriptionTokens, maxEdits, common, context, promptDir } =
-    synthesisSetup({
-      memoryFile,
-      summary,
-      config,
-      repo,
-      harnessCounts,
-    });
+  const {
+    state,
+    rejections,
+    overflow,
+    skillDirs,
+    skillFiles,
+    descriptionTokens,
+    maxEdits,
+    common,
+    context,
+    promptDir,
+  } = synthesisSetup({
+    memoryFile,
+    summary,
+    config,
+    repo,
+    harnessCounts,
+  });
 
   const editValues = {
     ...common,
@@ -458,7 +486,7 @@ export async function synthesizeProposal({ memoryFile, summary, config, repo, tr
     holder.ranWith = current.agent;
     chosen = current;
     if (current !== pick) notes.push(`synthesis fell through to ${current.agent} (${current.model})`);
-    workspace = prepareWorkspace({ state, repo, memoryFile, skillsDir: overflow.dir });
+    workspace = prepareWorkspace({ state, repo, memoryFile, skillsDir: overflow.dir, skillDirs });
     progress("edit", { attempt: 1 });
     holder.session = await openSession({
       agent: current.agent,

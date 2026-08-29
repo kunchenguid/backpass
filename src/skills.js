@@ -61,6 +61,41 @@ export function loadSkills(repoRoot, skillsDir) {
   return skills.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/**
+ * Every project-level skill root a supported harness can load. The overflow target is
+ * included even when custom-configured, and roots resolving to the same directory (the
+ * normal `.claude/skills` symlink) are counted only once.
+ */
+export function resolveProjectSkillDirs(repoRoot, overflowDir = CANONICAL_SKILLS_DIR) {
+  const dirs = [];
+  const seen = new Set();
+  for (const dir of [overflowDir, CANONICAL_SKILLS_DIR, CLAUDE_SKILLS_LINK]) {
+    if (!dir) continue;
+    const absolute = path.join(repoRoot, dir);
+    const exists = fs.existsSync(absolute);
+    if (!exists && dir !== overflowDir) continue;
+    let identity = path.resolve(absolute);
+    if (exists) {
+      try {
+        identity = fs.realpathSync(absolute);
+      } catch {
+        continue;
+      }
+    }
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    dirs.push(dir);
+  }
+  return dirs;
+}
+
+/** Load generated and human-authored project skills across every supported root. */
+export function loadProjectSkills(repoRoot, overflowDir = CANONICAL_SKILLS_DIR) {
+  return resolveProjectSkillDirs(repoRoot, overflowDir)
+    .flatMap((dir) => loadSkills(repoRoot, dir))
+    .sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path));
+}
+
 /** The markdown after the frontmatter block - what a harness loads when the trigger fires. */
 export function skillBody(text) {
   const end = /^---\n[\s\S]*?\n---\n?/.exec(text);
