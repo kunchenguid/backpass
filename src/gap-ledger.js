@@ -207,21 +207,24 @@ export function pruneGapLedger(
 function coverageUnits(memoryFile, skills) {
   return [
     ...(memoryFile?.units || []).map((unit) => ({ text: unit.text })),
-    ...(skills || []).flatMap((skill) =>
-      [skill.description || "", ...parseMemoryUnits(skill.body || "").map((unit) => unit.text)].map((text) => ({
-        text,
+    ...(skills || []).flatMap((skill) => [
+      { text: skill.description || "", skill: skill.name, kind: "description" },
+      ...parseMemoryUnits(skill.body || "").map((unit) => ({
+        text: unit.text,
         skill: skill.name,
+        kind: "body",
       })),
-    ),
+    ]),
   ].filter((unit) => unit.text.trim());
 }
 
 function isCovered(coverage, entry) {
   const phrasings = [...new Set([entry.proposedInstruction, ...(entry.phrasings || [])])];
   return coverage.some((unit) => {
-    const isFailedTrigger =
-      unit.skill && Object.values(entry.sessions).some((observation) => observation.coveredBySkill === unit.skill);
-    return !isFailedTrigger && phrasings.some((phrasing) => similarity(unit.text, phrasing) >= GAP_COVERED_THRESHOLD);
+    const isCitedBody =
+      unit.kind === "body" &&
+      Object.values(entry.sessions).some((observation) => observation.coveredBySkill === unit.skill);
+    return !isCitedBody && phrasings.some((phrasing) => similarity(unit.text, phrasing) >= GAP_COVERED_THRESHOLD);
   });
 }
 

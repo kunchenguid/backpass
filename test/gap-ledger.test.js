@@ -396,6 +396,16 @@ test("failed-trigger evidence survives skill body edits", () => {
   });
   assert.equal(afterBodyRewrite.covered, 0, "body edits never invalidate judged failed-trigger evidence");
   assert.equal(Object.keys(ledger.entries).length, 1);
+
+  const descriptionFixed = { ...rewrittenBody, description: phrasing };
+  const afterDescriptionFix = pruneGapLedger(ledger, {
+    memoryFile: memoryFile(),
+    memoryPath: MEMORY_PATH,
+    maxAge: "all",
+    skills: [descriptionFixed],
+  });
+  assert.equal(afterDescriptionFix.covered, 1, "a covering description retires the resolved failed trigger");
+  assert.deepEqual(ledger.entries, {});
 });
 
 test("a missing skill suppresses its citation while body edits preserve judged citations", () => {

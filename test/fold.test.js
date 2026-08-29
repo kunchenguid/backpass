@@ -250,6 +250,35 @@ test("failed-trigger citations count per skill and reach the synthesis prompt wi
   );
   assert.equal(partlyCited.gaps.length, 1, "the gap itself still clears its corroboration floor");
   assert.equal(partlyCited.gaps[0].failedTriggerSkill, undefined, "one skill citation cannot clear a two-session floor");
+
+  const citedAfterDuplicate = foldEvidence(
+    [
+      record("s1", {
+        gaps: [
+          { proposedInstruction: "Wrap migrations in a transaction.", quote: "first uncited s1" },
+          {
+            proposedInstruction: "Wrap migrations in a transaction.",
+            quote: "later cited s1",
+            coveredBySkill: "db-schema",
+          },
+        ],
+      }),
+      record("s2", {
+        gaps: [
+          { proposedInstruction: "Wrap migrations in one transaction.", quote: "first uncited s2" },
+          {
+            proposedInstruction: "Wrap migrations in one transaction.",
+            quote: "later cited s2",
+            coveredBySkill: "db-schema",
+          },
+        ],
+      }),
+    ],
+    { memoryFile, minGapEvidence: 2 },
+  );
+  assert.equal(citedAfterDuplicate.gaps[0].sessions, 2);
+  assert.equal(citedAfterDuplicate.gaps[0].failedTriggerSkill, "db-schema");
+  assert.equal(citedAfterDuplicate.gaps[0].failedTriggerSessions, 2);
 });
 
 test("a cluster nobody tied to a skill renders without a failed-trigger line", () => {

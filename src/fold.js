@@ -176,10 +176,15 @@ export function clusterGapObservations(observations) {
       recurrenceRisk: obs.recurrenceRisk,
       source: obs.source,
       sessionId: obs.sessionId,
-      ...(obs.coveredBySkill ? { coveredBySkill: obs.coveredBySkill } : {}),
+      coveredBySkills: new Set(obs.coveredBySkill ? [obs.coveredBySkill] : []),
     };
     if (cluster) {
-      if (!cluster.sessions.has(obs.sessionId)) cluster.items.push(item);
+      const sessionItem = cluster.items.find((candidate) => candidate.sessionId === obs.sessionId);
+      if (sessionItem) {
+        if (obs.coveredBySkill) sessionItem.coveredBySkills.add(obs.coveredBySkill);
+      } else {
+        cluster.items.push(item);
+      }
       cluster.sessions.add(obs.sessionId);
       // Keep the shortest phrasing: it generalizes best.
       if (obs.proposedInstruction.length < cluster.proposedInstruction.length) {
@@ -210,8 +215,9 @@ function highestRisk(items) {
 function failedTriggerOf(items, minGapEvidence) {
   const counts = new Map();
   for (const item of items) {
-    if (!item.coveredBySkill) continue;
-    counts.set(item.coveredBySkill, (counts.get(item.coveredBySkill) || 0) + 1);
+    for (const skill of item.coveredBySkills) {
+      counts.set(skill, (counts.get(skill) || 0) + 1);
+    }
   }
   let best = null;
   for (const [skill, sessions] of counts) {
