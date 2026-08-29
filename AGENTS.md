@@ -238,8 +238,7 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   `set thought_level` (those rewrite `~/.pi/agent/settings.json`) and never edit-then-restore
   harness defaults. `src/harness-invoke.js` owns the harness overlay mechanisms and
   `src/acpx.js` owns verification and fallback. An unproven overlay must stop rather than
-  pretend; OpenCode effort alone is skipped with a report note. Preserve the current spawn
-  when no override is requested.
+  pretend. Preserve the current spawn when no override is requested.
 - **Agent auto-pick is probe-then-verify, never probe-only.** `src/agents.js` walks each
   role's ladder with a zero-token probe, but the claude adapter cannot be pre-verified by
   acpx (sessions succeed while logged out), so every real call runs under

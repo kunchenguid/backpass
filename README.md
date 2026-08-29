@@ -506,7 +506,7 @@ backpass \
 `--no-auto-agent` pins the pre-ladder defaults (codex / claude). Model and effort
 overrides are scoped to that Backpass invocation, so they never rewrite your harness
 defaults. If an adapter has no proven overlay, backpass stops rather than pretending it
-applied, except OpenCode effort which is skipped with a report note.
+applied.
 
 ### Configuration
 

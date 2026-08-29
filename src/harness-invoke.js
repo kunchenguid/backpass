@@ -19,7 +19,7 @@ import { UserError } from "./logger.js";
  *   grok      process argv via acpx `--agent` wrapper: `-m`, `--reasoning-effort`
  *   claude    acpx `--model` at `sessions new` (session/new `_meta`); ACP `set effort`
  *   codex     acpx `--model` at `sessions new`; ACP `set reasoning_effort`
- *   opencode  acpx `--model` at `sessions new`; no effort overlay (report, never pretend)
+ *   opencode  acpx `--model` at `sessions new`; ACP `set effort` (session-local variant)
  *
  * Synthesis also requests `writeAccess`: native file-write / code-mode must be on for
  * this spawn, never by rewriting `~/.codex/config.toml` or other harness defaults.
@@ -32,12 +32,11 @@ import { UserError } from "./logger.js";
  *
  * No overlay requested means no wrapper, no `--model`, no `set` - same spawn as before.
  * A requested overlay with no proven invocation-scoped mechanism throws rather than
- * writing persistent defaults or silently ignoring the request. OpenCode effort is the
- * sole explicit exception: it is skipped with a report note.
+ * writing persistent defaults or silently ignoring the request.
  */
 
 /** ACP session-config ids used only when that `set` is session-local, not a persist path. */
-const SESSION_LOCAL_EFFORT_KEYS = { codex: "reasoning_effort", claude: "effort" };
+const SESSION_LOCAL_EFFORT_KEYS = { codex: "reasoning_effort", claude: "effort", opencode: "effort" };
 
 /**
  * @typedef {{
@@ -84,20 +83,11 @@ export function prepareHarnessInvocation({ agent, model = null, effort = null, w
         : baseInvocation({ notes, dispose });
     } else if (agent === "grok") {
       invocation = grokInvocation({ requestedModel, requestedEffort, writeAccess, notes, cleanups, dispose });
-    } else if (agent === "claude" || agent === "codex") {
+    } else if (agent === "claude" || agent === "codex" || agent === "opencode") {
       invocation = {
         ...baseInvocation({ notes, dispose }),
         acpxModel: requestedModel,
         setEffortKey: requestedEffort ? SESSION_LOCAL_EFFORT_KEYS[agent] : null,
-        requiredBuiltinAgent: overlay ? agent : null,
-      };
-    } else if (agent === "opencode") {
-      if (requestedEffort) {
-        notes.push(`${agent} does not advertise a reasoning-effort option; ran without effort=${requestedEffort}`);
-      }
-      invocation = {
-        ...baseInvocation({ notes, dispose }),
-        acpxModel: requestedModel,
         requiredBuiltinAgent: overlay ? agent : null,
       };
     } else if (overlay) {

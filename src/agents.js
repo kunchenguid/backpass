@@ -353,11 +353,10 @@ export class AgentResolver {
    */
   async resolve(role) {
     if (this.picks[role]) return this.picks[role];
-    const effort = this.config[role].effort || DEFAULT_EFFORT[role];
 
     const pinned = this.pinned(role);
     if (pinned) {
-      this.picks[role] = { ...pinned, effort };
+      this.picks[role] = { ...pinned, effort: resolvedEffort(role, pinned.agent, this.config) };
       return this.picks[role];
     }
 
@@ -377,7 +376,7 @@ export class AgentResolver {
           agent: candidate.agent,
           model: entry.resolvedModel || candidate.model,
           ladderModel: candidate.model,
-          effort,
+          effort: resolvedEffort(role, candidate.agent, this.config),
           pinned: false,
           reason: describeTrail(trail),
         };
@@ -391,7 +390,7 @@ export class AgentResolver {
   announce(role, pick, trail) {
     const losers = trail.filter((t) => t.verdict !== "ok");
     const cached = trail.at(-1)?.cached ? color.dim(" (cached)") : "";
-    info(`${color.cyan("·")} ${role}: ${pick.agent} (${pick.model}) effort=${pick.effort}${cached}`);
+    info(`${color.cyan("·")} ${role}: ${pick.agent} (${pick.model}) effort=${pick.effort || "unset"}${cached}`);
     for (const t of losers) {
       info(color.dim(`    skipped ${t.agent}/${t.model}: ${VERDICT_LABELS[t.verdict] || t.verdict}`));
     }
@@ -436,6 +435,14 @@ export class AgentResolver {
       }
     }
   }
+}
+
+/** OpenCode variants are per-model, so role defaults do not become an overlay. */
+export function resolvedEffort(role, agent, config) {
+  const configured = config[role].effort;
+  if (typeof configured === "string" && configured.trim()) return configured.trim();
+  if (agent === "opencode") return null;
+  return DEFAULT_EFFORT[role];
 }
 
 function describeTrail(trail) {

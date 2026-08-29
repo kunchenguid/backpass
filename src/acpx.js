@@ -37,9 +37,9 @@ export function acpxAgentName(agent) {
  * `set` is session-local. Pi is absent: ACP `set thought_level` rewrites
  * `~/.pi/agent/settings.json`, so Pi effort is process `--thinking` instead
  * (`src/harness-invoke.js`). Grok uses process `--reasoning-effort`. OpenCode
- * has no overlay; effort is skipped with a report note, never silently.
+ * uses ACP `set effort`, which is session-local variant state.
  */
-export const EFFORT_OPTION_KEYS = { codex: "reasoning_effort", claude: "effort" };
+export const EFFORT_OPTION_KEYS = { codex: "reasoning_effort", claude: "effort", opencode: "effort" };
 
 export function effortOptionKey(agent) {
   return EFFORT_OPTION_KEYS[agent] || null;
@@ -335,8 +335,7 @@ export async function execOneShot({
  * effort for every harness, so an effortful call still goes through a session when
  * the overlay needs one. Synthesis also needs more than one turn in the same context:
  * the agent edits the staging copy, then annotates the changes backpass measured.
- * OpenCode alone skips its unsupported effort overlay with a report line. Every other
- * requested overlay without a proven mechanism stops rather than pretending it applied.
+ * A requested overlay without a proven mechanism stops rather than pretending it applied.
  *
  * Resolves to the handle, or throws an `AcpxError` (`unsupported: true` when the adapter
  * has no session support; `sessionPrompt` only falls back when it can preserve the requested overlays).
@@ -486,7 +485,7 @@ function subtractUsage(current, previous) {
  * One prompt through a short-lived named session: open, prompt, close. The analysis
  * pass uses this whenever an effort is configured. Without session support, it falls
  * back to one-shot `exec` only when that preserves the requested overlays; otherwise it
- * stops with actionable guidance. OpenCode effort remains the explicit reported skip.
+ * stops with actionable guidance.
  */
 export async function sessionPrompt({
   agent,
@@ -505,20 +504,17 @@ export async function sessionPrompt({
     session = await openSession({ agent, model, effort, sessionName, cwd });
   } catch (err) {
     if (!(err instanceof AcpxError) || !err.unsupported) throw err;
-    if (effort && (agent === "claude" || agent === "codex")) {
+    if (effort && effortOptionKey(agent)) {
       throw new UserError(
         `${agent} cannot apply invocation-scoped effort=${effort} because its acpx adapter does not support sessions`,
         "upgrade acpx or omit the effort override",
       );
     }
     const notes = [`session unsupported for ${agent}; fell back to exec one-shot`];
-    if (effort && agent === "opencode") {
-      notes.push(`${agent} does not advertise a reasoning-effort option; ran without effort=${effort}`);
-    }
     const fallback = await execOneShot({
       agent,
       model,
-      effort: agent === "opencode" ? null : effort,
+      effort,
       promptFile,
       cwd,
       timeoutSeconds,

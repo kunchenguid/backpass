@@ -386,6 +386,24 @@ test("explicit config or CLI flags pin the role and skip the ladder entirely", a
     { agent: synthesis.agent, model: synthesis.model, effort: synthesis.effort, pinned: synthesis.pinned },
     { agent: "claude", model: "claude-opus-5", effort: "max", pinned: true },
   );
+  const opencodeConfig = loadConfig(tmpRepo({ analysis: { agent: "opencode", model: "xai/grok-4.6" } }), {
+    synthesis: { agent: "opencode", model: "xai/grok-4.6", effort: "xhigh" },
+  });
+  const { resolver: opencodeResolver, calls: opencodeCalls } = resolverWith({}, { config: opencodeConfig });
+  const opencodeAnalysis = await opencodeResolver.resolve("analysis");
+  assert.deepEqual(
+    {
+      agent: opencodeAnalysis.agent,
+      model: opencodeAnalysis.model,
+      effort: opencodeAnalysis.effort,
+      pinned: opencodeAnalysis.pinned,
+    },
+    { agent: "opencode", model: "xai/grok-4.6", effort: null, pinned: true },
+  );
+  const opencodeSynthesis = await opencodeResolver.resolve("synthesis");
+  assert.equal(opencodeSynthesis.effort, "xhigh");
+  assert.deepEqual(opencodeCalls, [], "pinned OpenCode skips the ladder");
+
   assert.deepEqual(calls, [], "nothing was probed");
 
   // A pinned agent is the user's decision: an auth failure surfaces as a UserError, it does not fall through.
@@ -660,6 +678,7 @@ test("acpx failure classification and the per-adapter tables", () => {
   assert.equal(acpxAgentName("codex"), "codex");
   assert.equal(effortOptionKey("codex"), "reasoning_effort");
   assert.equal(effortOptionKey("claude"), "effort");
+  assert.equal(effortOptionKey("opencode"), "effort");
   assert.equal(effortOptionKey("pi"), null, "Pi effort is process --thinking, not ACP set");
   assert.equal(effortOptionKey("grok"), null);
 });

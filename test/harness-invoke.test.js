@@ -604,7 +604,24 @@ test("Codex session passes --model at create and ACP set reasoning_effort, never
   assert.deepEqual(jsonl(codexLog), []);
 });
 
-test("OpenCode session passes --model at create, skips effort, and does not persist", async () => {
+test("OpenCode session with no effort passes --model at create and does not set effort", async () => {
+  resetLogsAndSettings();
+  const before = Buffer.from(settingsBytes());
+  const session = await openSession({
+    agent: "opencode",
+    model: "gpt-5.6-sol",
+    sessionName: "bp-opencode-model-only",
+    cwd: workDir,
+  });
+  await session.close();
+  assert.equal(settingsBytes().compare(before), 0);
+  const calls = acpxCalls();
+  const created = calls.find((c) => c.argv.includes("new"));
+  assert.equal(created.argv[created.argv.indexOf("--model") + 1], "gpt-5.6-sol");
+  assert.deepEqual(setCalls(calls).map(setKey), []);
+});
+
+test("OpenCode session passes --model at create and ACP set effort, never set model", async () => {
   resetLogsAndSettings();
   const before = Buffer.from(settingsBytes());
   const session = await openSession({
@@ -614,13 +631,13 @@ test("OpenCode session passes --model at create, skips effort, and does not pers
     sessionName: "bp-opencode",
     cwd: workDir,
   });
-  assert.match(session.notes.join("\n"), /does not advertise a reasoning-effort option/);
   await session.close();
   assert.equal(settingsBytes().compare(before), 0);
   const calls = acpxCalls();
   const created = calls.find((c) => c.argv.includes("new"));
   assert.equal(created.argv[created.argv.indexOf("--model") + 1], "gpt-5.6-sol");
-  assert.deepEqual(setCalls(calls).map(setKey), []);
+  assert.deepEqual(setCalls(calls).map(setKey), ["effort"]);
+  assert.ok(!setCalls(calls).some((c) => setKey(c) === "model"));
 });
 
 test("configured replacement adapters are rejected for positional built-ins", async () => {
@@ -813,30 +830,8 @@ test("Pi and Grok retain process effort when session fallback uses exec", async 
   }
 });
 
-test("OpenCode session fallback keeps its authorized effort omission visible", async () => {
-  resetLogsAndSettings();
-  process.env.FAKE_SESSIONS_UNSUPPORTED = "1";
-  let result;
-  try {
-    result = await sessionPrompt({
-      agent: "opencode",
-      model: "safe-model",
-      effort: "high",
-      sessionName: "bp-opencode-fallback",
-      promptFile,
-      cwd: workDir,
-      timeoutSeconds: 5,
-    });
-  } finally {
-    delete process.env.FAKE_SESSIONS_UNSUPPORTED;
-  }
-  assert.match(result.notes.join("\n"), /ran without effort=high/);
-  const exec = acpxCalls().find((c) => c.argv.includes("exec"));
-  assert.equal(exec.argv[exec.argv.indexOf("--model") + 1], "safe-model");
-});
-
-test("Claude and Codex stop when effort cannot be applied without a session", async () => {
-  for (const agent of ["claude", "codex"]) {
+test("Claude, Codex, and OpenCode stop when effort cannot be applied without a session", async () => {
+  for (const agent of ["claude", "codex", "opencode"]) {
     resetLogsAndSettings();
     process.env.FAKE_SESSIONS_UNSUPPORTED = "1";
     try {
@@ -891,7 +886,7 @@ test("the Backpass CLI uses verified overlays for every positional harness", () 
   const cases = [
     { agent: "claude", model: "claude-opus-5", effortKey: "effort" },
     { agent: "codex", model: "gpt-5.6-sol", effortKey: "reasoning_effort" },
-    { agent: "opencode", model: "openai/gpt-5.6-sol", effortKey: null },
+    { agent: "opencode", model: "openai/gpt-5.6-sol", effortKey: "effort" },
   ];
   for (const { agent, model, effortKey } of cases) {
     resetLogsAndSettings();
@@ -926,7 +921,7 @@ test("the Backpass CLI applies Grok model and effort as process arguments", () =
 });
 
 test("the Backpass CLI preserves safe process fallbacks and rejects unsafe ones", () => {
-  for (const agent of ["pi", "grok", "opencode"]) {
+  for (const agent of ["pi", "grok"]) {
     resetLogsAndSettings();
     const before = Buffer.from(settingsBytes());
     const repo = makeCliRepo(`${agent}-fallback`);
@@ -936,12 +931,11 @@ test("the Backpass CLI preserves safe process fallbacks and rejects unsafe ones"
     assert.ok(acpxCalls().some((call) => call.argv.includes("exec")));
     if (agent === "pi") assert.ok(jsonl(piLog)[0].includes("--thinking"));
     if (agent === "grok") assert.ok(jsonl(grokLog)[0].includes("--reasoning-effort"));
-    if (agent === "opencode") assert.match(result.stderr, /ran without effort=high/);
     assert.equal(settingsBytes().compare(before), 0);
     assertBareDefaults(before);
   }
 
-  for (const agent of ["claude", "codex"]) {
+  for (const agent of ["claude", "codex", "opencode"]) {
     resetLogsAndSettings();
     const before = Buffer.from(settingsBytes());
     const repo = makeCliRepo(`${agent}-unsafe-fallback`);
