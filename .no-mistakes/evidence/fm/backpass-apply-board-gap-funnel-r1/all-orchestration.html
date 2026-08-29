@@ -1,0 +1,1207 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>backpass apply</title>
+    <style>
+      :root {
+        --bg: #0b0e14;
+        --panel: #10141d;
+        --panel-2: #0e1219;
+        --line: #1c2431;
+        --line-soft: #161d28;
+        --text: #d9dfea;
+        --dim: #8a93a5;
+        --faint: #5a6375;
+        --accent: #4fe3c1;
+        --accent-dim: rgba(79, 227, 193, 0.12);
+        --reject: #ff5d73;
+        --reject-dim: rgba(255, 93, 115, 0.1);
+        --defer: #ffc857;
+        --defer-dim: rgba(255, 200, 87, 0.1);
+        --blue: #6ea8ff;
+        --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+        --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        background: var(--bg);
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--sans);
+        font-size: 15px;
+        line-height: 1.55;
+        -webkit-font-smoothing: antialiased;
+        background-image:
+          linear-gradient(rgba(110, 168, 255, 0.025) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(110, 168, 255, 0.025) 1px, transparent 1px);
+        background-size: 48px 48px;
+      }
+      .wrap {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 48px 28px 140px;
+      }
+      .microlabel {
+        font-family: var(--mono);
+        font-size: 10.5px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--faint);
+      }
+      .num {
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ---------- header ---------- */
+      .brand {
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+        margin-bottom: 6px;
+        flex-wrap: wrap;
+      }
+      .brand h1 {
+        font-family: var(--mono);
+        font-weight: 500;
+        font-size: 22px;
+        margin: 0;
+        letter-spacing: 0.01em;
+      }
+      .brand h1 .cmd {
+        color: var(--accent);
+      }
+      .brand .ver {
+        font-family: var(--mono);
+        font-size: 11.5px;
+        color: var(--faint);
+      }
+      .runline {
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--dim);
+        margin-bottom: 34px;
+        word-break: break-word;
+      }
+      .runline b {
+        color: var(--text);
+        font-weight: 500;
+      }
+
+      .statrow {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 1px;
+        background: var(--line);
+        border: 1px solid var(--line);
+        margin-bottom: 36px;
+      }
+      .stat {
+        background: var(--panel);
+        padding: 14px 16px;
+        min-width: 0;
+      }
+      .stat .v {
+        font-family: var(--mono);
+        font-size: 21px;
+        font-weight: 500;
+        color: var(--text);
+      }
+      .stat .v em {
+        font-style: normal;
+        color: var(--accent);
+      }
+      .stat .k {
+        font-family: var(--mono);
+        font-size: 10.5px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--faint);
+        margin-top: 3px;
+      }
+
+      /* ---------- gap funnel ---------- */
+      /* The template's own display rules (.statrow's grid) would beat the UA
+         stylesheet's [hidden]; this keeps the hidden attribute authoritative. */
+      [hidden] {
+        display: none !important;
+      }
+      .run-context {
+        border: 1px solid var(--line);
+        background: var(--line);
+        display: grid;
+        grid-template-columns: minmax(0, 3fr) minmax(280px, 2fr);
+        gap: 1px;
+        margin-bottom: 36px;
+      }
+      .ctx-funnel {
+        background: var(--panel);
+        padding: 13px 18px 14px;
+        min-width: 0;
+      }
+      .ctx-stats {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        grid-auto-rows: 1fr;
+        gap: 1px;
+        min-width: 0;
+      }
+      .funnel-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+      .funnel-head .t {
+        font-size: 13px;
+        color: var(--dim);
+      }
+      .funnel-head .facts {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--faint);
+      }
+      .funnel-head .facts b {
+        color: var(--text);
+        font-weight: 500;
+      }
+      .frow {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin: 4px 0;
+      }
+      .frow .fl {
+        width: 148px;
+        flex: none;
+        font-family: var(--mono);
+        font-size: 10px;
+        letter-spacing: 0.11em;
+        text-transform: uppercase;
+        color: var(--faint);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .frow .fb {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        height: 16px;
+        background: var(--panel-2);
+        border: 1px solid var(--line-soft);
+      }
+      .frow .fb i {
+        display: block;
+        height: 100%;
+        background: rgba(110, 168, 255, 0.38);
+        border-right: 1px solid rgba(110, 168, 255, 0.75);
+      }
+      .frow.lit .fb i {
+        background: rgba(79, 227, 193, 0.4);
+        border-right-color: var(--accent);
+      }
+      .frow.zero .fb i {
+        border-right: none;
+      }
+      .frow .fv {
+        flex: none;
+        width: 34px;
+        font-family: var(--mono);
+        font-size: 12.5px;
+        color: var(--text);
+      }
+      .frow.zero .fv {
+        color: var(--faint);
+      }
+      .frow.lit .fv {
+        color: var(--accent);
+      }
+      .fdrop {
+        margin: 1px 0 6px 160px;
+        font-size: 12px;
+        color: var(--dim);
+      }
+      .fdrop b {
+        font-family: var(--mono);
+        font-weight: 500;
+        color: var(--faint);
+      }
+      .funnel-note {
+        margin-top: 10px;
+        padding-top: 9px;
+        border-top: 1px dashed var(--line-soft);
+        font-size: 12.5px;
+        color: var(--dim);
+      }
+
+      /* ---------- budget gauge ---------- */
+      .gauge-block {
+        border: 1px solid var(--line);
+        background: var(--panel);
+        padding: 18px 20px 20px;
+        margin-bottom: 44px;
+      }
+      .gauge-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+      .gauge-head .t {
+        font-size: 13px;
+        color: var(--dim);
+      }
+      .gauge-head .readout {
+        font-family: var(--mono);
+        font-size: 12.5px;
+        color: var(--dim);
+      }
+      .gauge-head .readout b {
+        color: var(--accent);
+        font-weight: 500;
+      }
+      .gauge-head .readout b.over {
+        color: var(--reject);
+      }
+      .gauge {
+        position: relative;
+        height: 8px;
+        background: var(--panel-2);
+        border: 1px solid var(--line-soft);
+      }
+      .gauge .fill-now {
+        position: absolute;
+        inset: 0 auto 0 0;
+        background: linear-gradient(90deg, rgba(110, 168, 255, 0.35), rgba(110, 168, 255, 0.6));
+      }
+      .gauge .fill-after {
+        position: absolute;
+        inset: 0 auto 0 0;
+        background: linear-gradient(90deg, rgba(79, 227, 193, 0.5), var(--accent));
+        transition: width 0.35s ease;
+      }
+      .gauge .fill-after.over {
+        background: linear-gradient(90deg, rgba(255, 93, 115, 0.5), var(--reject));
+      }
+      .gauge .cap {
+        position: absolute;
+        top: -5px;
+        bottom: -5px;
+        left: 100%;
+        width: 2px;
+        background: var(--reject);
+        opacity: 0.8;
+      }
+      .gauge-legend {
+        display: flex;
+        gap: 22px;
+        margin-top: 10px;
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--faint);
+        flex-wrap: wrap;
+      }
+      .gauge-legend i {
+        display: inline-block;
+        width: 14px;
+        height: 5px;
+        margin-right: 6px;
+        vertical-align: middle;
+      }
+
+      /* ---------- section titles ---------- */
+      .sect {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+        margin: 0 0 18px;
+      }
+      .sect h2 {
+        font-size: 15px;
+        font-weight: 600;
+        margin: 0;
+        letter-spacing: 0.01em;
+      }
+      .sect .rule {
+        flex: 1;
+        height: 1px;
+        background: var(--line);
+      }
+      .sect .count {
+        font-family: var(--mono);
+        font-size: 11.5px;
+        color: var(--faint);
+      }
+
+      /* ---------- edit cards ---------- */
+      .edit {
+        border: 1px solid var(--line);
+        background: var(--panel);
+        margin-bottom: 22px;
+        position: relative;
+      }
+      .edit::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 2px;
+        background: var(--blue);
+      }
+      .edit[data-kind="remove"]::before {
+        background: var(--reject);
+      }
+      .edit[data-kind="add"]::before {
+        background: var(--accent);
+      }
+      .edit[data-kind="extract"]::before {
+        background: var(--defer);
+      }
+      .edit[data-state="accepted"] {
+        border-color: rgba(79, 227, 193, 0.45);
+      }
+      .edit[data-state="rejected"] {
+        opacity: 0.55;
+      }
+      .edit-head {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 13px 18px;
+        border-bottom: 1px solid var(--line-soft);
+        flex-wrap: wrap;
+      }
+      .kind {
+        font-family: var(--mono);
+        font-size: 10px;
+        letter-spacing: 0.13em;
+        padding: 3px 8px;
+        border: 1px solid var(--line);
+        color: var(--dim);
+        white-space: nowrap;
+      }
+      .edit[data-kind="add"] .kind {
+        color: var(--accent);
+        border-color: rgba(79, 227, 193, 0.4);
+      }
+      .edit[data-kind="remove"] .kind {
+        color: var(--reject);
+        border-color: rgba(255, 93, 115, 0.4);
+      }
+      .edit[data-kind="rewrite"] .kind {
+        color: var(--blue);
+        border-color: rgba(110, 168, 255, 0.4);
+      }
+      .edit[data-kind="extract"] .kind {
+        color: var(--defer);
+        border-color: rgba(255, 200, 87, 0.4);
+      }
+      .edit-head .title {
+        font-size: 14px;
+        font-weight: 550;
+        flex: 1;
+        min-width: 200px;
+      }
+      .edit-head .delta {
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--dim);
+        white-space: nowrap;
+      }
+      .edit-head .delta.pos {
+        color: var(--accent);
+      }
+      .edit-head .delta.neg {
+        color: var(--reject);
+      }
+      .edit-body {
+        padding: 16px 18px 18px;
+      }
+      .rationale {
+        font-size: 13.5px;
+        color: var(--dim);
+        margin: 0 0 12px;
+      }
+      .target {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--faint);
+        margin-bottom: 10px;
+        word-break: break-all;
+      }
+
+      .diff {
+        font-family: var(--mono);
+        font-size: 12.5px;
+        line-height: 1.7;
+        border: 1px solid var(--line-soft);
+        background: var(--panel-2);
+        padding: 12px 14px;
+        overflow-x: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        margin-bottom: 14px;
+      }
+      .diff .del {
+        display: block;
+        color: #c98d97;
+        background: var(--reject-dim);
+        padding: 1px 8px;
+        margin: 1px 0;
+      }
+      .diff .del::before {
+        content: "- ";
+        color: var(--reject);
+      }
+      .diff .ins {
+        display: block;
+        color: #9fe8d6;
+        background: var(--accent-dim);
+        padding: 1px 8px;
+        margin: 1px 0;
+      }
+      .diff .ins::before {
+        content: "+ ";
+        color: var(--accent);
+      }
+      .diff .ctx {
+        display: block;
+        color: var(--faint);
+        padding: 1px 8px;
+      }
+      .diff .ctx::before {
+        content: "  ";
+      }
+      .diff .gap {
+        display: block;
+        color: var(--faint);
+        padding: 1px 8px;
+        border-top: 1px dashed var(--line-soft);
+      }
+
+      .evidence {
+        border-top: 1px dashed var(--line-soft);
+        padding-top: 12px;
+      }
+      .evidence summary {
+        cursor: pointer;
+        font-family: var(--mono);
+        font-size: 11.5px;
+        color: var(--blue);
+        letter-spacing: 0.06em;
+        list-style: none;
+      }
+      .evidence summary::-webkit-details-marker {
+        display: none;
+      }
+      .evidence summary::before {
+        content: "> ";
+      }
+      .evidence[open] summary::before {
+        content: "v ";
+      }
+      .evidence .quote {
+        border-left: 2px solid var(--line);
+        margin: 10px 0 4px;
+        padding: 6px 12px;
+        font-size: 12.5px;
+        color: var(--dim);
+      }
+      .evidence .quote .src {
+        font-family: var(--mono);
+        font-size: 10.5px;
+        color: var(--faint);
+        display: block;
+        margin-top: 4px;
+      }
+      .evidence .quote.negative {
+        border-left-color: var(--reject);
+      }
+      .evidence .quote.positive {
+        border-left-color: var(--accent);
+      }
+
+      .decide {
+        display: flex;
+        gap: 8px;
+        margin-top: 14px;
+      }
+      .decide button {
+        font-family: var(--mono);
+        font-size: 11.5px;
+        letter-spacing: 0.08em;
+        padding: 7px 16px;
+        background: transparent;
+        border: 1px solid var(--line);
+        color: var(--dim);
+        cursor: pointer;
+        transition: all 0.12s ease;
+      }
+      .decide button:hover {
+        border-color: var(--dim);
+        color: var(--text);
+      }
+      .decide button.on-accept {
+        border-color: var(--accent);
+        color: var(--accent);
+        background: var(--accent-dim);
+      }
+      .decide button.on-reject {
+        border-color: var(--reject);
+        color: var(--reject);
+        background: var(--reject-dim);
+      }
+
+      .skillprev {
+        border: 1px solid var(--line-soft);
+        background: var(--panel-2);
+        padding: 12px 14px;
+        font-family: var(--mono);
+        font-size: 12px;
+        line-height: 1.65;
+        color: var(--dim);
+        margin-bottom: 14px;
+        white-space: pre-wrap;
+        word-break: break-word;
+        overflow-x: auto;
+      }
+      .skillprev .fm {
+        color: var(--defer);
+      }
+
+      .notes {
+        border: 1px solid var(--line);
+        background: var(--panel);
+        padding: 16px 20px;
+        margin-top: 34px;
+      }
+      .notes h3 {
+        margin: 0 0 8px;
+        font-size: 12px;
+        font-family: var(--mono);
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--faint);
+        font-weight: 500;
+      }
+      .notes li {
+        font-size: 13px;
+        color: var(--dim);
+      }
+      .empty {
+        border: 1px dashed var(--line);
+        padding: 28px;
+        text-align: center;
+        color: var(--dim);
+        font-family: var(--mono);
+        font-size: 13px;
+      }
+
+      /* ---------- sticky apply bar ---------- */
+      .applybar {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(11, 14, 20, 0.92);
+        backdrop-filter: blur(8px);
+        border-top: 1px solid var(--line);
+        z-index: 50;
+      }
+      .applybar-in {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 14px 28px;
+        display: flex;
+        align-items: center;
+        gap: 22px;
+        flex-wrap: wrap;
+      }
+      .applybar .tally {
+        font-family: var(--mono);
+        font-size: 12.5px;
+        color: var(--dim);
+        display: flex;
+        gap: 18px;
+        flex-wrap: wrap;
+      }
+      .applybar .tally b {
+        font-weight: 500;
+      }
+      .applybar .tally .a b {
+        color: var(--accent);
+      }
+      .applybar .tally .r b {
+        color: var(--reject);
+      }
+      .applybar .proj {
+        font-family: var(--mono);
+        font-size: 12px;
+        color: var(--faint);
+        flex: 1;
+        min-width: 180px;
+      }
+      .applybar .proj b {
+        color: var(--text);
+        font-weight: 500;
+      }
+      .applybar .proj b.over {
+        color: var(--reject);
+      }
+      .btn-apply {
+        font-family: var(--mono);
+        font-size: 12.5px;
+        letter-spacing: 0.1em;
+        padding: 11px 26px;
+        background: var(--accent);
+        color: #06231c;
+        border: none;
+        cursor: pointer;
+        font-weight: 600;
+        transition: opacity 0.15s;
+      }
+      .btn-apply:hover {
+        opacity: 0.88;
+      }
+      .btn-apply:disabled {
+        background: var(--line);
+        color: var(--faint);
+        cursor: not-allowed;
+      }
+
+      @media (max-width: 760px) {
+        .wrap {
+          padding: 28px 16px 170px;
+        }
+        .applybar-in {
+          padding: 12px 16px;
+          gap: 12px;
+        }
+        .run-context {
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .frow .fl {
+          width: 92px;
+        }
+        .fdrop {
+          margin-left: 0;
+        }
+      }
+    </style>
+  <script>window.__BACKPASS_PROPOSAL__ = {"generatedAt":"2026-04-01T12:00:00.000Z","repo":{"name":"backpass"},"memoryFile":{"path":"AGENTS.md"},"config":{"maxEditsPerRun":5,"minGapEvidence":2},"budget":{"current":3430,"capTokens":5000},"stats":{"transcripts":16,"harnessCounts":{"codex":9,"claude":7},"positive":34,"negative":7,"skillExtractions":0,"gapSightings":6,"orchestrationGapSightings":6,"droppedGapSingletons":0,"gapClusters":0},"edits":[],"notes":[],"toolVersion":"0.1.13"};</script>
+</head>
+  <body>
+    <div class="wrap">
+      <div class="microlabel" style="margin-bottom: 10px">gradient descent for your agent memory</div>
+      <div class="brand">
+        <h1><span class="cmd">backpass</span> apply</h1>
+        <span class="ver" id="ver"></span>
+      </div>
+      <div class="runline" id="runline"></div>
+
+      <div class="statrow" id="statrow" hidden></div>
+
+      <div class="run-context" id="ctx" hidden>
+        <div class="ctx-funnel">
+          <div class="funnel-head">
+            <span class="t">Gap funnel · counted across runs</span>
+            <span class="facts num" id="funnel-floor"></span>
+          </div>
+          <div id="funnel-bars"></div>
+          <div class="funnel-note" id="funnel-note" hidden></div>
+        </div>
+        <div class="ctx-stats" id="ctx-stats"></div>
+      </div>
+
+      <div class="gauge-block">
+        <div class="gauge-head">
+          <span class="t" id="gauge-title">Always-loaded budget</span>
+          <span class="readout num" id="gauge-readout"></span>
+        </div>
+        <div class="gauge">
+          <div class="fill-now" id="gauge-now"></div>
+          <div class="fill-after" id="gauge-after"></div>
+          <div class="cap"></div>
+        </div>
+        <div class="gauge-legend">
+          <span><i style="background: rgba(110, 168, 255, 0.5)"></i>current</span>
+          <span><i style="background: var(--accent)"></i>projected after apply</span>
+          <span><i style="background: var(--reject); height: 9px; width: 2px"></i><span id="cap-label"></span></span>
+        </div>
+      </div>
+
+      <div class="sect">
+        <h2>Proposed edits</h2>
+        <div class="rule"></div>
+        <span class="count num" id="editcount"></span>
+      </div>
+      <div id="edits"></div>
+
+      <div class="notes" id="notes" hidden>
+        <h3>Notes from this run</h3>
+        <ul id="noteslist" style="margin: 0; padding-left: 18px"></ul>
+      </div>
+    </div>
+
+    <div class="applybar">
+      <div class="applybar-in">
+        <div class="tally num">
+          <span class="a"><b id="n-accept">0</b> accept</span>
+          <span class="r"><b id="n-reject">0</b> reject</span>
+        </div>
+        <div class="proj num" id="projline"></div>
+        <button class="btn-apply" id="btn-apply" type="button">APPLY</button>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        "use strict";
+
+        // The CLI injects exactly one payload; nothing on this page is model-generated.
+        var P = window.__BACKPASS_PROPOSAL__ || { edits: [], stats: {}, budget: {}, memoryFile: {}, repo: {} };
+        var edits = P.edits || [];
+        var budget = P.budget || { current: 0, capTokens: 0 };
+        var decisions = {};
+        edits.forEach(function (e) {
+          decisions[e.id] = "accepted";
+        });
+
+        function fmt(n) {
+          return Number(n || 0).toLocaleString("en-US");
+        }
+        function el(tag, cls, text) {
+          var n = document.createElement(tag);
+          if (cls) n.className = cls;
+          if (text !== undefined && text !== null) n.textContent = String(text);
+          return n;
+        }
+        function pct(value, cap) {
+          return cap > 0 ? Math.min(100, (value / cap) * 100) : 0;
+        }
+
+        // ---- header ----
+        document.getElementById("ver").textContent =
+          "v" + (P.toolVersion || "0.1.0") + " · run " + (P.generatedAt || "").replace(/\.\d+Z$/, "Z");
+
+        var harnessBits = Object.keys(P.stats.harnessCounts || {}).map(function (h) {
+          return h + " " + P.stats.harnessCounts[h];
+        });
+        var runline = document.getElementById("runline");
+        runline.appendChild(el("b", null, P.repo.name || "repo"));
+        runline.appendChild(document.createTextNode(" · " + (P.memoryFile.path || "") + " · analyzed "));
+        runline.appendChild(el("b", null, fmt(P.stats.transcripts)));
+        runline.appendChild(
+          document.createTextNode(" transcripts" + (harnessBits.length ? " (" + harnessBits.join(" · ") + ")" : "")),
+        );
+
+        // ---- run context: one frame, the gap funnel beside the run stats ----
+        // A single bordered band. The left pane tells the gap story as proportional
+        // bars - sightings recorded by analysis -> project-domain (orchestration
+        // excluded) -> distinct gaps after clustering -> eligible to propose - with
+        // each drop-off explained in plain words. The right pane holds the run facts
+        // (edits, evidence, skills) as stat cells; a separate stat row would duplicate
+        // the funnel's last stage. Every count is recorded by the fold (`totals` in
+        // evidence-summary.json); a proposal saved before the counts existed falls
+        // back to the classic stat row rather than showing zeros nobody measured.
+        function funnelCounts() {
+          if (typeof (P.stats || {}).gapSightings !== "number") return null;
+          var eligible = P.stats.gapClusters || 0;
+          var dropped = P.stats.droppedGapSingletons || 0;
+          var orch = P.stats.orchestrationGapSightings || 0;
+          var project = Math.max(0, P.stats.gapSightings - orch);
+          return {
+            floor: Number((P.config || {}).minGapEvidence) || 2,
+            sighted: P.stats.gapSightings,
+            orch: orch,
+            project: project,
+            distinct: eligible + dropped,
+            merged: Math.max(0, project - (eligible + dropped)),
+            dropped: dropped,
+            eligible: eligible,
+          };
+        }
+        function funnelBar(host, value, label, max, lit) {
+          var row = el("div", "frow" + (value === 0 ? " zero" : lit ? " lit" : ""));
+          row.appendChild(el("span", "fl", label));
+          var track = el("div", "fb");
+          var fill = el("i");
+          fill.style.width = max > 0 ? Math.max((value / max) * 100, value > 0 ? 2 : 0) + "%" : "0%";
+          track.appendChild(fill);
+          row.appendChild(track);
+          row.appendChild(el("span", "fv num", fmt(value)));
+          host.appendChild(row);
+        }
+        function funnelDrop(host, n, text) {
+          if (!n) return;
+          var line = el("div", "fdrop");
+          line.appendChild(el("b", null, "− " + fmt(n) + " "));
+          line.appendChild(document.createTextNode(text));
+          host.appendChild(line);
+        }
+        var funnelNote = null;
+        var funnel = funnelCounts();
+        if (funnel) {
+          var bars = document.getElementById("funnel-bars");
+          funnelBar(bars, funnel.sighted, "sightings", funnel.sighted);
+          funnelDrop(
+            bars,
+            funnel.orch,
+            "orchestration: mistakes in how the task was run, not in this project - excluded from proposals by design",
+          );
+          funnelBar(bars, funnel.project, "project-domain", funnel.sighted);
+          funnelDrop(
+            bars,
+            funnel.merged,
+            "merged: repeat sightings of a gap already counted - they corroborate it rather than add a new one",
+          );
+          funnelBar(bars, funnel.distinct, "distinct gaps", funnel.sighted);
+          funnelDrop(
+            bars,
+            funnel.dropped,
+            "below the corroboration floor: seen in fewer than " +
+              funnel.floor +
+              " sessions so far - more transcripts can corroborate them",
+          );
+          funnelBar(bars, funnel.eligible, "eligible to propose", funnel.sighted, true);
+
+          document.getElementById("funnel-floor").textContent = "corroboration floor · " + funnel.floor + " sessions";
+          var statHost = document.getElementById("ctx-stats");
+          [
+            [
+              String(edits.length) + "/" + String((P.config || {}).maxEditsPerRun || edits.length),
+              "edits proposed / cap",
+            ],
+            [fmt(P.stats.positive), "positive evidence"],
+            [fmt(P.stats.negative), "negative evidence"],
+            [fmt(P.stats.skillExtractions), "skill extractions"],
+          ].forEach(function (s) {
+            var box = el("div", "stat");
+            box.appendChild(el("div", "v num", s[0]));
+            box.appendChild(el("div", "k", s[1]));
+            statHost.appendChild(box);
+          });
+
+          // The drop lines carry the takeaway; the visible note only speaks when there
+          // are no bars to read. funnelNote itself still feeds the zero-edit empty state.
+          if (!funnel.sighted) {
+            funnelNote = "Analysis reported no uncovered gaps.";
+          } else if (!funnel.eligible && funnel.dropped) {
+            funnelNote =
+              funnel.dropped +
+              " distinct gap" +
+              (funnel.dropped === 1 ? " is" : "s are") +
+              " still below the " +
+              funnel.floor +
+              "-session corroboration floor - more transcripts may corroborate " +
+              (funnel.dropped === 1 ? "it." : "them.");
+          } else if (!funnel.eligible && funnel.orch >= funnel.sighted) {
+            funnelNote =
+              "All " +
+              funnel.sighted +
+              " sighting" +
+              (funnel.sighted === 1 ? " was" : "s were") +
+              " orchestration-domain (caused by the orchestrating harness, not this repository) and " +
+              (funnel.sighted === 1 ? "is" : "are") +
+              " excluded by design.";
+          }
+          if (funnelNote && !funnel.sighted) {
+            var noteEl = document.getElementById("funnel-note");
+            noteEl.textContent = funnelNote;
+            noteEl.hidden = false;
+          }
+          document.getElementById("ctx").hidden = false;
+        } else {
+          // A proposal from before the funnel counts existed: the classic stat row.
+          var statrow = document.getElementById("statrow");
+          statrow.hidden = false;
+          [
+            [
+              String(edits.length) + "/" + String((P.config || {}).maxEditsPerRun || edits.length),
+              "edits proposed / cap",
+            ],
+            [fmt(P.stats.positive), "positive evidence"],
+            [fmt(P.stats.negative), "negative evidence"],
+            [fmt(P.stats.gapClusters), "eligible gaps"],
+            [fmt(P.stats.skillExtractions), "skill extractions"],
+          ].forEach(function (s) {
+            var box = el("div", "stat");
+            box.appendChild(el("div", "v num", s[0]));
+            box.appendChild(el("div", "k", s[1]));
+            statrow.appendChild(box);
+          });
+        }
+
+        // ---- budget gauge ----
+        document.getElementById("gauge-title").textContent = "Always-loaded budget · " + (P.memoryFile.path || "");
+        document.getElementById("cap-label").textContent = fmt(budget.capTokens) + " tok cap";
+        document.getElementById("gauge-now").style.width = pct(budget.current, budget.capTokens) + "%";
+
+        // ---- edit cards ----
+        var host = document.getElementById("edits");
+        document.getElementById("editcount").textContent =
+          edits.length + " of " + ((P.config || {}).maxEditsPerRun || edits.length) + " (learning-rate cap)";
+
+        if (!edits.length) {
+          var eligibleWithoutEdits = Number((P.stats || {}).gapClusters) || 0;
+          var emptyReason = funnelNote;
+          if (!emptyReason && eligibleWithoutEdits > 0) {
+            emptyReason =
+              fmt(eligibleWithoutEdits) +
+              " eligible gap" +
+              (eligibleWithoutEdits === 1 ? "" : "s") +
+              " reached synthesis, but no edit was proposed this run.";
+          }
+          host.appendChild(
+            el(
+              "div",
+              "empty",
+              "No edits proposed. " + (emptyReason || "The evidence did not clear the thresholds this run."),
+            ),
+          );
+        }
+
+        edits.forEach(function (edit) {
+          var card = el("article", "edit");
+          card.setAttribute("data-kind", edit.kind);
+          card.setAttribute("data-state", "accepted");
+
+          var head = el("div", "edit-head");
+          head.appendChild(el("span", "kind", edit.kind === "extract" ? "EXTRACT -> SKILL" : edit.kind.toUpperCase()));
+          head.appendChild(el("span", "title", edit.title));
+          var delta = edit.deltaTokens || 0;
+          var deltaNode = el(
+            "span",
+            "delta num " + (delta < 0 ? "pos" : delta > 0 ? "neg" : ""),
+            "Δ " +
+              (delta > 0 ? "+" : "") +
+              fmt(delta) +
+              " tok" +
+              (edit.targetsMemoryFile ? "" : " (not always-loaded)"),
+          );
+          head.appendChild(deltaNode);
+          card.appendChild(head);
+
+          var body = el("div", "edit-body");
+          if (!edit.targetsMemoryFile) body.appendChild(el("div", "target", "target: " + edit.file));
+          if (edit.rationale) body.appendChild(el("p", "rationale", edit.rationale));
+
+          // An extract creates one skill, or several when their removals were measured as
+          // one change - then they are one decision, so they are previewed on one card.
+          if (edit.kind === "extract") {
+            editSkills(edit).forEach(function (skill) {
+              var prev = el("div", "skillprev");
+              prev.appendChild(
+                el(
+                  "span",
+                  "fm",
+                  "--- " + skill.path + " (new) ---\nname: " + skill.name + "\ndescription: " + skill.description,
+                ),
+              );
+              prev.appendChild(document.createTextNode("\n\n" + (skill.body || "").slice(0, 900)));
+              body.appendChild(prev);
+            });
+          }
+
+          var diff = el("div", "diff");
+          diffLines(edit).forEach(function (line) {
+            diff.appendChild(el("span", line.type, line.text));
+          });
+          body.appendChild(diff);
+
+          if ((edit.evidence || []).length) {
+            var det = el("details", "evidence");
+            var counts = { positive: 0, negative: 0 };
+            edit.evidence.forEach(function (q) {
+              counts[q.polarity === "positive" ? "positive" : "negative"] += 1;
+            });
+            det.appendChild(
+              el(
+                "summary",
+                null,
+                "evidence · " +
+                  (edit.transcripts || 0) +
+                  " transcripts (" +
+                  counts.negative +
+                  "-, " +
+                  counts.positive +
+                  "+)",
+              ),
+            );
+            edit.evidence.forEach(function (q) {
+              var quote = el(
+                "div",
+                "quote " + (q.polarity === "positive" ? "positive" : "negative"),
+                "“" + q.text + "”",
+              );
+              quote.appendChild(el("span", "src", q.source));
+              det.appendChild(quote);
+            });
+            body.appendChild(det);
+          }
+
+          var decide = el("div", "decide");
+          ["accept", "reject"].forEach(function (choice) {
+            var btn = el("button", choice === "accept" ? "on-accept" : "", choice.toUpperCase());
+            btn.type = "button";
+            btn.addEventListener("click", function () {
+              decisions[edit.id] = choice === "accept" ? "accepted" : "rejected";
+              card.setAttribute("data-state", decisions[edit.id]);
+              Array.prototype.forEach.call(decide.children, function (b) {
+                b.className = "";
+              });
+              btn.className = "on-" + choice;
+              recompute();
+            });
+            decide.appendChild(btn);
+          });
+          body.appendChild(decide);
+          card.appendChild(body);
+          host.appendChild(card);
+        });
+
+        function nonEmpty(line) {
+          return line.length > 0;
+        }
+
+        // The skills one extract creates. A proposal saved before an extract could carry
+        // several (merged removals) has a single `skill`; both shapes read the same way.
+        function editSkills(edit) {
+          if (Array.isArray(edit.skills)) {
+            return edit.skills.filter(function (skill) {
+              return skill;
+            });
+          }
+          return edit.skill ? [edit.skill] : [];
+        }
+
+        // Measured edits carry display lines per hunk (ctx/del/ins); a legacy
+        // find/replace edit is shown as removed then added lines.
+        function diffLines(edit) {
+          if (Array.isArray(edit.hunks)) {
+            var out = [];
+            edit.hunks.forEach(function (hunk, i) {
+              if (i > 0) out.push({ type: "gap", text: "\u2026" });
+              (hunk.lines || []).forEach(function (line) {
+                out.push(line);
+              });
+            });
+            return out;
+          }
+          return (edit.find || "")
+            .split("\n")
+            .filter(nonEmpty)
+            .map(function (text) {
+              return { type: "del", text: text };
+            })
+            .concat(
+              (edit.replace || "")
+                .split("\n")
+                .filter(nonEmpty)
+                .map(function (text) {
+                  return { type: "ins", text: text };
+                }),
+            );
+        }
+
+        // ---- notes ----
+        if ((P.notes || []).length) {
+          document.getElementById("notes").hidden = false;
+          var list = document.getElementById("noteslist");
+          P.notes.forEach(function (n) {
+            list.appendChild(el("li", null, n));
+          });
+        }
+
+        // ---- live tally + projection ----
+        function recompute() {
+          var accepted = 0,
+            rejected = 0,
+            tok = budget.current;
+          edits.forEach(function (e) {
+            if (decisions[e.id] === "accepted") {
+              accepted += 1;
+              if (e.targetsMemoryFile) tok += e.deltaTokens || 0;
+            } else if (decisions[e.id] === "rejected") {
+              rejected += 1;
+            }
+          });
+          var over = tok > budget.capTokens;
+
+          document.getElementById("n-accept").textContent = accepted;
+          document.getElementById("n-reject").textContent = rejected;
+
+          var readout = document.getElementById("gauge-readout");
+          readout.textContent = "";
+          readout.appendChild(document.createTextNode("now " + fmt(budget.current) + " tok -> if accepted "));
+          // In shrink mode the file started over budget: progress is the goal, not arrival.
+          readout.appendChild(
+            el("b", (budget.mode === "shrink" ? tok >= budget.current : over) ? "over" : null, fmt(tok) + " tok"),
+          );
+          readout.appendChild(
+            document.createTextNode(
+              " / " +
+                fmt(budget.capTokens) +
+                " cap" +
+                (budget.mode === "shrink"
+                  ? " · shrink plan: " + fmt(Math.max(0, tok - budget.capTokens)) + " tok still over"
+                  : ""),
+            ),
+          );
+
+          var after = document.getElementById("gauge-after");
+          after.style.width = pct(tok, budget.capTokens) + "%";
+          after.className = "fill-after" + (over ? " over" : "");
+
+          var proj = document.getElementById("projline");
+          proj.textContent = "";
+          proj.appendChild(document.createTextNode("projected: "));
+          proj.appendChild(el("b", over ? "over" : null, fmt(tok)));
+          proj.appendChild(document.createTextNode(" / " + fmt(budget.capTokens) + " tok"));
+
+          var btn = document.getElementById("btn-apply");
+          btn.textContent =
+            accepted > 0 ? "APPLY " + accepted + " EDIT" + (accepted === 1 ? "" : "S") + " ->" : "NOTHING TO APPLY";
+          btn.disabled = accepted === 0 && rejected === 0;
+        }
+
+        // ---- the single structured decision vector back to the CLI ----
+        document.getElementById("btn-apply").addEventListener("click", function () {
+          var vector = edits
+            .map(function (e) {
+              return e.id + "=" + decisions[e.id];
+            })
+            .join(" ");
+          var message = "BACKPASS_DECISIONS " + vector;
+          if (window.lavish && typeof window.lavish.queuePrompt === "function") {
+            window.lavish.queuePrompt(message, {
+              tag: "choice",
+              text: vector,
+              data: { question: "backpass-apply-decisions", decisions: decisions },
+              queueKey: "backpass-apply-decisions",
+            });
+            this.textContent = "QUEUED - SEND FROM THE PANEL";
+          } else {
+            this.textContent = "QUEUED (offline preview)";
+          }
+          this.disabled = true;
+        });
+
+        recompute();
+      })();
+    </script>
+  </body>
+</html>

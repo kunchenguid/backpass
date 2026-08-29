@@ -1,0 +1,31 @@
+{
+  "healthy": {
+    "scenario": "healthy-mobile-600px",
+    "viewport": 600,
+    "scrollWidth": 600,
+    "horizontalOverflow": 0,
+    "contextVisible": true,
+    "classicStatRowHidden": true,
+    "contextColumns": "566px",
+    "bars": [
+      "sightings: 11",
+      "project-domain: 9",
+      "distinct gaps: 5",
+      "eligible to propose: 2"
+    ],
+    "editCards": 1
+  },
+  "legacy": {
+    "scenario": "legacy-mobile-600px",
+    "contextHidden": true,
+    "classicStatRowVisible": true,
+    "classicLabels": [
+      "edits proposed / cap",
+      "positive evidence",
+      "negative evidence",
+      "eligible gaps",
+      "skill extractions"
+    ],
+    "horizontalOverflow": 0
+  }
+}
