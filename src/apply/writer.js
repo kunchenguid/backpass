@@ -13,6 +13,7 @@ import {
   ensureSkillsLayout,
   loadSkills,
   removeOwnedSkillPaths,
+  resolveOverflowTarget,
   skillDescriptionTokens,
   writeSkill,
 } from "../skills.js";
@@ -223,9 +224,11 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
 
   // The always-loaded skill layer as it exists on disk right now - the budget below
   // covers the whole surface, not the memory file alone.
-  const descriptionTokensNow = skillDescriptionTokens(
-    loadSkills(repo.root, proposal.config?.skillsDir || CANONICAL_SKILLS_DIR),
-  );
+  const skillsDir = resolveOverflowTarget(
+    repo.root,
+    proposal.config?.skillsDir || config.skillsDir || CANONICAL_SKILLS_DIR,
+  ).dir;
+  const descriptionTokensNow = skillDescriptionTokens(loadSkills(repo.root, skillsDir));
 
   const budgetFailure = acceptedSubsetBudgetFailure({
     proposal,

@@ -342,32 +342,47 @@ test("mergeGapEntries drops what it cannot verify instead of guessing", () => {
   assert.ok(ledger.entries["c".repeat(16)], "c stayed untouched");
 });
 
-test("a skill whose content covers a gap retires it; an unrelated skill leaves it open", () => {
+test("failed-trigger evidence survives unchanged skill coverage and retires after a skill fix", () => {
   const phrasing = "Run pnpm lint before committing changes.";
+  const citedSkill = {
+    name: "lint-ritual",
+    path: ".agents/skills/lint-ritual/SKILL.md",
+    description: "Load before committing.",
+    body: `- ${phrasing}\n`,
+  };
   const ledger = { version: 1, entries: {} };
-  recordGapObservations(ledger, [record("s1", [{ proposedInstruction: phrasing, coveredBySkill: "lint-ritual" }])]);
+  recordGapObservations(
+    ledger,
+    [record("s1", [{ proposedInstruction: phrasing, coveredBySkill: "lint-ritual" }])],
+    { skills: [citedSkill] },
+  );
 
-  // The citation is durable: it survives the ledger round-trip into the fold's input.
   const entry = Object.values(ledger.entries)[0];
   assert.equal(Object.values(entry.sessions)[0].coveredBySkill, "lint-ritual");
   assert.equal(ledgerGapObservations(ledger, MEMORY_PATH)[0].coveredBySkill, "lint-ritual");
 
-  const unrelated = pruneGapLedger(ledger, {
+  const unchanged = pruneGapLedger(ledger, {
     memoryFile: memoryFile(),
     memoryPath: MEMORY_PATH,
     maxAge: "all",
-    skills: [{ description: "Load when cutting a release.", body: "- Tag the release.\n" }],
+    skills: [citedSkill],
   });
-  assert.equal(unrelated.covered, 0, "an unrelated skill covers nothing");
+  assert.equal(unchanged.covered, 0, "the cited pre-existing body is evidence of a failed trigger");
   assert.equal(Object.keys(ledger.entries).length, 1);
 
+  const fixedSkill = { ...citedSkill, body: `# Fixed trigger\n\n- ${phrasing}\n` };
+  recordGapObservations(
+    ledger,
+    [record("s1", [{ proposedInstruction: phrasing, coveredBySkill: "lint-ritual" }])],
+    { skills: [fixedSkill] },
+  );
   const stats = pruneGapLedger(ledger, {
     memoryFile: memoryFile(),
     memoryPath: MEMORY_PATH,
     maxAge: "all",
-    skills: [{ description: "Load before committing.", body: `- ${phrasing}\n` }],
+    skills: [fixedSkill],
   });
-  assert.equal(stats.covered, 1, "a gap resolved by a skill retires instead of aging out");
+  assert.equal(stats.covered, 1, "changed skill content that resolves the gap retires it");
   assert.deepEqual(ledger.entries, {});
 });
 

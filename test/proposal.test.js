@@ -590,6 +590,7 @@ test("apply refuses an accepted subset that exceeds the memory cap before writin
     config: config({ budgetTokens: cap }),
   });
   assert.deepEqual(violations, [], "the complete proposal is valid because the removal pays for the addition");
+  proposal.config.skillsDir = "configured-but-missing";
 
   const results = applyDecisions({
     proposal,

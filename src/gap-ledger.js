@@ -101,8 +101,9 @@ export function findGapEntry(ledger, memoryPath, proposedInstruction) {
  * Fold this run's evidence into the ledger. One observation per (gap, session); a
  * session seen again replaces its own observation and keeps its first-seen timestamp.
  */
-export function recordGapObservations(ledger, evidenceRecords, { now = new Date() } = {}) {
+export function recordGapObservations(ledger, evidenceRecords, { now = new Date(), skills = [] } = {}) {
   const observedAt = new Date(now).toISOString();
+  const skillsByName = new Map(skills.map((skill) => [skill.name, skill]));
   let recorded = 0;
   for (const record of evidenceRecords) {
     if (!record || record.status !== "ok" || !record.memoryPath) continue;
@@ -146,6 +147,13 @@ export function recordGapObservations(ledger, evidenceRecords, { now = new Date(
         .filter((value) => Number.isFinite(Date.parse(value)))
         .sort((a, b) => Date.parse(a) - Date.parse(b))[0];
       if (aliasPrior) delete entry.sessions[transcript.id];
+      const priorFailedTrigger = priors.find(
+        (observation) =>
+          observation.coveredBySkill === gap.coveredBySkill && observation.coveredBySkillHash,
+      );
+      const citedSkill = gap.coveredBySkill ? skillsByName.get(gap.coveredBySkill) : null;
+      const coveredBySkillHash = priorFailedTrigger?.coveredBySkillHash ||
+        (citedSkill ? skillCoverageHash(citedSkill) : null);
       entry.sessions[sessionIdentity] = {
         firstObservedAt: firstObservedAt || observedAt,
         observedAt,
@@ -161,6 +169,7 @@ export function recordGapObservations(ledger, evidenceRecords, { now = new Date(
         // this mistake. Absent when no skill covers it (including all pre-existing
         // observations), and absence never counts as a citation.
         ...(gap.coveredBySkill ? { coveredBySkill: gap.coveredBySkill } : {}),
+        ...(coveredBySkillHash ? { coveredBySkillHash } : {}),
       };
       recorded += 1;
     }
@@ -182,7 +191,7 @@ export function pruneGapLedger(
   const maxAgeMs = parseSince(maxAge);
   const cutoff = maxAgeMs === null ? -Infinity : new Date(now).getTime() - maxAgeMs;
   const stats = { expired: 0, covered: 0 };
-  const coverage = coverageTexts(memoryFile, skills);
+  const coverage = coverageUnits(memoryFile, skills);
 
   for (const [id, entry] of Object.entries(ledger.entries)) {
     const applies = memoryPath === null || entry.memoryPath === memoryPath;
@@ -204,19 +213,38 @@ export function pruneGapLedger(
 }
 
 /** Every unit of always-available knowledge a gap can be covered by. */
-function coverageTexts(memoryFile, skills) {
+function coverageUnits(memoryFile, skills) {
   return [
-    ...(memoryFile?.units || []).map((unit) => unit.text),
-    ...(skills || []).flatMap((skill) => [
-      skill.description || "",
-      ...parseMemoryUnits(skill.body || "").map((unit) => unit.text),
-    ]),
-  ].filter((text) => text.trim());
+    ...(memoryFile?.units || []).map((unit) => ({ text: unit.text })),
+    ...(skills || []).flatMap((skill) => {
+      const hash = skillCoverageHash(skill);
+      return [skill.description || "", ...parseMemoryUnits(skill.body || "").map((unit) => unit.text)].map((text) => ({
+        text,
+        skill: skill.name,
+        hash,
+      }));
+    }),
+  ].filter((unit) => unit.text.trim());
+}
+
+function skillCoverageHash(skill) {
+  return sha256(`${skill.path || ""}\n${skill.name || ""}\n${skill.description || ""}\n${skill.body || ""}`);
 }
 
 function isCovered(coverage, entry) {
   const phrasings = [...new Set([entry.proposedInstruction, ...(entry.phrasings || [])])];
-  return coverage.some((text) => phrasings.some((phrasing) => similarity(text, phrasing) >= GAP_COVERED_THRESHOLD));
+  return coverage.some((unit) => {
+    const isUnchangedFailedTrigger =
+      unit.skill &&
+      Object.values(entry.sessions).some(
+        (observation) =>
+          observation.coveredBySkill === unit.skill && observation.coveredBySkillHash === unit.hash,
+      );
+    return (
+      !isUnchangedFailedTrigger &&
+      phrasings.some((phrasing) => similarity(unit.text, phrasing) >= GAP_COVERED_THRESHOLD)
+    );
+  });
 }
 
 /** Flatten the ledger into the observation list `foldEvidence` clusters over. */

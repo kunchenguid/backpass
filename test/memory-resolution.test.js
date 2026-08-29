@@ -146,8 +146,8 @@ test("no memory file: primaryMemoryFile fails with a pointer to bootstrap", () =
   assert.equal(resolveMemoryFiles(repo.root, ["AGENTS.md", "CLAUDE.md"]).primary, null);
 });
 
-test("the run hash is the memory surface: skill descriptions move it, bodies do not", () => {
-  const skill = (description, body) => `---\nname: db\ndescription: ${description}\n---\n\n${body}\n`;
+test("the run hash is the memory surface: skill identity and descriptions move it, bodies do not", () => {
+  const skill = (description, body, name = "db") => `---\nname: ${name}\ndescription: ${description}\n---\n\n${body}\n`;
   const repo = repoWith({ "AGENTS.md": AGENTS, ".agents/skills/db/SKILL.md": skill("old trigger", "- body v1") });
   const config = loadConfig(repo.root);
 
@@ -163,4 +163,8 @@ test("the run hash is the memory surface: skill descriptions move it, bodies do 
   fs.writeFileSync(path.join(repo.root, ".agents/skills/db/SKILL.md"), skill("new trigger", "- body v2 changed"));
   const v3 = primaryMemoryFile(repo, config);
   assert.notEqual(v3.hash, v1.hash, "a description edit invalidates evidence like a memory-file edit does");
+
+  fs.writeFileSync(path.join(repo.root, ".agents/skills/db/SKILL.md"), skill("new trigger", "- body v2 changed", "database"));
+  const v4 = primaryMemoryFile(repo, config);
+  assert.notEqual(v4.hash, v3.hash, "a rendered skill rename invalidates evidence carrying the old name");
 });

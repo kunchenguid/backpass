@@ -159,7 +159,7 @@ export function memorySetHash(files) {
  */
 export function memorySurfaceHash(setHash, skills) {
   if (!skills?.length) return setHash;
-  const layer = skills.map((s) => `${s.path}:${s.description || ""}`).join("|");
+  const layer = skills.map((s) => `${s.path}:${s.name || ""}:${s.description || ""}`).join("|");
   return `sha256:${sha256(`${setHash}|${layer}`).slice(0, 16)}`;
 }
 
