@@ -1,0 +1,11 @@
+{
+  "analyzedSessions": 2,
+  "orchestrationGapSightings": 2,
+  "eligibleProjectGaps": [
+    {
+      "proposedInstruction": "Always run lint before pushing.",
+      "sessions": 2
+    }
+  ],
+  "synthesisEvidence": "Sessions analyzed: 2\nTotals: 0 positive, 0 negative, 1 gap clusters (0 singletons dropped below threshold)\n\n### Per-instruction evidence\nA negative's class is what it means: `harm` = following the instruction caused damage (evidence against it); `non-compliance` = the agent ignored it (evidence it failed to steer - argues for reinforcement, never deletion); `irrelevant` = no real bearing.\n- [AG-001] +0 -0 sessions=0 relevance=0.0% cost=10tok\n\n### Gap clusters (mistakes no current instruction covers)\n- 2 orchestration-domain sighting(s) caused by the orchestrating harness or tooling were excluded; they never enter this repository's memory file\n- sessions=2 risk=high :: Always run lint before pushing.\n    \"skipped lint entirely this time\" (pi · b · 2026-08-29)\n    \"skipped lint entirely this time\" (pi · a · 2026-08-29)"
+}
