@@ -1573,7 +1573,7 @@ test("description bloat with an unchanged memory file trips the always-loaded ca
   );
 });
 
-test("apply labels the first skill description as part of the always-loaded surface", () => {
+test("apply measures a legacy skill rewrite missing descriptionDelta", () => {
   const skill = "---\nname: db\ndescription: \n---\n\nbody\n";
   const built = gate({
     files: { ".agents/skills/db/SKILL.md": skill },
@@ -1584,6 +1584,7 @@ test("apply labels the first skill description as part of the always-loaded surf
     annotation: { edits: [claim(["H1"], { title: "add the trigger" })] },
   });
   assert.deepEqual(built.violations, []);
+  delete built.proposal.edits[0].descriptionDelta;
 
   const results = applyDecisions({
     proposal: built.proposal,
@@ -1610,6 +1611,7 @@ test("post-apply warnings label a newly created skill description as always-load
   });
   assert.deepEqual(built.violations, []);
   assert.ok(built.proposal.budget.delta < 0);
+  delete built.proposal.edits[0].descriptionDelta;
 
   const results = applyDecisions({
     proposal: built.proposal,

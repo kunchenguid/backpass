@@ -2,9 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
-import { applyEdit, projectWithDecisions } from "../proposal.js";
+import { applyEdit } from "../proposal.js";
 import { memoryTextHash } from "../memory.js";
-import { budgetGateKind, budgetStatus, formatTokens } from "../tokens.js";
+import { budgetGateKind, budgetStatus, estimateTokens, formatTokens } from "../tokens.js";
 import { recordRejection } from "../state.js";
 import {
   CANONICAL_SKILLS_DIR,
@@ -12,6 +12,7 @@ import {
   editSkills,
   ensureSkillsLayout,
   loadSkills,
+  parseFrontmatter,
   removeOwnedSkillPaths,
   resolveOverflowTarget,
   skillDescriptionTokens,
@@ -27,26 +28,26 @@ function surfaceLabel(memoryPath, descriptionTokens) {
   return descriptionTokens ? `the always-loaded surface (${memoryPath} + skill descriptions)` : memoryPath;
 }
 
-function acceptedSubsetBudgetFailure({ proposal, accepted, repo, capTokens, memoryText, descriptionTokensNow }) {
-  if (!accepted.length) return null;
+function descriptionTokensIn(text) {
+  return estimateTokens(parseFrontmatter(text).description || "");
+}
 
+function acceptedSubsetBudgetFailure({
+  proposal,
+  capTokens,
+  memoryText,
+  projectedMemoryText,
+  descriptionTokensNow,
+  descriptionTokensProjected,
+}) {
   const relative = proposal.memoryFile.path;
-  const absolute = path.join(repo.root, relative);
-  if (memoryText === null && !fs.existsSync(absolute)) return null;
+  if (memoryText === null) return null;
 
-  const before = memoryText ?? fs.readFileSync(absolute, "utf8");
-  const { budget } = projectWithDecisions(
-    before,
-    accepted,
-    accepted.map((edit) => edit.id),
-    capTokens,
-    descriptionTokensNow,
-  );
-  const acceptedDescriptionDelta = accepted.reduce((sum, edit) => sum + (edit.descriptionDelta || 0), 0);
-  const label = surfaceLabel(
-    relative,
-    Math.max(descriptionTokensNow, descriptionTokensNow + acceptedDescriptionDelta),
-  );
+  const budget = budgetStatus(memoryText, projectedMemoryText, capTokens, {
+    current: descriptionTokensNow,
+    projected: descriptionTokensProjected,
+  });
+  const label = surfaceLabel(relative, Math.max(descriptionTokensNow, descriptionTokensProjected));
   const gate = budgetGateKind(budget);
   if (gate === "cap") {
     return {
@@ -232,20 +233,8 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     repo.root,
     proposal.config?.skillsDir || config.skillsDir || CANONICAL_SKILLS_DIR,
   ).dir;
-  const descriptionTokensNow = skillDescriptionTokens(loadSkills(repo.root, skillsDir));
-
-  const budgetFailure = acceptedSubsetBudgetFailure({
-    proposal,
-    accepted,
-    repo,
-    capTokens: config.budgetTokens,
-    memoryText,
-    descriptionTokensNow,
-  });
-  if (budgetFailure) {
-    results.failed.push(budgetFailure);
-    return results;
-  }
+  const skillsNow = loadSkills(repo.root, skillsDir);
+  const descriptionTokensNow = skillDescriptionTokens(skillsNow);
 
   // Freshness for every non-memory file an accepted edit targets, the same contract the
   // memory file gets: each hunk was cut from one exact image, and a file that changed
@@ -362,6 +351,32 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
   }
   if (results.failed.length) return results;
 
+  const existingSkillPaths = new Set(skillsNow.map((skill) => skill.path));
+  let descriptionTokensProjected = descriptionTokensNow;
+  for (const item of resolvedPlanned) {
+    if (!existingSkillPaths.has(item.relative)) continue;
+    descriptionTokensProjected += descriptionTokensIn(item.text) - descriptionTokensIn(item.before);
+  }
+  descriptionTokensProjected += plannedSkills.reduce(
+    (sum, { skill }) => sum + estimateTokens(skill.description || ""),
+    0,
+  );
+  const memoryPlan = resolvedPlanned.find((item) => item.relative === proposal.memoryFile.path);
+  if (accepted.length) {
+    const budgetFailure = acceptedSubsetBudgetFailure({
+      proposal,
+      capTokens: config.budgetTokens,
+      memoryText,
+      projectedMemoryText: memoryPlan?.text ?? memoryText,
+      descriptionTokensNow,
+      descriptionTokensProjected,
+    });
+    if (budgetFailure) {
+      results.failed.push(budgetFailure);
+      return results;
+    }
+  }
+
   const canonical = plannedSkills.find(
     ({ skill }) => skill.path === CANONICAL_SKILLS_DIR || skill.path.startsWith(`${CANONICAL_SKILLS_DIR}/`),
   );
@@ -442,10 +457,7 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     }
     results.written = [];
   };
-  const landedDescriptionDelta = accepted
-    .filter((edit) => landed.has(edit.id))
-    .reduce((sum, edit) => sum + (edit.descriptionDelta || 0), 0);
-  const memoryPlan = orderedPlanned.find((item) => item.relative === proposal.memoryFile.path);
+  const landedDescriptionDelta = descriptionTokensProjected - descriptionTokensNow;
   const budgetTarget = memoryPlan || orderedPlanned[0];
   const surfaceBudget = budgetTarget
     ? budgetStatus(memoryText, memoryPlan?.text ?? memoryText, config.budgetTokens, {

@@ -278,6 +278,25 @@ test("mergeGapEntries unions sessions without double-counting and keeps the shor
   assert.deepEqual(Object.keys(entries[0].sessions).sort(), ["s1", "s2", "shared"], "a session never counts twice");
 });
 
+test("mergeGapEntries preserves absorbed citations for duplicate sessions", () => {
+  const targetId = "a".repeat(16);
+  const absorbedId = "b".repeat(16);
+  const ledger = ledgerWith(
+    { id: targetId, text: "Check the database contract before changing queries.", sessions: ["s1", "s2"] },
+    { id: absorbedId, text: "Read schema docs before SQL edits.", sessions: ["s1", "s2"] },
+  );
+  ledger.entries[absorbedId].sessions.s1.coveredBySkill = "db-schema";
+  ledger.entries[absorbedId].sessions.s2.coveredBySkill = "db-schema";
+
+  mergeGapEntries(ledger, [[targetId, absorbedId]]);
+  const observations = ledgerGapObservations(ledger, MEMORY_PATH, [{ name: "db-schema" }]);
+  const summary = foldEvidence([], { gapObservations: observations, minGapEvidence: 2 });
+
+  assert.equal(observations.length, 2, "each session remains one observation");
+  assert.equal(summary.gaps[0].failedTriggerSkill, "db-schema");
+  assert.equal(summary.gaps[0].failedTriggerSessions, 2);
+});
+
 test("merged gap identities remain durable as the canonical phrasing changes", () => {
   const first = "Always inspect the database schema documentation before composing a production SQL query.";
   const absorbed = "Consult schema before SQL.";
