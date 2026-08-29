@@ -1,0 +1,39 @@
+$ backpass status --json
+{
+  "repo": "repo",
+  "budgets": [
+    {
+      "path": "AGENTS.md",
+      "label": "AGENTS.md + skill descriptions",
+      "capTokens": 5000,
+      "current": 19,
+      "projected": 19,
+      "delta": 0,
+      "withinBudget": true,
+      "over": 0,
+      "utilization": 0.0038,
+      "instructions": 1,
+      "pointerTo": null,
+      "separate": false
+    }
+  ],
+  "evidence": {
+    "ok": 0,
+    "failed": 0,
+    "skipped": 0
+  },
+  "scanCacheEntries": 0,
+  "summary": null,
+  "proposal": null,
+  "rejections": 0,
+  "skills": 1
+}
+
+$ backpass analyze ... # initial skill description + body
+{"total":1,"cached":0,"analyzed":1,"skipped":0,"failed":0,"usage":[{"agent":"pi","usage":null}],"staleMemoryHash":0}
+$ backpass analyze ... # after body-only edit
+{"total":1,"cached":1,"analyzed":0,"skipped":0,"failed":0,"usage":[],"staleMemoryHash":0}
+$ backpass analyze ... # after description edit
+{"total":1,"cached":0,"analyzed":1,"skipped":0,"failed":0,"usage":[{"agent":"pi","usage":null}],"staleMemoryHash":1}
+stderr:
+· 1 transcript(s) have evidence from a previous memory surface (sha256:34e1f201a9ed0eb3 -> sha256:14ed65aee7553ea4); that evidence is stale, not missing, and reuse resumes once this pass re-judges it against the current memory file and skill descriptions
