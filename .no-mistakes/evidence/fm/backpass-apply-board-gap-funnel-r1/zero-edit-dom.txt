@@ -1,0 +1,3 @@
+result: "{\"funnelHidden\":false,\"funnelText\":\"Gap funnel · counted across runs\\ncorroboration floor · 2 sessions\\n3\\nSIGHTINGS\\nrecorded by analysis\\n3\\nPROJECT-DOMAIN\\n \\n3\\nDISTINCT GAPS\\nafter clustering\\n0\\nELIGIBLE TO PROPOSE\\n−3 below floor\\n3 distinct gaps are still below the 2-session corroboration floor - more transcripts may corroborate them.\",\"emptyText\":\"No edits proposed. 3 distinct gaps are still below the 2-session corroboration floor - more transcripts may corroborate them.\"}"
+help[1]:
+  Run `chrome-devtools-axi snapshot` to see current page state

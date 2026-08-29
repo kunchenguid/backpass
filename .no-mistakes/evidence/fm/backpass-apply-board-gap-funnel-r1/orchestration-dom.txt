@@ -1,0 +1,3 @@
+result: "{\"funnelHidden\":false,\"funnelText\":\"Gap funnel · counted across runs\\ncorroboration floor · 2 sessions\\n6\\nSIGHTINGS\\nrecorded by analysis\\n0\\nPROJECT-DOMAIN\\n−6 orchestration\\n0\\nDISTINCT GAPS\\nafter clustering\\n0\\nELIGIBLE TO PROPOSE\\n≥ 2 sessions\\nAll 6 sightings were orchestration-domain (caused by the orchestrating harness, not this repository) and are excluded by design.\",\"emptyText\":\"No edits proposed. All 6 sightings were orchestration-domain (caused by the orchestrating harness, not this repository) and are excluded by design.\"}"
+help[1]:
+  Run `chrome-devtools-axi snapshot` to see current page state

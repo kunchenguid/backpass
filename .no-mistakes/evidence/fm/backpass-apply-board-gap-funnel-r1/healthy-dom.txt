@@ -1,0 +1,3 @@
+result: "{\"funnelHidden\":false,\"funnelText\":\"Gap funnel · counted across runs\\ncorroboration floor · 2 sessions\\n12\\nSIGHTINGS\\nrecorded by analysis\\n10\\nPROJECT-DOMAIN\\n−2 orchestration\\n4\\nDISTINCT GAPS\\nafter clustering\\n3\\nELIGIBLE TO PROPOSE\\n−1 below floor\",\"emptyText\":null}"
+help[1]:
+  Run `chrome-devtools-axi snapshot` to see current page state

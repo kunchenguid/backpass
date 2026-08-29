@@ -1,0 +1,3 @@
+result: "{\"funnelText\":\"Gap funnel · counted across runs\\ncorroboration floor · 2 sessions\\n0\\nSIGHTINGS\\nrecorded by analysis\\n0\\nPROJECT-DOMAIN\\n \\n0\\nDISTINCT GAPS\\nafter clustering\\n0\\nELIGIBLE TO PROPOSE\\n≥ 2 sessions\\nAnalysis reported no uncovered gaps.\",\"emptyText\":\"No edits proposed. Analysis reported no uncovered gaps.\"}"
+help[1]:
+  Run `chrome-devtools-axi snapshot` to see current page state
