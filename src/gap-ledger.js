@@ -1,4 +1,4 @@
-import { parseMemoryUnits, similarity, unitHash } from "./memory.js";
+import { parseMemoryUnits, similarity } from "./memory.js";
 import { parseSince } from "./config.js";
 import { sha256 } from "./state.js";
 
@@ -101,9 +101,8 @@ export function findGapEntry(ledger, memoryPath, proposedInstruction) {
  * Fold this run's evidence into the ledger. One observation per (gap, session); a
  * session seen again replaces its own observation and keeps its first-seen timestamp.
  */
-export function recordGapObservations(ledger, evidenceRecords, { now = new Date(), skills = [] } = {}) {
+export function recordGapObservations(ledger, evidenceRecords, { now = new Date() } = {}) {
   const observedAt = new Date(now).toISOString();
-  const skillsByName = new Map(skills.map((skill) => [skill.name, skill]));
   let recorded = 0;
   for (const record of evidenceRecords) {
     if (!record || record.status !== "ok" || !record.memoryPath) continue;
@@ -147,14 +146,6 @@ export function recordGapObservations(ledger, evidenceRecords, { now = new Date(
         .filter((value) => Number.isFinite(Date.parse(value)))
         .sort((a, b) => Date.parse(a) - Date.parse(b))[0];
       if (aliasPrior) delete entry.sessions[transcript.id];
-      const priorFailedTrigger = priors.find(
-        (observation) =>
-          observation.coveredBySkill === gap.coveredBySkill && observation.coveredBySkillHashes?.length,
-      );
-      const citedSkill = gap.coveredBySkill ? skillsByName.get(gap.coveredBySkill) : null;
-      const coveredBySkillHashes =
-        priorFailedTrigger?.coveredBySkillHashes ||
-        (citedSkill ? matchingCoverageHashes(citedSkill, gap.proposedInstruction) : []);
       entry.sessions[sessionIdentity] = {
         firstObservedAt: firstObservedAt || observedAt,
         observedAt,
@@ -170,7 +161,6 @@ export function recordGapObservations(ledger, evidenceRecords, { now = new Date(
         // this mistake. Absent when no skill covers it (including all pre-existing
         // observations), and absence never counts as a citation.
         ...(gap.coveredBySkill ? { coveredBySkill: gap.coveredBySkill } : {}),
-        ...(coveredBySkillHashes.length ? { coveredBySkillHashes } : {}),
       };
       recorded += 1;
     }
@@ -221,44 +211,24 @@ function coverageUnits(memoryFile, skills) {
       [skill.description || "", ...parseMemoryUnits(skill.body || "").map((unit) => unit.text)].map((text) => ({
         text,
         skill: skill.name,
-        hash: unitHash(text),
       })),
     ),
   ].filter((unit) => unit.text.trim());
 }
 
-function matchingCoverageHashes(skill, phrasing) {
-  return coverageUnits(null, [skill])
-    .filter((unit) => similarity(unit.text, phrasing) >= GAP_COVERED_THRESHOLD)
-    .map((unit) => unit.hash);
-}
-
 function isCovered(coverage, entry) {
   const phrasings = [...new Set([entry.proposedInstruction, ...(entry.phrasings || [])])];
   return coverage.some((unit) => {
-    const isUnchangedFailedTrigger =
-      unit.skill &&
-      Object.values(entry.sessions).some(
-        (observation) =>
-          observation.coveredBySkill === unit.skill && observation.coveredBySkillHashes?.includes(unit.hash),
-      );
-    return (
-      !isUnchangedFailedTrigger &&
-      phrasings.some((phrasing) => similarity(unit.text, phrasing) >= GAP_COVERED_THRESHOLD)
-    );
+    const isFailedTrigger =
+      unit.skill && Object.values(entry.sessions).some((observation) => observation.coveredBySkill === unit.skill);
+    return !isFailedTrigger && phrasings.some((phrasing) => similarity(unit.text, phrasing) >= GAP_COVERED_THRESHOLD);
   });
 }
 
 /** Flatten the ledger into the observation list `foldEvidence` clusters over. */
 export function ledgerGapObservations(ledger, memoryPath, skills = null) {
   const observations = [];
-  const skillCoverage = skills
-    ? coverageUnits(null, skills).reduce((byName, unit) => {
-        if (!byName.has(unit.skill)) byName.set(unit.skill, new Set());
-        byName.get(unit.skill).add(unit.hash);
-        return byName;
-      }, new Map())
-    : null;
+  const skillNames = skills ? new Set(skills.map((skill) => skill.name)) : null;
   for (const entry of Object.values(ledger.entries)) {
     if (entry.memoryPath !== memoryPath) continue;
     for (const [sessionId, obs] of Object.entries(entry.sessions)) {
@@ -270,9 +240,7 @@ export function ledgerGapObservations(ledger, memoryPath, skills = null) {
         quote: obs.quote,
         recurrenceRisk: obs.recurrenceRisk,
         domain: obs.domain === "orchestration" ? "orchestration" : "project",
-        ...(obs.coveredBySkill &&
-        (!skillCoverage ||
-          obs.coveredBySkillHashes?.some((hash) => skillCoverage.get(obs.coveredBySkill)?.has(hash)))
+        ...(obs.coveredBySkill && (!skillNames || skillNames.has(obs.coveredBySkill))
           ? { coveredBySkill: obs.coveredBySkill }
           : {}),
       });

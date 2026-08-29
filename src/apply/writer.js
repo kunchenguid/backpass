@@ -445,15 +445,17 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
   const landedDescriptionDelta = accepted
     .filter((edit) => landed.has(edit.id))
     .reduce((sum, edit) => sum + (edit.descriptionDelta || 0), 0);
+  const memoryPlan = orderedPlanned.find((item) => item.relative === proposal.memoryFile.path);
+  const budgetTarget = memoryPlan || orderedPlanned[0];
+  const surfaceBudget = budgetTarget
+    ? budgetStatus(memoryText, memoryPlan?.text ?? memoryText, config.budgetTokens, {
+        current: descriptionTokensNow,
+        projected: descriptionTokensNow + landedDescriptionDelta,
+      })
+    : null;
   for (const item of orderedPlanned) {
     const { relative, resolved, before, text, applied } = item;
-    const budget =
-      relative === proposal.memoryFile.path
-        ? budgetStatus(before, text, config.budgetTokens, {
-            current: descriptionTokensNow,
-            projected: descriptionTokensNow + landedDescriptionDelta,
-          })
-        : null;
+    const budget = item === budgetTarget ? surfaceBudget : null;
 
     let commit = null;
     try {
@@ -469,19 +471,18 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     }
     committed.push({ ...item, commit });
     results.written.push({ file: relative, edits: applied, budget, dryRun });
+  }
 
-    // Shrinking over several runs is the design, so this is a heading, not a failure.
-    if (budget && !budget.withinBudget) {
-      results.warnings.push(
-        overBudgetWarning(
-          surfaceLabel(
-            relative,
-            Math.max(descriptionTokensNow, descriptionTokensNow + landedDescriptionDelta),
-          ),
-          budget,
+  if (surfaceBudget && !surfaceBudget.withinBudget) {
+    results.warnings.push(
+      overBudgetWarning(
+        surfaceLabel(
+          proposal.memoryFile.path,
+          Math.max(descriptionTokensNow, descriptionTokensNow + landedDescriptionDelta),
         ),
-      );
-    }
+        surfaceBudget,
+      ),
+    );
   }
 
   if (!dryRun && canonical) {

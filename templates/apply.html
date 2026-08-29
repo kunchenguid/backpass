@@ -946,9 +946,7 @@
 
         // ---- budget gauge ----
         document.getElementById("gauge-title").textContent =
-          "Always-loaded budget · " +
-          (P.memoryFile.path || "") +
-          (budget.descriptionTokens ? " + skill descriptions" : "");
+          "Always-loaded budget · " + (P.memoryFile.path || "");
         document.getElementById("cap-label").textContent = fmt(budget.capTokens) + " tok cap";
         document.getElementById("gauge-now").style.width = pct(budget.current, budget.capTokens) + "%";
 
@@ -985,16 +983,20 @@
           head.appendChild(el("span", "kind", edit.kind === "extract" ? "EXTRACT -> SKILL" : edit.kind.toUpperCase()));
           head.appendChild(el("span", "title", edit.title));
           var delta = edit.deltaTokens || 0;
-          var deltaNode = el(
-            "span",
-            "delta num " + (delta < 0 ? "pos" : delta > 0 ? "neg" : ""),
-            "Δ " +
-              (delta > 0 ? "+" : "") +
-              fmt(delta) +
-              " tok" +
-              (edit.targetsMemoryFile ? "" : " (not always-loaded)"),
+          var descriptionDelta = edit.descriptionDelta || 0;
+          function deltaNode(label, value) {
+            return el(
+              "span",
+              "delta num " + (value < 0 ? "pos" : value > 0 ? "neg" : ""),
+              "Δ " + label + " " + (value > 0 ? "+" : "") + fmt(value) + " tok",
+            );
+          }
+          head.appendChild(
+            edit.targetsMemoryFile
+              ? deltaNode("memory", delta)
+              : deltaNode("on trigger", delta - descriptionDelta),
           );
-          head.appendChild(deltaNode);
+          if (descriptionDelta) head.appendChild(deltaNode("description (always-loaded)", descriptionDelta));
           card.appendChild(head);
 
           var body = el("div", "edit-body");
@@ -1132,7 +1134,8 @@
         function recompute() {
           var accepted = 0,
             rejected = 0,
-            tok = budget.current;
+            tok = budget.current,
+            descriptionTok = budget.descriptionTokens || 0;
           edits.forEach(function (e) {
             if (decisions[e.id] === "accepted") {
               accepted += 1;
@@ -1141,12 +1144,17 @@
               // description a created skill adds). Skill bodies never move this bar.
               if (e.targetsMemoryFile) tok += e.deltaTokens || 0;
               tok += e.descriptionDelta || 0;
+              descriptionTok += e.descriptionDelta || 0;
             } else if (decisions[e.id] === "rejected") {
               rejected += 1;
             }
           });
           var over = tok > budget.capTokens;
 
+          document.getElementById("gauge-title").textContent =
+            "Always-loaded budget · " +
+            (P.memoryFile.path || "") +
+            (descriptionTok > 0 ? " + skill descriptions" : "");
           document.getElementById("n-accept").textContent = accepted;
           document.getElementById("n-reject").textContent = rejected;
 

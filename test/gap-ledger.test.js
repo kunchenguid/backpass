@@ -342,7 +342,7 @@ test("mergeGapEntries drops what it cannot verify instead of guessing", () => {
   assert.ok(ledger.entries["c".repeat(16)], "c stayed untouched");
 });
 
-test("failed-trigger evidence survives unchanged skill coverage and retires after a skill fix", () => {
+test("failed-trigger evidence survives skill body edits", () => {
   const phrasing = "Run pnpm lint before committing changes.";
   const citedSkill = {
     name: "lint-ritual",
@@ -384,21 +384,21 @@ test("failed-trigger evidence survives unchanged skill coverage and retires afte
   });
   assert.equal(afterUnrelatedEdit.covered, 0, "an unrelated body edit preserves the failed-trigger evidence");
 
-  const fixedSkill = {
+  const rewrittenBody = {
     ...unrelatedEdit,
     body: "# Notes\n\nUnrelated details changed.\n\n- Run pnpm lint before committing changes every time.\n",
   };
-  const stats = pruneGapLedger(ledger, {
+  const afterBodyRewrite = pruneGapLedger(ledger, {
     memoryFile: memoryFile(),
     memoryPath: MEMORY_PATH,
     maxAge: "all",
-    skills: [fixedSkill],
+    skills: [rewrittenBody],
   });
-  assert.equal(stats.covered, 1, "changed covering content that resolves the gap retires it");
-  assert.deepEqual(ledger.entries, {});
+  assert.equal(afterBodyRewrite.covered, 0, "body edits never invalidate judged failed-trigger evidence");
+  assert.equal(Object.keys(ledger.entries).length, 1);
 });
 
-test("an unavailable or non-covering cited skill remains ordinary gap evidence", () => {
+test("a missing skill suppresses its citation while body edits preserve judged citations", () => {
   const phrasing = "Run pnpm lint before committing changes.";
   const citedSkill = {
     name: "lint-ritual",
@@ -420,11 +420,11 @@ test("an unavailable or non-covering cited skill remains ordinary gap evidence",
   assert.equal(missing.length, 2);
   assert.ok(missing.every((observation) => observation.coveredBySkill === undefined));
 
-  const noLongerCovered = ledgerGapObservations(ledger, MEMORY_PATH, [
+  const bodyEdited = ledgerGapObservations(ledger, MEMORY_PATH, [
     { ...citedSkill, body: "- Run the formatter before committing.\n" },
   ]);
-  assert.equal(noLongerCovered.length, 2);
-  assert.ok(noLongerCovered.every((observation) => observation.coveredBySkill === undefined));
+  assert.equal(bodyEdited.length, 2);
+  assert.ok(bodyEdited.every((observation) => observation.coveredBySkill === "lint-ritual"));
   assert.equal(Object.values(ledger.entries)[0].sessions.s1.coveredBySkill, "lint-ritual");
   assert.equal(Object.values(ledger.entries)[0].sessions.s2.coveredBySkill, "lint-ritual");
 });

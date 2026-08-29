@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import vm from "node:vm";
 
 import {
   applyEdit,
@@ -1035,6 +1036,80 @@ test("renderApplySurface writes one valid document through the real template", (
   assert.deepEqual(extractInjectedPayload(html), { ...payload, toolVersion: "0.1.0" });
 });
 
+test("the apply surface separates memory, description, and on-trigger deltas", () => {
+  class Node {
+    constructor(text = "") {
+      this.textContent = text;
+      this.children = [];
+      this.style = {};
+    }
+    appendChild(child) {
+      this.children.push(child);
+      return child;
+    }
+    setAttribute() {}
+    addEventListener() {}
+  }
+  const nodes = new Map();
+  const document = {
+    createElement: () => new Node(),
+    createTextNode: (text) => new Node(String(text)),
+    getElementById: (id) => {
+      if (!nodes.has(id)) nodes.set(id, new Node());
+      return nodes.get(id);
+    },
+  };
+  const textOf = (node) => node.textContent + node.children.map(textOf).join("");
+  const proposal = {
+    generatedAt: "2026-08-01T00:00:00.000Z",
+    repo: { name: "demo" },
+    memoryFile: { path: "AGENTS.md" },
+    stats: { harnessCounts: {}, transcripts: 2, positive: 0, negative: 0, gapClusters: 0, skillExtractions: 1 },
+    config: { maxEditsPerRun: 5, minGapEvidence: 2 },
+    budget: { current: 100, projected: 82, capTokens: 200, descriptionTokens: 0, mode: "cap" },
+    edits: [
+      {
+        id: "e1",
+        kind: "extract",
+        title: "extract setup",
+        file: "AGENTS.md",
+        targetsMemoryFile: true,
+        deltaTokens: -20,
+        descriptionDelta: 5,
+        hunks: [],
+        skills: [{ name: "setup", path: ".agents/skills/setup/SKILL.md", description: "Load for setup.", body: "body" }],
+        evidence: [],
+      },
+      {
+        id: "e2",
+        kind: "rewrite",
+        title: "tighten trigger",
+        file: ".agents/skills/db/SKILL.md",
+        targetsMemoryFile: false,
+        deltaTokens: -3,
+        descriptionDelta: -2,
+        hunks: [],
+        evidence: [],
+      },
+    ],
+  };
+  const repo = makeRepo();
+  const target = renderApplySurface(proposal, new State(repo.root), "0.1.0");
+  const html = fs.readFileSync(target, "utf8");
+  const window = {};
+  window.window = window;
+  for (const match of html.matchAll(/<script>([\s\S]*?)<\/script>/g)) {
+    vm.runInNewContext(match[1], { window, document });
+  }
+
+  const cards = nodes.get("edits").children;
+  assert.match(textOf(cards[0]), /Δ memory -20 tok/);
+  assert.match(textOf(cards[0]), /Δ description \(always-loaded\) \+5 tok/);
+  assert.match(textOf(cards[1]), /Δ on trigger -1 tok/);
+  assert.match(textOf(cards[1]), /Δ description \(always-loaded\) -2 tok/);
+  assert.equal(nodes.get("gauge-title").textContent, "Always-loaded budget · AGENTS.md + skill descriptions");
+});
+
 test("the decision vector from the review surface is parsed back into decisions", () => {
   const ids = ["e1", "e2", "e3"];
   assert.deepEqual(parseDecisions("BACKPASS_DECISIONS e1=accepted e2=rejected e3=accepted", ids), {
@@ -1545,6 +1620,35 @@ test("post-apply warnings label a newly created skill description as always-load
     dryRun: true,
   });
   assert.deepEqual(results.failed, []);
+  assert.match(results.warnings[0], /always-loaded surface \(AGENTS\.md \+ skill descriptions\)/);
+});
+
+test("a skill-only shrink reports the remaining always-loaded overage", () => {
+  const oldDescription = "trigger ".repeat(60).trim();
+  const newDescription = "trigger ".repeat(50).trim();
+  const skill = `---\nname: db\ndescription: ${oldDescription}\n---\n\nbody\n`;
+  const built = gate({
+    files: { ".agents/skills/db/SKILL.md": skill },
+    edit: (root) =>
+      writeIn(root, ".agents/skills/db/SKILL.md", (text) => text.replace(oldDescription, newDescription)),
+    annotation: { edits: [claim(["H1"], { title: "trim the trigger" })] },
+    config: config({ budgetTokens: 100 }),
+  });
+  assert.deepEqual(built.violations, []);
+
+  const results = applyDecisions({
+    proposal: built.proposal,
+    decisions: { e1: "accepted" },
+    repo: built.repo,
+    state: built.state,
+    config: { budgetTokens: 100 },
+    dryRun: true,
+  });
+  assert.deepEqual(results.failed, []);
+  assert.equal(results.written.length, 1);
+  assert.equal(results.written[0].file, ".agents/skills/db/SKILL.md");
+  assert.ok(results.written[0].budget.delta < 0);
+  assert.ok(results.written[0].budget.projected > 100);
   assert.match(results.warnings[0], /always-loaded surface \(AGENTS\.md \+ skill descriptions\)/);
 });
 
