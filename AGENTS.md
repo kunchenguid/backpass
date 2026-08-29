@@ -162,8 +162,9 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   open entries, `foldForRun` runs ONE consolidation call (`src/consolidate.js`) that merges paraphrased entries
   (`mergeGapEntries`) - record, consolidate, prune, in that order. Consolidation failure
   degrades to lexical identity with a warning, never an abort. Gaps also carry `domain`;
-  `orchestration` sightings (task-harness mistakes, not this repo's engineering) are
-  counted in `totals.orchestrationGapSightings` and excluded from clustering, so they can
+  `orchestration` sightings (mistakes caused by the external harness or tooling that
+  orchestrated the task, not by this repo) are counted in
+  `totals.orchestrationGapSightings` and excluded from clustering, so they can
   never reach a proposal - there is deliberately no orchestrator-memory write path.
 - **backpass must never analyze itself.** Its own acpx calls are filed by each harness
   under the repo's cwd, a tier-1 match. Every prompt starts with `SELF_SESSION_SENTINEL`

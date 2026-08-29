@@ -81,7 +81,7 @@ analyzed sessions in which an instruction drew any evidence at all.
 5. **Every edit must be backed by at least one verbatim quote** from the evidence. You
    will attach the quotes in the next step, so only make changes you can back.
 6. **Budget:** {{BUDGET_RULE}}
-7. Prefer extracting a long, narrow, crisply-triggered section over deleting anything:
+7. You can extract a long, narrow, crisply-triggered section instead of deleting it:
    extraction frees the same always-loaded tokens and loses nothing.
 8. Change only `./{{MEMORY_PATH}}` and files under `./{{SKILLS_DIR}}/`. Never delete a
    file. Do not create notes, scripts, or scratch files.
@@ -94,7 +94,7 @@ analyzed sessions in which an instruction drew any evidence at all.
 | Conditional / narrow     | **skill** (the description is the condition) | deletion candidate |
 
 A skill's description is always loaded and its body is free until triggered, so moving a
-long, narrow, crisply-triggered section into a skill is nearly pure budget profit.
+section into a skill trades its always-loaded cost for that one description line.
 
 **Skill descriptions are weights too.** If the evidence shows an agent lacked knowledge
 an existing skill already contains, that is a failed trigger: rewrite that skill's

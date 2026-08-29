@@ -158,8 +158,9 @@ strict JSON: which instructions helped, which were violated, and what mistakes n
 instruction covers. Every negative carries a class - `harm` (following the instruction
 caused damage), `non-compliance` (the agent ignored it), or `irrelevant` - because those
 argue for opposite fates: harm argues against an instruction, non-compliance argues for
-reinforcing it. Every gap carries a domain - `project` for this repository's own
-engineering, `orchestration` for the task-management layer around the session - and the
+reinforcing it. Every gap carries a domain - `orchestration` when the mistake was caused
+not by this repository but by an external agent harness or tooling that orchestrated the
+task, `project` for every other mistake - and the
 analysis is shown the ledger's open gaps so it can cite an existing gap id instead of
 coining a paraphrase of it.
 
@@ -193,8 +194,9 @@ consolidation call sees the full open gap set and merges entries that describe t
 mistake. That second judgment is what lets two sightings of a brand-new gap in the same
 run's parallel fan-out corroborate. A failed consolidation call degrades the run to
 lexical identity and says so; it never aborts. Orchestration-domain gaps are counted and
-reported but never cluster: mistakes about the task harness around a session do not
-become instructions in the project's memory file.
+reported but never cluster: a mistake caused not by this repository but by the external
+agent harness or tooling that orchestrated a session does not become an instruction in the
+project's memory file.
 
 Only evidence judged against the _current_ memory-file set hash is folded into a proposal. A
 transcript that fell out of this run's sample - the time window, `maxTranscripts`, or the

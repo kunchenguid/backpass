@@ -53,12 +53,12 @@ Rules, in order of importance:
    or violated the instruction - evidence the instruction failed to steer, which argues
    for reinforcing it, never for deleting it. `irrelevant`: on inspection the moment
    does not actually bear on this instruction. Never report a skipped rule as `harm`.
-4. **`domain` states whose mistake a gap is.** `project`: about this repository's own
-   engineering - its code, tests, build, docs, releases, conventions. `orchestration`:
-   about the task-management layer around the session - task briefs and their scope
-   (scout/read-only rules), status reporting to a supervisor, approval and authorization
-   flows, delivery-lifecycle process imposed from outside the repository. Orchestration
-   gaps are counted but never proposed into this repository's memory file.
+4. **`domain` states what caused a gap.** A gap is `orchestration` when the mistake was
+   not caused by this repository, but by an external agent harness or tooling that
+   orchestrated the task (a task brief, a supervisor's process, the harness itself - by
+   way of illustration only, not a list to match against); every other gap is `project`.
+   Ask the causal question, not which category the wording resembles. Orchestration gaps
+   are counted but never proposed into this repository's memory file.
 5. **Do not confabulate influence.** Only call something positive when the trace shows
    the agent doing the specific thing the instruction asks for. An outcome that would
    have happened anyway is not evidence.

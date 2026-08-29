@@ -26,9 +26,9 @@ import { sha256 } from "./state.js";
  *    merged by the pre-synthesis consolidation pass (`mergeGapEntries`, driven by
  *    `src/consolidate.js`), which is what lets two same-run parallel sightings - neither
  *    of which could cite the other - still corroborate.
- *  - Every observation carries the `domain` the analysis judged: `project` for mistakes
- *    about this repository's own engineering, `orchestration` for mistakes about the
- *    task-management layer around it (briefs, scout scope, status records, approvals).
+ *  - Every observation carries the `domain` the analysis judged: `orchestration` when the
+ *    mistake was not caused by this repository but by an external agent harness or tooling
+ *    that orchestrated the task, `project` for every other mistake.
  *    Orchestration sightings are recorded for legibility but never counted toward
  *    corroboration and never surface in a proposal; a missing domain counts as project,
  *    so evidence from before the field existed keeps its old behavior.

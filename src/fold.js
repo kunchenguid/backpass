@@ -91,9 +91,9 @@ export function foldEvidence(evidenceRecords, { minGapEvidence = 2, memoryFile =
     }
   }
 
-  // Orchestration-domain sightings are about the task-management layer around the
-  // session, not this repository's engineering; they are counted for legibility but
-  // never cluster, so they can never corroborate into a project proposal.
+  // Orchestration-domain sightings are mistakes caused not by this repository but by the
+  // external agent harness or tooling that orchestrated the session; they are counted for
+  // legibility but never cluster, so they can never corroborate into a project proposal.
   const allObservations = gapObservations ?? recordObservations;
   const projectObservations = allObservations.filter((obs) => obs?.domain !== "orchestration");
   const orchestrationGapSightings = allObservations.length - projectObservations.length;
@@ -230,8 +230,8 @@ export function renderEvidenceForPrompt(summary) {
   lines.push("### Gap clusters (mistakes no current instruction covers)");
   if (summary.totals.orchestrationGapSightings) {
     lines.push(
-      `- ${summary.totals.orchestrationGapSightings} orchestration-domain sighting(s) about the ` +
-        `task-management layer were excluded; they never enter this repository's memory file`,
+      `- ${summary.totals.orchestrationGapSightings} orchestration-domain sighting(s) caused by the ` +
+        `orchestrating harness or tooling were excluded; they never enter this repository's memory file`,
     );
   }
   if (!summary.gaps.length) {
