@@ -231,17 +231,34 @@ export async function acpxVersion({ timeoutMs = 10_000 } = {}) {
  * real auth gate (ACP -32000); for claude it is not, which is why `src/agents.js`
  * checks `claude auth status` before ever calling this.
  *
+ * `run` is injectable so both branches of the kill path can be exercised without racing
+ * a real subprocess: whether a killed child's buffered output reaches us at all is
+ * timing-dependent, which is exactly why the classification below is an opportunistic
+ * upgrade over `timeout` and never something a caller may rely on.
+ *
  * @returns {Promise<{ verdict: "ok" | "unauthenticated" | "model-unavailable" | "unreachable" | "timeout",
  *   detail: string, availableModels: string[] }>}
  */
-export async function probeSession({ agent, sessionName, cwd = undefined, timeoutMs = 20_000 }) {
+export async function probeSession({ agent, sessionName, cwd = undefined, timeoutMs = 10_000, run: exec = run }) {
   const acpxAgent = acpxAgentName(agent);
-  const created = await run([acpxAgent, "sessions", "new", "--name", sessionName], { timeoutMs, cwd });
+  const created = await exec([acpxAgent, "sessions", "new", "--name", sessionName], { timeoutMs, cwd });
   if (created.spawnError?.code === "ENOENT") throw notFoundError(created);
   if (created.timedOut) {
+    // acpx writes its diagnostics as it goes, so a handshake that later wedged has often
+    // already named why on stderr. Reading that back is what turns a bare stall into
+    // "not logged in" with a command that fixes it; only a silent hang stays a timeout.
+    const seconds = Math.round(timeoutMs / 1000);
+    const classified = classifyAcpxFailure(created);
+    if (classified) {
+      return {
+        verdict: classified,
+        detail: firstLine(created.stderr) || `reported before the probe was killed at ${seconds}s`,
+        availableModels: [],
+      };
+    }
     return {
       verdict: "timeout",
-      detail: `probe timed out after ${Math.round(timeoutMs / 1000)}s`,
+      detail: `no answer in ${seconds}s`,
       availableModels: [],
     };
   }
@@ -251,7 +268,7 @@ export async function probeSession({ agent, sessionName, cwd = undefined, timeou
   }
 
   try {
-    const status = await run(["--format", "json", acpxAgent, "status", "-s", sessionName], { timeoutMs, cwd });
+    const status = await exec(["--format", "json", acpxAgent, "status", "-s", sessionName], { timeoutMs, cwd });
     let availableModels = [];
     if (status.code === 0) {
       try {
@@ -263,7 +280,7 @@ export async function probeSession({ agent, sessionName, cwd = undefined, timeou
     }
     return { verdict: "ok", detail: "", availableModels };
   } finally {
-    const closed = await run([acpxAgent, "sessions", "close", sessionName], { timeoutMs, cwd });
+    const closed = await exec([acpxAgent, "sessions", "close", sessionName], { timeoutMs, cwd });
     if (closed.code !== 0) warn(`could not close acpx probe session ${sessionName}`);
   }
 }

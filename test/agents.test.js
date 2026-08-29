@@ -163,6 +163,10 @@ test("claude is decided by `claude auth status`, not by the acpx session probe",
       { agent: "claude", model: "claude-sonnet-5" },
       {
         sessionName: "t",
+        // Generous on purpose: the fake exits at once, so this only rules out a loaded
+        // CI box tripping the real 5s budget and turning a scripted verdict into a
+        // timeout. Seen failing this way under a parallel suite run.
+        nativeTimeoutMs: 60_000,
         probeSession: async () => {
           acpxProbed = true;
           fs.writeFileSync(marker, "");
@@ -183,6 +187,7 @@ test("claude is decided by `claude auth status`, not by the acpx session probe",
       { agent: "claude", model: "claude-sonnet-5" },
       {
         sessionName: "t",
+        nativeTimeoutMs: 60_000,
         probeSession: async () => ({ verdict: "ok", detail: "", availableModels: ["default", "sonnet"] }),
       },
     );
@@ -444,4 +449,77 @@ test("acpx failure classification and the per-adapter tables", () => {
   assert.equal(effortOptionKey("claude"), "effort");
   assert.equal(effortOptionKey("pi"), null, "Pi effort is process --thinking, not ACP set");
   assert.equal(effortOptionKey("grok"), null);
+});
+
+test("a native status call that never answers is a timeout, not `not installed`", async () => {
+  // The failure this pins: a killed `claude auth status` exits non-zero with unparseable
+  // output, which read as `unreachable` - whose hint is "install the claude CLI", to a
+  // user whose claude is installed and logged in.
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-hangbin-"));
+  const script = path.join(bin, "claude");
+  fs.writeFileSync(script, "#!/bin/sh\nexec sleep 30\n");
+  fs.chmodSync(script, 0o755);
+  const oldPath = process.env.PATH;
+  process.env.PATH = `${bin}${path.delimiter}${oldPath}`;
+  try {
+    const verdict = await probeCandidate(
+      { agent: "claude", model: "claude-sonnet-5" },
+      {
+        sessionName: "t",
+        nativeTimeoutMs: 150,
+        probeSession: async () => assert.fail("a hung native check must not fall through to the acpx probe"),
+      },
+    );
+    assert.equal(verdict.verdict, "timeout");
+    assert.match(verdict.detail, /did not answer/);
+  } finally {
+    process.env.PATH = oldPath;
+  }
+});
+
+test("an adapter that never answers is waited on once, not once per rung it appears in", async () => {
+  // The default analysis ladder lists pi and opencode twice each. Before this, a harness
+  // that is not spawnable was probed - and waited on - once per rung, so the cost of
+  // declaring the ladder empty was paid seven times for five harnesses.
+  const { resolver, calls } = resolverWith({});
+  await assert.rejects(() => resolver.resolve("analysis"), UserError);
+  assert.deepEqual(calls, [
+    "pi|gpt-5.6-luna",
+    "opencode|gpt-5.6-luna",
+    "codex|gpt-5.6-luna",
+    "claude|claude-sonnet-5",
+    "grok|grok-4.6",
+  ]);
+});
+
+test("a timed-out adapter retires for the run, but a rejected model does not", async () => {
+  const hung = resolverWith({ "pi|gpt-5.6-luna": "timeout" });
+  await assert.rejects(() => hung.resolver.resolve("analysis"), UserError);
+  assert.equal(
+    hung.calls.filter((c) => c.startsWith("pi|")).length,
+    1,
+    "an adapter that never answered cannot answer differently for another model",
+  );
+
+  // `model-unavailable` is a fact about the model, not the adapter: pi must be asked again.
+  const picky = resolverWith({
+    "pi|gpt-5.6-luna": "model-unavailable",
+    "pi|grok-4.6": { resolvedModel: "xai/grok-4.6" },
+  });
+  const pick = await picky.resolver.resolve("analysis");
+  assert.equal(pick.agent, "pi");
+  assert.equal(pick.model, "xai/grok-4.6");
+  assert.equal(picky.calls.filter((c) => c.startsWith("pi|")).length, 2);
+});
+
+test("an exhausted ladder names a command for every row, including the hung ones", async () => {
+  const { resolver } = resolverWith({ "pi|gpt-5.6-luna": "timeout", "claude|claude-sonnet-5": "unauthenticated" });
+  const err = await resolver.resolve("analysis").then(
+    () => null,
+    (e) => e,
+  );
+  assert.ok(err instanceof UserError);
+  assert.match(err.message, /acpx pi sessions new/, "a hung adapter names the command that reproduces the hang");
+  assert.match(err.message, /claude auth login/);
+  assert.match(err.message, /install the codex CLI/);
 });

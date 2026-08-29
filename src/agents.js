@@ -1,6 +1,6 @@
 import { UserError, color, info, warn } from "./logger.js";
 import { DEFAULT_EFFORT, LEGACY_DEFAULT_AGENTS } from "./config.js";
-import { AcpxError, acpxVersion, classifyAcpxFailure, probeSession } from "./acpx.js";
+import { AcpxError, acpxAgentName, acpxVersion, classifyAcpxFailure, probeSession } from "./acpx.js";
 import { runCapture } from "./subprocess.js";
 
 /**
@@ -17,7 +17,15 @@ import { runCapture } from "./subprocess.js";
  * is `NATIVE_PROBES` below: the claude adapter creates sessions happily while logged
  * out and only fails at prompt time, so its login state has to come from the harness's
  * own `claude auth status`. opencode's ACP session has been seen to wedge for minutes
- * on a large profile, so `opencode models` answers first and the ACP probe is capped.
+ * on a large profile, so `opencode models` answers first.
+ *
+ * A probe that never answers is the expensive failure, because it is paid per candidate
+ * before the ladder can be declared empty. Three rules keep it bounded and named:
+ * `sessions new` does no model work, so it is capped at `PROBE_TIMEOUT_MS` for every
+ * adapter; a killed probe is classified from what it already printed before it is called
+ * a timeout (`probeSession`); and an adapter that never answered is model-independent,
+ * so the first `unreachable` or `timeout` retires that agent for the whole run instead
+ * of being re-probed once per rung it appears in.
  *
  * Verdicts are cached in `.backpass/agent-probe-cache.json` (12h for ok, 30min for
  * negatives, invalidated on an acpx version change) and memoized for the run.
@@ -26,8 +34,9 @@ import { runCapture } from "./subprocess.js";
 const OK_TTL_MS = 12 * 60 * 60 * 1000;
 const NEGATIVE_TTL_MS = 30 * 60 * 1000;
 const NATIVE_TIMEOUT_MS = 5_000;
-const PROBE_TIMEOUT_MS = 20_000;
-const PROBE_TIMEOUT_BY_AGENT = { opencode: 10_000 };
+const PROBE_TIMEOUT_MS = 10_000;
+/** Verdicts that describe the adapter itself, not the model asked for. */
+const AGENT_LEVEL_VERDICTS = new Set(["unreachable", "timeout"]);
 
 /** Adapters whose model list is open-ended: any id is forwarded, none can be verified. */
 const TRUSTING_MODEL_AGENTS = new Set(["claude"]);
@@ -53,10 +62,16 @@ const LOGIN_HINTS = {
  * the acpx probe decides). See the module header for why this table exists at all.
  */
 const NATIVE_PROBES = {
-  async claude({ model }) {
-    const result = await runCapture("claude", ["auth", "status"], { timeoutMs: NATIVE_TIMEOUT_MS });
+  async claude({ model }, { timeoutMs = NATIVE_TIMEOUT_MS } = {}) {
+    const result = await runCapture("claude", ["auth", "status"], { timeoutMs });
     if (result.spawnError?.code === "ENOENT") {
       return { verdict: "unreachable", detail: "claude CLI not found on PATH", resolvedModel: model };
+    }
+    if (result.timedOut) {
+      // A killed status call exits non-zero with unparseable output, which would otherwise
+      // read as "not installed / not spawnable" and tell a logged-in user to install the
+      // CLI they already have. An installed claude that did not answer is a timeout.
+      return { verdict: "timeout", detail: `claude auth status did not answer in ${timeoutMs / 1000}s` };
     }
     let parsed = null;
     try {
@@ -73,8 +88,8 @@ const NATIVE_PROBES = {
     }
     return null;
   },
-  async opencode({ model }) {
-    const result = await runCapture("opencode", ["models"], { timeoutMs: NATIVE_TIMEOUT_MS });
+  async opencode({ model }, { timeoutMs = NATIVE_TIMEOUT_MS } = {}) {
+    const result = await runCapture("opencode", ["models"], { timeoutMs });
     if (result.spawnError?.code === "ENOENT") {
       return { verdict: "unreachable", detail: "opencode CLI not found on PATH" };
     }
@@ -133,17 +148,17 @@ export function candidateKey({ agent, model }) {
  * then the zero-token acpx session probe, then model-id resolution.
  *
  * @param {{ agent: string, model: string }} candidate
- * @param {{ cwd?: string, sessionName?: string,
+ * @param {{ cwd?: string, sessionName?: string, nativeTimeoutMs?: number,
  *   probeSession?: (args: { agent: string, sessionName: string, cwd?: string, timeoutMs?: number }) =>
  *     Promise<{ verdict: string, detail: string, availableModels?: string[] }> }} [options]
  * @returns {Promise<{ verdict: string, detail: string, resolvedModel: string | null }>}
  */
 export async function probeCandidate(candidate, options = {}) {
-  const { cwd, sessionName, probeSession: probe = probeSession } = options;
+  const { cwd, sessionName, probeSession: probe = probeSession, nativeTimeoutMs } = options;
   const { agent, model } = candidate;
   const native = NATIVE_PROBES[agent];
   if (native) {
-    const early = await native(candidate);
+    const early = await native(candidate, { timeoutMs: nativeTimeoutMs ?? NATIVE_TIMEOUT_MS });
     if (early) return { resolvedModel: null, ...early };
   }
 
@@ -151,7 +166,7 @@ export async function probeCandidate(candidate, options = {}) {
     agent,
     sessionName,
     cwd,
-    timeoutMs: PROBE_TIMEOUT_BY_AGENT[agent] || PROBE_TIMEOUT_MS,
+    timeoutMs: PROBE_TIMEOUT_MS,
   });
   if (result.verdict !== "ok") return { verdict: result.verdict, detail: result.detail, resolvedModel: null };
 
@@ -184,6 +199,9 @@ export function isProbeEntryFresh(entry, { now = Date.now() } = {}) {
 function hintFor(agent, verdict) {
   if (verdict === "unauthenticated" && LOGIN_HINTS[agent]) return `-> run: ${LOGIN_HINTS[agent]}`;
   if (verdict === "unreachable") return `-> install the ${agent} CLI`;
+  // backpass cannot repair a wedged adapter, so the actionable thing is the command that
+  // reproduces the hang with acpx's own output visible.
+  if (verdict === "timeout") return `-> run: acpx ${acpxAgentName(agent)} sessions new --name probe`;
   return "";
 }
 
@@ -213,6 +231,10 @@ export class AgentResolver {
     this.memo = new Map();
     /** Probes in flight, so parallel analysis workers never double-probe a candidate. */
     this.inflight = new Map();
+    /** Agents that never answered this run: agent -> entry. Not cached to disk - the
+     * on-disk cache is keyed by candidate, and one adapter's silence is not a measurement
+     * of a model it was never asked for. */
+    this.deadAgents = new Map();
     this.picks = {};
     this.cache = null;
     this.version = undefined;
@@ -236,6 +258,8 @@ export class AgentResolver {
   async verdictFor(candidate) {
     const key = candidateKey(candidate);
     if (this.memo.has(key)) return this.memo.get(key);
+    const dead = this.deadAgents.get(candidate.agent);
+    if (dead) return dead;
     if (this.inflight.has(key)) return this.inflight.get(key);
     const pending = this.probeAndRecord(candidate, key).finally(() => this.inflight.delete(key));
     this.inflight.set(key, pending);
@@ -247,6 +271,7 @@ export class AgentResolver {
     const cached = cache.entries[key];
     if (!this.bypassCache && isProbeEntryFresh(cached, { now: this.now() })) {
       this.memo.set(key, { ...cached, cached: true });
+      this.noteAgentVerdict(candidate.agent, this.memo.get(key));
       return this.memo.get(key);
     }
 
@@ -261,8 +286,19 @@ export class AgentResolver {
     };
     cache.entries[key] = entry;
     this.memo.set(key, entry);
+    this.noteAgentVerdict(candidate.agent, entry);
     this.saveCache();
     return entry;
+  }
+
+  /**
+   * Retire an agent for the rest of the run when the adapter itself never answered.
+   * A ladder lists the same harness under several models, so without this a harness that
+   * is not spawnable is waited on once per rung before the ladder can be called empty.
+   */
+  noteAgentVerdict(agent, entry) {
+    if (!AGENT_LEVEL_VERDICTS.has(entry.verdict) || this.deadAgents.has(agent)) return;
+    this.deadAgents.set(agent, { ...entry, agentLevel: true });
   }
 
   /** The candidates for a role, in order, as `{ agent, model }`. */
@@ -343,6 +379,7 @@ export class AgentResolver {
       // First worker to see the failure records it; the rest just re-resolve.
       const entry = { verdict, detail, resolvedModel: null, checkedAt: new Date(this.now()).toISOString() };
       this.memo.set(key, entry);
+      this.noteAgentVerdict(pick.agent, entry);
       const cache = await this.loadCache();
       cache.entries[key] = entry;
       this.saveCache();
