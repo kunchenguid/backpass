@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.14](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.13...backpass-v0.1.14) (2026-08-29)
+
+
+### Features
+
+* **apply:** visualize gap evidence funnel on review board ([#69](https://github.com/kunchenguid/backpass/issues/69)) ([627b6d3](https://github.com/kunchenguid/backpass/commit/627b6d39cd372038b6d8db667d84cbf4fc4efb01))
+
 ## [0.1.13](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.12...backpass-v0.1.13) (2026-08-29)
 
 
