@@ -398,7 +398,7 @@ test("failed-trigger evidence survives unchanged skill coverage and retires afte
   assert.deepEqual(ledger.entries, {});
 });
 
-test("a missing cited skill remains ordinary gap evidence", () => {
+test("an unavailable or non-covering cited skill remains ordinary gap evidence", () => {
   const phrasing = "Run pnpm lint before committing changes.";
   const citedSkill = {
     name: "lint-ritual",
@@ -409,14 +409,24 @@ test("a missing cited skill remains ordinary gap evidence", () => {
   const ledger = { version: 1, entries: {} };
   recordGapObservations(
     ledger,
-    [record("s1", [{ proposedInstruction: phrasing, coveredBySkill: "lint-ritual" }])],
+    [
+      record("s1", [{ proposedInstruction: phrasing, coveredBySkill: "lint-ritual" }]),
+      record("s2", [{ proposedInstruction: phrasing, coveredBySkill: "lint-ritual" }]),
+    ],
     { skills: [citedSkill] },
   );
 
-  const observations = ledgerGapObservations(ledger, MEMORY_PATH, []);
-  assert.equal(observations.length, 1);
-  assert.equal(observations[0].coveredBySkill, undefined);
+  const missing = ledgerGapObservations(ledger, MEMORY_PATH, []);
+  assert.equal(missing.length, 2);
+  assert.ok(missing.every((observation) => observation.coveredBySkill === undefined));
+
+  const noLongerCovered = ledgerGapObservations(ledger, MEMORY_PATH, [
+    { ...citedSkill, body: "- Run the formatter before committing.\n" },
+  ]);
+  assert.equal(noLongerCovered.length, 2);
+  assert.ok(noLongerCovered.every((observation) => observation.coveredBySkill === undefined));
   assert.equal(Object.values(ledger.entries)[0].sessions.s1.coveredBySkill, "lint-ritual");
+  assert.equal(Object.values(ledger.entries)[0].sessions.s2.coveredBySkill, "lint-ritual");
 });
 
 test("a skill's description line alone can cover a gap", () => {

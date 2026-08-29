@@ -252,7 +252,13 @@ function isCovered(coverage, entry) {
 /** Flatten the ledger into the observation list `foldEvidence` clusters over. */
 export function ledgerGapObservations(ledger, memoryPath, skills = null) {
   const observations = [];
-  const skillNames = skills ? new Set(skills.map((skill) => skill.name)) : null;
+  const skillCoverage = skills
+    ? coverageUnits(null, skills).reduce((byName, unit) => {
+        if (!byName.has(unit.skill)) byName.set(unit.skill, new Set());
+        byName.get(unit.skill).add(unit.hash);
+        return byName;
+      }, new Map())
+    : null;
   for (const entry of Object.values(ledger.entries)) {
     if (entry.memoryPath !== memoryPath) continue;
     for (const [sessionId, obs] of Object.entries(entry.sessions)) {
@@ -264,7 +270,9 @@ export function ledgerGapObservations(ledger, memoryPath, skills = null) {
         quote: obs.quote,
         recurrenceRisk: obs.recurrenceRisk,
         domain: obs.domain === "orchestration" ? "orchestration" : "project",
-        ...(obs.coveredBySkill && (!skillNames || skillNames.has(obs.coveredBySkill))
+        ...(obs.coveredBySkill &&
+        (!skillCoverage ||
+          obs.coveredBySkillHashes?.some((hash) => skillCoverage.get(obs.coveredBySkill)?.has(hash)))
           ? { coveredBySkill: obs.coveredBySkill }
           : {}),
       });

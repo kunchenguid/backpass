@@ -1498,6 +1498,56 @@ test("description bloat with an unchanged memory file trips the always-loaded ca
   );
 });
 
+test("apply labels the first skill description as part of the always-loaded surface", () => {
+  const skill = "---\nname: db\ndescription: \n---\n\nbody\n";
+  const built = gate({
+    files: { ".agents/skills/db/SKILL.md": skill },
+    edit: (root) =>
+      writeIn(root, ".agents/skills/db/SKILL.md", (text) =>
+        text.replace("description: \n", "description: Load before touching the database.\n"),
+      ),
+    annotation: { edits: [claim(["H1"], { title: "add the trigger" })] },
+  });
+  assert.deepEqual(built.violations, []);
+
+  const results = applyDecisions({
+    proposal: built.proposal,
+    decisions: { e1: "accepted" },
+    repo: built.repo,
+    state: built.state,
+    config: { budgetTokens: estimateTokens(MEMORY_TEXT) },
+  });
+  assert.match(results.failed[0].error, /always-loaded surface \(AGENTS\.md \+ skill descriptions\)/);
+  assert.equal(fs.readFileSync(path.join(built.repo.root, ".agents/skills/db/SKILL.md"), "utf8"), skill);
+});
+
+test("post-apply warnings label a newly created skill description as always-loaded", () => {
+  const skillText =
+    "---\nname: release-signing\ndescription: Release.\n---\n\n- Use Node 18 via nvm before running any script.\n";
+  const built = gate({
+    edit: (root) => {
+      writeIn(root, "AGENTS.md", (text) =>
+        text.replace("- Use Node 18 via nvm before running any script.", "- Use the release skill."),
+      );
+      writeIn(root, ".agents/skills/release-signing/SKILL.md", skillText);
+    },
+    annotation: { edits: [claim(["H1", "H2"], { kind: "extract", title: "extract release setup" })] },
+  });
+  assert.deepEqual(built.violations, []);
+  assert.ok(built.proposal.budget.delta < 0);
+
+  const results = applyDecisions({
+    proposal: built.proposal,
+    decisions: { e1: "accepted" },
+    repo: built.repo,
+    state: built.state,
+    config: { budgetTokens: built.proposal.budget.projected - 1 },
+    dryRun: true,
+  });
+  assert.deepEqual(results.failed, []);
+  assert.match(results.warnings[0], /always-loaded surface \(AGENTS\.md \+ skill descriptions\)/);
+});
+
 test("a skill file that changed after the proposal refuses the apply; unchanged, the edit lands", () => {
   const skill = "---\nname: db\ndescription: old trigger\n---\n\nbody\n";
   const build = () =>

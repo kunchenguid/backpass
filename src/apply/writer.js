@@ -42,7 +42,11 @@ function acceptedSubsetBudgetFailure({ proposal, accepted, repo, capTokens, memo
     capTokens,
     descriptionTokensNow,
   );
-  const label = surfaceLabel(relative, descriptionTokensNow);
+  const acceptedDescriptionDelta = accepted.reduce((sum, edit) => sum + (edit.descriptionDelta || 0), 0);
+  const label = surfaceLabel(
+    relative,
+    Math.max(descriptionTokensNow, descriptionTokensNow + acceptedDescriptionDelta),
+  );
   const gate = budgetGateKind(budget);
   if (gate === "cap") {
     return {
@@ -468,7 +472,15 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
 
     // Shrinking over several runs is the design, so this is a heading, not a failure.
     if (budget && !budget.withinBudget) {
-      results.warnings.push(overBudgetWarning(surfaceLabel(relative, descriptionTokensNow), budget));
+      results.warnings.push(
+        overBudgetWarning(
+          surfaceLabel(
+            relative,
+            Math.max(descriptionTokensNow, descriptionTokensNow + landedDescriptionDelta),
+          ),
+          budget,
+        ),
+      );
     }
   }
 
