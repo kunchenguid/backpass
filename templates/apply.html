@@ -132,11 +132,25 @@
       [hidden] {
         display: none !important;
       }
-      .funnel {
+      .ctx {
         border: 1px solid var(--line);
+        background: var(--line);
+        display: grid;
+        grid-template-columns: minmax(0, 3fr) minmax(280px, 2fr);
+        gap: 1px;
+        margin-bottom: 36px;
+      }
+      .ctx-funnel {
         background: var(--panel);
         padding: 13px 18px 14px;
-        margin-bottom: 36px;
+        min-width: 0;
+      }
+      .ctx-stats {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        grid-auto-rows: 1fr;
+        gap: 1px;
+        min-width: 0;
       }
       .funnel-head {
         display: flex;
@@ -676,6 +690,9 @@
           padding: 12px 16px;
           gap: 12px;
         }
+        .ctx {
+          grid-template-columns: minmax(0, 1fr);
+        }
         .frow .fl {
           width: 92px;
         }
@@ -696,13 +713,16 @@
 
       <div class="statrow" id="statrow" hidden></div>
 
-      <div class="funnel" id="funnel" hidden>
-        <div class="funnel-head">
-          <span class="t">Gap funnel · counted across runs</span>
-          <span class="facts num" id="run-facts"></span>
+      <div class="ctx" id="ctx" hidden>
+        <div class="ctx-funnel">
+          <div class="funnel-head">
+            <span class="t">Gap funnel · counted across runs</span>
+            <span class="facts num" id="funnel-floor"></span>
+          </div>
+          <div id="funnel-bars"></div>
+          <div class="funnel-note" id="funnel-note" hidden></div>
         </div>
-        <div id="funnel-bars"></div>
-        <div class="funnel-note" id="funnel-note" hidden></div>
+        <div class="ctx-stats" id="ctx-stats"></div>
       </div>
 
       <div class="gauge-block">
@@ -787,15 +807,15 @@
           document.createTextNode(" transcripts" + (harnessBits.length ? " (" + harnessBits.join(" · ") + ")" : "")),
         );
 
-        // ---- run context: the gap funnel, with the run facts in its header ----
-        // One panel tells the gap story as proportional bars - sightings recorded by
-        // analysis -> project-domain (orchestration excluded) -> distinct gaps after
-        // clustering -> eligible to propose - with each drop-off explained in plain
-        // words. The run facts (edits, evidence, skills) live in the panel head; a
-        // separate stat row would duplicate the funnel's last stage. Every count is
-        // recorded by the fold (`totals` in evidence-summary.json); a proposal saved
-        // before the counts existed falls back to the classic stat row rather than
-        // showing zeros nobody measured.
+        // ---- run context: one frame, the gap funnel beside the run stats ----
+        // A single bordered band. The left pane tells the gap story as proportional
+        // bars - sightings recorded by analysis -> project-domain (orchestration
+        // excluded) -> distinct gaps after clustering -> eligible to propose - with
+        // each drop-off explained in plain words. The right pane holds the run facts
+        // (edits, evidence, skills) as stat cells; a separate stat row would duplicate
+        // the funnel's last stage. Every count is recorded by the fold (`totals` in
+        // evidence-summary.json); a proposal saved before the counts existed falls
+        // back to the classic stat row rather than showing zeros nobody measured.
         function funnelCounts() {
           if (typeof (P.stats || {}).gapSightings !== "number") return null;
           var eligible = P.stats.gapClusters || 0;
@@ -857,17 +877,22 @@
           );
           funnelBar(bars, funnel.eligible, "eligible to propose", funnel.sighted, true);
 
-          var facts = document.getElementById("run-facts");
-          var fact = function (value, label) {
-            facts.appendChild(el("b", null, value));
-            facts.appendChild(document.createTextNode(" " + label));
-          };
-          fact(String(edits.length) + "/" + String((P.config || {}).maxEditsPerRun || edits.length), "edits");
-          facts.appendChild(document.createTextNode(" · "));
-          fact("+" + fmt(P.stats.positive) + " / −" + fmt(P.stats.negative), "evidence");
-          facts.appendChild(document.createTextNode(" · "));
-          fact(fmt(P.stats.skillExtractions), "skills");
-          facts.appendChild(document.createTextNode(" · floor " + funnel.floor + " sessions"));
+          document.getElementById("funnel-floor").textContent = "corroboration floor · " + funnel.floor + " sessions";
+          var statHost = document.getElementById("ctx-stats");
+          [
+            [
+              String(edits.length) + "/" + String((P.config || {}).maxEditsPerRun || edits.length),
+              "edits proposed / cap",
+            ],
+            [fmt(P.stats.positive), "positive evidence"],
+            [fmt(P.stats.negative), "negative evidence"],
+            [fmt(P.stats.skillExtractions), "skill extractions"],
+          ].forEach(function (s) {
+            var box = el("div", "stat");
+            box.appendChild(el("div", "v num", s[0]));
+            box.appendChild(el("div", "k", s[1]));
+            statHost.appendChild(box);
+          });
 
           // The drop lines carry the takeaway; the visible note only speaks when there
           // are no bars to read. funnelNote itself still feeds the zero-edit empty state.
@@ -897,7 +922,7 @@
             noteEl.textContent = funnelNote;
             noteEl.hidden = false;
           }
-          document.getElementById("funnel").hidden = false;
+          document.getElementById("ctx").hidden = false;
         } else {
           // A proposal from before the funnel counts existed: the classic stat row.
           var statrow = document.getElementById("statrow");
