@@ -176,9 +176,8 @@ function describeRole(config, role) {
   }
   const configured =
     typeof config[role].effort === "string" && config[role].effort.trim() ? config[role].effort.trim() : null;
-  return color.dim(
-    `auto - ${config.agents.ladder(role).length} candidates, none probed yet (effort ${formatEffort(configured)})`,
-  );
+  const count = `auto - ${config.agents.ladder(role).length} candidates, none probed yet`;
+  return color.dim(configured ? `${count} (effort ${configured})` : count);
 }
 
 function formatEffort(effort) {
