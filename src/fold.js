@@ -131,7 +131,7 @@ export function foldEvidence(evidenceRecords, { minGapEvidence = 2, memoryFile =
       sessions: cluster.sessions.size,
       recurrenceRisk: highestRisk(cluster.items),
       quotes: cluster.items.slice(0, 6).map((i) => ({ text: i.quote, effect: i.mistake, source: i.source })),
-      ...failedTriggerOf(cluster.items),
+      ...failedTriggerOf(cluster.items, minGapEvidence),
     }))
     .filter((cluster) => cluster.sessions >= minGapEvidence)
     .sort((a, b) => b.sessions - a.sessions);
@@ -207,7 +207,7 @@ function highestRisk(items) {
  * per session, so counting items counts sessions. The most-cited skill wins; a cluster
  * nobody tied to a skill contributes nothing.
  */
-function failedTriggerOf(items) {
+function failedTriggerOf(items, minGapEvidence) {
   const counts = new Map();
   for (const item of items) {
     if (!item.coveredBySkill) continue;
@@ -217,7 +217,9 @@ function failedTriggerOf(items) {
   for (const [skill, sessions] of counts) {
     if (!best || sessions > best.sessions) best = { skill, sessions };
   }
-  return best ? { failedTriggerSkill: best.skill, failedTriggerSessions: best.sessions } : {};
+  return best && best.sessions >= minGapEvidence
+    ? { failedTriggerSkill: best.skill, failedTriggerSessions: best.sessions }
+    : {};
 }
 
 /** Compact rendering of the folded evidence for the synthesis prompt. */

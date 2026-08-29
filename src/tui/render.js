@@ -173,7 +173,7 @@ function headerLines(state, theme, width, spin) {
     const cells = state.narrow ? 16 : 24;
     const over = memory.tokens > memory.budget;
     const left =
-      `${theme.paint(memory.path, "dim")}  ${gaugeBar(theme, ratio, cells)}  ` +
+      `${theme.paint(memory.label || memory.path, "dim")}  ${gaugeBar(theme, ratio, cells)}  ` +
       `${theme.paint(formatCount(memory.tokens), over ? "red" : "mint")} ${theme.paint("/", "faint")} ${theme.paint(`${formatCount(memory.budget)} tok`, "text")}`;
     const right = over
       ? `${theme.paint("OVER", "red", { bold: true })}${theme.paint(" · shrink plan", "faint")}`

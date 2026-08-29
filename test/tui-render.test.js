@@ -175,7 +175,10 @@ test("fold and synthesis events settle the tail stages", () => {
 // ---------- full frames ----------
 
 const DISCOVERY_SCRIPT = [
-  ["memory", { path: "AGENTS.md", tokens: 2412, budget: 5000, units: 63 }],
+  [
+    "memory",
+    { path: "AGENTS.md", label: "AGENTS.md + skill descriptions", tokens: 2412, budget: 5000, units: 63 },
+  ],
   ["discover:start", { harnesses: ["claude", "codex", "opencode", "grok", "pi"] }],
   ["discover:harness:start", { harness: "claude" }],
   ["discover:harness:done", { harness: "claude", scanned: 214, cached: 131, matched: 38, tiers: { 1: 36, 2: 2 } }],
@@ -195,6 +198,7 @@ test("discovery frame: header gauge, rail, per-harness rows, plain-language labe
 
   assert.ok(text.includes("∇ backpass v1.1.0"));
   assert.ok(text.includes("eddies-wallet · 3 worktrees · since 30d"));
+  assert.ok(text.includes("AGENTS.md + skill descriptions"));
   assert.ok(text.includes("2,412 / 5,000 tok"));
   assert.ok(text.includes("63 instructions · budget 48%"));
   assert.ok(text.includes("sessions from this repo so far"));

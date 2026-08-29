@@ -115,7 +115,13 @@ export function reduceEvent(state, event, data, now = Date.now()) {
 
   switch (event) {
     case "memory":
-      state.memory = { path: data.path, tokens: data.tokens, budget: data.budget, units: data.units };
+      state.memory = {
+        path: data.path,
+        label: data.label || data.path,
+        tokens: data.tokens,
+        budget: data.budget,
+        units: data.units,
+      };
       break;
 
     case "discover:start":

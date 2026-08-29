@@ -1,7 +1,7 @@
 import { analyzeTranscripts } from "../analyze.js";
 import { UserError, color, info, json, out, warn } from "../logger.js";
 import { memorySurfaceHash, resolveMemoryFiles } from "../memory.js";
-import { loadSkills, resolveOverflowTarget } from "../skills.js";
+import { loadSkills, resolveOverflowTarget, skillDescriptionTokens } from "../skills.js";
 import { emitProgress } from "../progress.js";
 import { discoverForRun } from "./scan.js";
 import { printUsage } from "./usage.js";
@@ -54,9 +54,11 @@ export async function runAnalysis(ctx) {
   const { repo, config } = ctx;
   const { file, hash, skills } = primaryMemoryFile(repo, config);
   // Deterministic by design: tokens and units come from parsing the file, no model.
+  const descriptionTokens = skillDescriptionTokens(skills);
   emitProgress("memory", {
     path: file.path,
-    tokens: file.tokens,
+    label: skills.length ? `${file.path} + skill descriptions` : file.path,
+    tokens: file.tokens + descriptionTokens,
     budget: config.budgetTokens,
     units: file.units.length,
   });
