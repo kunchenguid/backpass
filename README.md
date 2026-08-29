@@ -280,8 +280,14 @@ Every always-loaded token is paid on every future session, forever, and instruct
 following dilutes as the file grows. So the budget is the constraint the whole backward
 pass optimizes under.
 
-**Default: 5,000 estimated tokens (~20KB)** per always-loaded memory file, configurable.
+**Default: 5,000 estimated tokens (~20KB)** for the always-loaded surface, configurable.
 The estimator is bytes/4 - harness-neutral, ±15%.
+
+The gated number is the **memory file plus every skill's `description:` line** - that is
+what an agent actually pays on every session. Skill bodies stay free until triggered and
+never compete for this budget. (A repo that already carries many skills may find itself
+over budget with no file having changed when upgrading to this accounting - that is the
+one-time re-tune of `budgetTokens`, not a regression.)
 
 ```
 AGENTS.md      [###############.................] 2,412 / 5,000 tok · 63 instructions
@@ -307,7 +313,17 @@ line, and backpass reports the arithmetic: `−611 tok always-loaded, +35 tok de
 
 Skill descriptions are weights too. If the evidence shows an agent lacked knowledge a
 skill already contains, that is a _failed trigger_ - backpass proposes a description edit,
-not duplicate content.
+not duplicate content. Failed triggers are counted, not guessed: the analysis stage sees
+every skill's name and trigger line, stamps a gap it judges covered by an existing skill
+with `coveredBySkill`, and the gap ledger corroborates those citations across sessions
+before synthesis is told to fix the trigger. The same coverage check retires a ledger gap
+once a skill's content answers it, so a gap resolved by extraction stops resurfacing.
+
+Skills are protected by the same floors as the memory file: text deleted from a skill
+file is a removal, and since no evidence can attribute to skill text, no deletion there
+clears the harm floor - skill content is rewritten or extracted, never quietly dropped.
+Every skill file a proposal edits is fingerprinted, and an apply refuses a skill that
+changed since the proposal measured it, exactly as it refuses a drifted memory file.
 
 ### 8. Apply - the human gate
 

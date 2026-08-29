@@ -23,12 +23,15 @@ export function formatTokens(n) {
 }
 
 /**
- * Budget verdict for one always-loaded memory file.
+ * Budget verdict for the always-loaded surface. The texts are the memory file;
+ * `alwaysLoadedExtra` carries the token counts loaded alongside it - today the skill
+ * description lines - so one cap covers everything an agent pays on every session.
  * `over` is the amount by which projected exceeds the cap (0 when within).
  */
-export function budgetStatus(currentText, projectedText, capTokens) {
-  const current = estimateTokens(currentText);
-  const projected = estimateTokens(projectedText ?? currentText);
+export function budgetStatus(currentText, projectedText, capTokens, alwaysLoadedExtra = {}) {
+  const extraCurrent = alwaysLoadedExtra.current ?? 0;
+  const current = estimateTokens(currentText) + extraCurrent;
+  const projected = estimateTokens(projectedText ?? currentText) + (alwaysLoadedExtra.projected ?? extraCurrent);
   return {
     capTokens,
     current,

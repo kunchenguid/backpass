@@ -10,6 +10,16 @@ Each instruction has a stable id in [brackets]. Refer to instructions ONLY by th
 
 {{INSTRUCTION_INDEX}}
 
+## Project skills (load-on-trigger)
+
+These skills exist in the repo. Each one's body is loaded only when its trigger fires,
+so it is NOT shown here - only the trigger description is. If a mistake you found is
+covered by one of these skills' content, it is a failed trigger: still report the gap,
+and name that skill in `coveredBySkill`. Open the skill's file (path in parentheses)
+only when you need its body to confirm the coverage.
+
+{{SKILLS}}
+
 ## Gaps already on the books
 
 Earlier sessions reported these gaps; each has a stable id. If a gap you found is the
@@ -36,7 +46,7 @@ Return ONE JSON object and nothing else. No prose before or after, no markdown f
 {
   "positive":  [{"instruction": "AG-042", "moment": "turn 12", "effect": "what following it achieved", "quote": "verbatim text from the trace"}],
   "negative":  [{"instruction": "AG-017", "moment": "turn 3",  "effect": "what happened and what it cost", "class": "harm|non-compliance|irrelevant", "quote": "verbatim text from the trace"}],
-  "gaps":      [{"mistake": "what went wrong", "proposedInstruction": "one sentence that would have prevented it", "recurrenceRisk": "high|medium|low", "domain": "project|orchestration", "matchesGap": "<id from the list above, omit when new>", "quote": "verbatim text from the trace"}],
+  "gaps":      [{"mistake": "what went wrong", "proposedInstruction": "one sentence that would have prevented it", "recurrenceRisk": "high|medium|low", "domain": "project|orchestration", "matchesGap": "<id from the list above, omit when new>", "coveredBySkill": "<skill name from the skills list, omit when none covers it>", "quote": "verbatim text from the trace"}],
   "usedRawTranscript": false
 }
 ```
@@ -63,7 +73,10 @@ Rules, in order of importance:
    the agent doing the specific thing the instruction asks for. An outcome that would
    have happened anyway is not evidence.
 6. `gaps` are mistakes NOT covered by any current instruction. If an instruction exists
-   and was ignored, that is `negative` with `class: "non-compliance"`, not a gap.
+   and was ignored, that is `negative` with `class: "non-compliance"`, not a gap. A
+   mistake covered only by a SKILL's content is still a gap - skills have no
+   instruction ids - but cite the skill in `coveredBySkill`: that is a failed trigger,
+   and the fix is that skill's description, not new memory-file text.
 7. `proposedInstruction` must be one imperative sentence, specific enough to act on and
    general enough to apply beyond this one session.
 8. An empty array is a valid and useful answer. Report nothing rather than something weak.

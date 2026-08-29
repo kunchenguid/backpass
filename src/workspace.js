@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { anchoredHunks, countOccurrences, span } from "./diff.js";
 import { parseMemoryUnits } from "./memory.js";
-import { parseFrontmatter } from "./skills.js";
+import { parseFrontmatter, skillBody } from "./skills.js";
 import { sha256 } from "./state.js";
 
 /**
@@ -85,13 +85,11 @@ export function isSkillFilePath(relative, skillsDir) {
 export function parseSkillFile(relative, text) {
   const frontmatter = parseFrontmatter(text);
   if (!frontmatter.name || !frontmatter.description) return null;
-  const end = /^---\n[\s\S]*?\n---\n?/.exec(text);
-  const body = end ? text.slice(end[0].length) : text;
   return {
     name: String(frontmatter.name).trim(),
     description: String(frontmatter.description).trim(),
     path: relative,
-    body: body.trim(),
+    body: skillBody(text),
   };
 }
 

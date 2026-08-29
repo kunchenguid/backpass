@@ -150,6 +150,20 @@ export function memorySetHash(files) {
 }
 
 /**
+ * The memory-surface hash: the memory-set hash extended with the always-loaded skill
+ * layer, which is exactly the description lines. Analysis is judged against the
+ * instruction index AND the skill descriptions, so editing a description invalidates
+ * cached evidence the same way editing the memory file does - while a body edit
+ * invalidates nothing, because nothing is judged against bodies. A repo without skills
+ * keeps the plain set hash, so its cached evidence survives this hash unchanged.
+ */
+export function memorySurfaceHash(setHash, skills) {
+  if (!skills?.length) return setHash;
+  const layer = skills.map((s) => `${s.path}:${s.description || ""}`).join("|");
+  return `sha256:${sha256(`${setHash}|${layer}`).slice(0, 16)}`;
+}
+
+/**
  * Render the instruction index that both prompt tiers see. It is a lookup table keyed
  * by alias, never a stand-in for the file: units are listed with the lines they occupy
  * so the synthesis agent can find them in the raw file it edits.

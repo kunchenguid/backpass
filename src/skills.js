@@ -52,12 +52,28 @@ export function loadSkills(repoRoot, skillsDir) {
       name: frontmatter.name || entry.name.replace(/\.md$/, ""),
       description: frontmatter.description || "",
       path: path.relative(repoRoot, file),
+      body: skillBody(text),
       bodyTokens: estimateTokens(text),
       descriptionTokens: estimateTokens(frontmatter.description || ""),
     });
   }
 
   return skills.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** The markdown after the frontmatter block - what a harness loads when the trigger fires. */
+export function skillBody(text) {
+  const end = /^---\n[\s\S]*?\n---\n?/.exec(text);
+  return (end ? text.slice(end[0].length) : text).trim();
+}
+
+/**
+ * The always-loaded token cost of the skill layer: every description line, nothing
+ * else. Bodies are free until triggered by design - this sum is what joins the memory
+ * file under the one always-loaded budget cap.
+ */
+export function skillDescriptionTokens(skills) {
+  return (skills || []).reduce((sum, s) => sum + (s.descriptionTokens ?? estimateTokens(s.description || "")), 0);
 }
 
 /** Minimal YAML frontmatter reader: only `key: value` and folded multi-line values. */
@@ -86,6 +102,17 @@ export function renderSkillIndex(skills) {
         `- ${s.name} (${s.bodyTokens} tok body, ${s.descriptionTokens} tok description) :: ${s.description || "(no description)"}`,
     )
     .join("\n");
+}
+
+/**
+ * The skill index the analysis prompt sees: name, path, and trigger description only.
+ * Bodies are deliberately absent - the analysis turn opens a SKILL.md by path when a
+ * description looks relevant to a mistake, instead of paying for every body on every
+ * transcript.
+ */
+export function renderSkillIndexForAnalysis(skills) {
+  if (!skills.length) return "(this repo has no skills)";
+  return skills.map((s) => `- ${s.name} (${s.path}) :: ${s.description || "(no description)"}`).join("\n");
 }
 
 /** Serialize a skill draft to the common SKILL.md shape. */

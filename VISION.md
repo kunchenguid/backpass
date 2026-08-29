@@ -3,7 +3,7 @@
 `backpass` exists so that a repository's agent memory file improves from what actually happened in its agent sessions, instead of from whatever a human happened to remember.
 It serves the developer who owns that file, whether it is `AGENTS.md` or the `CLAUDE.md` Claude Code reads in its place, and it turns transcripts already sitting on their disk into a small set of reviewable edits.
 The project file is the one it trains; a person's own `~/.claude/CLAUDE.md` is handwritten preference, and anything learned belongs in project memory instead.
-It owns exactly one thing: the backward pass from session transcripts to a proposed change in the memory file.
+It owns exactly one thing: the backward pass from session transcripts to a proposed change in the memory surface - the memory file and the project's skills.
 
 ## Evidence is the only currency
 

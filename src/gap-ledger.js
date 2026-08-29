@@ -1,4 +1,4 @@
-import { similarity } from "./memory.js";
+import { parseMemoryUnits, similarity } from "./memory.js";
 import { parseSince } from "./config.js";
 import { sha256 } from "./state.js";
 
@@ -36,8 +36,9 @@ import { sha256 } from "./state.js";
  *    or re-sampling the same session overwrites its observation and never adds a count.
  *  - A gap is a fact about its session: re-analysis that no longer mentions it is model
  *    noise, not the session changing, so observations are only ever replaced, not removed
- *    by absence. They retire in exactly two ways: the memory file gains an instruction
- *    that covers the gap (`GAP_COVERED_THRESHOLD`, the `reanchor` bar), or the sighting
+ *    by absence. They retire in exactly two ways: the memory surface gains content
+ *    that covers the gap - a memory-file instruction or a skill's description/body
+ *    (`GAP_COVERED_THRESHOLD`, the `reanchor` bar) - or the sighting
  *    has waited longer than `gapLedgerMaxAge` for a partner, counted from when backpass
  *    first saw it (re-analysis never refreshes that clock; session age itself is already
  *    bounded by discovery's `since` at entry). Keying to the memory hash instead would
@@ -156,6 +157,10 @@ export function recordGapObservations(ledger, evidenceRecords, { now = new Date(
         quote: gap.quote,
         recurrenceRisk: gap.recurrenceRisk,
         domain: gap.domain === "orchestration" ? "orchestration" : "project",
+        // A failed trigger: the analysis judged an existing skill's content to cover
+        // this mistake. Absent when no skill covers it (including all pre-existing
+        // observations), and absence never counts as a citation.
+        ...(gap.coveredBySkill ? { coveredBySkill: gap.coveredBySkill } : {}),
       };
       recorded += 1;
     }
@@ -165,19 +170,23 @@ export function recordGapObservations(ledger, evidenceRecords, { now = new Date(
 
 /**
  * Retire observations that no longer count: sightings first seen more than `maxAge` ago
- * (a duration like `90d`, `all` to disable) and gaps the current memory file now covers.
+ * (a duration like `90d`, `all` to disable) and gaps the current memory surface now
+ * covers - a memory-file instruction OR a skill's content (its description line or a
+ * body unit). Skills count because a gap resolved by extracting or writing a skill is
+ * resolved; without them the entry would haunt every analysis prompt until it expires.
  */
 export function pruneGapLedger(
   ledger,
-  { memoryFile = null, memoryPath = null, maxAge = "90d", now = new Date() } = {},
+  { memoryFile = null, memoryPath = null, skills = [], maxAge = "90d", now = new Date() } = {},
 ) {
   const maxAgeMs = parseSince(maxAge);
   const cutoff = maxAgeMs === null ? -Infinity : new Date(now).getTime() - maxAgeMs;
   const stats = { expired: 0, covered: 0 };
+  const coverage = coverageTexts(memoryFile, skills);
 
   for (const [id, entry] of Object.entries(ledger.entries)) {
     const applies = memoryPath === null || entry.memoryPath === memoryPath;
-    if (applies && memoryFile && isCovered(memoryFile, entry)) {
+    if (applies && coverage.length && isCovered(coverage, entry)) {
       stats.covered += Object.keys(entry.sessions).length;
       delete ledger.entries[id];
       continue;
@@ -194,11 +203,20 @@ export function pruneGapLedger(
   return stats;
 }
 
-function isCovered(memoryFile, entry) {
+/** Every unit of always-available knowledge a gap can be covered by. */
+function coverageTexts(memoryFile, skills) {
+  return [
+    ...(memoryFile?.units || []).map((unit) => unit.text),
+    ...(skills || []).flatMap((skill) => [
+      skill.description || "",
+      ...parseMemoryUnits(skill.body || "").map((unit) => unit.text),
+    ]),
+  ].filter((text) => text.trim());
+}
+
+function isCovered(coverage, entry) {
   const phrasings = [...new Set([entry.proposedInstruction, ...(entry.phrasings || [])])];
-  return (memoryFile.units || []).some((unit) =>
-    phrasings.some((phrasing) => similarity(unit.text, phrasing) >= GAP_COVERED_THRESHOLD),
-  );
+  return coverage.some((text) => phrasings.some((phrasing) => similarity(text, phrasing) >= GAP_COVERED_THRESHOLD));
 }
 
 /** Flatten the ledger into the observation list `foldEvidence` clusters over. */
@@ -215,6 +233,7 @@ export function ledgerGapObservations(ledger, memoryPath) {
         quote: obs.quote,
         recurrenceRisk: obs.recurrenceRisk,
         domain: obs.domain === "orchestration" ? "orchestration" : "project",
+        ...(obs.coveredBySkill ? { coveredBySkill: obs.coveredBySkill } : {}),
       });
     }
   }

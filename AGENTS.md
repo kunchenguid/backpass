@@ -69,9 +69,11 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   every other stage is read-only analysis, which is what makes a run safe to interrupt.
   Bootstrap (`src/commands/bootstrap.js`, a repo with no memory file) is the one run that
   writes without the apply gate, and it only ever creates files, never overwrites.
-  For proposals carrying a memory-file hash, nothing is written until five gates pass:
+  For proposals carrying a memory-file hash, nothing is written until the gates pass:
   the memory file still exists and hashes to `proposal.memoryFile.hash` (`memoryFileSnapshot`,
-  using `memoryTextHash` from `src/memory.js` so the check and the proposal cannot disagree), the
+  using `memoryTextHash` from `src/memory.js` so the check and the proposal cannot disagree),
+  every non-memory edit target still hashes to its `proposal.targetFiles` entry (same
+  contract, so a hand-edited skill refuses the apply instead of being patched blind), the
   accepted subset clears `budgetGateKind` (`src/tokens.js`), every accepted edit for a file
   composes against that file's one pre-write image, and every created skill target is still
   absent. Any of them failing writes nothing and records no rejection. Accepted paths are
@@ -114,8 +116,10 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   (dash-and-whitespace-folded, `normalizeRecoveryLine`), and any other edit whose hunk only
   deletes memory-file text is a removal whatever its kind: each deleted unit needs
   `minGapEvidence` distinct sessions of `class: "harm"` negatives (`harmSessions` in the
-  fold). Non-compliance never satisfies the floor; the >= 20%-relevance placement table
-  stays prompt guidance by the captain's explicit decision - do not harden it.
+  fold). The same floor covers skill files, where no evidence can attribute at all, so a
+  pure deletion inside a skill file is refused outright - skill content is rewritten or
+  extracted, never dropped. Non-compliance never satisfies the floor; the >= 20%-relevance
+  placement table stays prompt guidance by the captain's explicit decision - do not harden it.
 - **Negative evidence has a sign the pipeline must not lose.** Analysis classifies every
   negative (`harm` / `non-compliance` / `irrelevant`, `sanitizeEvidence` drops other
   values) and `renderEvidenceForPrompt` renders the class AND the `effect` text with each
@@ -136,9 +140,15 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   `{ agent, usage|null }` (`usageRecord` in `src/acpx.js`) and `src/commands/usage.js` is
   the one place that prints them - never `n/a`: nothing when no call ran, the harness by
   name when it stayed silent.
-- **Fold and this-run gap-ledger ingest are scoped to the current memory-set hash.**
+- **Fold and this-run gap-ledger ingest are scoped to the current memory-surface hash.**
+  The run hash (`primaryMemoryFile` in `src/commands/analyze.js`) is `memorySurfaceHash`:
+  the memory-set hash extended with every skill's description line - a description edit
+  invalidates cached evidence, a skill-body edit never does, and a repo without skills
+  keeps the plain set hash. The always-loaded budget gate measures the same surface
+  (memory file + description lines; bodies stay free until triggered), so a repo with
+  many skills re-tunes `budgetTokens` once - accepted by the captain's explicit decision.
   `foldForRun` (`src/commands/propose.js`) filters `state.listEvidence()` by `memoryPath`
-  AND `memoryHash === current set hash`, not path alone - a transcript that fell out of
+  AND `memoryHash === current surface hash`, not path alone - a transcript that fell out of
   this run's sample (window, cap, or the transcript itself gone) can leave an evidence file
   on disk stamped with a stale hash, and it must not count toward `analyzedSessions`,
   per-instruction scores, or this run's gap-ledger observations (positional `AG-nnn`
@@ -166,6 +176,12 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   orchestrated the task, not by this repo) are counted in
   `totals.orchestrationGapSightings` and excluded from clustering, so they can
   never reach a proposal - there is deliberately no orchestrator-memory write path.
+  A gap may also carry `coveredBySkill`: the analysis (shown every skill's name and
+  trigger line) judged an existing skill's content to cover the mistake - a failed
+  trigger. The fold counts those citations per skill onto the cluster
+  (`failedTriggerSkill`/`failedTriggerSessions`) so synthesis fixes the description
+  with real cross-session evidence, and skill content joins `pruneGapLedger` coverage
+  so a gap resolved by a skill retires instead of aging out.
 - **backpass must never analyze itself.** Its own acpx calls are filed by each harness
   under the repo's cwd, a tier-1 match. Every prompt starts with `SELF_SESSION_SENTINEL`
   (`src/prompts.js`) and discovery drops transcripts whose first user message begins with

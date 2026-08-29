@@ -8,7 +8,13 @@ import { State } from "../src/state.js";
 import { parseMemoryUnits } from "../src/memory.js";
 import { foldForRun } from "../src/commands/propose.js";
 import { foldEvidence, renderEvidenceForPrompt } from "../src/fold.js";
-import { gapEntryId, mergeGapEntries, pruneGapLedger, recordGapObservations } from "../src/gap-ledger.js";
+import {
+  gapEntryId,
+  ledgerGapObservations,
+  mergeGapEntries,
+  pruneGapLedger,
+  recordGapObservations,
+} from "../src/gap-ledger.js";
 
 const MEMORY_PATH = "AGENTS.md";
 const DAY = 86_400_000;
@@ -334,4 +340,48 @@ test("mergeGapEntries drops what it cannot verify instead of guessing", () => {
   assert.equal(twice, 1, "only the first group merged");
   assert.ok(!ledger.entries["b".repeat(16)], "b was absorbed into a");
   assert.ok(ledger.entries["c".repeat(16)], "c stayed untouched");
+});
+
+test("a skill whose content covers a gap retires it; an unrelated skill leaves it open", () => {
+  const phrasing = "Run pnpm lint before committing changes.";
+  const ledger = { version: 1, entries: {} };
+  recordGapObservations(ledger, [record("s1", [{ proposedInstruction: phrasing, coveredBySkill: "lint-ritual" }])]);
+
+  // The citation is durable: it survives the ledger round-trip into the fold's input.
+  const entry = Object.values(ledger.entries)[0];
+  assert.equal(Object.values(entry.sessions)[0].coveredBySkill, "lint-ritual");
+  assert.equal(ledgerGapObservations(ledger, MEMORY_PATH)[0].coveredBySkill, "lint-ritual");
+
+  const unrelated = pruneGapLedger(ledger, {
+    memoryFile: memoryFile(),
+    memoryPath: MEMORY_PATH,
+    maxAge: "all",
+    skills: [{ description: "Load when cutting a release.", body: "- Tag the release.\n" }],
+  });
+  assert.equal(unrelated.covered, 0, "an unrelated skill covers nothing");
+  assert.equal(Object.keys(ledger.entries).length, 1);
+
+  const stats = pruneGapLedger(ledger, {
+    memoryFile: memoryFile(),
+    memoryPath: MEMORY_PATH,
+    maxAge: "all",
+    skills: [{ description: "Load before committing.", body: `- ${phrasing}\n` }],
+  });
+  assert.equal(stats.covered, 1, "a gap resolved by a skill retires instead of aging out");
+  assert.deepEqual(ledger.entries, {});
+});
+
+test("a skill's description line alone can cover a gap", () => {
+  const phrasing = "Always inspect schema documentation before SQL.";
+  const ledger = { version: 1, entries: {} };
+  recordGapObservations(ledger, [record("s1", [phrasing])]);
+
+  const stats = pruneGapLedger(ledger, {
+    memoryFile: memoryFile(),
+    memoryPath: MEMORY_PATH,
+    maxAge: "all",
+    skills: [{ description: "Always inspect schema documentation before writing SQL.", body: "" }],
+  });
+  assert.equal(stats.covered, 1);
+  assert.deepEqual(ledger.entries, {});
 });

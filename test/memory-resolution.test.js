@@ -18,7 +18,11 @@ const SEPARATE_CLAUDE = "# Claude notes\n\n- Prefer bun over npm.\n";
 
 function repoWith(files) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-memres-"));
-  for (const [name, text] of Object.entries(files)) fs.writeFileSync(path.join(dir, name), text);
+  for (const [name, text] of Object.entries(files)) {
+    const absolute = path.join(dir, name);
+    fs.mkdirSync(path.dirname(absolute), { recursive: true });
+    fs.writeFileSync(absolute, text);
+  }
   return { root: dir, realRoot: dir, name: path.basename(dir), worktrees: [dir], remotes: [] };
 }
 
@@ -140,4 +144,23 @@ test("no memory file: primaryMemoryFile fails with a pointer to bootstrap", () =
   const repo = repoWith({});
   assert.throws(() => primaryMemoryFile(repo, loadConfig(repo.root)), /no memory file found/);
   assert.equal(resolveMemoryFiles(repo.root, ["AGENTS.md", "CLAUDE.md"]).primary, null);
+});
+
+test("the run hash is the memory surface: skill descriptions move it, bodies do not", () => {
+  const skill = (description, body) => `---\nname: db\ndescription: ${description}\n---\n\n${body}\n`;
+  const repo = repoWith({ "AGENTS.md": AGENTS, ".agents/skills/db/SKILL.md": skill("old trigger", "- body v1") });
+  const config = loadConfig(repo.root);
+
+  const noSkills = primaryMemoryFile(repoWith({ "AGENTS.md": AGENTS }), config);
+  const v1 = primaryMemoryFile(repo, config);
+  assert.notEqual(v1.hash, noSkills.hash, "the skill layer is part of the judged surface");
+  assert.equal(v1.skills.length, 1, "the loaded skills ride along with the hash they are part of");
+
+  fs.writeFileSync(path.join(repo.root, ".agents/skills/db/SKILL.md"), skill("old trigger", "- body v2 changed"));
+  const v2 = primaryMemoryFile(repo, config);
+  assert.equal(v2.hash, v1.hash, "a body edit invalidates nothing - evidence is never judged against bodies");
+
+  fs.writeFileSync(path.join(repo.root, ".agents/skills/db/SKILL.md"), skill("new trigger", "- body v2 changed"));
+  const v3 = primaryMemoryFile(repo, config);
+  assert.notEqual(v3.hash, v1.hash, "a description edit invalidates evidence like a memory-file edit does");
 });

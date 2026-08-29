@@ -27,7 +27,7 @@ import { discoverForRun } from "./scan.js";
  * `analyzedSessions` with a session this run never touched. Nothing is migrated, rewritten,
  * or deleted here - only excluded from this run's fold.
  */
-export async function foldForRun(ctx, memoryFile, memoryHash) {
+export async function foldForRun(ctx, memoryFile, memoryHash, skills = []) {
   const { state, minGapEvidence, gapLedgerMaxAge } = ctx.config;
   const evidence = state.listEvidence();
   const relevant = evidence.filter((e) => e.memoryPath === memoryFile.path && e.memoryHash === memoryHash);
@@ -38,13 +38,15 @@ export async function foldForRun(ctx, memoryFile, memoryHash) {
   // sessions coining the same brand-new gap in one parallel fan-out can only line up
   // here. One bounded judged call; a failure degrades to lexical identity and the run
   // continues. Prune afterwards so a merged-then-covered gap retires as one entry.
+  // Skills join the coverage check: a gap resolved by an extraction or a skill fix
+  // retires instead of haunting the open-gap index until it expires.
   const consolidation = await consolidateGapLedger({
     ledger,
     memoryPath: memoryFile.path,
     config: ctx.config,
     repo: ctx.repo,
   });
-  pruneGapLedger(ledger, { memoryFile, memoryPath: memoryFile.path, maxAge: gapLedgerMaxAge });
+  pruneGapLedger(ledger, { memoryFile, memoryPath: memoryFile.path, skills, maxAge: gapLedgerMaxAge });
   state.writeGapLedger(ledger);
 
   const summary = foldEvidence(relevant, {
@@ -68,11 +70,11 @@ export async function runProposal(ctx, precomputed = null) {
   // folding, and agent resolution can all fail before synthesis starts; none of those
   // failures may leave an older proposal available to apply as if it came from this run.
   config.state.clearProposal();
-  const { file, hash } = precomputed || primaryMemoryFile(repo, config);
+  const { file, hash, skills } = precomputed || primaryMemoryFile(repo, config);
   const transcripts = precomputed?.transcripts || (await discoverForRun(ctx)).transcripts;
 
   const foldStarted = Date.now();
-  const summary = await foldForRun(ctx, file, hash);
+  const summary = await foldForRun(ctx, file, hash, skills ?? []);
   config.state.writeSummary(summary);
   emitProgress("fold:done", {
     instructions: summary.instructions.length,

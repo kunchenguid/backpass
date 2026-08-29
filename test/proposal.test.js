@@ -444,7 +444,16 @@ test("a skill's description can be rewritten in place; deletions and stray files
   assert.deepEqual(rewritten.violations, []);
   assert.equal(rewritten.proposal.edits[0].file, ".agents/skills/db/SKILL.md");
   assert.equal(rewritten.proposal.edits[0].targetsMemoryFile, false);
-  assert.equal(rewritten.proposal.budget.delta, 0, "skill files are not always-loaded");
+  // Only the description line of a skill is always-loaded: the budget moves by the
+  // measured description delta, never by the body text around it.
+  const descDelta = estimateTokens("Load before touching the database.") - estimateTokens("old trigger");
+  assert.equal(rewritten.proposal.edits[0].descriptionDelta, descDelta);
+  assert.equal(rewritten.proposal.budget.delta, descDelta, "the description line is the skill's always-loaded cost");
+  assert.deepEqual(
+    rewritten.proposal.targetFiles.map((t) => t.file),
+    [".agents/skills/db/SKILL.md"],
+    "the proposal fingerprints every non-memory file its edits target",
+  );
 
   const deleted = gate({
     files: { ".agents/skills/db/SKILL.md": skill },
@@ -556,7 +565,9 @@ test("applying decisions writes accepted edits, skips rejected ones, and remembe
 
 test("apply refuses an accepted subset that exceeds the memory cap before writing any file", () => {
   const skill = "---\nname: db\ndescription: old trigger\n---\n\nbody\n";
-  const cap = estimateTokens(MEMORY_TEXT);
+  // The cap covers the always-loaded surface: the memory file plus the skill's
+  // description line, per the one-cap budget model.
+  const cap = estimateTokens(MEMORY_TEXT) + estimateTokens("old trigger");
   const { proposal, violations, repo, state } = gate({
     files: { ".agents/skills/db/SKILL.md": skill },
     edit: (root) => {
@@ -588,7 +599,10 @@ test("apply refuses an accepted subset that exceeds the memory cap before writin
     config: { budgetTokens: cap },
   });
 
-  assert.match(results.failed[0].error, /accepted edits leave AGENTS\.md .* over the .* budget/);
+  assert.match(
+    results.failed[0].error,
+    /accepted edits leave the always-loaded surface \(AGENTS\.md \+ skill descriptions\) .* over the .* budget/,
+  );
   assert.equal(results.rejectionsRecorded, false);
   assert.deepEqual(results.written, []);
   assert.deepEqual(results.skills, []);
@@ -1442,5 +1456,90 @@ test("a mixed removal reaching EOF without a trailing newline stays one merged h
   assert.ok(
     staged.violations.some((violation) => /do not carry/.test(violation)),
     "the merged hunk still cannot smuggle the deletion through the extract gate",
+  );
+});
+
+test("a pure deletion inside a skill file is a removal with no possible evidence: refused", () => {
+  const skill =
+    "---\nname: db\ndescription: Load before touching the database.\n---\n\n- Always run migrations in a transaction.\n- Never drop a column without a backfill plan.\n";
+  const { violations } = gate({
+    files: { ".agents/skills/db/SKILL.md": skill },
+    edit: (root) =>
+      writeIn(root, ".agents/skills/db/SKILL.md", (t) =>
+        t.replace("- Never drop a column without a backfill plan.\n", ""),
+      ),
+    annotation: {
+      edits: [claim(["H1"], { kind: "remove", title: "drop the backfill rule", transcripts: 9 })],
+    },
+  });
+  assert.ok(
+    violations.some((v) =>
+      /deletes "- Never drop a column without a backfill plan\." from \.agents\/skills\/db\/SKILL\.md/.test(v),
+    ),
+    `expected the skill-deletion floor, got ${JSON.stringify(violations)}`,
+  );
+  assert.ok(violations.some((v) => /no evidence can attribute to skill files/.test(v)));
+});
+
+test("description bloat with an unchanged memory file trips the always-loaded cap", () => {
+  const skill = "---\nname: db\ndescription: old trigger\n---\n\nbody\n";
+  const bloated = "Load this skill ".repeat(40).trim(); // ~160 tok of description
+  const cap = estimateTokens(MEMORY_TEXT) + estimateTokens("old trigger") + 20;
+  const { violations } = gate({
+    files: { ".agents/skills/db/SKILL.md": skill },
+    edit: (root) => writeIn(root, ".agents/skills/db/SKILL.md", (t) => t.replace("old trigger", bloated)),
+    annotation: { edits: [claim(["H1"], { title: "inflate the trigger" })] },
+    config: config({ budgetTokens: cap }),
+  });
+  assert.ok(
+    violations.some((v) => /always-loaded surface \(AGENTS\.md \+ skill descriptions\)/.test(v) && /over the/.test(v)),
+    `expected the surface cap violation, got ${JSON.stringify(violations)}`,
+  );
+});
+
+test("a skill file that changed after the proposal refuses the apply; unchanged, the edit lands", () => {
+  const skill = "---\nname: db\ndescription: old trigger\n---\n\nbody\n";
+  const build = () =>
+    gate({
+      files: { ".agents/skills/db/SKILL.md": skill },
+      edit: (root) =>
+        writeIn(root, ".agents/skills/db/SKILL.md", (t) =>
+          t.replace("old trigger", "Load before touching the database."),
+        ),
+      annotation: { edits: [claim(["H1"], { title: "fix the trigger" })] },
+    });
+
+  // Concurrent skill edit between propose and apply: the file no longer matches the
+  // image the hunks were cut from, so nothing anywhere is written.
+  const stale = build();
+  assert.deepEqual(stale.violations, []);
+  const skillOnDisk = path.join(stale.repo.root, ".agents/skills/db/SKILL.md");
+  const concurrent = skill.replace("body", "body, hand-edited meanwhile");
+  fs.writeFileSync(skillOnDisk, concurrent);
+  const refused = applyDecisions({
+    proposal: stale.proposal,
+    decisions: { e1: "accepted" },
+    repo: stale.repo,
+    state: stale.state,
+    config: { budgetTokens: 5000 },
+  });
+  assert.match(refused.failed[0].error, /\.agents\/skills\/db\/SKILL\.md changed after this proposal was made/);
+  assert.deepEqual(refused.written, []);
+  assert.equal(fs.readFileSync(skillOnDisk, "utf8"), concurrent, "the concurrent version is kept");
+  assert.equal(refused.rejectionsRecorded, false);
+
+  // Untouched, the same edit applies and the description lands on disk.
+  const fresh = build();
+  const applied = applyDecisions({
+    proposal: fresh.proposal,
+    decisions: { e1: "accepted" },
+    repo: fresh.repo,
+    state: fresh.state,
+    config: { budgetTokens: 5000 },
+  });
+  assert.deepEqual(applied.failed, []);
+  assert.match(
+    fs.readFileSync(path.join(fresh.repo.root, ".agents/skills/db/SKILL.md"), "utf8"),
+    /description: Load before touching the database\./,
   );
 });

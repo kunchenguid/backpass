@@ -21,9 +21,11 @@ paste the edited text into your reply; backpass measures what you changed in the
 
 ## Current memory file: {{MEMORY_PATH}}
 
-Budget: {{CURRENT_TOKENS}} / {{BUDGET_TOKENS}} estimated tokens ({{BUDGET_STATE}}).
+Budget: {{CURRENT_TOKENS}} / {{BUDGET_TOKENS}} estimated always-loaded tokens
+({{BUDGET_STATE}}). The count is this file PLUS every skill's `description:` line;
+skill bodies are free until triggered.
 
-Every token in this file is paid on every future session, forever, and instruction
+Every always-loaded token is paid on every future session, forever, and instruction
 following dilutes as the file grows. The budget is the constraint you optimize under.
 
 The index below is a lookup table, not the file: it names each instruction (`AG-nnn`),
@@ -74,7 +76,9 @@ analyzed sessions in which an instruction drew any evidence at all.
    Only `harm` negatives - following the instruction caused damage - argue against an
    instruction. `non-compliance` means it failed to steer: reinforce it, reposition it,
    or improve its trigger, never delete it for being ignored. Text you delete that does
-   not land in a created skill is a removal, whatever the edit is called.
+   not land in a created skill is a removal, whatever the edit is called - including
+   text deleted from an existing skill file, where no evidence can attribute at all, so
+   no skill-file deletion clears the floor: rewrite skill content, never remove it.
 4. **An extraction preserves every line it removes** in the SKILL.md it creates. A
    deletion is never part of an extract: it is its own `remove` edit, decided on its
    own evidence.
@@ -94,7 +98,9 @@ analyzed sessions in which an instruction drew any evidence at all.
 | Conditional / narrow     | **skill** (the description is the condition) | deletion candidate |
 
 A skill's description is always loaded and its body is free until triggered, so moving a
-section into a skill trades its always-loaded cost for that one description line.
+section into a skill trades its always-loaded cost for that one description line. That
+line is real budget: description tokens count toward the cap above, so keep descriptions
+to one crisp trigger condition.
 
 **Skill descriptions are weights too.** If the evidence shows an agent lacked knowledge
 an existing skill already contains, that is a failed trigger: rewrite that skill's

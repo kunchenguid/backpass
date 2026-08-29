@@ -44,6 +44,8 @@ Hard rules - a violation fails the whole proposal:
    `harm` negatives argue against an instruction; `non-compliance` never justifies a
    deletion. A change that only deletes text and is not part of an extract is a removal
    whatever its `kind` says - if it lacks the evidence, revert it in the file first.
+   Text deleted from an existing skill file can never carry that evidence (skills have
+   no instruction ids), so revert any skill-file deletion.
 6. `kind: "extract"` is an edit whose changes are one or more created `SKILL.md` files
    plus the change(s) to {{MEMORY_PATH}} that pay for them. **The skills must carry every
    line those changes remove** - a deletion is never part of an extract; give it its own

@@ -1,7 +1,8 @@
 import { renderHunkLines } from "./diff.js";
-import { editSkills } from "./skills.js";
+import { memoryTextHash } from "./memory.js";
+import { editSkills, parseFrontmatter, skillDescriptionTokens } from "./skills.js";
 import { budgetGateKind, budgetStatus, estimateTokens } from "./tokens.js";
-import { normalizeRecoveryLine, recoveredLineCounts } from "./workspace.js";
+import { isSkillFilePath, normalizeRecoveryLine, recoveredLineCounts } from "./workspace.js";
 
 /**
  * The proposal model: what a synthesis pass is allowed to produce, and the mechanical
@@ -39,9 +40,9 @@ export const SHRINK_MAX_EDITS = 20;
 /** A typical memory-file instruction removal or tightening trims about this many tokens. */
 export const SHRINK_EDIT_TOKENS = 40;
 
-export function effectiveMaxEdits(memoryFile, config) {
+export function effectiveMaxEdits(memoryFile, config, alwaysLoadedExtraTokens = 0) {
   if (Number.isInteger(config.maxEditsPerRun) && config.maxEditsPerRun > 0) return config.maxEditsPerRun;
-  const overage = memoryFile.tokens - config.budgetTokens;
+  const overage = memoryFile.tokens + alwaysLoadedExtraTokens - config.budgetTokens;
   if (overage <= 0) return DEFAULT_MAX_EDITS;
   return Math.min(SHRINK_MAX_EDITS, Math.max(DEFAULT_MAX_EDITS, Math.ceil(overage / SHRINK_EDIT_TOKENS)));
 }
@@ -124,6 +125,22 @@ function unrecoveredRemovedLines(hunk, lineCounts) {
  */
 function unitsRemovedBy(hunk, memoryFile) {
   return memoryFile.units.filter((unit) => unit.startLine <= hunk.oldEnd && unit.endLine >= hunk.oldStart);
+}
+
+/**
+ * One edit's always-loaded cost outside the memory file, measured from the real texts:
+ * an extract pays for the description line(s) of the skills it creates, and an edit to
+ * an existing skill pays (or earns) the change to its `description:` line. Everything
+ * else in a skill file is body - loaded on trigger, never billed here.
+ */
+function descriptionDeltaOf(edit, before, next, skillsDir) {
+  if (edit.kind === "extract") {
+    return editSkills(edit).reduce((sum, skill) => sum + estimateTokens(skill.description || ""), 0);
+  }
+  if (edit.targetsMemoryFile || !edit.file || !skillsDir || !isSkillFilePath(edit.file, skillsDir)) return 0;
+  const beforeDescription = parseFrontmatter(before).description || "";
+  const nextDescription = parseFrontmatter(next).description || "";
+  return estimateTokens(nextDescription) - estimateTokens(beforeDescription);
 }
 
 /** Overlapping count: a run of identical lines must not pass as unique. */
@@ -244,6 +261,7 @@ export function buildProposal(rawResult, context) {
     harnessCounts = {},
     rejections = { entries: {} },
     isSuppressed = () => false,
+    skillFiles = [],
   } = context;
 
   const violations = [];
@@ -252,7 +270,10 @@ export function buildProposal(rawResult, context) {
   const edits = rawEdits.map((raw, i) => normalizeEdit(raw, i));
   const changesById = new Map(measured.changes.map((c) => [c.id, c]));
 
-  const maxEdits = effectiveMaxEdits(memoryFile, config);
+  // Skill description lines are always loaded, so they sit under the same cap as the
+  // memory file: one always-loaded budget, per the captain's ruling.
+  const descriptionTokensNow = skillDescriptionTokens(skillFiles);
+  const maxEdits = effectiveMaxEdits(memoryFile, config, descriptionTokensNow);
   if (edits.length > maxEdits) {
     violations.push(`proposed ${edits.length} edits but the per-run cap is ${maxEdits} (the learning rate)`);
   }
@@ -387,6 +408,25 @@ export function buildProposal(rawResult, context) {
       }
     }
 
+    // The same floor covers every other staged file. Evidence cannot attribute to
+    // skill-file text at all - there are no instruction ids for it - so no pure
+    // deletion there can reach the harm bar, whatever the edit is called. Rewrites
+    // (a hunk that also adds text) stay possible; only vanishing text is refused.
+    if (edit.kind !== "extract" && files[0] !== memoryFile.path) {
+      const deleted = hunks
+        .filter((hunk) => hunk.removed && !hunk.added)
+        .flatMap((hunk) => (hunk.lines || []).filter((line) => line.type === "del").map((line) => line.text))
+        .filter((text) => text.trim());
+      if (deleted.length) {
+        violations.push(
+          `edit ${edit.id} ("${edit.title}") deletes "${deleted[0].trim().slice(0, 80)}" from ${files[0]}; ` +
+            `no evidence can attribute to skill files, so no deletion there clears the ` +
+            `${config.minGapEvidence}-session harm floor - revert the deletion`,
+        );
+        continue;
+      }
+    }
+
     const file = files[0];
     const proposed = {
       id: edit.id,
@@ -418,7 +458,10 @@ export function buildProposal(rawResult, context) {
     accepted.push(proposed);
   }
 
-  // Deltas are measured here, never taken from the model.
+  // Deltas are measured here, never taken from the model. `descriptionDelta` is the
+  // edit's always-loaded cost outside the memory file: the change to a skill's
+  // description line, or the description line(s) a created skill adds. Bodies stay
+  // free-until-triggered and never enter it.
   const running = new Map();
   for (const edit of accepted) {
     const before =
@@ -430,15 +473,22 @@ export function buildProposal(rawResult, context) {
       violations.push(err.message);
       edit.applicable = false;
       edit.deltaTokens = 0;
+      edit.descriptionDelta = 0;
       continue;
     }
     edit.applicable = true;
     edit.deltaTokens = estimateTokens(next) - estimateTokens(before);
+    edit.descriptionDelta = descriptionDeltaOf(edit, before, next, config.skillsDir);
     running.set(edit.file, next);
   }
 
   const projectedText = running.get(memoryFile.path) ?? memoryFile.text;
-  const budget = budgetStatus(memoryFile.text, projectedText, config.budgetTokens);
+  const descriptionTokensProjected =
+    descriptionTokensNow + accepted.reduce((sum, edit) => sum + (edit.descriptionDelta || 0), 0);
+  const budget = budgetStatus(memoryFile.text, projectedText, config.budgetTokens, {
+    current: descriptionTokensNow,
+    projected: descriptionTokensProjected,
+  });
 
   /**
    * The budget gate has two modes (design section 6).
@@ -448,18 +498,27 @@ export function buildProposal(rawResult, context) {
    * every run on exactly the repos that need backpass most. There, the run is a shrink
    * plan and the gate is progress: the edit set must be strictly net-negative.
    */
-  budget.mode = memoryFile.tokens > config.budgetTokens ? "shrink" : "cap";
+  budget.mode = memoryFile.tokens + descriptionTokensNow > config.budgetTokens ? "shrink" : "cap";
   budget.startedOverBudget = budget.mode === "shrink";
+  // For displays: how much of `current` is the skill layer, so a surface number is
+  // never presented as if it measured the file alone.
+  budget.descriptionTokens = descriptionTokensNow;
 
+  // With skills present the gated number is the surface, not the file alone; name what
+  // the number actually measures.
+  const surfaceLabel =
+    descriptionTokensNow || descriptionTokensProjected !== descriptionTokensNow
+      ? `the always-loaded surface (${memoryFile.path} + skill descriptions)`
+      : memoryFile.path;
   const gate = budgetGateKind(budget);
   if (gate === "cap") {
     violations.push(
-      `applying every proposed edit leaves ${memoryFile.path} at ${budget.projected} tokens, ` +
+      `applying every proposed edit leaves ${surfaceLabel} at ${budget.projected} tokens, ` +
         `${budget.over} over the ${config.budgetTokens}-token budget`,
     );
   } else if (gate === "shrink") {
     violations.push(
-      `${memoryFile.path} is already ${budget.current - config.budgetTokens} tokens over the ` +
+      `${surfaceLabel} is already ${budget.current - config.budgetTokens} tokens over the ` +
         `${config.budgetTokens}-token budget, so this run must shrink it, but the proposed edits ` +
         `change it by ${budget.delta >= 0 ? "+" : ""}${budget.delta} tokens`,
     );
@@ -468,12 +527,21 @@ export function buildProposal(rawResult, context) {
   for (const file of measured.stray || [])
     notes.push(`ignored ${file}: synthesis wrote it outside the memory file and skills`);
 
+  // Every non-memory file an accepted edit targets, with the fingerprint of the exact
+  // image its hunks were cut from. The writer re-checks these before composing, the
+  // same freshness contract `memoryFileSnapshot` gives the memory file - a skill file
+  // that changed after the proposal must refuse the apply, never be patched blind.
+  const targetFiles = [...new Set(accepted.filter((edit) => !edit.targetsMemoryFile).map((edit) => edit.file))]
+    .filter((file) => measured.originals?.has(file))
+    .map((file) => ({ file, hash: memoryTextHash(measured.originals.get(file)) }));
+
   const proposal = {
     version: 2,
     tool: "backpass",
     generatedAt: new Date().toISOString(),
     repo: { name: repo.name, root: repo.root },
     memoryFile: { path: memoryFile.path, hash: memoryFile.hash, tokens: memoryFile.tokens },
+    targetFiles,
     budget,
     config: {
       budgetTokens: config.budgetTokens,
@@ -519,8 +587,11 @@ export function slug(text) {
 /**
  * Project the memory file forward under a specific set of accepted edit ids - used by
  * both the apply surface's live budget gauge and the actual writer.
+ * `descriptionTokensCurrent` is the always-loaded skill layer measured by the caller
+ * (the descriptions on disk at apply time); each accepted edit's measured
+ * `descriptionDelta` moves it, so the budget describes the whole surface.
  */
-export function projectWithDecisions(memoryText, edits, acceptedIds, capTokens) {
+export function projectWithDecisions(memoryText, edits, acceptedIds, capTokens, descriptionTokensCurrent = 0) {
   const chosen = edits.filter((e) => acceptedIds.includes(e.id) && e.targetsMemoryFile && e.applicable !== false);
   let text = memoryText;
   for (const edit of chosen) {
@@ -530,5 +601,14 @@ export function projectWithDecisions(memoryText, edits, acceptedIds, capTokens) 
       // Skip an edit that no longer applies; the writer reports it.
     }
   }
-  return { text, budget: budgetStatus(memoryText, text, capTokens) };
+  const descriptionDelta = edits
+    .filter((e) => acceptedIds.includes(e.id) && e.applicable !== false)
+    .reduce((sum, e) => sum + (e.descriptionDelta || 0), 0);
+  return {
+    text,
+    budget: budgetStatus(memoryText, text, capTokens, {
+      current: descriptionTokensCurrent,
+      projected: descriptionTokensCurrent + descriptionDelta,
+    }),
+  };
 }

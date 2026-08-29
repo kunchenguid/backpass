@@ -11,11 +11,22 @@ import {
   CLAUDE_SKILLS_LINK,
   editSkills,
   ensureSkillsLayout,
+  loadSkills,
   removeOwnedSkillPaths,
+  skillDescriptionTokens,
   writeSkill,
 } from "../skills.js";
 
-function acceptedSubsetBudgetFailure({ proposal, accepted, repo, capTokens, memoryText }) {
+/**
+ * The always-loaded label a budget number carries: the surface when skill descriptions
+ * are part of the count, the bare file when there are none - a number shown to a person
+ * must describe the thing it measures.
+ */
+function surfaceLabel(memoryPath, descriptionTokens) {
+  return descriptionTokens ? `the always-loaded surface (${memoryPath} + skill descriptions)` : memoryPath;
+}
+
+function acceptedSubsetBudgetFailure({ proposal, accepted, repo, capTokens, memoryText, descriptionTokensNow }) {
   if (!accepted.length) return null;
 
   const relative = proposal.memoryFile.path;
@@ -28,13 +39,15 @@ function acceptedSubsetBudgetFailure({ proposal, accepted, repo, capTokens, memo
     accepted,
     accepted.map((edit) => edit.id),
     capTokens,
+    descriptionTokensNow,
   );
+  const label = surfaceLabel(relative, descriptionTokensNow);
   const gate = budgetGateKind(budget);
   if (gate === "cap") {
     return {
       file: relative,
       error:
-        `accepted edits leave ${relative} at ${budget.projected} tokens, ${budget.over} over the ` +
+        `accepted edits leave ${label} at ${budget.projected} tokens, ${budget.over} over the ` +
         `${capTokens}-token budget; choose a compatible set of edits`,
     };
   }
@@ -42,7 +55,7 @@ function acceptedSubsetBudgetFailure({ proposal, accepted, repo, capTokens, memo
     return {
       file: relative,
       error:
-        `${relative} is already ${budget.current - capTokens} tokens over the ${capTokens}-token budget, ` +
+        `${label} is already ${budget.current - capTokens} tokens over the ${capTokens}-token budget, ` +
         `so accepted edits must shrink it, but they change it by ${budget.delta >= 0 ? "+" : ""}${budget.delta} ` +
         "tokens; choose a compatible set of edits",
     };
@@ -101,9 +114,9 @@ function memoryFileSnapshot(proposal, repo) {
   };
 }
 
-function overBudgetWarning(relative, budget) {
+function overBudgetWarning(label, budget) {
   return (
-    `${relative} is still ${formatTokens(budget.over)} tokens over the ${formatTokens(budget.capTokens)}-token ` +
+    `${label} is still ${formatTokens(budget.over)} tokens over the ${formatTokens(budget.capTokens)}-token ` +
     "budget; run `backpass` again for the next shrink step"
   );
 }
@@ -208,17 +221,30 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     memoryText = snapshot.text;
   }
 
+  // The always-loaded skill layer as it exists on disk right now - the budget below
+  // covers the whole surface, not the memory file alone.
+  const descriptionTokensNow = skillDescriptionTokens(
+    loadSkills(repo.root, proposal.config?.skillsDir || CANONICAL_SKILLS_DIR),
+  );
+
   const budgetFailure = acceptedSubsetBudgetFailure({
     proposal,
     accepted,
     repo,
     capTokens: config.budgetTokens,
     memoryText,
+    descriptionTokensNow,
   });
   if (budgetFailure) {
     results.failed.push(budgetFailure);
     return results;
   }
+
+  // Freshness for every non-memory file an accepted edit targets, the same contract the
+  // memory file gets: each hunk was cut from one exact image, and a file that changed
+  // since no longer contains what the proposal describes - refuse, never patch blind.
+  // Proposals from before the field existed carry no hashes and are left alone.
+  const expectedTargetHashes = new Map((proposal.targetFiles ?? []).map((t) => [t.file, t.hash]));
 
   for (const edit of accepted) {
     if (!byFile.has(edit.file)) byFile.set(edit.file, []);
@@ -239,6 +265,20 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
 
     const before =
       relative === proposal.memoryFile?.path && memoryText !== null ? memoryText : fs.readFileSync(absolute, "utf8");
+    const expected = relative === proposal.memoryFile?.path ? null : expectedTargetHashes.get(relative);
+    if (expected) {
+      const observed = memoryTextHash(before);
+      if (observed !== expected) {
+        results.failed.push({
+          file: relative,
+          error:
+            `${relative} changed after this proposal was made (${expected} -> ${observed}), so its edits ` +
+            `no longer describe the file on disk; nothing was written. Run \`backpass\` to re-propose ` +
+            `against the current repository.`,
+        });
+        continue;
+      }
+    }
     let text = before;
     const applied = [];
     const failures = [];
@@ -395,9 +435,18 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     }
     results.written = [];
   };
+  const landedDescriptionDelta = accepted
+    .filter((edit) => landed.has(edit.id))
+    .reduce((sum, edit) => sum + (edit.descriptionDelta || 0), 0);
   for (const item of orderedPlanned) {
     const { relative, resolved, before, text, applied } = item;
-    const budget = relative === proposal.memoryFile.path ? budgetStatus(before, text, config.budgetTokens) : null;
+    const budget =
+      relative === proposal.memoryFile.path
+        ? budgetStatus(before, text, config.budgetTokens, {
+            current: descriptionTokensNow,
+            projected: descriptionTokensNow + landedDescriptionDelta,
+          })
+        : null;
 
     let commit = null;
     try {
@@ -415,7 +464,9 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     results.written.push({ file: relative, edits: applied, budget, dryRun });
 
     // Shrinking over several runs is the design, so this is a heading, not a failure.
-    if (budget && !budget.withinBudget) results.warnings.push(overBudgetWarning(relative, budget));
+    if (budget && !budget.withinBudget) {
+      results.warnings.push(overBudgetWarning(surfaceLabel(relative, descriptionTokensNow), budget));
+    }
   }
 
   if (!dryRun && canonical) {

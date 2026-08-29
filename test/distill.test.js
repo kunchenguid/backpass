@@ -138,6 +138,22 @@ test("sanitizeEvidence tolerates a malformed model response", () => {
   assert.deepEqual(sanitizeEvidence({ positive: "not an array" }).positive, []);
 });
 
+test("a gap's coveredBySkill citation survives sanitization; junk values record nothing", () => {
+  const gap = (extra) => ({
+    proposedInstruction: "Wrap migrations in a transaction.",
+    quote: "dropped the column with no backfill plan",
+    recurrenceRisk: "high",
+    ...extra,
+  });
+  const clean = sanitizeEvidence({
+    gaps: [gap({ coveredBySkill: "  db-schema  " }), gap({ coveredBySkill: "" }), gap({ coveredBySkill: 42 })],
+  });
+  assert.equal(clean.gaps.length, 3);
+  assert.equal(clean.gaps[0].coveredBySkill, "db-schema");
+  assert.ok(!("coveredBySkill" in clean.gaps[1]), "an empty citation is no citation");
+  assert.ok(!("coveredBySkill" in clean.gaps[2]), "a non-string citation is dropped, not coerced");
+});
+
 test("a negative's class survives only as one of the judged values, and never invents harm", () => {
   const clean = sanitizeEvidence({
     negative: [

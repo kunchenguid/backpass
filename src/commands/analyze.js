@@ -1,6 +1,7 @@
 import { analyzeTranscripts } from "../analyze.js";
 import { UserError, color, info, json, out, warn } from "../logger.js";
-import { resolveMemoryFiles } from "../memory.js";
+import { memorySurfaceHash, resolveMemoryFiles } from "../memory.js";
+import { loadSkills, resolveOverflowTarget } from "../skills.js";
 import { emitProgress } from "../progress.js";
 import { discoverForRun } from "./scan.js";
 import { printUsage } from "./usage.js";
@@ -12,6 +13,12 @@ import { capTranscripts } from "../sample.js";
  * `@AGENTS.md` is covered by optimizing AGENTS.md and needs no mention. A second file
  * with its own content is NOT updated - that would either be ignored silently or
  * double-written into divergence - so the run says so and recommends consolidating.
+ *
+ * `hash` is the memory-surface hash: the memory files plus the skill description
+ * lines, since analysis is judged against both. Evidence keys, fold scoping, and the
+ * gap ledger all flow from this one value, so analyze and propose can never disagree
+ * about which surface a judgment belongs to. The loaded `skills` ride along so every
+ * downstream stage reads the same snapshot this hash describes.
  *
  * When no configured file exists, `backpass` (the default run) bootstraps one; every
  * other command fails with a pointer to that.
@@ -31,12 +38,21 @@ export function primaryMemoryFile(repo, config) {
         `(a single line: @${resolved.primary.path}).`,
     );
   }
-  return { file: resolved.primary, all: resolved.all, hash: resolved.hash, resolved };
+  // Overflow-layout warnings are the synthesis stage's to print; this resolution is read-only.
+  const overflow = resolveOverflowTarget(repo.root, config.skillsDir);
+  const skills = loadSkills(repo.root, overflow.dir);
+  return {
+    file: resolved.primary,
+    all: resolved.all,
+    hash: memorySurfaceHash(resolved.hash, skills),
+    resolved,
+    skills,
+  };
 }
 
 export async function runAnalysis(ctx) {
   const { repo, config } = ctx;
-  const { file, hash } = primaryMemoryFile(repo, config);
+  const { file, hash, skills } = primaryMemoryFile(repo, config);
   // Deterministic by design: tokens and units come from parsing the file, no model.
   emitProgress("memory", {
     path: file.path,
@@ -49,19 +65,20 @@ export async function runAnalysis(ctx) {
 
   if (!transcripts.length) {
     info(`${color.yellow("·")} no transcripts associated with this repo`);
-    return { file, hash, transcripts, perHarness, summary: null };
+    return { file, hash, skills, transcripts, perHarness, summary: null };
   }
 
   const summary = await analyzeTranscripts({
     transcripts,
     memoryFile: file,
+    skills,
     config,
     repo,
     memoryHash: hash,
     force: Boolean(ctx.flags.force),
   });
 
-  return { file, hash, transcripts, perHarness, summary };
+  return { file, hash, skills, transcripts, perHarness, summary };
 }
 
 export async function cmdAnalyze(ctx) {

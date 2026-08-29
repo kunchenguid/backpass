@@ -945,7 +945,10 @@
         }
 
         // ---- budget gauge ----
-        document.getElementById("gauge-title").textContent = "Always-loaded budget · " + (P.memoryFile.path || "");
+        document.getElementById("gauge-title").textContent =
+          "Always-loaded budget · " +
+          (P.memoryFile.path || "") +
+          (budget.descriptionTokens ? " + skill descriptions" : "");
         document.getElementById("cap-label").textContent = fmt(budget.capTokens) + " tok cap";
         document.getElementById("gauge-now").style.width = pct(budget.current, budget.capTokens) + "%";
 
@@ -1133,7 +1136,11 @@
           edits.forEach(function (e) {
             if (decisions[e.id] === "accepted") {
               accepted += 1;
+              // The always-loaded projection: memory-file deltas plus each edit's
+              // measured description-line delta (a tuned skill trigger, or the
+              // description a created skill adds). Skill bodies never move this bar.
               if (e.targetsMemoryFile) tok += e.deltaTokens || 0;
+              tok += e.descriptionDelta || 0;
             } else if (decisions[e.id] === "rejected") {
               rejected += 1;
             }

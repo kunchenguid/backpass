@@ -87,6 +87,7 @@ export function foldEvidence(evidenceRecords, { minGapEvidence = 2, memoryFile =
         source,
         sessionId: record.transcript.identity || record.transcript.id,
         domain: gap.domain === "orchestration" ? "orchestration" : "project",
+        ...(gap.coveredBySkill ? { coveredBySkill: gap.coveredBySkill } : {}),
       });
     }
   }
@@ -130,6 +131,7 @@ export function foldEvidence(evidenceRecords, { minGapEvidence = 2, memoryFile =
       sessions: cluster.sessions.size,
       recurrenceRisk: highestRisk(cluster.items),
       quotes: cluster.items.slice(0, 6).map((i) => ({ text: i.quote, effect: i.mistake, source: i.source })),
+      ...failedTriggerOf(cluster.items),
     }))
     .filter((cluster) => cluster.sessions >= minGapEvidence)
     .sort((a, b) => b.sessions - a.sessions);
@@ -174,6 +176,7 @@ export function clusterGapObservations(observations) {
       recurrenceRisk: obs.recurrenceRisk,
       source: obs.source,
       sessionId: obs.sessionId,
+      ...(obs.coveredBySkill ? { coveredBySkill: obs.coveredBySkill } : {}),
     };
     if (cluster) {
       if (!cluster.sessions.has(obs.sessionId)) cluster.items.push(item);
@@ -196,6 +199,25 @@ export function clusterGapObservations(observations) {
 function highestRisk(items) {
   const order = { high: 3, medium: 2, low: 1 };
   return items.reduce((best, i) => (order[i.recurrenceRisk] > order[best] ? i.recurrenceRisk : best), "low");
+}
+
+/**
+ * The failed-trigger reading of a cluster: which existing skill the analyses judged to
+ * already cover this mistake, and in how many of the cluster's sessions. Items are one
+ * per session, so counting items counts sessions. The most-cited skill wins; a cluster
+ * nobody tied to a skill contributes nothing.
+ */
+function failedTriggerOf(items) {
+  const counts = new Map();
+  for (const item of items) {
+    if (!item.coveredBySkill) continue;
+    counts.set(item.coveredBySkill, (counts.get(item.coveredBySkill) || 0) + 1);
+  }
+  let best = null;
+  for (const [skill, sessions] of counts) {
+    if (!best || sessions > best.sessions) best = { skill, sessions };
+  }
+  return best ? { failedTriggerSkill: best.skill, failedTriggerSessions: best.sessions } : {};
 }
 
 /** Compact rendering of the folded evidence for the synthesis prompt. */
@@ -243,6 +265,13 @@ export function renderEvidenceForPrompt(summary) {
   }
   for (const gap of summary.gaps) {
     lines.push(`- sessions=${gap.sessions} risk=${gap.recurrenceRisk} :: ${gap.proposedInstruction}`);
+    if (gap.failedTriggerSkill) {
+      lines.push(
+        `    FAILED TRIGGER: the existing skill "${gap.failedTriggerSkill}" already covers this ` +
+          `(judged so in ${gap.failedTriggerSessions} session(s)) - fix that skill's description ` +
+          `line instead of duplicating its content in the memory file`,
+      );
+    }
     for (const quote of gap.quotes.slice(0, 3)) {
       lines.push(`    "${oneLine(quote.text)}" (${quote.source})`);
     }

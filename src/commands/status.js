@@ -75,6 +75,15 @@ export async function cmdStatus(ctx) {
           `${formatTokens(descTokens)} tok always loaded`,
       ),
     );
+    if (resolved.primary) {
+      // The number the budget gate actually measures: memory file + description lines.
+      const surface = budgetStatus(resolved.primary.text, null, config.budgetTokens, { current: descTokens });
+      out(
+        `  ${"always-loaded".padEnd(14)} ${budgetBar(surface)} ${formatTokens(surface.current)} / ` +
+          `${formatTokens(surface.capTokens)} tok · memory + descriptions` +
+          (surface.withinBudget ? "" : color.red(` ${surface.over} OVER`)),
+      );
+    }
   }
   out("");
 

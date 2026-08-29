@@ -208,3 +208,49 @@ test("harm-class negatives are counted per distinct session, and only explicit h
   assert.equal(rows.get("AG-001").negative, 4);
   assert.equal(rows.get("AG-002").harmSessions, 0, "non-compliance and unclassified never count as harm");
 });
+
+test("failed-trigger citations count per skill and reach the synthesis prompt with the cluster", () => {
+  const covered = (id, phrasing) =>
+    record(id, {
+      gaps: [
+        {
+          proposedInstruction: phrasing,
+          quote: `dropped a column in ${id}`,
+          recurrenceRisk: "high",
+          coveredBySkill: "db-schema",
+        },
+      ],
+    });
+
+  const summary = foldEvidence(
+    [covered("s1", "Wrap migrations in a transaction."), covered("s2", "Wrap migrations in one transaction.")],
+    { memoryFile, minGapEvidence: 2 },
+  );
+
+  assert.equal(summary.gaps.length, 1, "the two phrasings are one gap");
+  assert.equal(summary.gaps[0].failedTriggerSkill, "db-schema");
+  assert.equal(summary.gaps[0].failedTriggerSessions, 2);
+
+  const rendered = renderEvidenceForPrompt(summary);
+  assert.match(rendered, /FAILED TRIGGER: the existing skill "db-schema" already covers this/);
+  assert.match(rendered, /fix that skill's description/);
+
+  // The floor is untouched: one cited sighting is still a hidden singleton.
+  const single = foldEvidence([covered("s1", "Wrap migrations in a transaction.")], { memoryFile, minGapEvidence: 2 });
+  assert.equal(single.gaps.length, 0, "a failed-trigger citation never lowers the corroboration bar");
+});
+
+test("a cluster nobody tied to a skill renders without a failed-trigger line", () => {
+  const summary = foldEvidence(
+    [
+      record("s1", { gaps: [{ proposedInstruction: "Pin the Node version.", quote: "used system node v20" }] }),
+      record("s2", {
+        gaps: [{ proposedInstruction: "Pin the Node version everywhere.", quote: "node drifted again" }],
+      }),
+    ],
+    { memoryFile, minGapEvidence: 2 },
+  );
+  assert.equal(summary.gaps.length, 1);
+  assert.equal(summary.gaps[0].failedTriggerSkill, undefined);
+  assert.ok(!renderEvidenceForPrompt(summary).includes("FAILED TRIGGER"));
+});

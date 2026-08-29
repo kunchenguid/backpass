@@ -5,6 +5,7 @@ import { execOneShot, extractJson, sessionPrompt, usageRecord } from "./acpx.js"
 import { distill } from "./distill.js";
 import { readTranscript } from "./discovery/index.js";
 import { renderInstructionIndex } from "./memory.js";
+import { renderSkillIndexForAnalysis } from "./skills.js";
 import { renderPrompt } from "./prompts.js";
 import { renderOpenGapIndex } from "./gap-ledger.js";
 import { evidenceKey, isEvidenceFresh, safeFileName } from "./state.js";
@@ -73,6 +74,13 @@ export function sanitizeEvidence(parsed) {
     if (typeof item.matchesGap === "string" && /^[0-9a-f]{16}$/.test(item.matchesGap.trim())) {
       gap.matchesGap = item.matchesGap.trim();
     }
+    // A failed trigger: an existing skill's content would have prevented the mistake,
+    // but the skill was not in play. Kept as a judged citation so the fold can count
+    // failed triggers per skill; an absent or empty value simply means "no skill covers
+    // this" and records nothing.
+    if (typeof item.coveredBySkill === "string" && item.coveredBySkill.trim()) {
+      gap.coveredBySkill = item.coveredBySkill.trim().slice(0, 120);
+    }
     clean.gaps.push(gap);
   }
 
@@ -98,7 +106,15 @@ function promptPathFor(state, transcript) {
   return path.join(state.applyDir, "..", "prompts", `${safeFileName(transcriptIdentity(transcript))}.md`);
 }
 
-async function analyzeOne({ transcript, memoryFile, config, repo, slot = 0, openGapIndex = "(none yet)" }) {
+async function analyzeOne({
+  transcript,
+  memoryFile,
+  config,
+  repo,
+  slot = 0,
+  openGapIndex = "(none yet)",
+  skillIndex = "(this repo has no skills)",
+}) {
   const raw = await readTranscript(transcript);
   const distilled = distill(raw.events, {
     ...transcript,
@@ -134,6 +150,7 @@ async function analyzeOne({ transcript, memoryFile, config, repo, slot = 0, open
   const prompt = renderPrompt("analysis", {
     MEMORY_PATH: memoryFile.path,
     INSTRUCTION_INDEX: renderInstructionIndex(memoryFile),
+    SKILLS: skillIndex,
     OPEN_GAPS: openGapIndex,
     TRACE: distilled.trace,
   });
@@ -198,7 +215,15 @@ async function pool(items, limit, worker) {
   return results;
 }
 
-export async function analyzeTranscripts({ transcripts, memoryFile, config, repo, memoryHash, force = false }) {
+export async function analyzeTranscripts({
+  transcripts,
+  memoryFile,
+  skills = [],
+  config,
+  repo,
+  memoryHash,
+  force = false,
+}) {
   const state = config.state;
   const pending = [];
   const summary = {
@@ -219,7 +244,7 @@ export async function analyzeTranscripts({ transcripts, memoryFile, config, repo
       continue;
     }
     // Distinguish "no prior evidence" from "prior evidence exists, but it was judged
-    // against a memory-file set that no longer matches" - a re-analysis here, not a miss.
+    // against a memory surface that no longer matches" - a re-analysis here, not a miss.
     if (existing?.status === "ok" && existing.memoryHash && existing.memoryHash !== memoryHash) {
       summary.staleMemoryHash += 1;
       priorHashes.add(existing.memoryHash);
@@ -230,8 +255,8 @@ export async function analyzeTranscripts({ transcripts, memoryFile, config, repo
   if (summary.staleMemoryHash) {
     info(
       `${color.yellow("·")} ${summary.staleMemoryHash} transcript(s) have evidence from a previous ` +
-        `memory-file set (${[...priorHashes].join(", ")} -> ${memoryHash}); that evidence is stale, not ` +
-        `missing, and reuse resumes once this pass re-judges it against the current memory-file set`,
+        `memory surface (${[...priorHashes].join(", ")} -> ${memoryHash}); that evidence is stale, not ` +
+        `missing, and reuse resumes once this pass re-judges it against the current memory file and skill descriptions`,
     );
   }
 
@@ -258,8 +283,11 @@ export async function analyzeTranscripts({ transcripts, memoryFile, config, repo
   );
 
   // Rendered once per run: the ledger's open gaps, so each analysis can cite an existing
-  // gap id instead of coining a paraphrase of it (`matchesGap` in the reply schema).
+  // gap id instead of coining a paraphrase of it (`matchesGap` in the reply schema), and
+  // the skill index, so a mistake an existing skill's content covers is reported as a
+  // failed trigger (`coveredBySkill`) instead of a brand-new gap.
   const openGapIndex = renderOpenGapIndex(state.readGapLedger(), memoryFile.path);
+  const skillIndex = renderSkillIndexForAnalysis(skills);
 
   let done = 0;
   const evidenceTotals = { positive: 0, negative: 0, gaps: 0 };
@@ -290,7 +318,7 @@ export async function analyzeTranscripts({ transcripts, memoryFile, config, repo
     });
 
     try {
-      const result = await analyzeOne({ transcript, memoryFile, config, repo, slot, openGapIndex });
+      const result = await analyzeOne({ transcript, memoryFile, config, repo, slot, openGapIndex, skillIndex });
       if (result.status === "skipped") {
         summary.skipped += 1;
         state.writeEvidence(transcript, { ...base, status: "skipped", reason: result.reason });

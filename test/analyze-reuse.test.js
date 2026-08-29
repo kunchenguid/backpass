@@ -165,9 +165,51 @@ test("editing AGENTS.md without --force reanalyzes and explains that prior evide
     "a memory-file edit invalidates the cache, exactly as documented",
   );
   assert.equal(third.summary.staleMemoryHash, 1, "the invalidation is attributed to the hash change, not a plain miss");
-  assert.match(third.stderr, /evidence from a previous memory-file set/);
+  assert.match(third.stderr, /evidence from a previous memory surface/);
   assert.match(third.stderr, /stale, not missing/);
   assert.match(third.stderr, /sha256:\w+ -> sha256:\w+/, "names the old and new hash");
+});
+
+test("a skill description edit invalidates cached evidence; a body edit is free", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-reuse-home-"));
+  const dir = initRepo(MEMORY);
+  const skillFile = path.join(dir, ".agents", "skills", "db", "SKILL.md");
+  const skill = (description, body) => `---\nname: db\ndescription: ${description}\n---\n\n${body}\n`;
+  fs.mkdirSync(path.dirname(skillFile), { recursive: true });
+  fs.writeFileSync(skillFile, skill("old trigger", "- body v1"));
+  writeSession(home, "session-a", dir);
+
+  const first = runAnalyze(dir, home);
+  assert.equal(first.status, 0, first.output);
+  assert.deepEqual([first.summary.analyzed, first.summary.cached], [1, 0]);
+  // The skill layer is part of what the analysis is judged against: the prompt the
+  // model actually received names the skill and its trigger.
+  const promptDir = path.join(dir, ".backpass", "prompts");
+  const prompts = fs.readdirSync(promptDir).map((f) => fs.readFileSync(path.join(promptDir, f), "utf8"));
+  assert.ok(
+    prompts.some((p) => p.includes("db (.agents/skills/db/SKILL.md) :: old trigger")),
+    "the analysis prompt carries the skill index",
+  );
+
+  fs.writeFileSync(skillFile, skill("old trigger", "- body v2, changed"));
+  const second = runAnalyze(dir, home);
+  assert.equal(second.status, 0, second.output);
+  assert.deepEqual(
+    [second.summary.analyzed, second.summary.cached],
+    [0, 1],
+    "nothing is judged against skill bodies, so a body edit is a free rerun",
+  );
+
+  fs.writeFileSync(skillFile, skill("new trigger", "- body v2, changed"));
+  const third = runAnalyze(dir, home);
+  assert.equal(third.status, 0, third.output);
+  assert.deepEqual(
+    [third.summary.analyzed, third.summary.cached],
+    [1, 0],
+    "a description line is always loaded, so editing it re-judges the evidence",
+  );
+  assert.equal(third.summary.staleMemoryHash, 1);
+  assert.match(third.stderr, /evidence from a previous memory surface/);
 });
 
 test("old-hash leftover evidence cannot change the current fold's session count, instruction scores, or gap observations", () => {
