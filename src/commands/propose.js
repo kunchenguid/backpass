@@ -11,18 +11,19 @@ import { printUsage } from "./usage.js";
 import { discoverForRun } from "./scan.js";
 
 /**
- * Fold on-disk evidence for the memory file. Gap corroboration is counted through the
+ * Fold on-disk evidence for the memory surface. Gap corroboration is counted through the
  * persisted ledger so sessions accumulate across runs: record this run's observations,
- * prune what the current file now covers or what aged out (after recording, because the
- * evidence files that fed an expired sighting are still on disk and would re-add it),
+ * prune what the current surface now covers or what aged out (after recording, because
+ * the evidence files that fed an expired sighting are still on disk and would re-add it),
  * then cluster from the ledger.
  *
  * Evidence is also filtered to `memoryHash`: a transcript's evidence file is rewritten
- * every time it is re-analyzed against a changed memory file, but a transcript that fell
- * out of this run's sample (window, cap, or discovery drift) leaves its last evidence file
- * on disk under whatever hash it was last judged against. That leftover file is real and
- * reusable the moment its transcript is re-analyzed - or immediately, if the memory file's
- * bytes return to that hash - but folding it into *this* proposal would score it against
+ * every time it is re-analyzed against a changed memory file or skill description, but a
+ * transcript that fell out of this run's sample (window, cap, or discovery drift) leaves
+ * its last evidence file on disk under whatever hash it was last judged against. That
+ * leftover file is real and reusable the moment its transcript is re-analyzed - or
+ * immediately, if the memory surface returns to that hash - but folding it into *this*
+ * proposal would score it against
  * an instruction index it was never judged against (aliases are positional) and inflate
  * `analyzedSessions` with a session this run never touched. Nothing is migrated, rewritten,
  * or deleted here - only excluded from this run's fold.

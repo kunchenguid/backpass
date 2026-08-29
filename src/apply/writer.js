@@ -191,13 +191,12 @@ function removeEmptyDirectories(directories) {
  * The only place in backpass that writes to the repo.
  *
  * Everything upstream is read-only analysis; a run only changes the weights here, after
- * a human accepted specific edits. Five gates run before the first byte is written:
- * the memory file must still be the file the proposal was measured against
- * (`memoryFileSnapshot`), the accepted subset must clear the same cap/shrink budget gate as
- * the full proposal (`budgetGateKind`), every accepted edit for a file must compose
- * against that file's single pre-write image, every created skill target must still be
- * absent, and accepted paths must resolve to distinct targets. Any of them failing writes
- * nothing and records no rejection.
+ * a human accepted specific edits. Before the first byte is written, the memory file and
+ * every decided non-memory target must still be the files the proposal measured; the
+ * accepted subset must clear the same cap/shrink budget gate as the full proposal
+ * (`budgetGateKind`); every accepted edit for a file must compose against that file's
+ * single pre-write image; every created skill target must still be absent; and accepted
+ * paths must resolve to distinct targets. Any failure writes nothing and records no rejection.
  *
  * A file is therefore applied all at once or not at all. Skills are written only after
  * every accepted edit has composed, and before the files that reference them.
@@ -476,7 +475,7 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
       })
     : null;
   for (const item of orderedPlanned) {
-    const { relative, resolved, before, text, applied } = item;
+    const { relative, resolved, text, applied } = item;
     const budget = item === budgetTarget ? surfaceBudget : null;
 
     let commit = null;

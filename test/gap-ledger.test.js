@@ -141,10 +141,7 @@ function age(h, days) {
 test("a later uncited observation preserves the session's failed-trigger citation", () => {
   const phrasing = "Wrap migrations in a transaction.";
   const citedThenUncited = (id) =>
-    record(id, [
-      { proposedInstruction: phrasing, coveredBySkill: "db-schema" },
-      { proposedInstruction: phrasing },
-    ]);
+    record(id, [{ proposedInstruction: phrasing, coveredBySkill: "db-schema" }, { proposedInstruction: phrasing }]);
   const ledger = { version: 1, entries: {} };
 
   recordGapObservations(ledger, [citedThenUncited("s1"), citedThenUncited("s2")]);
@@ -388,11 +385,9 @@ test("failed-trigger evidence survives skill body edits", () => {
     body: `- ${phrasing}\n`,
   };
   const ledger = { version: 1, entries: {} };
-  recordGapObservations(
-    ledger,
-    [record("s1", [{ proposedInstruction: phrasing, coveredBySkill: "lint-ritual" }])],
-    { skills: [citedSkill] },
-  );
+  recordGapObservations(ledger, [record("s1", [{ proposedInstruction: phrasing, coveredBySkill: "lint-ritual" }])], {
+    skills: [citedSkill],
+  });
 
   const entry = Object.values(ledger.entries)[0];
   assert.equal(Object.values(entry.sessions)[0].coveredBySkill, "lint-ritual");
@@ -408,11 +403,9 @@ test("failed-trigger evidence survives skill body edits", () => {
   assert.equal(Object.keys(ledger.entries).length, 1);
 
   const unrelatedEdit = { ...citedSkill, body: `# Notes\n\nUnrelated details changed.\n\n- ${phrasing}\n` };
-  recordGapObservations(
-    ledger,
-    [record("s1", [{ proposedInstruction: phrasing, coveredBySkill: "lint-ritual" }])],
-    { skills: [unrelatedEdit] },
-  );
+  recordGapObservations(ledger, [record("s1", [{ proposedInstruction: phrasing, coveredBySkill: "lint-ritual" }])], {
+    skills: [unrelatedEdit],
+  });
   const afterUnrelatedEdit = pruneGapLedger(ledger, {
     memoryFile: memoryFile(),
     memoryPath: MEMORY_PATH,

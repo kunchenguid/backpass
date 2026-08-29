@@ -175,10 +175,7 @@ test("fold and synthesis events settle the tail stages", () => {
 // ---------- full frames ----------
 
 const DISCOVERY_SCRIPT = [
-  [
-    "memory",
-    { path: "AGENTS.md", label: "AGENTS.md + skill descriptions", tokens: 2412, budget: 5000, units: 63 },
-  ],
+  ["memory", { path: "AGENTS.md", label: "AGENTS.md + skill descriptions", tokens: 2412, budget: 5000, units: 63 }],
   ["discover:start", { harnesses: ["claude", "codex", "opencode", "grok", "pi"] }],
   ["discover:harness:start", { harness: "claude" }],
   ["discover:harness:done", { harness: "claude", scanned: 214, cached: 131, matched: 38, tiers: { 1: 36, 2: 2 } }],

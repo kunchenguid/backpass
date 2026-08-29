@@ -205,7 +205,7 @@ function migrateEvidenceRecord(record, transcript, identity) {
 
 /**
  * Cache key for a transcript's analysis: the transcript's own content signature plus
- * the memory-file hash it was judged against. Either changing invalidates the evidence.
+ * the memory-surface hash it was judged against. Either changing invalidates the evidence.
  */
 export function evidenceKey(transcript, memoryHash) {
   return `${transcriptIdentity(transcript)}:${transcript.mtimeMs}:${transcript.bytes}:${memoryHash}`;

@@ -18,8 +18,9 @@ import { transcriptIdentity } from "./transcript.js";
  * fanned out over a small worker pool.
  *
  * Everything expensive is cached. Evidence is keyed to the transcript's content
- * signature AND the memory-file hash it was judged against, so re-running after an
- * apply correctly re-analyzes against the new weights while an unchanged run is free.
+ * signature AND the memory-surface hash it was judged against, so re-running after a
+ * memory-file or skill-description change correctly re-analyzes against the new weights
+ * while an unchanged surface is free.
  */
 
 const MIN_ASSISTANT_TURNS = 4;

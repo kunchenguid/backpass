@@ -164,7 +164,10 @@ test("the run hash is the memory surface: skill identity and descriptions move i
   const v3 = primaryMemoryFile(repo, config);
   assert.notEqual(v3.hash, v1.hash, "a description edit invalidates evidence like a memory-file edit does");
 
-  fs.writeFileSync(path.join(repo.root, ".agents/skills/db/SKILL.md"), skill("new trigger", "- body v2 changed", "database"));
+  fs.writeFileSync(
+    path.join(repo.root, ".agents/skills/db/SKILL.md"),
+    skill("new trigger", "- body v2 changed", "database"),
+  );
   const v4 = primaryMemoryFile(repo, config);
   assert.notEqual(v4.hash, v3.hash, "a rendered skill rename invalidates evidence carrying the old name");
 });

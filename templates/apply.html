@@ -945,8 +945,7 @@
         }
 
         // ---- budget gauge ----
-        document.getElementById("gauge-title").textContent =
-          "Always-loaded budget · " + (P.memoryFile.path || "");
+        document.getElementById("gauge-title").textContent = "Always-loaded budget · " + (P.memoryFile.path || "");
         document.getElementById("cap-label").textContent = fmt(budget.capTokens) + " tok cap";
         document.getElementById("gauge-now").style.width = pct(budget.current, budget.capTokens) + "%";
 
@@ -992,9 +991,7 @@
             );
           }
           head.appendChild(
-            edit.targetsMemoryFile
-              ? deltaNode("memory", delta)
-              : deltaNode("on trigger", delta - descriptionDelta),
+            edit.targetsMemoryFile ? deltaNode("memory", delta) : deltaNode("on trigger", delta - descriptionDelta),
           );
           if (descriptionDelta) head.appendChild(deltaNode("description (always-loaded)", descriptionDelta));
           card.appendChild(head);
@@ -1152,9 +1149,7 @@
           var over = tok > budget.capTokens;
 
           document.getElementById("gauge-title").textContent =
-            "Always-loaded budget · " +
-            (P.memoryFile.path || "") +
-            (descriptionTok > 0 ? " + skill descriptions" : "");
+            "Always-loaded budget · " + (P.memoryFile.path || "") + (descriptionTok > 0 ? " + skill descriptions" : "");
           document.getElementById("n-accept").textContent = accepted;
           document.getElementById("n-reject").textContent = rejected;
 

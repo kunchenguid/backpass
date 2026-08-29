@@ -29,8 +29,8 @@ transcript that session leaves on disk is the loss signal - and today nothing re
 The loop only closes when a human happens to remember a failure and edits the file by hand.
 
 `backpass` closes it. It finds the agent sessions that actually ran in your repo, reads
-what happened in them, and proposes evidence-backed edits to your memory file - under a
-token budget, gated by you.
+what happened in them, and proposes evidence-backed edits to your memory surface - the
+memory file and project skills - under a token budget, gated by you.
 
 - **Local-first** - Reads the transcript stores of seven agent harnesses directly from disk.
   No API, no upload; transcripts never leave your machine except into an agent you already
@@ -42,7 +42,7 @@ token budget, gated by you.
   command, and it shows each edit with its evidence for you to accept or reject.
 
 ```
-AGENTS.md / CLAUDE.md          (the weights)
+AGENTS.md / CLAUDE.md + skills (the weights)
   → agent session               (forward pass)
   → transcript on disk          (loss signal)
   → backpass: collect samples, distill, calculate loss, aggregate gradients
@@ -153,9 +153,9 @@ weights still evolve as transcripts age, so the selected set can change over tim
 `--max-transcripts all` to analyze every transcript, or `--seed <n>` to draw a different,
 equally reproducible sample.
 
-Each distilled trace goes to a cheap model with the memory file and a rubric. It returns
-strict JSON: which instructions helped, which were violated, and what mistakes no current
-instruction covers. Every negative carries a class - `harm` (following the instruction
+Each distilled trace goes to a cheap model with the memory file, the project skill index,
+and a rubric. It returns strict JSON: which instructions helped, which were violated, and
+what mistakes no current instruction covers. Every negative carries a class - `harm` (following the instruction
 caused damage), `non-compliance` (the agent ignored it), or `irrelevant` - because those
 argue for opposite fates: harm argues against an instruction, non-compliance argues for
 reinforcing it. Every gap carries a domain - `orchestration` when the mistake was caused
@@ -170,13 +170,16 @@ weighted highest, but its class determines what it supports: non-compliance supp
 reinforcement, while only harm supports removal.
 
 Results are cached per transcript, keyed to both the transcript's content _and_ the effective
-memory-file set hash: edit the weights and the evidence correctly re-computes; change nothing
-and the next run is free. A memory-file edit therefore reanalyzes without `--force` - that is
-not a cache miss, it is the cache doing its job - and the run says so on stderr, naming the
-old and new hash, so a "0 reused" line reads as "the file changed" rather than "reuse is
-broken." Evidence files that are not refreshed remain on disk but are excluded while their
-hash is stale. They become eligible again if the memory-file set returns to that hash;
-evidence for transcripts included in the new analysis is replaced with fresh judgments.
+memory-surface hash: the memory-file set plus every project skill's name and description.
+Edit a memory file or skill description and the evidence correctly re-computes; edit only a
+skill body and the cache remains valid because bodies are inspected only for failed-trigger
+confirmation. A repo without skills keeps the prior memory-set hash. A surface edit therefore
+reanalyzes without `--force` - that is not a cache miss, it is the cache doing its job - and
+the run says so on stderr, naming the old and new hash, so a "0 reused" line reads as "the
+surface changed" rather than "reuse is broken." Evidence files that are not refreshed remain
+on disk but are excluded while their hash is stale. They become eligible again if the memory
+surface returns to that hash; evidence for transcripts included in the new analysis is
+replaced with fresh judgments.
 
 ### 4. Aggregate gradients - and one judged consolidation call
 
@@ -198,17 +201,17 @@ reported but never cluster: a mistake caused not by this repository but by the e
 agent harness or tooling that orchestrated a session does not become an instruction in the
 project's memory file.
 
-Only evidence judged against the _current_ memory-file set hash is folded into a proposal. A
+Only evidence judged against the _current_ memory-surface hash is folded into a proposal. A
 transcript that fell out of this run's sample - the time window, `maxTranscripts`, or the
 transcript itself being gone - can leave an older evidence file on disk under a hash the
-memory-file set no longer has; that file is left untouched, but it does not count toward this
+memory surface no longer has; that file is left untouched, but it does not count toward this
 run's session total or instruction scores, or add a gap observation, until it is current
 again.
 
 Those sessions are counted across runs, not per run: every gap sighting is kept in
 `.backpass/gap-ledger.json` by gap and session, so a gap seen in one session today and in
 another session next week graduates on the later run. The same session never counts twice,
-a sighting retires once the memory file gains an instruction that covers it, and a session's
+a sighting retires once the memory file or a project skill covers it, and a session's
 sightings expire after `gapLedgerMaxAge` (default 90d). Until a gap corroborates it stays
 out of the proposal entirely.
 
@@ -217,29 +220,30 @@ out of the proposal entirely.
 A high-reasoning synthesis run turns the aggregated gradients into concrete edits: ADD,
 REMOVE, REWRITE, or EXTRACT→SKILL. The agent does not describe edits for backpass to
 splice in - it makes them, with its harness's own file tools, in a **staging copy** of the
-memory file under `.backpass/synthesis/` (the repo itself is read-only to it, for
-grounding). backpass then diffs the copy against the original and shows the agent the
+memory file and project skills under `.backpass/synthesis/` (the repo itself is read-only
+to it, for grounding). backpass then diffs the copy against the original and shows the agent the
 measured changes by id; the agent annotates each one with a title, rationale, and the
 verbatim evidence behind it. Nothing textual is ever taken from the model: every hunk's
 text is copied out of your file by construction, so an edit can never "not appear" in it.
 Then mechanical gates run, and they are not negotiable:
 
 - at most `maxEditsPerRun` edits (the learning rate). By default the cap is adaptive: 5
-  when the file is near or under budget, and in a shrink plan (file over budget) one edit
-  per ~40 tokens of overage, capped at 20, so badly overgrown files recover in fewer runs.
+  when the always-loaded surface is near or under budget, and in a shrink plan (surface
+  over budget) one edit per ~40 tokens of overage, capped at 20, so badly overgrown
+  surfaces recover in fewer runs.
   An explicit `--max-edits` or config value always pins it.
 - every measured change belongs to exactly one annotated edit - an unexplained change
   is a violation, so is an edit that names no change
 - new instructions need evidence from `minGapEvidence` distinct sessions (an edit that
   only adds text is a new instruction, whatever the model calls it)
-- removing an instruction outright needs harm-class negatives from `minGapEvidence`
-  distinct sessions - non-compliance never counts, because a rule that was skipped needs
-  reinforcement, not deletion (a change that only deletes text outside an extraction is a
-  removal, whatever the model calls it)
+- removing a memory-file instruction outright needs harm-class negatives from
+  `minGapEvidence` distinct sessions - non-compliance never counts, because a rule that
+  was skipped needs reinforcement, not deletion. A pure deletion in a skill file is also
+  a removal, but no evidence can attribute harm to skill-file text, so it is refused.
 - an extraction preserves every line it removes in the skills it creates; a deletion is
   never part of an extract
 - every edit carries a verbatim quote
-- the post-edit file must fit the budget, measured on the staged file
+- the post-edit always-loaded surface must fit the budget, measured from the staged files
 
 An extraction is the created `SKILL.md` plus the memory-file change that pays for it.
 Neighbouring removals are merged into one measured change, and a merged change cannot be
@@ -348,11 +352,11 @@ over. An incompatible set writes nothing and does not record rejections, so you 
 a compatible set and try again. If the run shrinks the file but leaves it above the cap,
 that is progress, not a failure: it is written, and the remaining overage is printed.
 
-Apply preflights every accepted edit before writing. The proposal was measured against one
-exact version of your memory file, so apply first checks the file still exists and is still
-that version. If it was removed or changed since - you pulled, edited it by hand, or another
+Apply preflights every decided edit before writing. The proposal was measured against exact
+versions of your memory file and every skill file it proposes editing, so apply first checks
+those files still exist and are still those versions. If one was removed or changed since - you pulled, edited it by hand, or another
 agent did - the edits no longer describe what is on disk, so nothing is written and you are
-told to run `backpass` again to re-propose against the current file. That rerun reanalyzes
+told to run `backpass` again to re-propose against the current repository. That rerun reanalyzes
 transcripts against the file that exists now; it does not reuse the stale judgments behind
 the refused proposal. Within a run every file is composed from one version: it takes every
 accepted edit or none of them. Apply also

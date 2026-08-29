@@ -249,7 +249,11 @@ test("failed-trigger citations count per skill and reach the synthesis prompt wi
     { memoryFile, minGapEvidence: 2 },
   );
   assert.equal(partlyCited.gaps.length, 1, "the gap itself still clears its corroboration floor");
-  assert.equal(partlyCited.gaps[0].failedTriggerSkill, undefined, "one skill citation cannot clear a two-session floor");
+  assert.equal(
+    partlyCited.gaps[0].failedTriggerSkill,
+    undefined,
+    "one skill citation cannot clear a two-session floor",
+  );
 
   const citedAfterDuplicate = foldEvidence(
     [

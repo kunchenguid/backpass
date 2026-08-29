@@ -100,8 +100,11 @@ export function findGapEntry(ledger, memoryPath, proposedInstruction) {
 /**
  * Fold this run's evidence into the ledger. One observation per (gap, session); a
  * session seen again replaces its own observation and keeps its first-seen timestamp.
+ *
+ * @param {{ now?: Date, skills?: unknown[] }} [options]
  */
-export function recordGapObservations(ledger, evidenceRecords, { now = new Date() } = {}) {
+export function recordGapObservations(ledger, evidenceRecords, options = {}) {
+  const { now = new Date() } = options;
   const observedAt = new Date(now).toISOString();
   let recorded = 0;
   for (const record of evidenceRecords) {

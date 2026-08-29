@@ -1077,7 +1077,9 @@ test("the apply surface separates memory, description, and on-trigger deltas", (
         deltaTokens: -20,
         descriptionDelta: 5,
         hunks: [],
-        skills: [{ name: "setup", path: ".agents/skills/setup/SKILL.md", description: "Load for setup.", body: "body" }],
+        skills: [
+          { name: "setup", path: ".agents/skills/setup/SKILL.md", description: "Load for setup.", body: "body" },
+        ],
         evidence: [],
       },
       {
@@ -1631,8 +1633,7 @@ test("a skill-only shrink reports the remaining always-loaded overage", () => {
   const skill = `---\nname: db\ndescription: ${oldDescription}\n---\n\nbody\n`;
   const built = gate({
     files: { ".agents/skills/db/SKILL.md": skill },
-    edit: (root) =>
-      writeIn(root, ".agents/skills/db/SKILL.md", (text) => text.replace(oldDescription, newDescription)),
+    edit: (root) => writeIn(root, ".agents/skills/db/SKILL.md", (text) => text.replace(oldDescription, newDescription)),
     annotation: { edits: [claim(["H1"], { title: "trim the trigger" })] },
     config: config({ budgetTokens: 100 }),
   });

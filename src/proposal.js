@@ -9,7 +9,7 @@ import { isSkillFilePath, normalizeRecoveryLine, recoveredLineCounts } from "./w
  * gates it must clear before a human ever sees it (design sections 3, 6, 7). The
  * budget gate (`budgetGateKind`) runs again on the accepted subset at apply.
  *
- * The synthesis agent edits a staging copy of the memory file natively
+ * The synthesis agent edits a staging copy of the memory file and project skills natively
  * (`src/workspace.js`); backpass measures the result as anchored hunks (`src/diff.js`)
  * and the agent annotates them - kind, title, rationale, evidence - by id. An edit is
  * therefore a group of measured changes against one file:
@@ -493,9 +493,9 @@ export function buildProposal(rawResult, context) {
   /**
    * The budget gate has two modes (design section 6).
    *
-   * Normally the post-edit file must fit the budget. But a file that is ALREADY over
-   * budget cannot be brought under it in one capped step - demanding that would fail
-   * every run on exactly the repos that need backpass most. There, the run is a shrink
+   * Normally the post-edit always-loaded surface must fit the budget. But a surface that
+   * is ALREADY over budget cannot be brought under it in one capped step - demanding that
+   * would fail every run on exactly the repos that need backpass most. There, the run is a shrink
    * plan and the gate is progress: the edit set must be strictly net-negative.
    */
   budget.mode = memoryFile.tokens + descriptionTokensNow > config.budgetTokens ? "shrink" : "cap";

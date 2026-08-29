@@ -17,8 +17,8 @@ import { UserError, color, info, warn } from "./logger.js";
  * evidence into concrete edits.
  *
  * The agent never describes an edit for backpass to locate - it makes the edit, with its
- * harness's own file tools, in a staging copy of the memory file (`src/workspace.js`).
- * A run starts in one session with two kinds of turn:
+ * harness's own file tools, in a staging copy of the memory file and project skills
+ * (`src/workspace.js`). A run starts in one session with two kinds of turn:
  *
  *   edit      the synthesis prompt; the agent edits `./AGENTS.md` in the staging copy
  *   annotate  backpass measures the copy against the original (`src/diff.js`) and shows
