@@ -52,7 +52,7 @@ export async function foldForRun(ctx, memoryFile, memoryHash, skills = []) {
   const summary = foldEvidence(relevant, {
     minGapEvidence,
     memoryFile,
-    gapObservations: ledgerGapObservations(ledger, memoryFile.path),
+    gapObservations: ledgerGapObservations(ledger, memoryFile.path, skills),
   });
   summary.consolidation = consolidation;
   return summary;

@@ -359,7 +359,7 @@ test("failed-trigger evidence survives unchanged skill coverage and retires afte
 
   const entry = Object.values(ledger.entries)[0];
   assert.equal(Object.values(entry.sessions)[0].coveredBySkill, "lint-ritual");
-  assert.equal(ledgerGapObservations(ledger, MEMORY_PATH)[0].coveredBySkill, "lint-ritual");
+  assert.equal(ledgerGapObservations(ledger, MEMORY_PATH, [citedSkill])[0].coveredBySkill, "lint-ritual");
 
   const unchanged = pruneGapLedger(ledger, {
     memoryFile: memoryFile(),
@@ -370,20 +370,53 @@ test("failed-trigger evidence survives unchanged skill coverage and retires afte
   assert.equal(unchanged.covered, 0, "the cited pre-existing body is evidence of a failed trigger");
   assert.equal(Object.keys(ledger.entries).length, 1);
 
-  const fixedSkill = { ...citedSkill, body: `# Fixed trigger\n\n- ${phrasing}\n` };
+  const unrelatedEdit = { ...citedSkill, body: `# Notes\n\nUnrelated details changed.\n\n- ${phrasing}\n` };
   recordGapObservations(
     ledger,
     [record("s1", [{ proposedInstruction: phrasing, coveredBySkill: "lint-ritual" }])],
-    { skills: [fixedSkill] },
+    { skills: [unrelatedEdit] },
   );
+  const afterUnrelatedEdit = pruneGapLedger(ledger, {
+    memoryFile: memoryFile(),
+    memoryPath: MEMORY_PATH,
+    maxAge: "all",
+    skills: [unrelatedEdit],
+  });
+  assert.equal(afterUnrelatedEdit.covered, 0, "an unrelated body edit preserves the failed-trigger evidence");
+
+  const fixedSkill = {
+    ...unrelatedEdit,
+    body: "# Notes\n\nUnrelated details changed.\n\n- Run pnpm lint before committing changes every time.\n",
+  };
   const stats = pruneGapLedger(ledger, {
     memoryFile: memoryFile(),
     memoryPath: MEMORY_PATH,
     maxAge: "all",
     skills: [fixedSkill],
   });
-  assert.equal(stats.covered, 1, "changed skill content that resolves the gap retires it");
+  assert.equal(stats.covered, 1, "changed covering content that resolves the gap retires it");
   assert.deepEqual(ledger.entries, {});
+});
+
+test("a missing cited skill remains ordinary gap evidence", () => {
+  const phrasing = "Run pnpm lint before committing changes.";
+  const citedSkill = {
+    name: "lint-ritual",
+    path: ".agents/skills/lint-ritual/SKILL.md",
+    description: "Load before committing.",
+    body: `- ${phrasing}\n`,
+  };
+  const ledger = { version: 1, entries: {} };
+  recordGapObservations(
+    ledger,
+    [record("s1", [{ proposedInstruction: phrasing, coveredBySkill: "lint-ritual" }])],
+    { skills: [citedSkill] },
+  );
+
+  const observations = ledgerGapObservations(ledger, MEMORY_PATH, []);
+  assert.equal(observations.length, 1);
+  assert.equal(observations[0].coveredBySkill, undefined);
+  assert.equal(Object.values(ledger.entries)[0].sessions.s1.coveredBySkill, "lint-ritual");
 });
 
 test("a skill's description line alone can cover a gap", () => {

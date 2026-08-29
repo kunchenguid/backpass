@@ -1,4 +1,4 @@
-import { parseMemoryUnits, similarity } from "./memory.js";
+import { parseMemoryUnits, similarity, unitHash } from "./memory.js";
 import { parseSince } from "./config.js";
 import { sha256 } from "./state.js";
 
@@ -149,11 +149,12 @@ export function recordGapObservations(ledger, evidenceRecords, { now = new Date(
       if (aliasPrior) delete entry.sessions[transcript.id];
       const priorFailedTrigger = priors.find(
         (observation) =>
-          observation.coveredBySkill === gap.coveredBySkill && observation.coveredBySkillHash,
+          observation.coveredBySkill === gap.coveredBySkill && observation.coveredBySkillHashes?.length,
       );
       const citedSkill = gap.coveredBySkill ? skillsByName.get(gap.coveredBySkill) : null;
-      const coveredBySkillHash = priorFailedTrigger?.coveredBySkillHash ||
-        (citedSkill ? skillCoverageHash(citedSkill) : null);
+      const coveredBySkillHashes =
+        priorFailedTrigger?.coveredBySkillHashes ||
+        (citedSkill ? matchingCoverageHashes(citedSkill, gap.proposedInstruction) : []);
       entry.sessions[sessionIdentity] = {
         firstObservedAt: firstObservedAt || observedAt,
         observedAt,
@@ -169,7 +170,7 @@ export function recordGapObservations(ledger, evidenceRecords, { now = new Date(
         // this mistake. Absent when no skill covers it (including all pre-existing
         // observations), and absence never counts as a citation.
         ...(gap.coveredBySkill ? { coveredBySkill: gap.coveredBySkill } : {}),
-        ...(coveredBySkillHash ? { coveredBySkillHash } : {}),
+        ...(coveredBySkillHashes.length ? { coveredBySkillHashes } : {}),
       };
       recorded += 1;
     }
@@ -216,19 +217,20 @@ export function pruneGapLedger(
 function coverageUnits(memoryFile, skills) {
   return [
     ...(memoryFile?.units || []).map((unit) => ({ text: unit.text })),
-    ...(skills || []).flatMap((skill) => {
-      const hash = skillCoverageHash(skill);
-      return [skill.description || "", ...parseMemoryUnits(skill.body || "").map((unit) => unit.text)].map((text) => ({
+    ...(skills || []).flatMap((skill) =>
+      [skill.description || "", ...parseMemoryUnits(skill.body || "").map((unit) => unit.text)].map((text) => ({
         text,
         skill: skill.name,
-        hash,
-      }));
-    }),
+        hash: unitHash(text),
+      })),
+    ),
   ].filter((unit) => unit.text.trim());
 }
 
-function skillCoverageHash(skill) {
-  return sha256(`${skill.path || ""}\n${skill.name || ""}\n${skill.description || ""}\n${skill.body || ""}`);
+function matchingCoverageHashes(skill, phrasing) {
+  return coverageUnits(null, [skill])
+    .filter((unit) => similarity(unit.text, phrasing) >= GAP_COVERED_THRESHOLD)
+    .map((unit) => unit.hash);
 }
 
 function isCovered(coverage, entry) {
@@ -238,7 +240,7 @@ function isCovered(coverage, entry) {
       unit.skill &&
       Object.values(entry.sessions).some(
         (observation) =>
-          observation.coveredBySkill === unit.skill && observation.coveredBySkillHash === unit.hash,
+          observation.coveredBySkill === unit.skill && observation.coveredBySkillHashes?.includes(unit.hash),
       );
     return (
       !isUnchangedFailedTrigger &&
@@ -248,8 +250,9 @@ function isCovered(coverage, entry) {
 }
 
 /** Flatten the ledger into the observation list `foldEvidence` clusters over. */
-export function ledgerGapObservations(ledger, memoryPath) {
+export function ledgerGapObservations(ledger, memoryPath, skills = null) {
   const observations = [];
+  const skillNames = skills ? new Set(skills.map((skill) => skill.name)) : null;
   for (const entry of Object.values(ledger.entries)) {
     if (entry.memoryPath !== memoryPath) continue;
     for (const [sessionId, obs] of Object.entries(entry.sessions)) {
@@ -261,7 +264,9 @@ export function ledgerGapObservations(ledger, memoryPath) {
         quote: obs.quote,
         recurrenceRisk: obs.recurrenceRisk,
         domain: obs.domain === "orchestration" ? "orchestration" : "project",
-        ...(obs.coveredBySkill ? { coveredBySkill: obs.coveredBySkill } : {}),
+        ...(obs.coveredBySkill && (!skillNames || skillNames.has(obs.coveredBySkill))
+          ? { coveredBySkill: obs.coveredBySkill }
+          : {}),
       });
     }
   }
