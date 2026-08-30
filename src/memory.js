@@ -133,11 +133,37 @@ function unitHasFence(text) {
   return text.split("\n").some((line) => FENCE.test(line));
 }
 
+const ABBREVIATIONS = new Set([
+  "approx",
+  "cf",
+  "dept",
+  "dr",
+  "e.g",
+  "etc",
+  "fig",
+  "i.e",
+  "inc",
+  "jr",
+  "misc",
+  "mr",
+  "mrs",
+  "ms",
+  "no",
+  "prof",
+  "sr",
+  "st",
+  "v",
+  "vs",
+]);
+
 function ambiguousPeriodEnding(text) {
   const token = text.match(/([\p{L}.]+)\.$/u)?.[1] || "";
-  if (!token || /^\p{L}$/u.test(token) || /^(?:\p{L}\.)+\p{L}$/u.test(token)) return true;
-  const words = text.match(/[\p{L}\p{N}]+/gu)?.length || 0;
-  return token.replace(/\./g, "").length <= 8 && words <= 3;
+  if (!token) return true;
+  return (
+    ABBREVIATIONS.has(token.toLowerCase()) ||
+    /^\p{L}$/u.test(token) ||
+    /^(?:\p{L}\.)+\p{L}$/u.test(token)
+  );
 }
 
 function startsSentence(text, index) {
