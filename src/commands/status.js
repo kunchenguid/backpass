@@ -115,9 +115,15 @@ export async function cmdStatus(ctx) {
     `  evidence        ${counts.ok || 0} ok · ${counts.skipped || 0} skipped · ${color.red(String(counts.failed || 0))} failed`,
   );
   if (summary) {
+    const eligibleClusters = summary.totals.gapClusters;
+    const reportOnlyClusters = summary.totals.reportOnlyGapClusters || 0;
+    const totalClusters = eligibleClusters + reportOnlyClusters;
+    const clusterSplit = reportOnlyClusters
+      ? ` (${eligibleClusters} synthesis eligible · ${reportOnlyClusters} report only)`
+      : "";
     out(
       `  gradients       ${summary.analyzedSessions} session(s) · ${summary.totals.positive}+ ` +
-        `${summary.totals.negative}- · ${summary.totals.gapClusters} gap cluster(s)`,
+        `${summary.totals.negative}- · ${totalClusters} gap cluster(s)${clusterSplit}`,
     );
   }
   out(`  rejections      ${Object.keys(rejections.entries).length} remembered`);

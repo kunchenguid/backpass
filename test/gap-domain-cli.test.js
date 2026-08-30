@@ -225,7 +225,9 @@ test("an orchestration gap is counted but never corroborates, while a gap with n
   );
 
   const rendered = renderEvidenceForPrompt(summary);
-  assert.ok(!rendered.includes(ORCHESTRATION_GAP), "the orchestration gap never reaches the synthesis prompt");
+  const [eligibleEvidence, reportOnlyEvidence] = rendered.split("### REPORT ONLY");
+  assert.ok(!eligibleEvidence.includes(ORCHESTRATION_GAP), "the orchestration gap is not synthesis-eligible");
+  assert.ok(reportOnlyEvidence.includes(ORCHESTRATION_GAP), "the orchestration gap remains visible as report-only");
   assert.match(rendered, /2 orchestration-domain sighting\(s\).*excluded/, "the run stays legible about what it cut");
 
   const ledger = state.readGapLedger();
