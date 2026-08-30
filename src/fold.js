@@ -306,14 +306,15 @@ function failedTriggerOf(items, minGapEvidence) {
 
 /** Compact rendering of the folded evidence for the synthesis prompt. */
 export function renderEvidenceForPrompt(summary) {
-  return renderEvidence(summary);
+  return renderEvidence(summary, { includeReportOnly: false });
 }
 
+/** Full evidence report, including diagnostics that must never reach synthesis. */
 export function renderEvidenceReport(summary) {
-  return renderEvidence(summary);
+  return renderEvidence(summary, { includeReportOnly: true });
 }
 
-function renderEvidence(summary) {
+function renderEvidence(summary, { includeReportOnly }) {
   const lines = [];
 
   const mix = summary.analyzedByInteraction;
@@ -399,10 +400,9 @@ function renderEvidence(summary) {
     }
   }
 
-  if (summary.reportOnlyGaps?.length) {
+  if (includeReportOnly && summary.reportOnlyGaps?.length) {
     lines.push("");
     lines.push("### REPORT ONLY - not synthesis-eligible evidence");
-    lines.push("Do not create or justify proposals from these diagnostic clusters.");
     for (const gap of summary.reportOnlyGaps) {
       lines.push(`- ${gapSessionLabel(gap)} risk=${gap.recurrenceRisk} :: ${gap.proposedInstruction}`);
     }

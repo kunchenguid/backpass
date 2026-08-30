@@ -823,27 +823,26 @@
 
         // ---- run context: one frame, the gap funnel beside the run stats ----
         // A single bordered band. The left pane tells the gap story as proportional
-        // bars - sightings recorded by analysis -> project-domain (orchestration
-        // excluded) -> distinct gaps after clustering -> eligible to propose - with
-        // each drop-off explained in plain words. The right pane holds the run facts
-        // (edits, evidence, skills) as stat cells; a separate stat row would duplicate
-        // the funnel's last stage. Every count is recorded by the fold (`totals` in
+        // bars - sightings recorded by analysis -> distinct gaps after clustering ->
+        // eligible to propose - with each drop-off explained in plain words. Domain is
+        // voted after clustering, so orchestration sightings are not subtracted before
+        // the distinct-gap stage. The right pane holds the run facts (edits, evidence,
+        // skills) as stat cells. Every count is recorded by the fold (`totals` in
         // evidence-summary.json); a proposal saved before the counts existed falls
         // back to the classic stat row rather than showing zeros nobody measured.
         function funnelCounts() {
           if (typeof (P.stats || {}).gapSightings !== "number") return null;
           var eligible = P.stats.gapClusters || 0;
           var dropped = P.stats.droppedGapSingletons || 0;
-          var orch = P.stats.orchestrationGapSightings || 0;
-          var project = Math.max(0, P.stats.gapSightings - orch);
+          var reportOnly = P.stats.reportOnlyGapClusters || 0;
+          var distinct = eligible + reportOnly + dropped;
           return {
             floor: Number((P.config || {}).minGapEvidence) || 2,
             sighted: P.stats.gapSightings,
-            orch: orch,
-            project: project,
-            distinct: eligible + dropped,
-            merged: Math.max(0, project - (eligible + dropped)),
+            distinct: distinct,
+            merged: Math.max(0, P.stats.gapSightings - distinct),
             dropped: dropped,
+            reportOnly: reportOnly,
             eligible: eligible,
           };
         }
@@ -872,12 +871,6 @@
           funnelBar(bars, funnel.sighted, "sightings", funnel.sighted);
           funnelDrop(
             bars,
-            funnel.orch,
-            "orchestration: mistakes in how the task was run, not in this project - excluded from proposals by design",
-          );
-          funnelBar(bars, funnel.project, "project-domain", funnel.sighted);
-          funnelDrop(
-            bars,
             funnel.merged,
             "merged: repeat sightings of a gap already counted - they corroborate it rather than add a new one",
           );
@@ -888,6 +881,11 @@
             "below the corroboration floor: seen in fewer than " +
               funnel.floor +
               " sessions so far - more transcripts can corroborate them",
+          );
+          funnelDrop(
+            bars,
+            funnel.reportOnly,
+            "report only: mixed clusters below the floor or clusters excluded by a majority orchestration vote",
           );
           funnelBar(bars, funnel.eligible, "eligible to propose", funnel.sighted, true);
 
@@ -921,15 +919,12 @@
               funnel.floor +
               "-session corroboration floor - more transcripts may corroborate " +
               (funnel.dropped === 1 ? "it." : "them.");
-          } else if (!funnel.eligible && funnel.orch >= funnel.sighted) {
+          } else if (!funnel.eligible && funnel.reportOnly) {
             funnelNote =
-              "All " +
-              funnel.sighted +
-              " sighting" +
-              (funnel.sighted === 1 ? " was" : "s were") +
-              " orchestration-domain (caused by the orchestrating harness, not this repository) and " +
-              (funnel.sighted === 1 ? "is" : "are") +
-              " excluded by design.";
+              funnel.reportOnly +
+              " distinct gap cluster" +
+              (funnel.reportOnly === 1 ? " is" : "s are") +
+              " report only and excluded from proposals.";
           }
           if (funnelNote && !funnel.sighted) {
             var noteEl = document.getElementById("funnel-note");

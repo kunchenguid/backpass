@@ -194,7 +194,7 @@ test("a two-sighting cluster with one orchestration vote survives instead of dro
   assert.match(renderedMajority, /3 sightings, 2 orchestration; domain excluded by majority vote/);
   assert.match(renderedMajority, /no gap cluster is eligible for a repository proposal/);
   assert.doesNotMatch(renderedMajority, /none above the evidence threshold/);
-  assert.match(renderEvidenceForPrompt(majorityOrch), /REPORT ONLY - not synthesis-eligible evidence/);
+  assert.doesNotMatch(renderEvidenceForPrompt(majorityOrch), /Read docs\/sshhip\.md|REPORT ONLY/);
 });
 
 test("a below-threshold mixed cluster remains visible only in the report", () => {
@@ -223,7 +223,8 @@ test("a below-threshold mixed cluster remains visible only in the report", () =>
   assert.equal(summary.totals.reportOnlyGapClusters, 1);
   assert.equal(summary.totals.droppedGapSingletons, 0);
   assert.match(renderEvidenceReport(summary), /2 sightings, 1 orchestration/);
-  assert.match(renderEvidenceForPrompt(summary), /REPORT ONLY - not synthesis-eligible evidence/);
+  assert.match(renderEvidenceReport(summary), /Read docs\/sshhip\.md/);
+  assert.doesNotMatch(renderEvidenceForPrompt(summary), /Read docs\/sshhip\.md|REPORT ONLY/);
 });
 
 test("a pure orchestration singleton stays hidden below the evidence floor", () => {

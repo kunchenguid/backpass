@@ -7,7 +7,7 @@ import path from "node:path";
 import { State } from "../src/state.js";
 import { parseMemoryUnits } from "../src/memory.js";
 import { foldForRun } from "../src/commands/propose.js";
-import { foldEvidence, renderEvidenceForPrompt } from "../src/fold.js";
+import { foldEvidence, renderEvidenceForPrompt, renderEvidenceReport } from "../src/fold.js";
 import {
   gapEntryId,
   ledgerGapObservations,
@@ -255,10 +255,12 @@ test("orchestration-domain gaps are counted but never cluster into a proposal", 
   assert.equal(summary.reportOnlyGaps.length, 1);
   assert.equal(summary.totals.reportOnlyGapClusters, 1);
   assert.equal(summary.totals.orchestrationGapSightings, 2, "but the run stays legible about what it excluded");
-  const rendered = renderEvidenceForPrompt(summary);
-  assert.match(rendered, /1 gap clusters \(0 synthesis eligible, 1 report only/);
-  assert.match(rendered, /2 orchestration-domain sighting\(s\).*excluded/);
-  assert.match(rendered, /2 sightings, 2 orchestration; domain excluded by majority vote/);
+  const prompt = renderEvidenceForPrompt(summary);
+  assert.doesNotMatch(prompt, /Stop after the report on scout tasks/);
+  const report = renderEvidenceReport(summary);
+  assert.match(report, /1 gap clusters \(0 synthesis eligible, 1 report only/);
+  assert.match(report, /2 orchestration-domain sighting\(s\).*excluded/);
+  assert.match(report, /2 sightings, 2 orchestration; domain excluded by majority vote/);
 
   // The same shape in the project domain clusters as usual - the exclusion is the
   // domain, not the text.
