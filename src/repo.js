@@ -52,39 +52,46 @@ function listWorktrees(root) {
   return [...new Set(paths)];
 }
 
-function remoteIdentity(remote, root) {
+function cloneRemoteIdentity(remote, root) {
   const value = String(remote || "").trim();
   if (!value) return null;
 
   if (/^file:\/\//i.test(value)) {
     try {
-      return normalizeRemote(realpathOrSelf(fileURLToPath(value)));
+      return `local:${realpathOrSelf(fileURLToPath(value))}`;
     } catch {
-      return normalizeRemote(value);
+      return null;
     }
   }
   if (/^[a-z][a-z+.-]*:\/\//i.test(value) || /^(?:[^/@\s]+@)?[^/:\s]+:.+/.test(value)) {
-    return normalizeRemote(value);
+    const normalized = normalizeRemote(value);
+    return normalized ? `remote:${normalized}` : null;
   }
 
   const expanded = expandUserPath(value);
-  return normalizeRemote(realpathOrSelf(path.isAbsolute(expanded) ? expanded : path.resolve(root, expanded)));
+  const resolved = realpathOrSelf(path.isAbsolute(expanded) ? expanded : path.resolve(root, expanded));
+  return `local:${resolved}`;
 }
 
-function listRemotes(root) {
+function listRemoteUrls(root) {
   let raw;
   try {
     raw = git(["remote", "-v"], root);
   } catch {
     return [];
   }
-  const out = new Set();
-  for (const line of raw.split("\n")) {
-    const url = line.split(/\s+/)[1];
-    const norm = remoteIdentity(url, root);
-    if (norm) out.add(norm);
-  }
-  return [...out];
+  return raw
+    .split("\n")
+    .map((line) => line.split(/\s+/)[1])
+    .filter(Boolean);
+}
+
+function listRemotes(root) {
+  return [...new Set(listRemoteUrls(root).map(normalizeRemote).filter(Boolean))];
+}
+
+function listCloneRemotes(root) {
+  return [...new Set(listRemoteUrls(root).map((remote) => cloneRemoteIdentity(remote, root)).filter(Boolean))];
 }
 
 function expandUserPath(p) {
@@ -134,7 +141,7 @@ export function listSiblingCloneWorktrees({ remotes, worktrees, cloneRoots = [],
       return;
     }
     if (known.has(real) || !isGitCheckout(real)) return;
-    const theirs = listRemotes(real);
+    const theirs = listCloneRemotes(real);
     if (!remotesOverlap(remotes, theirs)) return;
     for (const wt of listWorktrees(real)) {
       if (known.has(wt)) continue;
@@ -174,12 +181,12 @@ export function listSiblingCloneWorktrees({ remotes, worktrees, cloneRoots = [],
 /**
  * Fill `repo.siblingWorktrees` from local clones that share this repo's remotes.
  *
- * @param {{ root: string, remotes: string[], worktrees: string[], siblingWorktrees?: string[] }} repo
+ * @param {{ root: string, cloneRemotes: string[], worktrees: string[], siblingWorktrees?: string[] }} repo
  * @param {string[]} [cloneRoots]
  */
 export function attachSiblingClones(repo, cloneRoots = []) {
   repo.siblingWorktrees = listSiblingCloneWorktrees({
-    remotes: repo.remotes,
+    remotes: repo.cloneRemotes,
     worktrees: repo.worktrees,
     cloneRoots,
     repoRoot: repo.root,
@@ -234,6 +241,7 @@ export function resolveRepo(cwd = process.cwd()) {
     name: path.basename(realRoot),
     worktrees: listWorktrees(root),
     remotes: listRemotes(root),
+    cloneRemotes: listCloneRemotes(root),
     siblingWorktrees: [],
   };
 }

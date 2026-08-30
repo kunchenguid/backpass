@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
+import { associate } from "../src/discovery/association.js";
 import { attachSiblingClones, ensureLocalExclude, resolveRepo } from "../src/repo.js";
 
 function git(args, cwd) {
@@ -117,6 +118,35 @@ test("local relative remotes are resolved from each checkout", () => {
 
   const repo = attachSiblingClones(resolveRepo(primary), [path.dirname(matching), foreignParent]);
   assert.ok(repo.siblingWorktrees.includes(fs.realpathSync(matching)));
+  assert.equal(repo.siblingWorktrees.includes(fs.realpathSync(foreign)), false);
+
+  const recorded = associate({ cwd: "/vanished/checkout", remotes: ["../origin.git"] }, repo);
+  assert.equal(recorded.tier, 2);
+  assert.equal(recorded.confidence, "remote");
+});
+
+test("distinct local paths remain distinct clone identities", () => {
+  const parent = tempDir("backpass-local-identity-");
+  const remotes = path.join(parent, "remotes");
+  const dottedRemote = path.join(remotes, "project.git");
+  const plainRemote = path.join(remotes, "project");
+  fs.mkdirSync(remotes);
+  git(["init", "--bare", "-q", dottedRemote], parent);
+  git(["init", "--bare", "-q", plainRemote], parent);
+
+  const primary = path.join(parent, "primary");
+  const foreign = path.join(parent, "foreign");
+  for (const dir of [primary, foreign]) {
+    fs.mkdirSync(dir);
+    git(["init", "-q", "-b", "main"], dir);
+    git(["config", "user.email", "test@example.com"], dir);
+    git(["config", "user.name", "test"], dir);
+    git(["commit", "--allow-empty", "-q", "-m", "init"], dir);
+  }
+  git(["remote", "add", "origin", dottedRemote], primary);
+  git(["remote", "add", "origin", plainRemote], foreign);
+
+  const repo = attachSiblingClones(resolveRepo(primary));
   assert.equal(repo.siblingWorktrees.includes(fs.realpathSync(foreign)), false);
 });
 
