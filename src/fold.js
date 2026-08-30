@@ -175,7 +175,7 @@ export function foldEvidence(
     .filter((cluster) => cluster.sessions >= minGapEvidence)
     .sort((a, b) => b.sessions - a.sessions);
   const reportOnlyGaps = decided
-    .filter((cluster) => cluster.mixed && (cluster.majorityOrchestration || cluster.sessions < minGapEvidence))
+    .filter((cluster) => cluster.majorityOrchestration || (cluster.mixed && cluster.sessions < minGapEvidence))
     .sort((a, b) => b.sessions - a.sessions);
 
   const droppedGapSingletons = proposalClusters.filter(
@@ -410,7 +410,7 @@ function renderEvidence(summary) {
 function gapSessionLabel(gap) {
   const orch = gap.orchestrationSightings || 0;
   if (!orch) return `sessions=${gap.sessions}`;
-  const extra = gap.majorityOrchestration ? "; majority vote excluded" : "";
+  const extra = gap.majorityOrchestration ? "; domain excluded by majority vote" : "";
   return `sessions=${gap.sessions} (${gap.sessions} sightings, ${orch} orchestration${extra})`;
 }
 

@@ -252,8 +252,13 @@ test("orchestration-domain gaps are counted but never cluster into a proposal", 
   const summary = await run(h, [record("claude-s1", [orchestration]), record("codex-s2", [orchestration])]);
 
   assert.equal(summary.gaps.length, 0, "two sessions corroborate it, and it still never becomes a proposal");
+  assert.equal(summary.reportOnlyGaps.length, 1);
+  assert.equal(summary.totals.reportOnlyGapClusters, 1);
   assert.equal(summary.totals.orchestrationGapSightings, 2, "but the run stays legible about what it excluded");
-  assert.match(renderEvidenceForPrompt(summary), /2 orchestration-domain sighting\(s\).*excluded/);
+  const rendered = renderEvidenceForPrompt(summary);
+  assert.match(rendered, /1 gap clusters \(0 synthesis eligible, 1 report only/);
+  assert.match(rendered, /2 orchestration-domain sighting\(s\).*excluded/);
+  assert.match(rendered, /2 sightings, 2 orchestration; domain excluded by majority vote/);
 
   // The same shape in the project domain clusters as usual - the exclusion is the
   // domain, not the text.
