@@ -306,6 +306,7 @@ export function mergeGapEntries(ledger, groups) {
           const earlier =
             Date.parse(obs.firstObservedAt || obs.observedAt) < Date.parse(prior.firstObservedAt || prior.observedAt);
           if (earlier) prior.firstObservedAt = obs.firstObservedAt || obs.observedAt;
+          if (prior.domain === "orchestration" && obs.domain !== "orchestration") prior.domain = "project";
           if (!prior.coveredBySkill && obs.coveredBySkill) prior.coveredBySkill = obs.coveredBySkill;
         }
       }

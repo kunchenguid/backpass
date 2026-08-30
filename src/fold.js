@@ -342,7 +342,11 @@ export function renderEvidenceForPrompt(summary) {
     lines.push(`- ${gapSessionLabel(gap)} risk=${gap.recurrenceRisk} :: ${gap.proposedInstruction}`);
   }
   if (!summary.gaps.length) {
-    lines.push("- none above the evidence threshold");
+    lines.push(
+      summary.excludedMixedGaps?.length
+        ? "- no gap cluster is eligible for a repository proposal"
+        : "- none above the evidence threshold",
+    );
   }
   for (const gap of summary.gaps) {
     lines.push(`- ${gapSessionLabel(gap)} risk=${gap.recurrenceRisk} :: ${gap.proposedInstruction}`);
