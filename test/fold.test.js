@@ -130,7 +130,11 @@ test("the fold records the sightings it clustered over - the gap funnel's top", 
   assert.equal(fromLedger.totals.gapSightings, 4);
   assert.equal(fromLedger.totals.orchestrationGapSightings, 1);
   assert.equal(fromLedger.totals.gapClusters, 1, "two sessions corroborate the lockfile gap");
-  assert.equal(fromLedger.totals.droppedGapSingletons, 1, "the schema gap stays below the floor");
+  assert.equal(
+    fromLedger.totals.droppedGapSingletons,
+    2,
+    "the schema and pure-orchestration gaps stay below the floor",
+  );
 });
 
 test("a two-sighting cluster with one orchestration vote survives instead of dropping below the floor", () => {
@@ -220,6 +224,31 @@ test("a below-threshold mixed cluster remains visible only in the report", () =>
   assert.equal(summary.totals.droppedGapSingletons, 0);
   assert.match(renderEvidenceReport(summary), /2 sightings, 1 orchestration/);
   assert.match(renderEvidenceForPrompt(summary), /REPORT ONLY - not synthesis-eligible evidence/);
+});
+
+test("a pure orchestration singleton stays hidden below the evidence floor", () => {
+  const phrasing = "Stop after the report on scout tasks.";
+  const summary = foldEvidence(
+    [
+      record("s1", {
+        gaps: [
+          {
+            proposedInstruction: phrasing,
+            quote: "q1",
+            recurrenceRisk: "low",
+            domain: "orchestration",
+          },
+        ],
+      }),
+    ],
+    { minGapEvidence: 2 },
+  );
+
+  assert.equal(summary.gaps.length, 0);
+  assert.equal(summary.reportOnlyGaps.length, 0);
+  assert.equal(summary.totals.reportOnlyGapClusters, 0);
+  assert.equal(summary.totals.droppedGapSingletons, 1);
+  assert.doesNotMatch(renderEvidenceForPrompt(summary), /Stop after the report/);
 });
 
 test("the same gap repeated inside one session does not clear the threshold", () => {
