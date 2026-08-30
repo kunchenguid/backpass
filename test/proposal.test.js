@@ -250,11 +250,10 @@ test("a single-session rewrite that appends net-new text is gated like an add", 
   assert.ok(violations.some((v) => /backed by 1 session/.test(v)));
 });
 
-test("a single-session net-negative replacement remains a tightening", () => {
+test("a single-session net-negative unrelated substitution is gated like an add", () => {
   const original =
     "- Before running any script, install Node 18 through nvm, verify the active version, clear old package caches, and reinstall every dependency from the lockfile.";
   const replacement = "- Always route SSH through the designated jumphost and record the hop in the pull request.";
-  assert.ok(estimateTokens(replacement) > 10, "fixture substantially rephrases the instruction");
   assert.ok(estimateTokens(replacement) < estimateTokens(original), "fixture shrinks overall");
   const { proposal, violations, measured } = gate({
     text: `${MEMORY_TEXT}${original}\n`,
@@ -262,8 +261,8 @@ test("a single-session net-negative replacement remains a tightening", () => {
     annotation: { edits: [claim(["H1"], { kind: "rewrite", title: "replace the node rule", transcripts: 1 })] },
   });
   assert.equal(measured.changes.length, 1);
-  assert.deepEqual(violations, []);
-  assert.equal(proposal.edits.length, 1);
+  assert.equal(proposal.edits.length, 0);
+  assert.ok(violations.some((v) => /backed by 1 session/.test(v)));
 });
 
 test("a single-session rewrite cannot hide growth through independently rounded token estimates", () => {
@@ -343,9 +342,9 @@ test("a rewrite cannot hide aggregate net growth across an insertion and tighten
   assert.ok(violations.some((v) => /backed by 1 session/.test(v)));
 });
 
-test("a single-session rewrite that only tightens still passes", () => {
+test("a single-session overlapping tightening still passes", () => {
   const original = "- Use Node 18 via nvm before running any script.";
-  const tighter = "- Use nvm for Node 18.";
+  const tighter = "- Use Node 18 with nvm.";
   assert.ok(estimateTokens(tighter) - estimateTokens(original) < 0, "fixture is a net tightening");
   const { proposal, violations } = gate({
     edit: memoryEdit((t) => t.replace(original, tighter)),

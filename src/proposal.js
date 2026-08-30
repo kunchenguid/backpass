@@ -65,11 +65,38 @@ export const DEFAULT_MAX_EDITS = 5;
 export const SHRINK_MAX_EDITS = 20;
 /** A typical memory-file instruction removal or tightening trims about this many tokens. */
 export const SHRINK_EDIT_TOKENS = 40;
-/**
- * A rewrite whose measured changes grow by more than this many tokens is gated like an add.
- * Net-negative and smaller rewrites still clear on one session.
- */
+/** A rewrite whose measured changes grow by more than this many tokens is gated like an add. */
 export const REWRITE_NET_ADD_TOKENS = 10;
+
+const REWRITE_OVERLAP_THRESHOLD = 0.3;
+const MAX_REWRITE_OVERLAP_WORDS = 512;
+
+function changedWordSet(hunks, type) {
+  const words = new Set();
+  let count = 0;
+  for (const hunk of hunks) {
+    for (const line of hunk.lines || []) {
+      if (line.type !== type) continue;
+      for (const match of line.text.toLowerCase().matchAll(/[\p{L}\p{N}]+/gu)) {
+        count += 1;
+        if (count > MAX_REWRITE_OVERLAP_WORDS) return null;
+        words.add(match[0]);
+      }
+    }
+  }
+  return words;
+}
+
+function rewriteHasSubstantialOverlap(hunks) {
+  const removed = changedWordSet(hunks, "del");
+  const added = changedWordSet(hunks, "ins");
+  if (!removed || !added || !removed.size || !added.size) return false;
+  let shared = 0;
+  for (const word of added) {
+    if (removed.has(word)) shared += 1;
+  }
+  return (2 * shared) / (removed.size + added.size) >= REWRITE_OVERLAP_THRESHOLD;
+}
 
 export function effectiveMaxEdits(memoryFile, config, alwaysLoadedExtraTokens = 0) {
   if (Number.isInteger(config.maxEditsPerRun) && config.maxEditsPerRun > 0) return config.maxEditsPerRun;
@@ -505,18 +532,19 @@ export function buildProposal(rawResult, context) {
     }
 
     // An addition is measured, not declared: text that only goes in is a new instruction.
-    // A rewrite that grows across its measured hunks can hide the same addition, so measure
-    // the aggregate byte delta before token rounding. Net-negative rewrites, including retained
-    // rephrasing or reordering, remain tightenings. Extracts move text; they are not adds.
+    // Replacements also need corroboration when they grow substantially or substitute
+    // unrelated text. Extracts and moves preserve the always-loaded instruction surface.
     const onlyAdds = hunks.every((h) => h.removed === 0);
+    const replacesText = hunks.some((h) => h.removed > 0) && hunks.some((h) => h.added > 0);
     const netAddedBytes = hunks.reduce(
       (sum, hunk) => sum + Buffer.byteLength(hunk.replace) - Buffer.byteLength(hunk.find),
       0,
     );
     const growsAboveRewriteTolerance = estimateTokensFromBytes(Math.max(0, netAddedBytes)) > REWRITE_NET_ADD_TOKENS;
+    const substitutesUnrelatedText = replacesText && !rewriteHasSubstantialOverlap(hunks);
     if (
       !preservesAlwaysLoaded(edit.kind) &&
-      (onlyAdds || growsAboveRewriteTolerance) &&
+      (onlyAdds || growsAboveRewriteTolerance || substitutesUnrelatedText) &&
       edit.transcripts < config.minGapEvidence
     ) {
       violations.push(

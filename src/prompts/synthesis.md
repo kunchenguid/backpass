@@ -72,8 +72,8 @@ analyzed sessions in which an instruction drew any evidence at all.
    speculative one.
 2. **New instructions need evidence from at least {{MIN_GAP_EVIDENCE}} distinct
    sessions.** One bad session never rewrites the weights. A rewrite whose measured changes
-   add more than about ten net tokens is a new instruction; a net-negative or smaller rewrite
-   is not.
+   add more than about ten net tokens, or whose added and removed words do not substantially
+   overlap, is a new instruction. A genuine tightening is not.
 3. **Removing an instruction outright needs harm evidence from at least
    {{MIN_GAP_EVIDENCE}} distinct sessions** (`harm-sessions` in the evidence rows).
    Only `harm` negatives - following the instruction caused damage - argue against an
