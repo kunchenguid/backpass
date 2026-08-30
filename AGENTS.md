@@ -206,9 +206,9 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   `totals.orchestrationGapSightings` and travel into clustering as votes. Cluster
   domain is decided after grouping (`src/fold.js`): withhold a cluster from a
   proposal only when a majority of its sightings vote orchestration (ties stay
-  project). Mixed clusters always appear in the evidence report (`N sightings, M
-  orchestration`) so one inconsistent classifier call cannot drop a real
-  recurrence below `minGapEvidence`. There is deliberately no orchestrator-memory
+  project). Mixed clusters always appear in the evidence report with both sighting counts,
+  so one inconsistent classifier call cannot drop a real recurrence below
+  `minGapEvidence`. There is deliberately no orchestrator-memory
   write path. When this repository IS that orchestrating tool, those mistakes are
   `project` (`src/prompts/analysis.md`).
   A gap may also carry `coveredBySkill`: the analysis (shown every skill's name and
