@@ -394,6 +394,22 @@ test("a wordless replacement cannot erase an instruction with one session", () =
   assert.ok(violations.some((v) => /backed by 1 session/.test(v)));
 });
 
+test("wordless replacement lines still require harm evidence", () => {
+  const original = "- Never commit secrets.";
+  for (const replacement of ["-", " "]) {
+    const { proposal, violations, measured } = gate({
+      text: `# Memory\n\n${original}\n`,
+      edit: memoryEdit((t) => t.replace(original, replacement)),
+      annotation: { edits: [claim(["H1"], { kind: "rewrite", title: "erase secrets rule", transcripts: 2 })] },
+      context: { summary: { instructions: [{ instruction: "AG-001", harmSessions: 0 }] } },
+    });
+    assert.equal(measured.changes.length, 1);
+    assert.ok(measured.changes[0].removed > 0 && measured.changes[0].added > 0);
+    assert.equal(proposal.edits.length, 0);
+    assert.ok(violations.some((v) => /harm-class negative evidence/.test(v)));
+  }
+});
+
 test("repeated unrelated added words count as separate uncovered occurrences", () => {
   const shared = "alpha beta gamma delta epsilon zeta";
   const original = `- ${shared} ${"x".repeat(1200)}.`;

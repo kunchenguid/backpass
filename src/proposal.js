@@ -70,6 +70,10 @@ export const REWRITE_NET_ADD_TOKENS = 10;
 
 const REWRITE_OVERLAP_THRESHOLD = 0.6;
 
+function hunkHasMeaningfulAddition(hunk) {
+  return (hunk.lines || []).some((line) => line.type === "ins" && /[\p{L}\p{N}]/u.test(line.text));
+}
+
 function rewriteHasSubstantialOverlap(hunks) {
   const changedText = (type) =>
     hunks
@@ -86,7 +90,7 @@ function rewriteHasSubstantialOverlap(hunks) {
     added += 1;
     if (removed.has(match[0])) shared += 1;
   }
-  if (added === 0) return insertedText.trim() === "";
+  if (added === 0) return false;
   return shared / added >= REWRITE_OVERLAP_THRESHOLD;
 }
 
@@ -554,7 +558,7 @@ export function buildProposal(rawResult, context) {
       const rows = new Map((summary?.instructions ?? []).map((row) => [row.instruction, row]));
       const unsupported = [];
       for (const hunk of hunks) {
-        if (!hunk.removed || hunk.added) continue;
+        if (!hunk.removed || hunkHasMeaningfulAddition(hunk)) continue;
         for (const unit of unitsRemovedBy(hunk, memoryFile)) {
           const harm = rows.get(unit.id)?.harmSessions ?? 0;
           if (harm < config.minGapEvidence) unsupported.push({ unit, harm });
@@ -578,7 +582,7 @@ export function buildProposal(rawResult, context) {
     // (a hunk that also adds text) stay possible; only vanishing text is refused.
     if (!preservesAlwaysLoaded(edit.kind) && files[0] !== memoryFile.path) {
       const deleted = hunks
-        .filter((hunk) => hunk.removed && !hunk.added)
+        .filter((hunk) => hunk.removed && !hunkHasMeaningfulAddition(hunk))
         .flatMap((hunk) => (hunk.lines || []).filter((line) => line.type === "del").map((line) => line.text))
         .filter((text) => text.trim());
       if (deleted.length) {
