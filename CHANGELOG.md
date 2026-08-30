@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.1.15](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.14...backpass-v0.1.15) (2026-08-30)
+
+
+### Features
+
+* add existing-skill extracts and memory moves ([#83](https://github.com/kunchenguid/backpass/issues/83)) ([8527339](https://github.com/kunchenguid/backpass/commit/8527339a2c73cb3b3b399d88ca7c964f02274929))
+* classify and balance interactive corpus sessions ([#85](https://github.com/kunchenguid/backpass/issues/85)) ([f887a32](https://github.com/kunchenguid/backpass/commit/f887a320aeb5764e928b6f2fceb1f85142424eb7))
+* report cross-surface skill duplication ([#81](https://github.com/kunchenguid/backpass/issues/81)) ([13f05f8](https://github.com/kunchenguid/backpass/commit/13f05f83b5882de433c579eab05431028fde6071))
+* split oversized paragraphs for precise attribution ([#88](https://github.com/kunchenguid/backpass/issues/88)) ([8c040dc](https://github.com/kunchenguid/backpass/commit/8c040dcbc52d8dc20a9d2036c6f6684655c785b8))
+* treat project skills as improvable memory ([#72](https://github.com/kunchenguid/backpass/issues/72)) ([d8cbdb6](https://github.com/kunchenguid/backpass/commit/d8cbdb68ca20a9ad6626810e0c24a576e43223c7))
+
+
+### Bug Fixes
+
+* decide gap cluster domains after grouping ([#87](https://github.com/kunchenguid/backpass/issues/87)) ([71a96c8](https://github.com/kunchenguid/backpass/commit/71a96c826f0ddd2ac2ecdaff327ce350d4019d51))
+* **discovery:** find sessions in sibling clones ([#84](https://github.com/kunchenguid/backpass/issues/84)) ([6cbb5b2](https://github.com/kunchenguid/backpass/commit/6cbb5b2c7e1acf56990507d8cd39545683b63046))
+* enable synthesis harness write access ([#82](https://github.com/kunchenguid/backpass/issues/82)) ([698b0b8](https://github.com/kunchenguid/backpass/commit/698b0b8fb0f97444f8355264206f1f153dcae8a6))
+* **prompts:** classify orchestrator repo gaps as project ([#78](https://github.com/kunchenguid/backpass/issues/78)) ([7b1a915](https://github.com/kunchenguid/backpass/commit/7b1a915aa757a632b8ae053eca773ab79158c17b))
+* retry transient harness capability probes ([#80](https://github.com/kunchenguid/backpass/issues/80)) ([658c2e9](https://github.com/kunchenguid/backpass/commit/658c2e9621c43b82e0c7b43c462ac137f91562e4))
+
 ## [0.1.14](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.13...backpass-v0.1.14) (2026-08-29)
 
 
