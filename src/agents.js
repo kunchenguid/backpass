@@ -24,8 +24,8 @@ import { runCapture } from "./subprocess.js";
  *
  * A busy harness (another backpass run, a wedged ACP session) looks like a probe
  * timeout, a bare `exit 1`, or an empty advertised-model list. Those retry once with
- * backoff before the walk demotes. A timeout is never written to the on-disk cache:
- * a transient miss must not become a 30-minute "model not advertised" for the next run.
+ * backoff before the walk demotes and are never written to the on-disk cache: a
+ * transient miss must not become a 30-minute negative verdict for the next run.
  */
 
 const OK_TTL_MS = 12 * 60 * 60 * 1000;

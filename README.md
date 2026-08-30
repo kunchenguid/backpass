@@ -438,8 +438,8 @@ wins:
 | synthesis | high   | `gpt-5.6-sol` via pi, opencode, codex  | `claude-opus-5` via claude   | `grok-4.6` via pi, opencode, grok |
 
 Each candidate is checked with a ~1.5s zero-token acpx probe (claude via `claude auth status`,
-because its adapter accepts sessions while logged out); a busy-harness miss retries once,
-and a probe timeout is not cached. Other verdicts are cached in
+because its adapter accepts sessions while logged out). A potentially transient busy-harness
+miss retries once and is not cached; durable verdicts are cached in
 `.backpass/agent-probe-cache.json` for 12h (30min for negatives) and re-probed with `--force`.
 The probe is a filter, not a promise: if the chosen harness answers `AUTH_REQUIRED` or rejects
 the model mid-run, backpass falls through to the next candidate and says so. When a whole

@@ -55,7 +55,8 @@ function scriptedProbe(verdicts) {
 /**
  * @param {Record<string, any>} verdicts
  * @param {{ config?: any, state?: ReturnType<typeof memoryState>, now?: () => number,
- *   bypassCache?: boolean, acpxVersion?: () => Promise<string | null> }} [options]
+ *   bypassCache?: boolean, acpxVersion?: () => Promise<string | null>,
+ *   sleep?: (ms: number) => Promise<void> }} [options]
  */
 function resolverWith(
   verdicts,
@@ -244,16 +245,12 @@ test("native probe transients retry without caching while unsupported models dem
   assert.equal(empty.nativeCalls(), 2);
   assert.equal(empty.state.cache.entries["opencode|gpt-5.6-luna"], undefined);
 
-  const timedOut = nativeResolver("claude", [
-    { code: null, stdout: "", stderr: "", timedOut: true },
-  ]);
+  const timedOut = nativeResolver("claude", [{ code: null, stdout: "", stderr: "", timedOut: true }]);
   assert.equal((await timedOut.resolver.resolve("analysis")).agent, "codex");
   assert.equal(timedOut.nativeCalls(), 2);
   assert.equal(timedOut.state.cache.entries["claude|gpt-5.6-luna"], undefined);
 
-  const unsupported = nativeResolver("opencode", [
-    { code: 0, stdout: "anthropic/claude-opus-5\n", stderr: "" },
-  ]);
+  const unsupported = nativeResolver("opencode", [{ code: 0, stdout: "anthropic/claude-opus-5\n", stderr: "" }]);
   assert.equal((await unsupported.resolver.resolve("analysis")).agent, "codex");
   assert.equal(unsupported.nativeCalls(), 1);
   assert.equal(unsupported.state.cache.entries["opencode|gpt-5.6-luna"].verdict, "model-unavailable");
