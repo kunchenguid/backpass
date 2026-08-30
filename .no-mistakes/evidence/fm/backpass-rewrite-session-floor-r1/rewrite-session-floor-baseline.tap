@@ -1,0 +1,31 @@
+✖ a single-session rewrite that appends net-new text is gated like an add (19.698041ms)
+✔ a single-session rewrite that only tightens still passes (12.4ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 1
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 76.657
+
+✖ failing tests:
+
+test at test/proposal.test.js:238:1
+✖ a single-session rewrite that appends net-new text is gated like an add (19.698041ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (file:///Users/kunchen/.no-mistakes/worktrees/26c81f74111f/01M18JBD4GZJR09CHGNV0FFNEX/test/proposal.test.js:248:10)
+      at Test.runInAsyncScope (node:async_hooks:228:14)
+      at Test.run (node:internal/test_runner/test:1118:25)
+      at Test.start (node:internal/test_runner/test:1015:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:358:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

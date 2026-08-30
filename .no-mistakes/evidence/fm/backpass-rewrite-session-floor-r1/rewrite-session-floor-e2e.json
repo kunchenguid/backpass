@@ -1,0 +1,23 @@
+{
+  "command": "backpass propose --synthesis-agent claude --synthesis-model fake-model",
+  "singleSessionNetAdd": {
+    "exitCode": 1,
+    "userVisibleStderr": [
+      "  x edit e1 (\"expand the node rule\") adds a new instruction backed by 1 session(s); 2 are required",
+      "  the rejected proposal was saved to <temporary-repo>/.backpass/proposal.json",
+      "error synthesis could not produce a valid proposal after 2 re-prompt(s) (1 violation(s))"
+    ],
+    "acceptedEdits": 0,
+    "acceptedReplacement": null,
+    "violations": [
+      "edit e1 (\"expand the node rule\") adds a new instruction backed by 1 session(s); 2 are required"
+    ]
+  },
+  "singleSessionTightening": {
+    "exitCode": 0,
+    "userVisibleStderr": [],
+    "acceptedEdits": 1,
+    "acceptedReplacement": "- Use nvm for Node 18.\n",
+    "violations": []
+  }
+}
