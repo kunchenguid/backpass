@@ -179,13 +179,8 @@ function confidentSentenceBoundary(text, sentenceStart, terminator) {
   if (text[terminator] === ".") {
     if (terminator === 0 || /\s/u.test(text[terminator - 1])) return null;
     const beforeTerminator = text.slice(sentenceStart, terminator);
-    const pathStarts = [...beforeTerminator.matchAll(/(?:^|\s)(\S*[\\/])/gu)];
-    const pathHasSpaces = pathStarts.some((pathStart) => {
-      const pathTail = beforeTerminator.slice(pathStart.index + pathStart[0].indexOf(pathStart[1]));
-      return /\s/u.test(pathTail);
-    });
-    const nextToken = text.slice(next).match(/^\S+/u)?.[0] || "";
-    if (pathHasSpaces && /[\\/]/u.test(nextToken)) return null;
+    const precedingToken = beforeTerminator.match(/\S+$/u)?.[0] || "";
+    if (/[\\/]/u.test(precedingToken)) return null;
     const rawPrefix = beforeTerminator.trim();
     if (/^\d+$/u.test(rawPrefix)) return null;
     const prefix = rawPrefix.replace(/["')\]}*`_~\u2019\u201d]+$/u, "");
