@@ -187,7 +187,7 @@ test("a two-sighting cluster with one orchestration vote survives instead of dro
   assert.equal(majorityOrch.totals.reportOnlyGapClusters, 1);
   const renderedMajority = renderEvidenceReport(majorityOrch);
   assert.match(renderedMajority, /1 gap clusters \(0 synthesis eligible, 1 report only/);
-  assert.match(renderedMajority, /3 sightings, 2 orchestration; majority vote excluded/);
+  assert.match(renderedMajority, /3 sightings, 2 orchestration; domain excluded by majority vote/);
   assert.match(renderedMajority, /no gap cluster is eligible for a repository proposal/);
   assert.doesNotMatch(renderedMajority, /none above the evidence threshold/);
   assert.match(renderEvidenceForPrompt(majorityOrch), /REPORT ONLY - not synthesis-eligible evidence/);
