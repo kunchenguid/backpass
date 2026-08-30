@@ -52,7 +52,11 @@ function harness(overrides = {}) {
 /** One backpass run: the evidence files on disk at the time, then the fold. */
 async function run(h, records, file = memoryFile(), memoryHash = "h1") {
   for (const r of records) h.state.writeEvidence(r.transcript.id, r);
-  return foldForRun(h.ctx, file, memoryHash);
+  const selected = h.state
+    .listEvidence()
+    .filter((evidence) => evidence.memoryHash === memoryHash)
+    .map((evidence) => evidence.transcript);
+  return foldForRun(h.ctx, file, memoryHash, [], selected);
 }
 
 const GAP = "Read docs/db.md before writing queries.";

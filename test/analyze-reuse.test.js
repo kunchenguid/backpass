@@ -240,7 +240,11 @@ test("old-hash leftover evidence cannot change the current fold's session count,
   const resolved = resolveMemoryFiles(dir, ["AGENTS.md", "CLAUDE.md"]);
   const ctx = { config: { state, minGapEvidence: 2, gapLedgerMaxAge: "90d" } };
 
-  return foldForRun(ctx, resolved.primary, resolved.hash).then((summary) => {
+  const selected = state
+    .listEvidence()
+    .filter((evidence) => evidence.memoryHash === resolved.hash)
+    .map((evidence) => evidence.transcript);
+  return foldForRun(ctx, resolved.primary, resolved.hash, [], selected).then((summary) => {
     assert.equal(summary.analyzedSessions, 1, "session B's leftover evidence must not inflate the session count");
 
     const ag001 = summary.instructions.find((i) => i.instruction === "AG-001");
@@ -263,7 +267,11 @@ test("old-hash leftover evidence cannot change the current fold's session count,
 
     fs.writeFileSync(path.join(dir, "AGENTS.md"), MEMORY);
     const reverted = resolveMemoryFiles(dir, ["AGENTS.md", "CLAUDE.md"]);
-    return foldForRun(ctx, reverted.primary, reverted.hash).then((revertedSummary) => {
+    const revertedSelected = state
+      .listEvidence()
+      .filter((evidence) => evidence.memoryHash === reverted.hash)
+      .map((evidence) => evidence.transcript);
+    return foldForRun(ctx, reverted.primary, reverted.hash, [], revertedSelected).then((revertedSummary) => {
       assert.equal(
         revertedSummary.analyzedSessions,
         1,

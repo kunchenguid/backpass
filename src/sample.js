@@ -89,7 +89,7 @@ export function recencyWeight(transcript, { now, halfLifeMs }) {
  * present category that would land below `floorRatio` of the cap (clipped to how many
  * members it has). A 98% non-interactive pool therefore keeps its interactive sessions
  * instead of rounding them out of a recency-weighted draw. When both floors cannot fit,
- * split the cap as evenly as availability allows so neither side is zeroed.
+ * fall back to the corpus proportion because representing both sides is impossible.
  */
 export function mixAllocations(nInteractive, nNonInteractive, cap, floorRatio = SAMPLE_MIX_FLOOR) {
   const nI = Math.max(0, nInteractive);
@@ -103,15 +103,11 @@ export function mixAllocations(nInteractive, nNonInteractive, cap, floorRatio = 
   const minN = Math.min(nN, floor);
 
   if (minI + minN > cap) {
-    let wantI = Math.min(nI, Math.max(1, Math.floor(cap / 2)));
-    let wantN = Math.min(nN, cap - wantI);
-    if (wantN === 0 && nN > 0) {
-      wantN = 1;
-      wantI = cap - 1;
-    }
-    if (wantI > nI) {
-      wantI = nI;
-      wantN = cap - wantI;
+    let wantI = Math.min(nI, Math.round((nI / (nI + nN)) * cap));
+    let wantN = cap - wantI;
+    if (wantN > nN) {
+      wantN = nN;
+      wantI = cap - wantN;
     }
     return { interactive: wantI, nonInteractive: wantN };
   }

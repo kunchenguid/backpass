@@ -102,7 +102,7 @@ export async function bootstrapRun(ctx, deps = {}) {
       `${result.summary.skipped} too short · ${result.summary.failed} failed`,
   );
 
-  const folded = await fold(ctx, memoryFile, memoryHash);
+  const folded = await fold(ctx, memoryFile, memoryHash, [], transcripts);
   config.state.writeSummary(folded);
   emitProgress("fold:done", {
     instructions: folded.instructions.length,

@@ -204,10 +204,16 @@ test("an orchestration gap is counted but never corroborates, while a gap with n
   const dir = analyzedRepo();
   const state = new State(dir).ensure();
   const resolved = resolveMemoryFiles(dir, ["AGENTS.md", "CLAUDE.md"]);
+  const transcripts = state
+    .listEvidence()
+    .filter((evidence) => evidence.memoryHash === resolved.hash)
+    .map((evidence) => evidence.transcript);
   const summary = await foldForRun(
     { config: { state, minGapEvidence: 2, gapLedgerMaxAge: "90d" } },
     resolved.primary,
     resolved.hash,
+    [],
+    transcripts,
   );
 
   assert.equal(summary.analyzedSessions, 2, "both sessions saw both gaps, so both clear the two-session floor");

@@ -274,6 +274,25 @@ test("a fractional 20% floor rounds up to the next whole slot", () => {
   assert.equal(kept.length - humans, 5);
 });
 
+test("a one-slot cap selects the dominant category", () => {
+  const set = [
+    ...Array.from({ length: 100 }, (_, i) => ({
+      harness: "claude",
+      id: `human-${i}`,
+      interaction: "interactive",
+      startedAt: NOW - i * DAY,
+    })),
+    {
+      harness: "claude",
+      id: "robot-only",
+      interaction: "non-interactive",
+      startedAt: NOW,
+    },
+  ];
+  const [kept] = sampleTranscripts(set, 1, { seed: 1, now: NOW });
+  assert.equal(kept.interaction, "interactive");
+});
+
 test("capTranscripts reports a greppable line only when sampling happened", () => {
   const config = loadConfig(tempDir(), { seed: 3 });
   const small = { transcripts: transcripts(40, 30), perHarness: {} };

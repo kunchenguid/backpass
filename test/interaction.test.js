@@ -447,6 +447,8 @@ test("fold excludes legacy evidence without an interaction category", async () =
     },
     { path: "AGENTS.md", text: "", units: [] },
     memoryHash,
+    [],
+    [transcript],
   );
 
   assert.equal(summary.analyzedSessions, 0);
@@ -455,6 +457,63 @@ test("fold excludes legacy evidence without an interaction category", async () =
     [NON_INTERACTIVE]: 0,
   });
   assert.equal(state.readEvidence(transcript).transcript.interaction, undefined);
+});
+
+test("fold bounds evidence and ledger observations to the selected sample", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-mix-selected-fold-"));
+  const state = new State(dir).ensure();
+  const memoryHash = "sha256:memory";
+  const memoryFile = { path: "AGENTS.md", text: "", units: [] };
+  const ctx = {
+    repo: { root: dir },
+    config: { state, minGapEvidence: 2, gapLedgerMaxAge: "90d" },
+  };
+  const writeRecord = (id, interaction, gaps = []) => {
+    const transcript = {
+      harness: "claude",
+      id: `claude-${id}`,
+      identity: `claude:${id}`,
+      path: `/sessions/${id}.jsonl`,
+      mtimeMs: 100,
+      bytes: 200,
+      interaction,
+    };
+    state.writeEvidence(transcript, {
+      status: "ok",
+      transcript,
+      memoryHash,
+      memoryPath: "AGENTS.md",
+      positive: [],
+      negative: [],
+      gaps,
+    });
+    return transcript;
+  };
+  const stale = Array.from({ length: 20 }, (_, i) =>
+    writeRecord(`stale-robot-${i}`, NON_INTERACTIVE, [
+      {
+        proposedInstruction: "Always use the scratch database.",
+        mistake: "used production",
+        quote: `stale robot ${i} used the production database`,
+        recurrenceRisk: "high",
+      },
+    ]),
+  );
+  await foldForRun(ctx, memoryFile, memoryHash, [], stale);
+
+  const selected = [
+    ...Array.from({ length: 2 }, (_, i) => writeRecord(`human-${i}`, INTERACTIVE)),
+    ...Array.from({ length: 8 }, (_, i) => writeRecord(`robot-${i}`, NON_INTERACTIVE)),
+  ];
+  const summary = await foldForRun(ctx, memoryFile, memoryHash, [], selected);
+
+  assert.equal(summary.analyzedSessions, 10);
+  assert.deepEqual(summary.analyzedByInteraction, {
+    [INTERACTIVE]: 2,
+    [NON_INTERACTIVE]: 8,
+  });
+  assert.equal(summary.gaps.length, 0);
+  assert.equal(Object.keys(state.readGapLedger().entries).length, 1);
 });
 
 test("evidence records carry the category and fold reports relevance per category", async () => {

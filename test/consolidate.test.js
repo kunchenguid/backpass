@@ -85,7 +85,7 @@ function harness(records, reply) {
     },
     repo: { root, name: "t" },
   };
-  return { root, state, ctx };
+  return { root, state, ctx, transcripts: records.map((record) => record.transcript) };
 }
 
 test("two same-run paraphrases of one brand-new gap corroborate through the consolidation pass", async () => {
@@ -95,7 +95,7 @@ test("two same-run paraphrases of one brand-new gap corroborate through the cons
     merges: [[idA, idB]],
   });
 
-  const summary = await foldForRun(h.ctx, memoryFile, "h1");
+  const summary = await foldForRun(h.ctx, memoryFile, "h1", [], h.transcripts);
 
   assert.equal(summary.gaps.length, 1, "the merged entry clears the two-session bar in a single run");
   assert.equal(summary.gaps[0].sessions, 2);
@@ -112,7 +112,7 @@ test("two same-run paraphrases of one brand-new gap corroborate through the cons
 test("materially distinct gaps stay separate when the model declines to merge", async () => {
   const h = harness([record("claude-s1", SIGHTING_A), record("codex-s2", UNRELATED)], { merges: [] });
 
-  const summary = await foldForRun(h.ctx, memoryFile, "h1");
+  const summary = await foldForRun(h.ctx, memoryFile, "h1", [], h.transcripts);
 
   assert.equal(summary.gaps.length, 0);
   assert.equal(summary.totals.droppedGapSingletons, 2, "no fabricated corroboration");
@@ -124,7 +124,7 @@ test("a failed consolidation call degrades to lexical identity and never aborts 
   const h = harness([record("claude-s1", SIGHTING_A), record("codex-s2", SIGHTING_B)], { merges: [] });
   process.env.FAKE_CONSOLIDATE_EXIT = "2";
 
-  const summary = await foldForRun(h.ctx, memoryFile, "h1");
+  const summary = await foldForRun(h.ctx, memoryFile, "h1", [], h.transcripts);
   delete process.env.FAKE_CONSOLIDATE_EXIT;
 
   assert.ok(summary.consolidation.failed, "the failure is named, not hidden");
@@ -135,7 +135,7 @@ test("a failed consolidation call degrades to lexical identity and never aborts 
 test("an unparseable consolidation reply is a named failure, not a guessed merge", async () => {
   const h = harness([record("claude-s1", SIGHTING_A), record("codex-s2", SIGHTING_B)], "no json here at all");
 
-  const summary = await foldForRun(h.ctx, memoryFile, "h1");
+  const summary = await foldForRun(h.ctx, memoryFile, "h1", [], h.transcripts);
 
   assert.match(String(summary.consolidation.failed), /no parseable merge list/);
   assert.equal(Object.keys(h.state.readGapLedger().entries).length, 2);
@@ -144,6 +144,6 @@ test("an unparseable consolidation reply is a named failure, not a guessed merge
 test("fewer than two open gaps never spends a model call", async () => {
   const h = harness([record("claude-s1", SIGHTING_A)], undefined);
   // No reply file exists: a call would crash the fake, so a green run proves no call ran.
-  const summary = await foldForRun(h.ctx, memoryFile, "h1");
+  const summary = await foldForRun(h.ctx, memoryFile, "h1", [], h.transcripts);
   assert.match(String(summary.consolidation.skipped), /fewer than two/);
 });

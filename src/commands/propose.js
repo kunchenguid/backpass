@@ -10,6 +10,8 @@ import { emitProgress } from "../progress.js";
 import { primaryMemoryFile } from "./analyze.js";
 import { printUsage } from "./usage.js";
 import { discoverForRun } from "./scan.js";
+import { capTranscripts } from "../sample.js";
+import { transcriptIdentity } from "../transcript.js";
 
 /**
  * Fold on-disk evidence for the memory surface. Gap corroboration is counted through the
@@ -29,14 +31,18 @@ import { discoverForRun } from "./scan.js";
  * `analyzedSessions` with a session this run never touched. Legacy records without a
  * valid interaction category stay excluded until analysis backfills them.
  */
-export async function foldForRun(ctx, memoryFile, memoryHash, skills = []) {
+export async function foldForRun(ctx, memoryFile, memoryHash, skills = [], transcripts = []) {
   const { state, minGapEvidence, gapLedgerMaxAge } = ctx.config;
+  const selected = new Set(
+    transcripts.flatMap((transcript) => [transcript.identity || transcriptIdentity(transcript), transcript.id]),
+  );
   const evidence = state.listEvidence();
   const relevant = evidence.filter(
     (e) =>
       e.memoryPath === memoryFile.path &&
       e.memoryHash === memoryHash &&
-      (e.transcript?.interaction === INTERACTIVE || e.transcript?.interaction === NON_INTERACTIVE),
+      (e.transcript?.interaction === INTERACTIVE || e.transcript?.interaction === NON_INTERACTIVE) &&
+      (selected.has(e.transcript?.identity || transcriptIdentity(e.transcript)) || selected.has(e.transcript?.id)),
   );
 
   const ledger = state.readGapLedger();
@@ -56,10 +62,13 @@ export async function foldForRun(ctx, memoryFile, memoryHash, skills = []) {
   pruneGapLedger(ledger, { memoryFile, memoryPath: memoryFile.path, skills, maxAge: gapLedgerMaxAge });
   state.writeGapLedger(ledger);
 
+  const gapObservations = ledgerGapObservations(ledger, memoryFile.path, skills).filter((observation) =>
+    selected.has(observation.sessionId),
+  );
   const summary = foldEvidence(relevant, {
     minGapEvidence,
     memoryFile,
-    gapObservations: ledgerGapObservations(ledger, memoryFile.path, skills),
+    gapObservations,
     skills,
   });
   summary.consolidation = consolidation;
@@ -79,10 +88,11 @@ export async function runProposal(ctx, precomputed = null) {
   // failures may leave an older proposal available to apply as if it came from this run.
   config.state.clearProposal();
   const { file, hash, skills } = precomputed || primaryMemoryFile(repo, config);
-  const transcripts = precomputed?.transcripts || (await discoverForRun(ctx)).transcripts;
+  const transcripts =
+    precomputed?.transcripts || capTranscripts(await discoverForRun(ctx), config).transcripts;
 
   const foldStarted = Date.now();
-  const summary = await foldForRun(ctx, file, hash, skills ?? []);
+  const summary = await foldForRun(ctx, file, hash, skills ?? [], transcripts);
   config.state.writeSummary(summary);
   emitProgress("fold:done", {
     instructions: summary.instructions.length,
