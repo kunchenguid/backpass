@@ -25,6 +25,7 @@ import { foldForRun, printProposal } from "../src/commands/propose.js";
 import { cmdScan } from "../src/commands/scan.js";
 import { renderApplySurface } from "../src/apply/lavish.js";
 import { evidenceKey, State } from "../src/state.js";
+import { transcriptIdentity } from "../src/transcript.js";
 import { sampleTranscripts, capTranscripts } from "../src/sample.js";
 import { setLoggerSink } from "../src/logger.js";
 
@@ -484,6 +485,29 @@ test("fold selection distinguishes colliding native IDs by source", async () => 
       gaps: [],
     });
   }
+  const observedAt = new Date().toISOString();
+  const observation = (source) => ({
+    firstObservedAt: observedAt,
+    observedAt,
+    source,
+    quote: `${source} used production`,
+    domain: "project",
+  });
+  state.writeGapLedger({
+    version: 1,
+    entries: {
+      collision: {
+        id: "collision",
+        memoryPath: "AGENTS.md",
+        proposedInstruction: "Always use the scratch database.",
+        phrasings: ["Always use the scratch database."],
+        sessions: {
+          [transcriptIdentity(selected)]: observation("selected"),
+          [selected.id]: observation("unselected legacy id"),
+        },
+      },
+    },
+  });
 
   const summary = await foldForRun(
     {
@@ -497,6 +521,7 @@ test("fold selection distinguishes colliding native IDs by source", async () => 
   );
 
   assert.equal(summary.analyzedSessions, 1);
+  assert.equal(summary.gaps.length, 0);
 });
 
 test("fold keeps legacy-id gap observations for sessions in the selected sample", async () => {
