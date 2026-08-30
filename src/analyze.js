@@ -242,6 +242,13 @@ export async function analyzeTranscripts({
   for (const transcript of transcripts) {
     const existing = state.readEvidence(transcript);
     if (!force && isEvidenceFresh(existing, transcript, memoryHash)) {
+      const interaction = classifyInteraction(transcript);
+      if (existing.transcript?.interaction !== interaction) {
+        state.writeEvidence(transcript, {
+          ...existing,
+          transcript: { ...existing.transcript, interaction },
+        });
+      }
       summary.cached += 1;
       continue;
     }

@@ -20,10 +20,11 @@ import { classifyInteraction, INTERACTIVE, NON_INTERACTIVE } from "../src/intera
 import { discoverTranscripts } from "../src/discovery/index.js";
 import { loadConfig } from "../src/config.js";
 import { foldEvidence, renderEvidenceForPrompt } from "../src/fold.js";
+import { analyzeTranscripts } from "../src/analyze.js";
 import { printProposal } from "../src/commands/propose.js";
 import { cmdScan } from "../src/commands/scan.js";
 import { renderApplySurface } from "../src/apply/lavish.js";
-import { State } from "../src/state.js";
+import { evidenceKey, State } from "../src/state.js";
 import { sampleTranscripts, capTranscripts } from "../src/sample.js";
 import { setLoggerSink } from "../src/logger.js";
 
@@ -368,6 +369,52 @@ test("propose and apply surfaces print the corpus mix", () => {
     vm.runInNewContext(match[1], { window, document });
   }
   assert.match(textOf(nodes.get("runline")), /interactive 2 · non-interactive 3/);
+});
+
+test("cached evidence is upgraded with the current interaction category", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-mix-cache-"));
+  const state = new State(dir).ensure();
+  const transcript = {
+    harness: "codex",
+    id: "codex-robot-1",
+    nativeId: "robot-1",
+    path: "/sessions/robot-1.jsonl",
+    mtimeMs: 100,
+    bytes: 200,
+    interactionSignals: { originator: "codex_exec", source: "exec" },
+    interaction: NON_INTERACTIVE,
+  };
+  const memoryHash = "sha256:memory";
+  state.writeEvidence(transcript, {
+    status: "ok",
+    transcript: { harness: "codex", id: transcript.id, identity: "codex:robot-1" },
+    memoryHash,
+    memoryPath: "AGENTS.md",
+    key: evidenceKey(transcript, memoryHash),
+    positive: [],
+    negative: [],
+    gaps: [],
+  });
+
+  const summary = await analyzeTranscripts({
+    transcripts: [transcript],
+    memoryFile: { path: "AGENTS.md" },
+    config: {
+      state,
+      jobs: 1,
+      agents: { resolve: () => assert.fail("a fresh cache record should not invoke an agent") },
+    },
+    repo: { root: dir },
+    memoryHash,
+  });
+
+  assert.deepEqual([summary.cached, summary.analyzed], [1, 0]);
+  const [upgraded] = state.listEvidence();
+  assert.equal(upgraded.transcript.interaction, NON_INTERACTIVE);
+  assert.deepEqual(foldEvidence([upgraded]).analyzedByInteraction, {
+    [INTERACTIVE]: 0,
+    [NON_INTERACTIVE]: 1,
+  });
 });
 
 test("evidence records carry the category and fold reports relevance per category", async () => {
