@@ -174,8 +174,8 @@ export function foldEvidence(
   const gaps = proposalClusters
     .filter((cluster) => cluster.sessions >= minGapEvidence)
     .sort((a, b) => b.sessions - a.sessions);
-  const excludedMixedGaps = decided
-    .filter((cluster) => cluster.majorityOrchestration && cluster.mixed && cluster.sessions >= minGapEvidence)
+  const reportOnlyGaps = decided
+    .filter((cluster) => cluster.mixed && (cluster.majorityOrchestration || cluster.sessions < minGapEvidence))
     .sort((a, b) => b.sessions - a.sessions);
 
   const droppedGapSingletons = proposalClusters.length - gaps.length;
@@ -201,7 +201,8 @@ export function foldEvidence(
     instructions: instructionRows,
     gaps,
     crossSurfaceDuplicates: duplicates,
-    excludedMixedGaps,
+    reportOnlyGaps,
+    gapEligibilityEnforced: true,
   };
 }
 
@@ -299,6 +300,14 @@ function failedTriggerOf(items, minGapEvidence) {
 
 /** Compact rendering of the folded evidence for the synthesis prompt. */
 export function renderEvidenceForPrompt(summary) {
+  return renderEvidence(summary);
+}
+
+export function renderEvidenceReport(summary) {
+  return renderEvidence(summary);
+}
+
+function renderEvidence(summary) {
   const lines = [];
 
   const mix = summary.analyzedByInteraction;
@@ -352,7 +361,7 @@ export function renderEvidenceForPrompt(summary) {
   }
 
   lines.push("");
-  lines.push("### Gap clusters (mistakes no current instruction covers)");
+  lines.push("### Synthesis-eligible gap clusters (mistakes no current instruction covers)");
   if (summary.totals.orchestrationGapSightings) {
     lines.push(
       `- ${summary.totals.orchestrationGapSightings} orchestration-domain sighting(s) counted as domain ` +
@@ -360,12 +369,9 @@ export function renderEvidenceForPrompt(summary) {
         `as their own instruction`,
     );
   }
-  for (const gap of summary.excludedMixedGaps || []) {
-    lines.push(`- ${gapSessionLabel(gap)} risk=${gap.recurrenceRisk} :: ${gap.proposedInstruction}`);
-  }
   if (!summary.gaps.length) {
     lines.push(
-      summary.excludedMixedGaps?.length
+      summary.reportOnlyGaps?.length
         ? "- no gap cluster is eligible for a repository proposal"
         : "- none above the evidence threshold",
     );
@@ -381,6 +387,14 @@ export function renderEvidenceForPrompt(summary) {
     }
     for (const quote of gap.quotes.slice(0, 3)) {
       lines.push(`    "${oneLine(quote.text)}" (${quote.source})`);
+    }
+  }
+
+  if (summary.reportOnlyGaps?.length) {
+    lines.push("");
+    lines.push("### Report-only mixed gap clusters (mechanically ineligible for synthesis)");
+    for (const gap of summary.reportOnlyGaps) {
+      lines.push(`- ${gapSessionLabel(gap)} risk=${gap.recurrenceRisk} :: ${gap.proposedInstruction}`);
     }
   }
 

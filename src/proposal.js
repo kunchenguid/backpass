@@ -1,6 +1,7 @@
 import { renderHunkLines } from "./diff.js";
 import { mixFromCounts } from "./interaction.js";
-import { memoryTextHash } from "./memory.js";
+import { memoryTextHash, similarity } from "./memory.js";
+import { GAP_SIMILARITY_THRESHOLD } from "./gap-ledger.js";
 import { editSkills, parseFrontmatter, skillDescriptionTokens } from "./skills.js";
 import { budgetGateKind, budgetStatus, estimateTokens } from "./tokens.js";
 import { isSkillFilePath, normalizeRecoveryLine, recoveredLineCounts } from "./workspace.js";
@@ -130,6 +131,20 @@ function normalizeEvidence(evidence) {
 function countSources(evidence) {
   if (!Array.isArray(evidence)) return 0;
   return new Set(evidence.map((e) => e?.source).filter(Boolean)).size;
+}
+
+function eligibleGapForAddition(edit, hunks, summary) {
+  if (summary?.gapEligibilityEnforced !== true) return true;
+  const inserted = hunks
+    .flatMap((hunk) => (hunk.lines || []).filter((line) => line.type === "ins").map((line) => line.text))
+    .join("\n");
+  return (summary.gaps || []).find(
+    (gap) =>
+      similarity(inserted, gap.proposedInstruction) >= GAP_SIMILARITY_THRESHOLD &&
+      edit.evidence.some((evidence) =>
+        (gap.quotes || []).some((quote) => evidence.text === quote.text && evidence.source === quote.source),
+      ),
+  );
 }
 
 /** The del-line texts of a hunk that are not carried by `lineCounts` (blank lines ignored). */
@@ -506,6 +521,12 @@ export function buildProposal(rawResult, context) {
       violations.push(
         `edit ${edit.id} ("${edit.title}") adds a new instruction backed by ${edit.transcripts} session(s); ` +
           `${config.minGapEvidence} are required`,
+      );
+      continue;
+    }
+    if (edit.kind !== "extract" && onlyAdds && !eligibleGapForAddition(edit, hunks, summary)) {
+      violations.push(
+        `edit ${edit.id} ("${edit.title}") adds a new instruction that does not match any synthesis-eligible gap and its evidence`,
       );
       continue;
     }
