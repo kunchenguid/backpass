@@ -81,6 +81,7 @@ test("invalid config values fail loudly with a usable message", () => {
   assert.throws(() => loadConfig(tempRepo({ memoryFiles: [] })), UserError);
   assert.throws(() => loadConfig(tempRepo({ minGapEvidence: 0 })), UserError);
   assert.throws(() => loadConfig(tempRepo({ discovery: { since: "yesterday" } })), UserError);
+  assert.throws(() => loadConfig(tempRepo({ discovery: { cloneRoots: "home" } })), UserError);
   assert.throws(() => loadConfig(tempRepo("{ not json")), UserError);
   assert.throws(() => loadConfig(tempRepo('"a bare string"')), UserError);
 });

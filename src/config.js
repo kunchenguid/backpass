@@ -73,6 +73,12 @@ export const DEFAULT_CONFIG = {
     harnesses: ALL_HARNESSES,
     since: "30d",
     worktreeGlobs: [],
+    /**
+     * Extra directories to search for local clones that share this repo's remotes
+     * (sibling of the current checkout is searched automatically). Each entry is a
+     * checkout or a parent of checkouts. Discovery only reads git identity there.
+     */
+    cloneRoots: [],
     minUserTurns: 2,
     includeCursorIde: false,
   },
@@ -208,6 +214,9 @@ function validate(config) {
   }
   config.discovery.harnesses = config.discovery.harnesses.filter((h) => known.has(h));
   parseSince(config.discovery.since);
+  if (!Array.isArray(config.discovery.cloneRoots) || config.discovery.cloneRoots.some((p) => typeof p !== "string")) {
+    throw new UserError("config.discovery.cloneRoots must be an array of paths");
+  }
   return config;
 }
 

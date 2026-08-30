@@ -18,7 +18,8 @@ import {
  * Every message line carries `cwd`, `gitBranch`, `sessionId` and `version`. The
  * directory name is a lossy munge of the cwd (slashes and dots both become dashes),
  * so it is only used to narrow the search - the per-line `cwd` is the authority.
- * No git remote is recorded, so a deleted worktree can only reach tier 3.
+ * No git remote is recorded, so a deleted worktree can only reach tier 3. A live
+ * sibling clone that shares this repo's remotes is associated at tier 1.5.
  *
  * `CLAUDE_CONFIG_DIR` relocates the whole config dir, and it is commonly set per
  * invocation (a shell alias for a work profile), which splits a machine's sessions across

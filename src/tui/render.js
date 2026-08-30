@@ -48,7 +48,12 @@ export const STAGE_LABELS = {
 };
 const STAGE_LABEL_WIDTH = Math.max(...Object.values(STAGE_LABELS).map((label) => label.length)) + 1;
 
-const TIER_LABELS = { 1: "ran in this repo", 2: "git remote match", 3: "path match (best-effort)" };
+const TIER_LABELS = {
+  1: "ran in this repo",
+  1.5: "sibling clone",
+  2: "git remote match",
+  3: "path match (best-effort)",
+};
 
 // eslint-disable-next-line no-control-regex -- matching ANSI SGR escapes is the point
 const ANSI_PATTERN = /\x1b\[[0-9;]*m/g;
@@ -150,7 +155,7 @@ function stageElapsed(stage, now) {
 
 function tierLabel(tiers = {}) {
   let best = null;
-  for (const tier of [1, 2, 3]) {
+  for (const tier of [1, 1.5, 2, 3]) {
     if ((tiers[tier] || 0) > (tiers[best] || 0)) best = tier;
   }
   return best ? TIER_LABELS[best] : "";

@@ -104,14 +104,20 @@ and reads each JSONL file once.
 Hermes collection includes CLI and ACP sessions only. Gateway, cron, and WhatsApp sessions
 are excluded because their recorded cwd belongs to the shared gateway process, not a project.
 
-Association runs in three tiers:
+Association runs in four tiers:
 
 1. **Tier 1 - deterministic.** The session's cwd is (or sits inside) one of this repo's
    worktrees.
-2. **Tier 2 - deterministic, survives deletion.** A git remote recorded in the transcript
+2. **Tier 1.5 - deterministic, sibling clone.** The cwd is a live local clone (or one of
+   its worktrees) that shares a git remote with this repo. This clone's `git worktree
+list` cannot see a second checkout, and Claude records no remote, so without this
+   tier a sibling clone's interactive history is invisible. Backpass searches the parent
+   of each of this repo's worktrees, plus any `discovery.cloneRoots` you configure, and
+   only reads git identity there. `--strict` keeps this tier.
+3. **Tier 2 - deterministic, survives deletion.** A git remote recorded in the transcript
    matches one of the repo's remotes. This is how codex and grok stay attributable long
    after the worktree is gone.
-3. **Tier 3 - best-effort.** A dead path whose last segment is the repo's directory name,
+4. **Tier 3 - best-effort.** A dead path whose last segment is the repo's directory name,
    or one matching a glob you configured. Labelled as such, and excluded by `--strict`.
 
 Collection is incremental. Codex alone can hold 10,000+ rollouts, so verdicts are cached in
@@ -496,6 +502,7 @@ CLI flags on top:
     "harnesses": ["claude", "codex", "pi", "opencode", "grok", "cursor", "hermes"],
     "since": "30d",
     "worktreeGlobs": [],
+    "cloneRoots": [],
     "minUserTurns": 2
   },
   "jobs": 4

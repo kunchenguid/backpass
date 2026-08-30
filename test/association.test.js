@@ -78,8 +78,25 @@ test("a user worktree glob promotes a dead path to tier 3", () => {
   assert.equal(globbed.confidence, "glob");
 });
 
+test("tier 1.5: a live sibling clone is deterministic, not a foreign live path", () => {
+  const { repo } = makeRepo();
+  const sibling = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "demo-sibling-")));
+  repo.siblingWorktrees = [sibling];
+
+  const exact = associate({ cwd: sibling }, repo);
+  assert.equal(exact.tier, 1.5);
+  assert.equal(exact.confidence, "sibling");
+
+  const nested = associate({ cwd: path.join(sibling, "src") }, repo);
+  assert.equal(nested.tier, 1.5);
+
+  const other = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "demo-other-")));
+  assert.equal(associate({ cwd: other }, repo), null);
+});
+
 test("--strict keeps only the deterministic tiers", () => {
   assert.equal(passesStrict({ tier: 1 }, true), true);
+  assert.equal(passesStrict({ tier: 1.5 }, true), true);
   assert.equal(passesStrict({ tier: 2 }, true), true);
   assert.equal(passesStrict({ tier: 3 }, true), false);
   assert.equal(passesStrict({ tier: 3 }, false), true);

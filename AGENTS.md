@@ -38,6 +38,11 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
 
 ## Sharp edges
 
+- **Sibling clones are a live-path tier, not a recorded-remote one.** `git worktree
+list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches the
+  parent of each worktree (and `discovery.cloneRoots`) for other checkouts that share a
+  remote, read-only, so Claude sessions whose cwd is a sibling clone still attach
+  (tier 1.5). A second full clone with no overlapping remote is never associated.
 - **Transcript formats are undocumented and drift.** File adapters in
   `src/discovery/adapters/` are pinned by golden fixtures in `test/fixtures/`; SQLite
   adapters (opencode, hermes) build tiny temp databases in tests. When a harness changes

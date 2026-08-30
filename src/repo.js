@@ -67,6 +67,105 @@ function listRemotes(root) {
   return [...out];
 }
 
+function expandUserPath(p) {
+  if (p === "~") return process.env.HOME || "";
+  if (typeof p === "string" && p.startsWith("~/")) {
+    return path.join(process.env.HOME || "", p.slice(2));
+  }
+  return p;
+}
+
+function isGitCheckout(dir) {
+  try {
+    return fs.existsSync(path.join(dir, ".git"));
+  } catch {
+    return false;
+  }
+}
+
+function remotesOverlap(ours, theirs) {
+  if (!ours.length || !theirs.length) return false;
+  const set = new Set(ours);
+  return theirs.some((remote) => set.has(remote));
+}
+
+/**
+ * Local checkouts that share a remote with this repo, plus their worktrees.
+ *
+ * Claude (and other harnesses that record cwd but no remote) only reach tier 1 when
+ * the cwd is a known live path. `git worktree list` cannot see a sibling clone's
+ * separate `.git`, so those sessions were invisible. Search is bounded and read-only:
+ * the parent of each of this repo's worktrees, each configured extra root, and the
+ * immediate children of those directories. Matching is remote identity, not directory
+ * name. Fail-soft: an unreadable path is skipped.
+ *
+ * @param {{ remotes?: string[], worktrees?: string[], cloneRoots?: string[] }} [opts]
+ */
+export function listSiblingCloneWorktrees({ remotes, worktrees, cloneRoots = [] } = {}) {
+  if (!remotes?.length) return [];
+  const known = new Set(worktrees || []);
+  const found = [];
+
+  const consider = (dir) => {
+    let real;
+    try {
+      real = realpathOrSelf(dir);
+    } catch {
+      return;
+    }
+    if (known.has(real) || !isGitCheckout(real)) return;
+    const theirs = listRemotes(real);
+    if (!remotesOverlap(remotes, theirs)) return;
+    for (const wt of listWorktrees(real)) {
+      if (known.has(wt)) continue;
+      known.add(wt);
+      found.push(wt);
+    }
+  };
+
+  const searchRoots = new Set();
+  for (const wt of worktrees || []) {
+    const parent = path.dirname(wt);
+    if (parent && parent !== wt) searchRoots.add(parent);
+  }
+  for (const extra of cloneRoots) {
+    const expanded = expandUserPath(extra);
+    if (!expanded) continue;
+    searchRoots.add(path.resolve(expanded));
+  }
+
+  for (const root of searchRoots) {
+    consider(root);
+    let entries;
+    try {
+      entries = fs.readdirSync(root, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+      consider(path.join(root, entry.name));
+    }
+  }
+
+  return found;
+}
+
+/**
+ * Fill `repo.siblingWorktrees` from local clones that share this repo's remotes.
+ *
+ * @param {{ remotes: string[], worktrees: string[], siblingWorktrees?: string[] }} repo
+ * @param {string[]} [cloneRoots]
+ */
+export function attachSiblingClones(repo, cloneRoots = []) {
+  repo.siblingWorktrees = listSiblingCloneWorktrees({
+    remotes: repo.remotes,
+    worktrees: repo.worktrees,
+    cloneRoots,
+  });
+  return repo;
+}
+
 /**
  * Ensure `line` is present in this repo's *local* git exclude file
  * (`.git/info/exclude`) - never a tracked file the user owns. The path is
@@ -114,5 +213,6 @@ export function resolveRepo(cwd = process.cwd()) {
     name: path.basename(realRoot),
     worktrees: listWorktrees(root),
     remotes: listRemotes(root),
+    siblingWorktrees: [],
   };
 }

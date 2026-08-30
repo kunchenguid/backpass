@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { UserError, fail, setQuiet } from "./logger.js";
 import { loadConfig, parseMaxTranscripts } from "./config.js";
-import { resolveRepo } from "./repo.js";
+import { attachSiblingClones, resolveRepo } from "./repo.js";
 import { State } from "./state.js";
 import { AgentResolver } from "./agents.js";
 
@@ -233,6 +233,7 @@ export async function main(argv) {
   try {
     const repo = resolveRepo(process.cwd());
     const config = loadConfig(repo.root, overridesFrom(values));
+    attachSiblingClones(repo, config.discovery.cloneRoots);
     config.state = new State(repo.root).ensure();
     config.agents = new AgentResolver(config, {
       state: config.state,

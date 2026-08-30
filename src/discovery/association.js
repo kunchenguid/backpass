@@ -4,13 +4,17 @@ import path from "node:path";
 import { normalizeRemote } from "../repo.js";
 
 /**
- * Three-tier repo/worktree association (design section 2.1).
+ * Association tiers (design section 2.1, plus sibling clones).
  *
- *   tier 1  deterministic  - transcript cwd is (or sits under) a live worktree path
- *   tier 2  deterministic  - a recorded git remote matches one of the repo's remotes;
- *                            survives worktree deletion (codex, grok)
- *   tier 3  best-effort    - dead cwd whose last segment is the repo dir name, or that
- *                            matches a user-supplied worktree glob; excluded by --strict
+ *   tier 1    deterministic  - transcript cwd is (or sits under) a live worktree path
+ *   tier 1.5  deterministic  - live cwd under a local clone that shares a git remote
+ *                              (sibling worktrees `git worktree list` cannot see).
+ *                              Survives `--strict`. Claude records no remote, so this
+ *                              is how a second clone's interactive history attaches.
+ *   tier 2    deterministic  - a recorded git remote matches one of the repo's remotes;
+ *                              survives worktree deletion (codex, grok)
+ *   tier 3    best-effort    - dead cwd whose last segment is the repo dir name, or that
+ *                              matches a user-supplied worktree glob; excluded by --strict
  *
  * Returns null when the transcript belongs to some other repo.
  */
@@ -55,7 +59,7 @@ export function associate({ cwd, remotes = [], gitRoot = null }, repo, options =
   const globs = options.worktreeGlobs || [];
   const candidates = [cwd, gitRoot].filter(Boolean);
 
-  // Tier 1 - live path under a known worktree.
+  // Tier 1 - live path under a known worktree of this clone.
   for (const candidate of candidates) {
     const real = realpathOrResolve(candidate);
     for (const worktree of repo.worktrees) {
@@ -64,6 +68,20 @@ export function associate({ cwd, remotes = [], gitRoot = null }, repo, options =
       }
       if (isUnder(real, worktree)) {
         return { tier: 1, confidence: "nested", reason: `cwd is inside worktree ${worktree}` };
+      }
+    }
+  }
+
+  // Tier 1.5 - live path under a sibling clone that shares a remote.
+  const siblingWorktrees = repo.siblingWorktrees || [];
+  for (const candidate of candidates) {
+    const real = realpathOrResolve(candidate);
+    for (const worktree of siblingWorktrees) {
+      if (real === worktree) {
+        return { tier: 1.5, confidence: "sibling", reason: `cwd is sibling clone ${worktree}` };
+      }
+      if (isUnder(real, worktree)) {
+        return { tier: 1.5, confidence: "sibling", reason: `cwd is inside sibling clone ${worktree}` };
       }
     }
   }
