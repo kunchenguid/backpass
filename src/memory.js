@@ -173,10 +173,14 @@ export function splitAttributionSentences(text) {
   let codeDelimiter = 0;
   for (let i = 0; i < text.length; i += 1) {
     if (text[i] === "`") {
+      let backslashes = 0;
+      while (text[i - backslashes - 1] === "\\") backslashes += 1;
       let run = 1;
       while (text[i + run] === "`") run += 1;
-      if (codeDelimiter === 0) codeDelimiter = run;
-      else if (codeDelimiter === run) codeDelimiter = 0;
+      if (backslashes % 2 === 0) {
+        if (codeDelimiter === 0) codeDelimiter = run;
+        else if (codeDelimiter === run) codeDelimiter = 0;
+      }
       i += run - 1;
       continue;
     }

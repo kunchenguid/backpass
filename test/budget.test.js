@@ -165,6 +165,18 @@ test("paths, URLs, and inline code do not create fragment attribution targets", 
   assert.ok(unit.parts.every((part) => !part.text.startsWith("--watch`")));
 });
 
+test("an escaped literal backtick cannot disable sentence attribution", () => {
+  const blob =
+    "Write \\` for literal output. " +
+    Array.from({ length: 12 }, (_, i) => `Run check ${i + 1} before deployment. Deploy safely afterward.`).join(" ");
+  const [unit] = parseMemoryUnits(`# T\n\n${blob}\n`);
+
+  assert.ok(estimateTokens(blob) > ATTRIBUTION_SPLIT_TOKENS);
+  assert.ok(unit.parts?.length > 12);
+  assert.equal(unit.parts[0].text, "Write \\` for literal output.");
+  assert.ok(unit.parts.some((part) => part.text === "Deploy safely afterward."));
+});
+
 test("list items and fenced blocks are not sentence-split even when oversized", () => {
   const blob = oversizedParagraph();
   const listed = parseMemoryUnits(`# T\n\n- ${blob}\n`);
