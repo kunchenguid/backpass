@@ -21,10 +21,11 @@ import { discoverTranscripts } from "../src/discovery/index.js";
 import { loadConfig } from "../src/config.js";
 import { foldEvidence, renderEvidenceForPrompt } from "../src/fold.js";
 import { analyzeTranscripts } from "../src/analyze.js";
-import { printProposal } from "../src/commands/propose.js";
+import { foldForRun, printProposal } from "../src/commands/propose.js";
 import { cmdScan } from "../src/commands/scan.js";
 import { renderApplySurface } from "../src/apply/lavish.js";
 import { evidenceKey, State } from "../src/state.js";
+import { transcriptIdentity } from "../src/transcript.js";
 import { sampleTranscripts, capTranscripts } from "../src/sample.js";
 import { setLoggerSink } from "../src/logger.js";
 
@@ -415,6 +416,54 @@ test("cached evidence is upgraded with the current interaction category", async 
     [INTERACTIVE]: 0,
     [NON_INTERACTIVE]: 1,
   });
+});
+
+test("fold upgrades current evidence outside the analyzed sample", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-mix-fold-cache-"));
+  const state = new State(dir).ensure();
+  const transcript = {
+    harness: "claude",
+    id: "claude-robot-unsampled",
+    nativeId: "robot-unsampled",
+    path: "/sessions/robot-unsampled.jsonl",
+    mtimeMs: 100,
+    bytes: 200,
+    interactionSignals: { entrypoint: "sdk-cli" },
+    interaction: NON_INTERACTIVE,
+  };
+  const memoryHash = "sha256:memory";
+  state.writeEvidence(transcript, {
+    status: "ok",
+    transcript: {
+      harness: "claude",
+      id: transcript.id,
+      identity: transcriptIdentity(transcript),
+      path: transcript.path,
+    },
+    memoryHash,
+    memoryPath: "AGENTS.md",
+    key: evidenceKey(transcript, memoryHash),
+    positive: [{ instruction: "AG-001", quote: "followed the repository rule exactly" }],
+    negative: [],
+    gaps: [],
+  });
+
+  const summary = await foldForRun(
+    {
+      repo: { root: dir },
+      config: { state, minGapEvidence: 2, gapLedgerMaxAge: "90d" },
+    },
+    { path: "AGENTS.md", text: "", units: [] },
+    memoryHash,
+    [],
+    [transcript],
+  );
+
+  assert.deepEqual(summary.analyzedByInteraction, {
+    [INTERACTIVE]: 0,
+    [NON_INTERACTIVE]: 1,
+  });
+  assert.equal(state.readEvidence(transcript).transcript.interaction, NON_INTERACTIVE);
 });
 
 test("evidence records carry the category and fold reports relevance per category", async () => {
