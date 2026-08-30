@@ -29,7 +29,16 @@ function makeCtx(repo, overrides = {}) {
 }
 
 function transcript(id) {
-  return { id, nativeId: id, harness: "claude", path: `/x/${id}.jsonl`, mtimeMs: 1, bytes: 10, startedAt: 1 };
+  return {
+    id,
+    identity: `claude:${id}`,
+    nativeId: id,
+    harness: "claude",
+    path: `/x/${id}.jsonl`,
+    mtimeMs: 1,
+    bytes: 10,
+    startedAt: 1,
+  };
 }
 
 const discoverNone = async () => ({ transcripts: [], perHarness: {} });
@@ -40,7 +49,13 @@ function fakeAnalyze({ transcripts, memoryFile, config, memoryHash }) {
   for (const t of transcripts) {
     config.state.writeEvidence(t.id, {
       status: "ok",
-      transcript: { id: t.id, harness: t.harness, startedAt: t.startedAt, interaction: "interactive" },
+      transcript: {
+        id: t.id,
+        identity: t.identity,
+        harness: t.harness,
+        startedAt: t.startedAt,
+        interaction: "interactive",
+      },
       memoryHash,
       memoryPath: memoryFile.path,
       positive: [],
@@ -175,6 +190,55 @@ test("no memory file and no transcripts: seeds AGENTS.md from defaults plus a CL
   const claude = fs.readFileSync(path.join(repo.root, "CLAUDE.md"), "utf8");
   assert.equal(claude, renderPointer("AGENTS.md"));
   assert.equal(isPointerTo(claude, "AGENTS.md"), true);
+});
+
+test("bootstrap analyzes and folds only the balanced capped sample", async () => {
+  const repo = makeRepo();
+  const ctx = makeCtx(repo, { maxTranscripts: 100, seed: 1 });
+  const discovered = [
+    ...Array.from({ length: 2 }, (_, i) => ({
+      ...transcript(`human-${i}`),
+      interaction: "interactive",
+    })),
+    ...Array.from({ length: 198 }, (_, i) => ({
+      ...transcript(`robot-${i}`),
+      interaction: "non-interactive",
+    })),
+  ];
+  const captured = {};
+  const analyze = async ({ transcripts }) => {
+    captured.analyzed = transcripts;
+    return {
+      total: transcripts.length,
+      analyzed: transcripts.length,
+      cached: 0,
+      skipped: 0,
+      failed: 0,
+      usage: [],
+    };
+  };
+  const fold = async (_ctx, _file, _hash, _skills, transcripts) => {
+    captured.folded = transcripts;
+    return {
+      analyzedSessions: 0,
+      instructions: [],
+      totals: { gapClusters: 0, droppedGapSingletons: 0 },
+    };
+  };
+
+  const { result } = await withSink(() =>
+    bootstrapRun(ctx, {
+      discover: async () => ({ transcripts: discovered, perHarness: { claude: {} } }),
+      analyze,
+      fold,
+    }),
+  );
+
+  assert.equal(result.transcripts, 100);
+  assert.equal(captured.analyzed.length, 100);
+  assert.deepEqual(captured.folded, captured.analyzed);
+  assert.equal(captured.analyzed.filter((item) => item.interaction === "interactive").length, 2);
+  assert.equal(captured.analyzed.filter((item) => item.interaction === "non-interactive").length, 98);
 });
 
 test("with transcripts: analysis gaps become the first evidence-backed instruction", async () => {

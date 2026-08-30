@@ -459,6 +459,46 @@ test("fold excludes legacy evidence without an interaction category", async () =
   assert.equal(state.readEvidence(transcript).transcript.interaction, undefined);
 });
 
+test("fold selection distinguishes colliding native IDs by source", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-mix-identity-fold-"));
+  const state = new State(dir).ensure();
+  const memoryHash = "sha256:memory";
+  const shared = {
+    harness: "claude",
+    id: "claude-shared",
+    nativeId: "shared",
+    mtimeMs: 100,
+    bytes: 200,
+    interaction: INTERACTIVE,
+  };
+  const selected = { ...shared, path: "/sessions/a.jsonl" };
+  const unselected = { ...shared, path: "/sessions/b.jsonl" };
+  for (const transcript of [selected, unselected]) {
+    state.writeEvidence(transcript, {
+      status: "ok",
+      transcript,
+      memoryHash,
+      memoryPath: "AGENTS.md",
+      positive: [],
+      negative: [],
+      gaps: [],
+    });
+  }
+
+  const summary = await foldForRun(
+    {
+      repo: { root: dir },
+      config: { state, minGapEvidence: 2, gapLedgerMaxAge: "90d" },
+    },
+    { path: "AGENTS.md", text: "", units: [] },
+    memoryHash,
+    [],
+    [selected],
+  );
+
+  assert.equal(summary.analyzedSessions, 1);
+});
+
 test("fold bounds evidence and ledger observations to the selected sample", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-mix-selected-fold-"));
   const state = new State(dir).ensure();

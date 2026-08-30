@@ -293,6 +293,31 @@ test("a one-slot cap selects the dominant category", () => {
   assert.equal(kept.interaction, "interactive");
 });
 
+test("a tied one-slot cap uses a neutral deterministic draw", () => {
+  const set = [
+    {
+      harness: "claude",
+      id: "human",
+      interaction: "interactive",
+      startedAt: NOW,
+    },
+    {
+      harness: "claude",
+      id: "robot",
+      interaction: "non-interactive",
+      startedAt: NOW,
+    },
+  ];
+  const choices = new Set(
+    Array.from({ length: 32 }, (_, seed) => sampleTranscripts(set, 1, { seed, now: NOW })[0].interaction),
+  );
+  assert.deepEqual(choices, new Set(["interactive", "non-interactive"]));
+  assert.deepEqual(
+    sampleTranscripts(set, 1, { seed: 7, now: NOW }),
+    sampleTranscripts(set, 1, { seed: 7, now: NOW }),
+  );
+});
+
 test("capTranscripts reports a greppable line only when sampling happened", () => {
   const config = loadConfig(tempDir(), { seed: 3 });
   const small = { transcripts: transcripts(40, 30), perHarness: {} };

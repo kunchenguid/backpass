@@ -33,16 +33,14 @@ import { transcriptIdentity } from "../transcript.js";
  */
 export async function foldForRun(ctx, memoryFile, memoryHash, skills = [], transcripts = []) {
   const { state, minGapEvidence, gapLedgerMaxAge } = ctx.config;
-  const selected = new Set(
-    transcripts.flatMap((transcript) => [transcript.identity || transcriptIdentity(transcript), transcript.id]),
-  );
+  const selected = new Set(transcripts.map((transcript) => transcriptIdentity(transcript)));
   const evidence = state.listEvidence();
   const relevant = evidence.filter(
     (e) =>
       e.memoryPath === memoryFile.path &&
       e.memoryHash === memoryHash &&
       (e.transcript?.interaction === INTERACTIVE || e.transcript?.interaction === NON_INTERACTIVE) &&
-      (selected.has(e.transcript?.identity || transcriptIdentity(e.transcript)) || selected.has(e.transcript?.id)),
+      selected.has(transcriptIdentity(e.transcript)),
   );
 
   const ledger = state.readGapLedger();

@@ -52,6 +52,7 @@ function record(id, proposedInstruction) {
     status: "ok",
     transcript: {
       id,
+      identity: id,
       harness: "claude",
       startedAt: Date.parse("2026-08-01T00:00:00Z"),
       interaction: "interactive",

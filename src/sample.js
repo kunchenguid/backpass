@@ -170,6 +170,9 @@ export function sampleTranscripts(
   if (interactive.length === 0 || nonInteractive.length === 0) {
     return weightedSample(transcripts, count, options);
   }
+  if (count === 1 && interactive.length === nonInteractive.length) {
+    return weightedSample(transcripts, count, options);
+  }
   const alloc = mixAllocations(interactive.length, nonInteractive.length, count);
   const keptInteractive = new Set(weightedSample(interactive, alloc.interactive, options));
   const keptNonInteractive = new Set(weightedSample(nonInteractive, alloc.nonInteractive, options));

@@ -5,6 +5,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { memorySetHash, memoryTextHash } from "../../src/memory.js";
+import { transcriptIdentity } from "../../src/transcript.js";
 
 /**
  * The synthesis pass driven through the real CLI, against a stand-in acpx.
@@ -137,21 +138,40 @@ export function makeCliRepo({ memory, sessions = 3, files = {} }) {
   // Real evidence always carries the set hash it was judged against (`foldForRun` filters
   // on it); match what the CLI computes for this repo's memory files so fold picks it up.
   const memoryHash = memorySetHash([{ path: "AGENTS.md", hash: memoryTextHash(memory) }]);
+  const projectDir = path.join(emptyHome, ".claude", "projects", dir.replaceAll(/[/\\.]/g, "-"));
+  fs.mkdirSync(projectDir, { recursive: true });
   for (let i = 1; i <= sessions; i += 1) {
+    const sessionId = `s${i}-${path.basename(dir)}`;
+    const sessionPath = path.join(projectDir, `${sessionId}.jsonl`);
+    fs.writeFileSync(
+      sessionPath,
+      `${JSON.stringify({
+        type: "user",
+        message: { role: "user", content: `session ${i} task` },
+        cwd: dir,
+        sessionId,
+        entrypoint: "cli",
+        timestamp: "2026-08-01T00:00:00.000Z",
+      })}\n`,
+    );
+    const stat = fs.statSync(sessionPath);
+    const transcript = {
+      harness: "claude",
+      id: `claude-${sessionId}`,
+      nativeId: sessionId,
+      path: sessionPath,
+      mtimeMs: stat.mtimeMs,
+      bytes: stat.size,
+      interaction: "interactive",
+    };
+    transcript.identity = transcriptIdentity(transcript);
     fs.writeFileSync(
       path.join(evidenceDir, `claude_s${i}.json`),
       JSON.stringify({
         status: "ok",
         memoryPath: "AGENTS.md",
         memoryHash,
-        transcript: {
-          harness: "claude",
-          id: `claude:s${i}`,
-          path: `/dev/null/s${i}`,
-          mtimeMs: 1,
-          bytes: 10,
-          interaction: "interactive",
-        },
+        transcript,
         positive: [],
         negative: [
           {
