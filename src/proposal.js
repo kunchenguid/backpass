@@ -510,14 +510,19 @@ export function buildProposal(rawResult, context) {
     // against every removed byte. This still lets a rewrite purely tighten existing prose.
     // Extracts move text; they are not adds.
     const onlyAdds = hunks.every((h) => h.removed === 0);
-    const growsAboveRewriteTolerance = hunks.some((h) => {
-      if (!h.removed || !h.added) return false;
-      const removed = h.lines
-        .filter((line) => line.type === "del")
+    let introducedBytes = 0;
+    for (const hunk of hunks) {
+      if (!hunk.added) continue;
+      const added = hunk.lines
+        .filter((line) => line.type === "ins")
         .map((line) => line.text)
         .join("\n");
-      const added = h.lines
-        .filter((line) => line.type === "ins")
+      if (!hunk.removed) {
+        introducedBytes += Buffer.byteLength(added);
+        continue;
+      }
+      const removed = hunk.lines
+        .filter((line) => line.type === "del")
         .map((line) => line.text)
         .join("\n");
       let prefix = 0;
@@ -530,10 +535,9 @@ export function buildProposal(rawResult, context) {
       ) {
         suffix += 1;
       }
-      return (
-        estimateTokensFromBytes(Buffer.byteLength(added.slice(prefix, added.length - suffix))) > REWRITE_NET_ADD_TOKENS
-      );
-    });
+      introducedBytes += Buffer.byteLength(added.slice(prefix, added.length - suffix));
+    }
+    const growsAboveRewriteTolerance = estimateTokensFromBytes(introducedBytes) > REWRITE_NET_ADD_TOKENS;
     if (
       !preservesAlwaysLoaded(edit.kind) &&
       (onlyAdds || growsAboveRewriteTolerance) &&

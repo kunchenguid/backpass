@@ -292,6 +292,38 @@ test("a tightening in one hunk cannot offset a substantial addition in another h
   assert.ok(violations.some((v) => /backed by 1 session/.test(v)));
 });
 
+test("several sub-threshold rewrite hunks are gated on their combined growth", () => {
+  const first = "- Whenever a PR is mentioned, include its URL.";
+  const second = "- Use Node 18 via nvm before running any script.";
+  const firstGrowth = ` ${"x".repeat(24)}`;
+  const secondGrowth = ` ${"y".repeat(24)}`;
+  assert.ok(estimateTokens(firstGrowth) <= 10 && estimateTokens(secondGrowth) <= 10);
+  assert.ok(estimateTokens(firstGrowth + secondGrowth) > 10);
+  const { proposal, violations, measured } = gate({
+    edit: memoryEdit((t) => t.replace(first, first + firstGrowth).replace(second, second + secondGrowth)),
+    annotation: { edits: [claim(["H1", "H2"], { kind: "rewrite", title: "expand two rules", transcripts: 1 })] },
+  });
+  assert.equal(measured.changes.length, 2);
+  assert.equal(proposal.edits.length, 0);
+  assert.ok(violations.some((v) => /backed by 1 session/.test(v)));
+});
+
+test("a rewrite cannot hide a substantial pure insertion beside a tightening", () => {
+  const inserted = "- Route all SSH connections through the designated bastion host.\n";
+  const { proposal, violations, measured } = gate({
+    edit: memoryEdit((t) =>
+      t
+        .replace("## Rules\n\n", `## Rules\n\n${inserted}`)
+        .replace("- Use Node 18 via nvm before running any script.", "- Use nvm for Node 18."),
+    ),
+    annotation: { edits: [claim(["H1", "H2"], { kind: "rewrite", title: "insert and tighten", transcripts: 1 })] },
+  });
+  assert.equal(measured.changes.length, 2);
+  assert.ok(measured.changes.some((h) => h.added > 0 && h.removed === 0));
+  assert.equal(proposal.edits.length, 0);
+  assert.ok(violations.some((v) => /backed by 1 session/.test(v)));
+});
+
 test("a single-session rewrite that only tightens still passes", () => {
   const original = "- Use Node 18 via nvm before running any script.";
   const tighter = "- Use nvm for Node 18.";
