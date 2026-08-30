@@ -464,7 +464,8 @@ test("an oversized non-compliance blob synthesizes as a list-item restructure, n
   assert.equal(hunk.replace.includes(blob), false);
 
   const editPrompt = fs.readFileSync(path.join(repo.root, ".backpass", "prompts", "synthesis-edit.md"), "utf8");
-  assert.match(editPrompt, /Oversized paragraph \[AG-001\]/);
+  assert.match(editPrompt, /Oversized paragraph AG-001/);
+  assert.doesNotMatch(editPrompt, /Oversized paragraph \[AG-001\]/);
   assert.match(editPrompt, /\[AG-001\.2\]/);
   assert.match(editPrompt, /### Oversized units that failed to steer/);
   assert.match(editPrompt, /Preferred reinforcement is a restructure-in-place/);

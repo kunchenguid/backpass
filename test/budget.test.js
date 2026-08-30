@@ -188,6 +188,18 @@ test("ambiguous abbreviations stay attached while clear sentence boundaries stil
   assert.ok(unit.parts.some((part) => part.text === "A clear requirement governs deployment."));
 });
 
+test("Markdown spans and standalone path tokens stay within attribution parts", () => {
+  const cycle = "Keep **alpha. Beta** together. Deploy safely. Work from . Next verify.";
+  const blob = Array.from({ length: 12 }, () => cycle).join(" ");
+  const [unit] = parseMemoryUnits(`# T\n\n${blob}\n`);
+
+  assert.ok(estimateTokens(blob) > ATTRIBUTION_SPLIT_TOKENS);
+  assert.ok(unit.parts?.some((part) => part.text === "Keep **alpha. Beta** together."));
+  assert.ok(unit.parts?.some((part) => part.text === "Deploy safely."));
+  assert.ok(unit.parts?.some((part) => part.text === "Work from . Next verify."));
+  assert.ok(unit.parts?.every((part) => part.text !== "Keep **alpha." && part.text !== "Work from ."));
+});
+
 test("paths, URLs, and inline code do not create fragment attribution targets", () => {
   const cycle =
     "Read docs/config.md before editing. Visit https://example.test/docs/config.md before editing. Run `node app.js. --watch` afterward.";

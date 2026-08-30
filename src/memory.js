@@ -197,22 +197,49 @@ function confidentSentenceBoundary(text, sentenceStart, terminator) {
 
 export function splitAttributionSentences(text) {
   const sentences = [];
+  const spanStack = [];
   let start = 0;
   let codeDelimiter = 0;
   for (let i = 0; i < text.length; i += 1) {
+    let backslashes = 0;
+    while (text[i - backslashes - 1] === "\\") backslashes += 1;
+    const escaped = backslashes % 2 === 1;
+
     if (text[i] === "`") {
-      let backslashes = 0;
-      while (text[i - backslashes - 1] === "\\") backslashes += 1;
       let run = 1;
       while (text[i + run] === "`") run += 1;
-      if (backslashes % 2 === 0) {
+      if (!escaped) {
         if (codeDelimiter === 0) codeDelimiter = run;
         else if (codeDelimiter === run) codeDelimiter = 0;
       }
       i += run - 1;
       continue;
     }
-    if (codeDelimiter || ![".", "!", "?"].includes(text[i])) continue;
+    if (codeDelimiter) continue;
+
+    const bracketClose = { "[": "]", "(": ")", "<": ">" }[text[i]];
+    if (!escaped && bracketClose) {
+      spanStack.push(bracketClose);
+      continue;
+    }
+    if (!escaped && spanStack.at(-1) === text[i]) {
+      spanStack.pop();
+      continue;
+    }
+
+    if (["*", "_", "~"].includes(text[i])) {
+      let run = 1;
+      while (text[i + run] === text[i]) run += 1;
+      const marker = text[i].repeat(run);
+      if (!escaped && (text[i] !== "~" || run >= 2)) {
+        if (spanStack.at(-1) === marker) spanStack.pop();
+        else if (text[i + run] && !/\s/u.test(text[i + run])) spanStack.push(marker);
+      }
+      i += run - 1;
+      continue;
+    }
+
+    if (spanStack.length || ![".", "!", "?"].includes(text[i])) continue;
     const boundary = confidentSentenceBoundary(text, start, i);
     if (!boundary) continue;
     sentences.push(text.slice(start, boundary.end).trim());
