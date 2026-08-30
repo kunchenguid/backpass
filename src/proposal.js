@@ -71,15 +71,31 @@ export const REWRITE_NET_ADD_TOKENS = 10;
 const REWRITE_OVERLAP_THRESHOLD = 0.6;
 const MAX_REWRITE_OVERLAP_WORDS = 512;
 
-function changedWordSet(text) {
-  const words = new Set();
+function sampledWordOccurrences(text) {
+  const normalized = text.toLowerCase();
+  const prefix = [];
   let count = 0;
-  for (const match of text.toLowerCase().matchAll(/[\p{L}\p{N}]+/gu)) {
-    words.add(match[0]);
+  for (const match of normalized.matchAll(/[\p{L}\p{N}]+/gu)) {
+    if (count < MAX_REWRITE_OVERLAP_WORDS) prefix.push(match[0]);
     count += 1;
-    if (count === MAX_REWRITE_OVERLAP_WORDS) break;
   }
-  return words;
+  if (count <= MAX_REWRITE_OVERLAP_WORDS) return prefix;
+
+  const indexes = Array.from({ length: MAX_REWRITE_OVERLAP_WORDS }, (_, index) =>
+    Math.floor((index * (count - 1)) / (MAX_REWRITE_OVERLAP_WORDS - 1)),
+  );
+  const sampled = [];
+  let wordIndex = 0;
+  let sampleIndex = 0;
+  for (const match of normalized.matchAll(/[\p{L}\p{N}]+/gu)) {
+    if (wordIndex === indexes[sampleIndex]) {
+      sampled.push(match[0]);
+      sampleIndex += 1;
+      if (sampleIndex === indexes.length) break;
+    }
+    wordIndex += 1;
+  }
+  return sampled;
 }
 
 function rewriteHasSubstantialOverlap(hunks) {
@@ -87,15 +103,16 @@ function rewriteHasSubstantialOverlap(hunks) {
     hunks
       .flatMap((hunk) => (hunk.lines || []).filter((line) => line.type === type).map((line) => line.text))
       .join("\n");
-  const removed = changedWordSet(changedText("del"));
-  const added = changedWordSet(changedText("ins"));
-  if (!added.size) return true;
-  if (!removed.size) return false;
-  let shared = 0;
-  for (const word of added) {
-    if (removed.has(word)) shared += 1;
+  const added = sampledWordOccurrences(changedText("ins"));
+  if (!added.length) return true;
+  const needed = new Set(added);
+  const covered = new Set();
+  for (const match of changedText("del").toLowerCase().matchAll(/[\p{L}\p{N}]+/gu)) {
+    if (needed.has(match[0])) covered.add(match[0]);
+    if (covered.size === needed.size) break;
   }
-  return shared / added.size >= REWRITE_OVERLAP_THRESHOLD;
+  const shared = added.reduce((count, word) => count + Number(covered.has(word)), 0);
+  return shared / added.length >= REWRITE_OVERLAP_THRESHOLD;
 }
 
 export function effectiveMaxEdits(memoryFile, config, alwaysLoadedExtraTokens = 0) {

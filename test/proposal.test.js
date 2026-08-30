@@ -381,6 +381,34 @@ test("one long rule can tighten into many covered bullets with one session", () 
   assert.equal(proposal.edits.length, 1);
 });
 
+test("repeated unrelated added words count as separate uncovered occurrences", () => {
+  const shared = "alpha beta gamma delta epsilon zeta";
+  const original = `- ${shared} ${"x".repeat(1200)}.`;
+  const replacement = `- ${shared} ${Array.from({ length: 100 }, () => "intruder").join(" ")}.`;
+  const { proposal, violations } = gate({
+    text: `# Memory\n\n${original}\n`,
+    edit: memoryEdit((t) => t.replace(original, replacement)),
+    annotation: { edits: [claim(["H1"], { kind: "rewrite", title: "repeat unrelated rule", transcripts: 1 })] },
+  });
+  assert.ok(estimateTokens(replacement) < estimateTokens(original));
+  assert.equal(proposal.edits.length, 0);
+  assert.ok(violations.some((v) => /backed by 1 session/.test(v)));
+});
+
+test("a long tightening can retain words from beyond the sampling prefix", () => {
+  const words = Array.from({ length: 1024 }, (_, index) => `term${index}`);
+  const original = `- ${words.join(" ")}.`;
+  const tighter = `- ${words.slice(-400).join(" ")}.`;
+  const { proposal, violations, measured } = gate({
+    text: `# Memory\n\n${original}\n`,
+    edit: memoryEdit((t) => t.replace(original, tighter)),
+    annotation: { edits: [claim(["H1"], { kind: "rewrite", title: "retain rule suffix", transcripts: 1 })] },
+  });
+  assert.equal(measured.changes.length, 1);
+  assert.deepEqual(violations, []);
+  assert.equal(proposal.edits.length, 1);
+});
+
 test("a long overlapping tightening remains eligible with one session", () => {
   const words = Array.from({ length: 513 }, (_, index) => `term${index}`);
   const original = `- ${words.join(" ")}.`;
