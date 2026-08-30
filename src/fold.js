@@ -416,6 +416,13 @@ function renderEvidence(summary, { includeReportOnly }) {
     }
   }
 
+  const parentHarm = Object.entries(summary.parentHarmSessions || {}).filter(([, sessions]) => sessions > 0);
+  if (parentHarm.length) {
+    lines.push("");
+    lines.push("Parent paragraph removal evidence aggregated across sentence parts:");
+    for (const [id, sessions] of parentHarm) lines.push(`- [${id}] harm-sessions=${sessions}`);
+  }
+
   if (summary.oversized?.length) {
     lines.push("");
     lines.push("### Oversized units that failed to steer");

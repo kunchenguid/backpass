@@ -427,6 +427,30 @@ function oversizedParagraph(count = 5) {
   ).join(" ");
 }
 
+test("sentence-part harm renders the parent paragraph's removal aggregate", () => {
+  const blob = oversizedParagraph();
+  const blobFile = { units: parseMemoryUnits(`# T\n\n${blob}\n`) };
+  const summary = foldEvidence(
+    [
+      record("s1", {
+        negative: [{ instruction: "AG-001.1", quote: "sentence one caused damage", class: "harm" }],
+      }),
+      record("s2", {
+        negative: [{ instruction: "AG-001.2", quote: "sentence two caused damage", class: "harm" }],
+      }),
+    ],
+    { memoryFile: blobFile },
+  );
+
+  assert.equal(summary.instructions.find((row) => row.instruction === "AG-001.1").harmSessions, 1);
+  assert.equal(summary.instructions.find((row) => row.instruction === "AG-001.2").harmSessions, 1);
+  assert.equal(summary.parentHarmSessions["AG-001"], 2);
+  assert.match(
+    renderEvidenceForPrompt(summary),
+    /Parent paragraph removal evidence aggregated across sentence parts:\n- \[AG-001\] harm-sessions=2/,
+  );
+});
+
 test("an oversized high-non-compliance paragraph attributes per sentence and invites a restructure, not a bold label", () => {
   const blob = oversizedParagraph();
   const blobFile = { units: parseMemoryUnits(`# T\n\n${blob}\n\n- Keep this list item whole.\n`) };
