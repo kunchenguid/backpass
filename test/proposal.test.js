@@ -481,6 +481,20 @@ test("an overlapping tightening cannot mask an unrelated pure insertion", () => 
   assert.ok(violations.some((v) => /backed by 1 session/.test(v)));
 });
 
+test("a separate insertion cannot borrow overlapping vocabulary from a tightening hunk", () => {
+  const verbose = "- Route SSH through the bastion, then route SSH through the bastion again.";
+  const tighter = "- Route SSH through the bastion.";
+  const inserted = "- Route SSH through the bastion.\n";
+  const { proposal, violations, measured } = gate({
+    text: `${MEMORY_TEXT}${verbose}\n`,
+    edit: memoryEdit((t) => t.replace("## Rules\n\n", `## Rules\n\n${inserted}`).replace(verbose, tighter)),
+    annotation: { edits: [claim(["H1", "H2"], { kind: "rewrite", title: "tighten and insert", transcripts: 1 })] },
+  });
+  assert.equal(measured.changes.length, 2);
+  assert.equal(proposal.edits.length, 0);
+  assert.ok(violations.some((v) => /backed by 1 session/.test(v)));
+});
+
 test("a rewrite cannot hide aggregate net growth across an insertion and tightening", () => {
   const inserted =
     "- Route all SSH connections through the designated bastion host, record the hop in the pull request, and never store private keys in the repo.\n";
@@ -1931,6 +1945,34 @@ test("non-compliance never satisfies the removal-evidence floor; harm does", () 
   });
   assert.deepEqual(harmed.violations, []);
   assert.equal(harmed.proposal.edits.length, 1);
+});
+
+test("a mixed hunk cannot hide a removed instruction behind an adjacent tightening", () => {
+  const { proposal, violations, measured } = gate({
+    text: TWO_SECTIONS,
+    edit: memoryEdit((text) =>
+      text.replace(
+        "- Beta one is a rule about releases.\n- Beta two is a rule about signing.",
+        "- Beta two covers signing.",
+      ),
+    ),
+    annotation: { edits: [claim(["H1"], { kind: "rewrite", title: "drop one beta rule", transcripts: 2 })] },
+    context: {
+      summary: {
+        ...betaRows({ harmSessions: 2 }),
+        instructions: [
+          { instruction: "AG-003", harmSessions: 0 },
+          { instruction: "AG-004", harmSessions: 2 },
+        ],
+      },
+    },
+  });
+  assert.equal(measured.changes.length, 1);
+  assert.equal(proposal.edits.length, 0);
+  assert.ok(
+    violations.some((v) => /deletes \[AG-003\].*harm-class negative evidence/.test(v)),
+    violations.join("\n"),
+  );
 });
 
 test("a removal is measured, not declared: relabeling the edit does not dodge the floor", () => {

@@ -1,5 +1,5 @@
 import { renderHunkLines } from "./diff.js";
-import { memoryTextHash } from "./memory.js";
+import { memoryTextHash, parseMemoryUnits, similarity } from "./memory.js";
 import { editSkills, parseFrontmatter, skillDescriptionTokens } from "./skills.js";
 import { budgetGateKind, budgetStatus, estimateTokens, estimateTokensFromBytes } from "./tokens.js";
 import { isSkillFilePath, normalizeRecoveryLine, recoveredLineCounts } from "./workspace.js";
@@ -75,31 +75,34 @@ function hunkHasMeaningfulAddition(hunk) {
 }
 
 function rewriteChangeStats(hunks) {
-  const changedWords = (type) =>
-    hunks.flatMap((hunk) =>
-      (hunk.lines || [])
-        .filter((line) => line.type === type)
-        .flatMap((line) => [...line.text.toLowerCase().matchAll(/[\p{L}\p{N}]+/gu)].map((match) => match[0])),
-    );
-  const removed = new Map();
-  for (const word of changedWords("del")) removed.set(word, (removed.get(word) || 0) + 1);
+  const words = (hunk, type) =>
+    (hunk.lines || [])
+      .filter((line) => line.type === type)
+      .flatMap((line) => [...line.text.toLowerCase().matchAll(/[\p{L}\p{N}]+/gu)].map((match) => match[0]));
 
-  const added = changedWords("ins");
+  let hasUnrelatedAddition = false;
   const introduced = [];
-  let shared = 0;
-  for (const word of added) {
-    const available = removed.get(word) || 0;
-    if (available > 0) {
-      shared += 1;
-      removed.set(word, available - 1);
-    } else {
-      introduced.push(word);
+  for (const hunk of hunks) {
+    const removed = new Map();
+    for (const word of words(hunk, "del")) removed.set(word, (removed.get(word) || 0) + 1);
+
+    const added = words(hunk, "ins");
+    let shared = 0;
+    for (const word of added) {
+      const available = removed.get(word) || 0;
+      if (available > 0) {
+        shared += 1;
+        removed.set(word, available - 1);
+      } else {
+        introduced.push(word);
+      }
+    }
+    const hasInsertedLine = (hunk.lines || []).some((line) => line.type === "ins");
+    if (hasInsertedLine && (added.length === 0 || shared / added.length < REWRITE_OVERLAP_THRESHOLD)) {
+      hasUnrelatedAddition = true;
     }
   }
-  return {
-    substantialOverlap: added.length > 0 && shared / added.length >= REWRITE_OVERLAP_THRESHOLD,
-    introducedTokens: estimateTokens(introduced.join(" ")),
-  };
+  return { hasUnrelatedAddition, introducedTokens: estimateTokens(introduced.join(" ")) };
 }
 
 export function effectiveMaxEdits(memoryFile, config, alwaysLoadedExtraTokens = 0) {
@@ -181,12 +184,51 @@ function unrecoveredRemovedLines(hunk, lineCounts) {
   return missing;
 }
 
-/**
- * The memory units a pure-removal hunk deletes. For a pure removal every file line in
- * [oldStart, oldEnd] is removed, so this is a plain range intersection with unit lines.
- */
+/** The memory units that vanish from a hunk, excluding units replaced in the same hunk. */
 function unitsRemovedBy(hunk, memoryFile) {
-  return memoryFile.units.filter((unit) => unit.startLine <= hunk.oldEnd && unit.endLine >= hunk.oldStart);
+  const lines = hunk.lines || [];
+  const firstChange = lines.findIndex((line) => line.type !== "ctx");
+  let oldLine = hunk.oldStart - (firstChange < 0 ? 0 : lines.slice(0, firstChange).length);
+  const deletedLines = new Set();
+  for (const line of lines) {
+    if (line.type === "del") deletedLines.add(oldLine);
+    if (line.type !== "ins") oldLine += 1;
+  }
+
+  const removed = memoryFile.units.filter((unit) => {
+    for (let line = unit.startLine; line <= unit.endLine; line += 1) {
+      if (!deletedLines.has(line)) return false;
+    }
+    return true;
+  });
+
+  const insertedUnits = [];
+  let insertedLines = [];
+  const flush = () => {
+    if (!insertedLines.length) return;
+    insertedUnits.push(...parseMemoryUnits(insertedLines.join("\n")).filter((unit) => /[\p{L}\p{N}]/u.test(unit.text)));
+    insertedLines = [];
+  };
+  for (const line of lines) {
+    if (line.type === "ins") insertedLines.push(line.text);
+    else flush();
+  }
+  flush();
+
+  const unmatched = [...removed];
+  for (const inserted of insertedUnits) {
+    let best = -1;
+    let bestScore = 0;
+    for (let index = 0; index < unmatched.length; index += 1) {
+      const score = similarity(inserted.text, unmatched[index].text);
+      if (score > bestScore) {
+        best = index;
+        bestScore = score;
+      }
+    }
+    if (best >= 0) unmatched.splice(best, 1);
+  }
+  return unmatched;
 }
 
 /**
@@ -545,8 +587,7 @@ export function buildProposal(rawResult, context) {
     const growsAboveRewriteTolerance = estimateTokensFromBytes(Math.max(0, netAddedBytes)) > REWRITE_NET_ADD_TOKENS;
     const rewriteChanges = rewriteChangeStats(hunks);
     const introducesNewText =
-      hunks.some((hunk) => hunk.added > 0) &&
-      (!rewriteChanges.substantialOverlap || rewriteChanges.introducedTokens > REWRITE_NET_ADD_TOKENS);
+      rewriteChanges.hasUnrelatedAddition || rewriteChanges.introducedTokens > REWRITE_NET_ADD_TOKENS;
     if (
       !preservesAlwaysLoaded(edit.kind) &&
       (growsAboveRewriteTolerance || introducesNewText) &&
@@ -569,7 +610,7 @@ export function buildProposal(rawResult, context) {
       const rows = new Map((summary?.instructions ?? []).map((row) => [row.instruction, row]));
       const unsupported = [];
       for (const hunk of hunks) {
-        if (!hunk.removed || hunkHasMeaningfulAddition(hunk)) continue;
+        if (!hunk.removed) continue;
         for (const unit of unitsRemovedBy(hunk, memoryFile)) {
           const harm = rows.get(unit.id)?.harmSessions ?? 0;
           if (harm < config.minGapEvidence) unsupported.push({ unit, harm });
