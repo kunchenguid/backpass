@@ -177,7 +177,7 @@ export function renderInstructionIndex(file) {
     .join("\n\n");
 }
 
-function bigrams(text) {
+export function similarityFeatures(text) {
   const words = normalizeForHash(text).split(" ").filter(Boolean);
   if (words.length < 2) return new Set(words);
   const out = new Set();
@@ -185,14 +185,16 @@ function bigrams(text) {
   return out;
 }
 
+export function featureSimilarity(a, b) {
+  if (!a.size || !b.size) return a.size === b.size ? 1 : 0;
+  let shared = 0;
+  for (const feature of a) if (b.has(feature)) shared += 1;
+  return (2 * shared) / (a.size + b.size);
+}
+
 /** Sorensen-Dice similarity over word bigrams, used for re-anchoring. */
 export function similarity(a, b) {
-  const A = bigrams(a);
-  const B = bigrams(b);
-  if (!A.size || !B.size) return A.size === B.size ? 1 : 0;
-  let shared = 0;
-  for (const g of A) if (B.has(g)) shared += 1;
-  return (2 * shared) / (A.size + B.size);
+  return featureSimilarity(similarityFeatures(a), similarityFeatures(b));
 }
 
 /**

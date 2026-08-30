@@ -1,4 +1,4 @@
-import { parseMemoryUnits, similarity } from "./memory.js";
+import { featureSimilarity, parseMemoryUnits, similarityFeatures } from "./memory.js";
 
 /**
  * Cross-surface duplication (always-loaded memory file vs skills).
@@ -35,18 +35,26 @@ function normalizeIndexLabel(text) {
     .trim();
 }
 
-function overlapScore(unitText, candidate) {
-  const unitVariants = textVariants(unitText);
-  const unmarked = unitVariants.at(-1);
-  const indexed = /^(.*?)(?:::|:|\s+-\s+)([\s\S]+)$/.exec(unmarked);
-  if (indexed && normalizeIndexLabel(indexed[1]) === normalizeIndexLabel(candidate.skill)) {
-    unitVariants.push(indexed[2].trim());
-  }
+function preparedUnit(text) {
+  const variants = textVariants(text);
+  const indexed = /^(.*?)(?:::|:|\s+-\s+)([\s\S]+)$/.exec(variants.at(-1));
+  return {
+    features: variants.map(similarityFeatures),
+    indexLabel: indexed ? normalizeIndexLabel(indexed[1]) : null,
+    indexedFeatures: indexed ? similarityFeatures(indexed[2].trim()) : null,
+  };
+}
 
+function overlapScore(unit, candidate) {
   let best = 0;
-  for (const unitVariant of unitVariants) {
-    for (const candidateVariant of textVariants(candidate.text)) {
-      best = Math.max(best, similarity(unitVariant, candidateVariant));
+  for (const unitFeatures of unit.features) {
+    for (const candidateFeatures of candidate.features) {
+      best = Math.max(best, featureSimilarity(unitFeatures, candidateFeatures));
+    }
+  }
+  if (unit.indexLabel === candidate.skillLabel) {
+    for (const candidateFeatures of candidate.features) {
+      best = Math.max(best, featureSimilarity(unit.indexedFeatures, candidateFeatures));
     }
   }
   return best;
@@ -85,15 +93,18 @@ export function crossSurfaceDuplicates(memoryFile, skills = [], threshold = CROS
       skill: skill.name,
       path: skill.path,
       ...entry,
+      skillLabel: normalizeIndexLabel(skill.name),
+      features: textVariants(entry.text).map(similarityFeatures),
     })),
   );
   if (!catalog.length) return [];
 
   const hits = [];
   for (const unit of units) {
+    const prepared = preparedUnit(unit.text);
     let best = null;
     for (const candidate of catalog) {
-      const score = overlapScore(unit.text, candidate);
+      const score = overlapScore(prepared, candidate);
       if (score < threshold) continue;
       if (!best || score > best.score) {
         best = {
