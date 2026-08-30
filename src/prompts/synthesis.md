@@ -71,9 +71,9 @@ analyzed sessions in which an instruction drew any evidence at all.
    human can decide on; pick the highest-signal ones. A small correct step beats a large
    speculative one.
 2. **New instructions need evidence from at least {{MIN_GAP_EVIDENCE}} distinct
-   sessions.** One bad session never rewrites the weights. A rewrite that introduces more
-   than about ten tokens beyond the text it retains is a new instruction; a pure tightening
-   or smaller rewrite is not.
+   sessions.** One bad session never rewrites the weights. A rewrite whose measured changes
+   add more than about ten net tokens is a new instruction; a net-negative or smaller rewrite
+   is not.
 3. **Removing an instruction outright needs harm evidence from at least
    {{MIN_GAP_EVIDENCE}} distinct sessions** (`harm-sessions` in the evidence rows).
    Only `harm` negatives - following the instruction caused damage - argue against an

@@ -66,8 +66,8 @@ export const SHRINK_MAX_EDITS = 20;
 /** A typical memory-file instruction removal or tightening trims about this many tokens. */
 export const SHRINK_EDIT_TOKENS = 40;
 /**
- * A rewrite that introduces more than this many tokens beyond its retained prefix and
- * suffix is gated like an add. Pure tightenings and smaller rewrites still clear on one session.
+ * A rewrite whose measured changes grow by more than this many tokens is gated like an add.
+ * Net-negative and smaller rewrites still clear on one session.
  */
 export const REWRITE_NET_ADD_TOKENS = 10;
 
@@ -505,46 +505,15 @@ export function buildProposal(rawResult, context) {
     }
 
     // An addition is measured, not declared: text that only goes in is a new instruction.
-    // A rewrite can hide an addition by deleting text in the same measured hunk, so measure
-    // inserted text after trimming the unchanged prefix and suffix. Aggregate net growth catches
-    // small additions across hunks; the largest inserted middle catches substantial new guidance
-    // hidden behind a larger same-hunk deletion. Small pure tightenings remain below the tolerance.
-    // Extracts move text; they are not adds.
+    // A rewrite that grows across its measured hunks can hide the same addition, so measure
+    // the aggregate byte delta before token rounding. Net-negative rewrites, including retained
+    // rephrasing or reordering, remain tightenings. Extracts move text; they are not adds.
     const onlyAdds = hunks.every((h) => h.removed === 0);
-    let introducedBytes = 0;
-    let largestInsertedMiddleBytes = 0;
-    for (const hunk of hunks) {
-      if (!hunk.added) continue;
-      const added = hunk.lines
-        .filter((line) => line.type === "ins")
-        .map((line) => line.text)
-        .join("\n");
-      if (!hunk.removed) {
-        introducedBytes += Buffer.byteLength(added);
-        continue;
-      }
-      const removed = hunk.lines
-        .filter((line) => line.type === "del")
-        .map((line) => line.text)
-        .join("\n");
-      let prefix = 0;
-      while (prefix < removed.length && prefix < added.length && removed[prefix] === added[prefix]) prefix += 1;
-      let suffix = 0;
-      while (
-        suffix < removed.length - prefix &&
-        suffix < added.length - prefix &&
-        removed[removed.length - 1 - suffix] === added[added.length - 1 - suffix]
-      ) {
-        suffix += 1;
-      }
-      const addedMiddleBytes = Buffer.byteLength(added.slice(prefix, added.length - suffix));
-      const removedMiddleBytes = Buffer.byteLength(removed.slice(prefix, removed.length - suffix));
-      introducedBytes += Math.max(0, addedMiddleBytes - removedMiddleBytes);
-      largestInsertedMiddleBytes = Math.max(largestInsertedMiddleBytes, addedMiddleBytes);
-    }
-    const growsAboveRewriteTolerance =
-      estimateTokensFromBytes(introducedBytes) > REWRITE_NET_ADD_TOKENS ||
-      estimateTokensFromBytes(largestInsertedMiddleBytes) > REWRITE_NET_ADD_TOKENS;
+    const netAddedBytes = hunks.reduce(
+      (sum, hunk) => sum + Buffer.byteLength(hunk.replace) - Buffer.byteLength(hunk.find),
+      0,
+    );
+    const growsAboveRewriteTolerance = estimateTokensFromBytes(Math.max(0, netAddedBytes)) > REWRITE_NET_ADD_TOKENS;
     if (
       !preservesAlwaysLoaded(edit.kind) &&
       (onlyAdds || growsAboveRewriteTolerance) &&
