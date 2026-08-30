@@ -133,14 +133,29 @@ function countSources(evidence) {
   return new Set(evidence.map((e) => e?.source).filter(Boolean)).size;
 }
 
+function insertedCandidates(hunks) {
+  const lines = hunks
+    .flatMap((hunk) => (hunk.lines || []).filter((line) => line.type === "ins").map((line) => line.text.trim()))
+    .filter(Boolean);
+  return [...lines, lines.join("\n")].filter(Boolean);
+}
+
+function matchesInsertedGap(hunks, gap) {
+  return insertedCandidates(hunks).some(
+    (inserted) => similarity(inserted, gap.proposedInstruction) >= GAP_SIMILARITY_THRESHOLD,
+  );
+}
+
+function reportOnlyGapForInsertion(hunks, summary) {
+  if (summary?.gapEligibilityEnforced !== true) return null;
+  return (summary.reportOnlyGaps || []).find((gap) => matchesInsertedGap(hunks, gap));
+}
+
 function eligibleGapForAddition(edit, hunks, summary) {
   if (summary?.gapEligibilityEnforced !== true) return true;
-  const inserted = hunks
-    .flatMap((hunk) => (hunk.lines || []).filter((line) => line.type === "ins").map((line) => line.text))
-    .join("\n");
   return (summary.gaps || []).find(
     (gap) =>
-      similarity(inserted, gap.proposedInstruction) >= GAP_SIMILARITY_THRESHOLD &&
+      matchesInsertedGap(hunks, gap) &&
       edit.evidence.some((evidence) =>
         (gap.quotes || []).some((quote) => evidence.text === quote.text && evidence.source === quote.source),
       ),
@@ -517,6 +532,13 @@ export function buildProposal(rawResult, context) {
 
     // An addition is measured, not declared: text that only goes in is a new instruction.
     const onlyAdds = hunks.every((h) => h.removed === 0);
+    const reportOnlyGap = preservesAlwaysLoaded(edit.kind) ? null : reportOnlyGapForInsertion(hunks, summary);
+    if (reportOnlyGap) {
+      violations.push(
+        `edit ${edit.id} ("${edit.title}") inserts the report-only gap "${reportOnlyGap.proposedInstruction}"`,
+      );
+      continue;
+    }
     if (!preservesAlwaysLoaded(edit.kind) && onlyAdds && edit.transcripts < config.minGapEvidence) {
       violations.push(
         `edit ${edit.id} ("${edit.title}") adds a new instruction backed by ${edit.transcripts} session(s); ` +
