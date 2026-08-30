@@ -30,9 +30,10 @@ import { sha256 } from "./state.js";
  *  - Every observation carries the `domain` the analysis judged: `orchestration` when the
  *    mistake was not caused by this repository but by an external agent harness or tooling
  *    that orchestrated the task, `project` for every other mistake.
- *    Orchestration sightings are recorded for legibility but never counted toward
- *    corroboration and never surface in a proposal; a missing domain counts as project,
- *    so evidence from before the field existed keeps its old behavior.
+ *    Each observation stores that vote. The fold clusters first and decides domain
+ *    afterward (majority orchestration withholds a cluster from proposals; a mixed
+ *    cluster stays visible). A missing domain counts as project, so evidence from
+ *    before the field existed keeps its old behavior.
  *  - Sessions are keyed by canonical transcript identity (with the legacy id as a fallback),
  *    so re-analyzing or re-sampling the same source session overwrites its observation and
  *    never adds a count. Persisted observations only contribute when that identity belongs

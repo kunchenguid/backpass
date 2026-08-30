@@ -203,10 +203,14 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   degrades to lexical identity with a warning, never an abort. Gaps also carry `domain`;
   `orchestration` sightings (mistakes caused by the external harness or tooling that
   orchestrated the task, not by this repo) are counted in
-  `totals.orchestrationGapSightings` and excluded from clustering, so they can
-  never reach a proposal - there is deliberately no orchestrator-memory write path.
-  When this repository IS that orchestrating tool, those mistakes are `project`
-  (`src/prompts/analysis.md`).
+  `totals.orchestrationGapSightings` and travel into clustering as votes. Cluster
+  domain is decided after grouping (`src/fold.js`): withhold a cluster from a
+  proposal only when a majority of its sightings vote orchestration (ties stay
+  project). Mixed clusters always appear in the evidence report (`N sightings, M
+  orchestration`) so one inconsistent classifier call cannot drop a real
+  recurrence below `minGapEvidence`. There is deliberately no orchestrator-memory
+  write path. When this repository IS that orchestrating tool, those mistakes are
+  `project` (`src/prompts/analysis.md`).
   A gap may also carry `coveredBySkill`: the analysis (shown every skill's name and
   trigger line) judged an existing skill's content to cover the mistake - a failed
   trigger. The fold counts those citations per skill onto the cluster

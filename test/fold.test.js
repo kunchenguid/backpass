@@ -133,6 +133,60 @@ test("the fold records the sightings it clustered over - the gap funnel's top", 
   assert.equal(fromLedger.totals.droppedGapSingletons, 1, "the schema gap stays below the floor");
 });
 
+test("a two-sighting cluster with one orchestration vote survives instead of dropping below the floor", () => {
+  const phrasing = "Read docs/sshhip.md before changing the tunnel.";
+  const summary = foldEvidence(
+    [
+      record("s1", {
+        gaps: [{ proposedInstruction: phrasing, quote: "rewrote the tunnel", recurrenceRisk: "high" }],
+      }),
+      record("s2", {
+        gaps: [
+          {
+            proposedInstruction: phrasing,
+            quote: "rewrote the tunnel again",
+            recurrenceRisk: "high",
+            domain: "orchestration",
+          },
+        ],
+      }),
+    ],
+    { minGapEvidence: 2 },
+  );
+
+  assert.equal(summary.gaps.length, 1, "one inconsistent orchestration vote cannot kill a two-session recurrence");
+  assert.equal(summary.gaps[0].sessions, 2);
+  assert.equal(summary.gaps[0].orchestrationSightings, 1);
+  assert.equal(summary.gaps[0].mixed, true);
+  assert.equal(summary.gaps[0].majorityOrchestration, false);
+  assert.equal(summary.totals.orchestrationGapSightings, 1);
+  assert.equal(summary.totals.droppedGapSingletons, 0);
+  assert.match(renderEvidenceForPrompt(summary), /2 sightings, 1 orchestration/);
+
+  const majorityOrch = foldEvidence(
+    [
+      record("s1", {
+        gaps: [{ proposedInstruction: phrasing, quote: "q1", recurrenceRisk: "low", domain: "orchestration" }],
+      }),
+      record("s2", {
+        gaps: [{ proposedInstruction: phrasing, quote: "q2", recurrenceRisk: "low", domain: "orchestration" }],
+      }),
+      record("s3", {
+        gaps: [{ proposedInstruction: phrasing, quote: "q3", recurrenceRisk: "low" }],
+      }),
+    ],
+    { minGapEvidence: 2 },
+  );
+  assert.equal(
+    majorityOrch.gaps.length,
+    0,
+    "a majority orchestration vote still withholds the cluster from a proposal",
+  );
+  assert.equal(majorityOrch.excludedMixedGaps.length, 1);
+  assert.equal(majorityOrch.excludedMixedGaps[0].sessions, 3);
+  assert.match(renderEvidenceForPrompt(majorityOrch), /3 sightings, 2 orchestration; majority vote excluded/);
+});
+
 test("the same gap repeated inside one session does not clear the threshold", () => {
   const summary = foldEvidence(
     [
