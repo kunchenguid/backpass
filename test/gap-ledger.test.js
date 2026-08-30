@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { State } from "../src/state.js";
+import { evidenceKey, State } from "../src/state.js";
 import { parseMemoryUnits } from "../src/memory.js";
 import { foldForRun } from "../src/commands/propose.js";
 import { foldEvidence, renderEvidenceForPrompt, renderEvidenceReport } from "../src/fold.js";
@@ -24,11 +24,13 @@ function memoryFile(text = "# T\n\n- Run pnpm test before pushing.\n- Keep the R
 }
 
 function record(id, gaps, { startedAt = Date.parse("2026-08-01T00:00:00Z"), memoryHash = "h1" } = {}) {
+  const transcript = { id, identity: id, harness: "claude", startedAt, interaction: "interactive" };
   return {
     status: "ok",
-    transcript: { id, identity: id, harness: "claude", startedAt, interaction: "interactive" },
+    transcript,
     memoryPath: MEMORY_PATH,
     memoryHash,
+    key: evidenceKey(transcript, memoryHash),
     positive: [],
     negative: [],
     gaps: gaps.map((gap) => ({
@@ -61,6 +63,17 @@ async function run(h, records, file = memoryFile(), memoryHash = "h1") {
 
 const GAP = "Read docs/db.md before writing queries.";
 const GAP_REPHRASED = "Read docs/db.md before writing any queries";
+
+test("keyless legacy evidence stays out of the fold", async () => {
+  const h = harness();
+  const stale = record("claude-old", [GAP]);
+  delete stale.key;
+  const summary = await run(h, [stale]);
+
+  assert.equal(summary.analyzedSessions, 0);
+  assert.equal(summary.totals.gapSightings, 0);
+  assert.deepEqual(h.state.readGapLedger().entries, {});
+});
 
 test("a gap seen once now and once on a later run accumulates to two sessions and graduates", async () => {
   const h = harness();
@@ -106,6 +119,7 @@ test("a legacy session-id observation migrates without counting the identity as 
 
   const migrated = record("claude-s1", [GAP_REPHRASED]);
   migrated.transcript.identity = "stable-identity-s1";
+  migrated.key = evidenceKey(migrated.transcript, migrated.memoryHash);
   const summary = await run(h, [migrated]);
 
   assert.equal(summary.gaps.length, 0, "one upgraded session must remain a singleton");

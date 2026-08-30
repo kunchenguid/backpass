@@ -34,7 +34,7 @@ const { foldForRun } = await import("../src/commands/propose.js");
 const { gapEntryId } = await import("../src/gap-ledger.js");
 const { parseMemoryUnits } = await import("../src/memory.js");
 const { SELF_SESSION_SENTINEL } = await import("../src/prompts.js");
-const { State } = await import("../src/state.js");
+const { evidenceKey, State } = await import("../src/state.js");
 const { setLoggerSink } = await import("../src/logger.js");
 
 setLoggerSink(() => {});
@@ -48,17 +48,19 @@ const SIGHTING_B = "Require every published attestation to reference the precise
 const UNRELATED = "Never force-push to main.";
 
 function record(id, proposedInstruction) {
+  const transcript = {
+    id,
+    identity: id,
+    harness: "claude",
+    startedAt: Date.parse("2026-08-01T00:00:00Z"),
+    interaction: "interactive",
+  };
   return {
     status: "ok",
-    transcript: {
-      id,
-      identity: id,
-      harness: "claude",
-      startedAt: Date.parse("2026-08-01T00:00:00Z"),
-      interaction: "interactive",
-    },
+    transcript,
     memoryPath: MEMORY_PATH,
     memoryHash: "h1",
+    key: evidenceKey(transcript, "h1"),
     positive: [],
     negative: [],
     gaps: [{ proposedInstruction, mistake: "hit it", quote: `quote from ${id}`, recurrenceRisk: "high" }],

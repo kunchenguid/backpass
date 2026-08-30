@@ -12,7 +12,7 @@ import { renderPointer, renderStarterMemory } from "../src/bootstrap.js";
 import { loadConfig } from "../src/config.js";
 import { UserError, setLoggerSink } from "../src/logger.js";
 import { isPointerTo, memorySetHash, memoryTextHash, parseMemoryUnits } from "../src/memory.js";
-import { State } from "../src/state.js";
+import { evidenceKey, State } from "../src/state.js";
 import { clearProgressSink, setProgressSink } from "../src/progress.js";
 import { ProposalViolation } from "../src/proposal.js";
 
@@ -49,16 +49,12 @@ const discoverTwo = async () => ({ transcripts: [transcript("s1"), transcript("s
 /** Stands in for the tier-1 model: every session reports the same gap against the starter. */
 function writeFakeEvidence({ transcripts, memoryFile, config, memoryHash }, domainAt = (_index) => undefined) {
   for (const [index, t] of transcripts.entries()) {
+    const evidenceTranscript = { ...t, interaction: "interactive" };
     config.state.writeEvidence(t.id, {
       status: "ok",
-      transcript: {
-        id: t.id,
-        identity: t.identity,
-        harness: t.harness,
-        startedAt: t.startedAt,
-        interaction: "interactive",
-      },
+      transcript: evidenceTranscript,
       memoryHash,
+      key: evidenceKey(evidenceTranscript, memoryHash),
       memoryPath: memoryFile.path,
       positive: [],
       negative: [],

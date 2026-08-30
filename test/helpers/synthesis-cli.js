@@ -5,6 +5,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { memorySetHash, memoryTextHash } from "../../src/memory.js";
+import { evidenceKey } from "../../src/state.js";
 import { transcriptIdentity } from "../../src/transcript.js";
 
 /**
@@ -171,6 +172,7 @@ export function makeCliRepo({ memory, sessions = 3, files = {} }) {
         status: "ok",
         memoryPath: "AGENTS.md",
         memoryHash,
+        key: evidenceKey(transcript, memoryHash),
         transcript,
         positive: [],
         negative: [

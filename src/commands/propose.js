@@ -52,7 +52,7 @@ export async function foldForRun(ctx, memoryFile, memoryHash, skills = [], trans
       e.memoryHash === memoryHash &&
       (e.transcript?.interaction === INTERACTIVE || e.transcript?.interaction === NON_INTERACTIVE) &&
       selected.has(transcriptIdentity(e.transcript)) &&
-      (!e.key || isEvidenceFresh(e, e.transcript, memoryHash)),
+      isEvidenceFresh(e, e.transcript, memoryHash),
   );
 
   const ledger = state.readGapLedger();
