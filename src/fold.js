@@ -1,3 +1,4 @@
+import { classifyInteraction, INTERACTIVE, NON_INTERACTIVE } from "./interaction.js";
 import { similarity } from "./memory.js";
 import { GAP_SIMILARITY_THRESHOLD, gapSource } from "./gap-ledger.js";
 import { crossSurfaceDuplicates } from "./overlap.js";
@@ -10,7 +11,9 @@ import { crossSurfaceDuplicates } from "./overlap.js";
  *
  *  1. Evidence is grouped by instruction id, giving per-instruction positive/negative
  *     counts and, crucially, `relevance` = sessions where the instruction drew any
- *     evidence / sessions analyzed. That ratio is what decides memory-file vs skill
+ *     evidence / sessions analyzed, plus the same ratio split by interactive vs
+ *     non-interactive so a robot-heavy corpus cannot hide that an instruction only
+ *     fired in one category. That ratio is what decides memory-file vs skill
  *     placement in section 7.
  *  2. Near-duplicate gaps from different sessions are clustered, so "three sessions
  *     re-derived the db schema" arrives as one item with three quotes. Judged identity
@@ -38,6 +41,8 @@ export function foldEvidence(
 ) {
   const usable = evidenceRecords.filter((e) => e && e.status === "ok");
   const analyzedSessions = usable.length;
+  const analyzedByInteraction = { [INTERACTIVE]: 0, [NON_INTERACTIVE]: 0 };
+  for (const record of usable) analyzedByInteraction[classifyInteraction(record.transcript)] += 1;
 
   const instructions = new Map();
   let positiveCount = 0;
@@ -51,6 +56,7 @@ export function foldEvidence(
         positive: 0,
         negative: 0,
         sessions: new Set(),
+        sessionsByInteraction: { [INTERACTIVE]: new Set(), [NON_INTERACTIVE]: new Set() },
         harmSessions: new Set(),
         quotes: [],
       });
@@ -68,7 +74,9 @@ export function foldEvidence(
         const entry = touch(item.instruction);
         entry[polarity] += 1;
         const sessionIdentity = record.transcript.identity || record.transcript.id;
+        const category = classifyInteraction(record.transcript);
         entry.sessions.add(sessionIdentity);
+        entry.sessionsByInteraction[category].add(sessionIdentity);
         // `class` is what a negative means (harm vs non-compliance vs irrelevant);
         // `harmSessions` is what the removal-evidence floor counts. A record from
         // before the class existed carries none and never counts as harm.
@@ -129,6 +137,14 @@ export function foldEvidence(
         harmSessions: entry.harmSessions.size,
         sessions: entry.sessions.size,
         relevance: analyzedSessions ? entry.sessions.size / analyzedSessions : 0,
+        relevanceByInteraction: {
+          [INTERACTIVE]: analyzedByInteraction[INTERACTIVE]
+            ? entry.sessionsByInteraction[INTERACTIVE].size / analyzedByInteraction[INTERACTIVE]
+            : 0,
+          [NON_INTERACTIVE]: analyzedByInteraction[NON_INTERACTIVE]
+            ? entry.sessionsByInteraction[NON_INTERACTIVE].size / analyzedByInteraction[NON_INTERACTIVE]
+            : 0,
+        },
         tokens: unit?.tokens ?? null,
         section: unit?.section ?? null,
         known: Boolean(unit),
@@ -155,6 +171,7 @@ export function foldEvidence(
     version: 1,
     generatedAt: new Date().toISOString(),
     analyzedSessions,
+    analyzedByInteraction,
     totals: {
       positive: positiveCount,
       negative: negativeCount,
@@ -247,7 +264,9 @@ function failedTriggerOf(items, minGapEvidence) {
 export function renderEvidenceForPrompt(summary) {
   const lines = [];
 
-  lines.push(`Sessions analyzed: ${summary.analyzedSessions}`);
+  const mix = summary.analyzedByInteraction;
+  const mixBit = mix ? ` (interactive ${mix[INTERACTIVE] || 0} · non-interactive ${mix[NON_INTERACTIVE] || 0})` : "";
+  lines.push(`Sessions analyzed: ${summary.analyzedSessions}${mixBit}`);
   lines.push(
     `Totals: ${summary.totals.positive} positive, ${summary.totals.negative} negative, ` +
       `${summary.totals.gapClusters} gap clusters (${summary.totals.droppedGapSingletons} singletons dropped below threshold)`,
@@ -261,10 +280,13 @@ export function renderEvidenceForPrompt(summary) {
   );
   for (const row of summary.instructions) {
     const relevance = `${(row.relevance * 100).toFixed(1)}%`;
+    const byCategory = row.relevanceByInteraction
+      ? ` (interactive ${(row.relevanceByInteraction[INTERACTIVE] * 100).toFixed(1)}% · non-interactive ${(row.relevanceByInteraction[NON_INTERACTIVE] * 100).toFixed(1)}%)`
+      : "";
     const cost = row.tokens === null ? "" : ` cost=${row.tokens}tok`;
     const harm = row.negative > 0 ? ` harm-sessions=${row.harmSessions ?? 0}` : "";
     lines.push(
-      `- [${row.instruction}] +${row.positive} -${row.negative}${harm} sessions=${row.sessions} relevance=${relevance}${cost}` +
+      `- [${row.instruction}] +${row.positive} -${row.negative}${harm} sessions=${row.sessions} relevance=${relevance}${byCategory}${cost}` +
         (row.known ? "" : " (id not found in current file - stale reference)"),
     );
     if (row.skillOverlap) {

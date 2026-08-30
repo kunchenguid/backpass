@@ -129,6 +129,14 @@ warning and is skipped; the run continues. backpass's own loss and gradient-desc
 in these same stores under the repo's cwd; every prompt it sends is tagged, and tagged
 sessions are excluded from the corpus (the `SELF` column in `backpass scan`).
 
+Every remaining session is labelled **interactive** or **non-interactive** (`src/interaction.js`).
+Codex `codex exec` / `originator: codex_exec`, Claude `entrypoint` values that start with
+`sdk`, OpenCode child sessions (`parent_id`), and a cwd with a `.no-mistakes` path segment
+are non-interactive; a no-mistakes pipeline run is just one kind of non-interactive session,
+not its own category. Missing harness metadata defaults to interactive. `backpass scan`,
+the proposal, and apply all print the mix so relevance is never silently computed against
+a robot-skewed pool.
+
 ```sh
 backpass scan --since 7d --strict
 ```
@@ -150,7 +158,10 @@ Calculating loss costs one call per transcript, so the set is capped first: past
 (default 100, `--max-transcripts`) a **recency-weighted sample** is analyzed instead of
 everything. Each transcript's weight halves every `sampleHalfLife` (default 14d), and the
 sample is drawn without replacement, so recent sessions are almost always kept and old
-ones stay represented in proportion. When this happens the run says so on stderr
+ones stay represented in proportion. When both interactive and non-interactive sessions
+are present, slots are allocated in proportion to the corpus with a 20% floor per
+category, so a 98% non-interactive history cannot drop the interactive sessions from
+the sample. When this happens the run says so on stderr
 (`discovered 340 transcript(s), analyzing a recency-weighted sample of 100`).
 
 The draw is deterministic and sticky: it is derived from each transcript's own durable

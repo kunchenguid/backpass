@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import { emptyInteractionSignals, interactionSignals } from "../../interaction.js";
 import { home, listDirs, readJsonFile, statOrNull } from "./shared.js";
 import { openReadOnly, safeJsonParse } from "./sqlite.js";
 
@@ -32,16 +33,24 @@ export function dbPath() {
  * Discovery is direct: one query returns every session with its directory, and the
  * caller applies the shared association tiers.
  */
+function tableHasColumn(db, table, column) {
+  return db
+    .prepare(`PRAGMA table_info(${table})`)
+    .all()
+    .some((entry) => entry.name === column);
+}
+
 export async function discover({ cutoffMs }) {
   const db = await openReadOnly(dbPath());
   if (!db) return legacyDiscover({ cutoffMs });
 
   try {
+    const parentSelect = tableHasColumn(db, "session", "parent_id") ? ", s.parent_id AS parent_id" : "";
     const rows = db
       .prepare(
         `SELECT s.id AS id, s.directory AS directory, s.title AS title,
                 s.time_created AS time_created, s.time_updated AS time_updated,
-                p.worktree AS worktree
+                p.worktree AS worktree${parentSelect}
            FROM session s
            LEFT JOIN project p ON p.id = s.project_id
           WHERE (? IS NULL OR s.time_updated >= ?)`,
@@ -62,6 +71,7 @@ export async function discover({ cutoffMs }) {
       bytes: 0,
       model: null,
       extra: { sessionId: row.id },
+      interactionSignals: row.parent_id ? interactionSignals({ parentId: row.parent_id }) : emptyInteractionSignals(),
     }));
   } finally {
     db.close();
@@ -139,6 +149,7 @@ function legacyDiscover({ cutoffMs }) {
       mtimeMs: stat.mtimeMs,
       bytes: 0,
       extra: { legacy: true },
+      interactionSignals: emptyInteractionSignals(),
     });
   }
   return out;

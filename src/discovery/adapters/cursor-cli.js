@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
+import { emptyInteractionSignals } from "../../interaction.js";
 import { home, listDirs, readJsonFile, statOrNull } from "./shared.js";
 import { openReadOnly, safeJsonParse } from "./sqlite.js";
 
@@ -54,6 +55,7 @@ export function classify(candidate) {
     title: meta.title || null,
     startedAt: meta.createdAtMs || candidate.mtimeMs,
     model: null,
+    interactionSignals: emptyInteractionSignals(),
   };
 }
 

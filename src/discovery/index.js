@@ -9,6 +9,7 @@ import * as cursorIde from "./adapters/cursor-ide.js";
 
 import { associate, passesStrict } from "./association.js";
 import { isSelfSession } from "./self.js";
+import { classifyInteraction, emptyInteractionSignals, hasInteractionSignals } from "../interaction.js";
 import { sinceCutoff } from "../config.js";
 import { emitProgress } from "../progress.js";
 import { warn } from "../logger.js";
@@ -166,7 +167,12 @@ function discoverFiles(adapter, { repo, config, cutoffMs, strict, stats, cache, 
     const cached = cache.entries[cacheKey];
     let descriptor;
 
-    if (cached && cached.mtimeMs === candidate.mtimeMs && cached.bytes === candidate.bytes) {
+    if (
+      cached &&
+      cached.mtimeMs === candidate.mtimeMs &&
+      cached.bytes === candidate.bytes &&
+      hasInteractionSignals(cached.descriptor)
+    ) {
       stats.cached += 1;
       descriptor = cached.descriptor;
     } else {
@@ -219,8 +225,10 @@ function toTranscript(adapter, row, association, id) {
     experimental: Boolean(adapter.experimental),
     association,
     extra: row.extra || {},
+    interactionSignals: row.interactionSignals ?? row.extra?.interactionSignals ?? emptyInteractionSignals(),
   };
   transcript.identity = transcriptIdentity(transcript);
+  transcript.interaction = classifyInteraction(transcript);
   return transcript;
 }
 

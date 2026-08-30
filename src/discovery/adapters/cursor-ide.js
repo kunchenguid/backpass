@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { emptyInteractionSignals } from "../../interaction.js";
 import { readJsonFile } from "./shared.js";
 import { openReadOnly, safeJsonParse } from "./sqlite.js";
 
@@ -97,6 +98,7 @@ export async function discover({ cutoffMs }) {
         model: null,
         experimental: true,
         extra: { composerId: header.composerId },
+        interactionSignals: emptyInteractionSignals(),
       });
     }
     return out;

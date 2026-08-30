@@ -812,6 +812,14 @@
         runline.appendChild(
           document.createTextNode(" transcripts" + (harnessBits.length ? " (" + harnessBits.join(" · ") + ")" : "")),
         );
+        var mix = (P.stats || {}).corpusMix;
+        if (mix && typeof mix.interactive === "number") {
+          runline.appendChild(
+            document.createTextNode(
+              " · interactive " + fmt(mix.interactive) + " · non-interactive " + fmt(mix.nonInteractive),
+            ),
+          );
+        }
 
         // ---- run context: one frame, the gap funnel beside the run stats ----
         // A single bordered band. The left pane tells the gap story as proportional

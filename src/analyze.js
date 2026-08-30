@@ -3,6 +3,7 @@ import path from "node:path";
 
 import { execOneShot, extractJson, sessionPrompt, usageRecord } from "./acpx.js";
 import { distill } from "./distill.js";
+import { classifyInteraction } from "./interaction.js";
 import { readTranscript } from "./discovery/index.js";
 import { renderInstructionIndex } from "./memory.js";
 import { renderSkillIndexForAnalysis } from "./skills.js";
@@ -303,6 +304,7 @@ export async function analyzeTranscripts({
         bytes: transcript.bytes,
         startedAt: transcript.startedAt,
         association: transcript.association,
+        interaction: classifyInteraction(transcript),
       },
       memoryHash,
       memoryPath: memoryFile.path,

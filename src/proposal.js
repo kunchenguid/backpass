@@ -1,4 +1,5 @@
 import { renderHunkLines } from "./diff.js";
+import { mixFromCounts } from "./interaction.js";
 import { memoryTextHash } from "./memory.js";
 import { editSkills, parseFrontmatter, skillDescriptionTokens } from "./skills.js";
 import { budgetGateKind, budgetStatus, estimateTokens } from "./tokens.js";
@@ -701,6 +702,7 @@ export function buildProposal(rawResult, context) {
     },
     stats: {
       transcripts: summary?.analyzedSessions ?? 0,
+      corpusMix: mixFromCounts(summary?.analyzedByInteraction, summary?.analyzedSessions),
       harnessCounts,
       positive: summary?.totals?.positive ?? 0,
       negative: summary?.totals?.negative ?? 0,

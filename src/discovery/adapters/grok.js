@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { emptyInteractionSignals } from "../../interaction.js";
 import { attachToolResults, contentToEvents, home, listDirs, readJsonFile, readJsonl, statOrNull } from "./shared.js";
 
 /**
@@ -44,6 +45,7 @@ export function classify(candidate) {
     startedAt: summary?.created_at ? Date.parse(summary.created_at) : candidate.mtimeMs,
     model: summary?.current_model_id || null,
     extra: { chatPath: candidate.chatPath || path.join(candidate.path, "chat_history.jsonl") },
+    interactionSignals: emptyInteractionSignals(),
   };
 }
 

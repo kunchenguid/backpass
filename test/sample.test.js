@@ -230,6 +230,28 @@ test("recent transcripts are favored over old ones", () => {
   assert.ok(oldestKept < 1667, `oldest third is under-represented: ${oldestKept}`);
 });
 
+test("a 40/60 mix past the cap stays proportional rather than being forced to 50/50", () => {
+  const set = [
+    ...Array.from({ length: 40 }, (_, i) => ({
+      harness: "claude",
+      id: `human-${i}`,
+      interaction: "interactive",
+      startedAt: NOW - i * DAY,
+    })),
+    ...Array.from({ length: 60 }, (_, i) => ({
+      harness: "claude",
+      id: `robot-${i}`,
+      interaction: "non-interactive",
+      startedAt: NOW - i * DAY,
+    })),
+  ];
+  const kept = sampleTranscripts(set, 50, { seed: 1, now: NOW });
+  assert.equal(kept.length, 50);
+  const humans = kept.filter((t) => t.interaction === "interactive").length;
+  assert.equal(humans, 20);
+  assert.equal(kept.length - humans, 30);
+});
+
 test("capTranscripts reports a greppable line only when sampling happened", () => {
   const config = loadConfig(tempDir(), { seed: 3 });
   const small = { transcripts: transcripts(40, 30), perHarness: {} };

@@ -3,6 +3,7 @@ import { foldEvidence } from "../fold.js";
 import { ledgerGapObservations, pruneGapLedger, recordGapObservations } from "../gap-ledger.js";
 import { synthesizeProposal } from "../synthesize.js";
 import { ProposalViolation } from "../proposal.js";
+import { formatCorpusMix } from "../interaction.js";
 import { UserError, color, info, json, out, terminalSafe } from "../logger.js";
 import { budgetBar, formatTokens } from "../tokens.js";
 import { emitProgress } from "../progress.js";
@@ -113,9 +114,10 @@ export async function runProposal(ctx, precomputed = null) {
  */
 export function printProposal(proposal, { applied = false, analysisUsage = [] } = {}) {
   out("");
+  const mix = proposal.stats.corpusMix ? ` · ${formatCorpusMix(proposal.stats.corpusMix)}` : "";
   out(
     `${color.bold("proposal")} · ${proposal.repo.name} · ${proposal.memoryFile.path} · ` +
-      `${proposal.edits.length} edit(s) from ${proposal.stats.transcripts} session(s)`,
+      `${proposal.edits.length} edit(s) from ${proposal.stats.transcripts} session(s)${mix}`,
   );
   out(
     `  budget ${budgetBar(proposal.budget)} ${formatTokens(proposal.budget.current)} -> ` +

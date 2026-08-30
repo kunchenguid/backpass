@@ -56,8 +56,16 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   `test/sample-reuse.test.js`, not by reading source) and keeps a transcript's draw stable
   as the corpus grows. Recency weights may still evolve with wall-clock time. A top-`count`
   selection by fixed per-transcript draw means inserting new transcripts can only displace
-  existing ones, never reshuffle their draws. Never reintroduce an index- or
-  array-position-derived draw here.
+  existing ones, never reshuffle their draws. When both interactive and non-interactive
+  sessions exceed the cap, `mixAllocations` is proportional-with-floor (20%), not a forced
+  50/50 split - see `src/interaction.js` for the two public categories. Never reintroduce
+  an index- or array-position-derived draw here.
+- **Corpus mix is two categories, never an unknown bucket.** `classifyInteraction` in
+  `src/interaction.js` labels every session interactive or non-interactive from per-harness
+  signals (codex `originator`/`source`, claude `entrypoint`, OpenCode `parent_id`, Hermes
+  source, `.no-mistakes` cwd). A no-mistakes pipeline run is one kind of non-interactive
+  session. Missing metadata defaults to interactive. The mix is printed by scan/propose/apply
+  and stamped on evidence so fold relevance is reported per category.
 - **Hermes is first-class but source-filtered.** `src/discovery/adapters/hermes.js` reads
   `~/.hermes/state.db` (`HERMES_HOME`). Only `cli` and `acp` sessions are ingested;
   gateway/cron rows share a process cwd and would pollute association. v26 stores CLI cwd

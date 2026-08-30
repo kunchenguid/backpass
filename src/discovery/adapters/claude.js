@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import { emptyInteractionSignals, interactionSignals } from "../../interaction.js";
 import {
   attachToolResults,
   contentToEvents,
@@ -53,19 +54,32 @@ export function enumerate() {
 }
 
 export function classify(candidate) {
+  let id = null;
+  let cwd = null;
+  let gitBranch = null;
+  let startedAt = null;
+  let entrypoint = null;
   for (const line of readHeadLines(candidate.path, HEADER_LINES)) {
     const entry = parseJsonLine(line);
-    if (!entry || !entry.cwd) continue;
-    return {
-      id: entry.sessionId || path.basename(candidate.path, ".jsonl"),
-      cwd: entry.cwd,
-      gitBranch: entry.gitBranch || null,
-      remotes: [],
-      startedAt: entry.timestamp ? Date.parse(entry.timestamp) : candidate.mtimeMs,
-      model: null,
-    };
+    if (!entry) continue;
+    if (entry.sessionId) id = id || entry.sessionId;
+    if (entry.entrypoint) entrypoint = entrypoint || entry.entrypoint;
+    if (entry.cwd && !cwd) {
+      cwd = entry.cwd;
+      gitBranch = entry.gitBranch || gitBranch;
+      startedAt = entry.timestamp ? Date.parse(entry.timestamp) : startedAt;
+    }
   }
-  return null;
+  if (!cwd) return null;
+  return {
+    id: id || path.basename(candidate.path, ".jsonl"),
+    cwd,
+    gitBranch,
+    remotes: [],
+    startedAt: startedAt || candidate.mtimeMs,
+    model: null,
+    interactionSignals: entrypoint ? interactionSignals({ entrypoint }) : emptyInteractionSignals(),
+  };
 }
 
 export function read(ref) {

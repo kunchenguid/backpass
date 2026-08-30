@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import { emptyInteractionSignals, interactionSignals } from "../../interaction.js";
 import { home, contentToEvents, attachToolResults } from "./shared.js";
 import { openReadOnly, safeJsonParse } from "./sqlite.js";
 
@@ -140,6 +141,7 @@ export async function discover({ cutoffMs } = {}) {
         bytes: 0,
         model: row.model || null,
         extra: { sessionId: row.id, source },
+        interactionSignals: source ? interactionSignals({ source }) : emptyInteractionSignals(),
       });
     }
     return out;

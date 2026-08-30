@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { emptyInteractionSignals } from "../../interaction.js";
 import {
   attachToolResults,
   contentToEvents,
@@ -108,6 +109,7 @@ export function classify(candidate) {
     remotes: [],
     startedAt: entry.timestamp ? Date.parse(entry.timestamp) : candidate.mtimeMs,
     model: null,
+    interactionSignals: emptyInteractionSignals(),
   };
 }
 

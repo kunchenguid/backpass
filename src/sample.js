@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 
 import { parseMaxTranscripts, parseSince } from "./config.js";
+import { classifyInteraction, corpusMix, formatCorpusMix, NON_INTERACTIVE } from "./interaction.js";
 import { color, info } from "./logger.js";
 import { transcriptIdentity } from "./transcript.js";
 
@@ -13,6 +14,15 @@ import { transcriptIdentity } from "./transcript.js";
  * sample WITHOUT replacement where each transcript's weight decays exponentially with
  * its age: weight = 2^(-age / halfLife). Recent sessions are almost always kept, old
  * ones are still represented in proportion to their weight.
+ *
+ * When both interactive and non-interactive sessions are present, the draw is
+ * stratified. Slots are allocated proportional-with-floor (see `mixAllocations`): the
+ * sample follows the corpus mix when both sides are healthy, but a category that would
+ * fall below 20% of the cap is boosted up to that floor (or all of its members, if
+ * fewer). That is why a 98% non-interactive corpus still keeps its interactive
+ * sessions in the sample instead of letting recency-weighted chance drop them. A
+ * 50/50 split is not forced - balanced-then-fill would distort a genuinely mixed
+ * corpus. One category only falls back to the historical single-pool draw.
  *
  * Sampling uses the Efraimidis-Spirakis one-pass scheme: key = -ln(u) / weight with
  * u ~ U(0, 1), keep the N smallest keys. That is exactly weighted sampling without
@@ -39,6 +49,9 @@ import { transcriptIdentity } from "./transcript.js";
  */
 
 export const DEFAULT_SAMPLE_HALF_LIFE = "14d";
+
+/** Minimum share of the cap reserved for each category that has at least one session. */
+export const SAMPLE_MIX_FLOOR = 0.2;
 
 /**
  * Deterministic draw in [0, 1) for one transcript: a SHA-256 of its durable identity
@@ -72,21 +85,57 @@ export function recencyWeight(transcript, { now, halfLifeMs }) {
 }
 
 /**
- * Weighted sample without replacement of `count` transcripts. Returns the kept
- * transcripts in their original (newest-first) order so downstream output is stable.
+ * Slot counts for a two-category sample. Start from corpus proportion, then raise any
+ * present category that would land below `floorRatio` of the cap (clipped to how many
+ * members it has). A 98% non-interactive pool therefore keeps its interactive sessions
+ * instead of rounding them out of a recency-weighted draw. When both floors cannot fit,
+ * split the cap as evenly as availability allows so neither side is zeroed.
  */
-/**
- * @param {object[]} transcripts
- * @param {number | null} count
- * @param {{ seed?: number, now?: number, halfLife?: string }} [options]
- */
-export function sampleTranscripts(
-  transcripts,
-  count,
-  { seed, now = Date.now(), halfLife = DEFAULT_SAMPLE_HALF_LIFE } = {},
-) {
+export function mixAllocations(nInteractive, nNonInteractive, cap, floorRatio = SAMPLE_MIX_FLOOR) {
+  const nI = Math.max(0, nInteractive);
+  const nN = Math.max(0, nNonInteractive);
+  if (nI + nN <= cap) return { interactive: nI, nonInteractive: nN };
+  if (nI === 0) return { interactive: 0, nonInteractive: cap };
+  if (nN === 0) return { interactive: cap, nonInteractive: 0 };
+
+  const floor = Math.max(1, Math.round(cap * floorRatio));
+  const minI = Math.min(nI, floor);
+  const minN = Math.min(nN, floor);
+
+  if (minI + minN > cap) {
+    let wantI = Math.min(nI, Math.max(1, Math.floor(cap / 2)));
+    let wantN = Math.min(nN, cap - wantI);
+    if (wantN === 0 && nN > 0) {
+      wantN = 1;
+      wantI = cap - 1;
+    }
+    if (wantI > nI) {
+      wantI = nI;
+      wantN = cap - wantI;
+    }
+    return { interactive: wantI, nonInteractive: wantN };
+  }
+
+  let wantI = Math.round((nI / (nI + nN)) * cap);
+  wantI = Math.min(nI, Math.max(wantI, minI));
+  let wantN = cap - wantI;
+  if (wantN < minN) {
+    wantN = minN;
+    wantI = cap - wantN;
+  }
+  if (wantI > nI) {
+    wantI = nI;
+    wantN = cap - wantI;
+  }
+  if (wantN > nN) {
+    wantN = nN;
+    wantI = cap - wantN;
+  }
+  return { interactive: wantI, nonInteractive: wantN };
+}
+
+function weightedSample(transcripts, count, { seed, now, halfLifeMs }) {
   if (count === null || transcripts.length <= count) return transcripts;
-  const halfLifeMs = parseSince(halfLife) ?? Infinity;
   const keyed = transcripts.map((transcript, index) => {
     const u = sampleUnit(transcript, seed) || Number.EPSILON;
     return {
@@ -98,6 +147,37 @@ export function sampleTranscripts(
   keyed.sort((a, b) => a.key - b.key || (a.identity < b.identity ? -1 : a.identity > b.identity ? 1 : 0));
   const kept = new Set(keyed.slice(0, count).map((k) => k.index));
   return transcripts.filter((_, index) => kept.has(index));
+}
+
+/**
+ * Weighted sample without replacement of `count` transcripts. Returns the kept
+ * transcripts in their original (newest-first) order so downstream output is stable.
+ *
+ * @param {object[]} transcripts
+ * @param {number | null} count
+ * @param {{ seed?: number, now?: number, halfLife?: string }} [options]
+ */
+export function sampleTranscripts(
+  transcripts,
+  count,
+  { seed, now = Date.now(), halfLife = DEFAULT_SAMPLE_HALF_LIFE } = {},
+) {
+  if (count === null || transcripts.length <= count) return transcripts;
+  const halfLifeMs = parseSince(halfLife) ?? Infinity;
+  const options = { seed, now, halfLifeMs };
+  const interactive = [];
+  const nonInteractive = [];
+  for (const transcript of transcripts) {
+    if (classifyInteraction(transcript) === NON_INTERACTIVE) nonInteractive.push(transcript);
+    else interactive.push(transcript);
+  }
+  if (interactive.length === 0 || nonInteractive.length === 0) {
+    return weightedSample(transcripts, count, options);
+  }
+  const alloc = mixAllocations(interactive.length, nonInteractive.length, count);
+  const keptInteractive = new Set(weightedSample(interactive, alloc.interactive, options));
+  const keptNonInteractive = new Set(weightedSample(nonInteractive, alloc.nonInteractive, options));
+  return transcripts.filter((transcript) => keptInteractive.has(transcript) || keptNonInteractive.has(transcript));
 }
 
 /**
@@ -114,8 +194,12 @@ export function capTranscripts(result, config, { now = Date.now() } = {}) {
     now,
     halfLife: config.sampleHalfLife,
   });
+  const sampledMix = corpusMix(sampled);
+  const discoveredMix = corpusMix(result.transcripts);
+  const mixed = discoveredMix.interactive > 0 && discoveredMix.nonInteractive > 0;
   info(
-    `${color.yellow("·")} discovered ${discovered} transcript(s), analyzing a recency-weighted sample of ${sampled.length} (--max-transcripts)`,
+    `${color.yellow("·")} discovered ${discovered} transcript(s), analyzing a recency-weighted sample of ${sampled.length} (--max-transcripts)` +
+      (mixed ? ` · ${formatCorpusMix(sampledMix)}` : ""),
   );
   return { ...result, transcripts: sampled, sampledFrom: discovered };
 }

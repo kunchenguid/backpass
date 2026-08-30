@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { emptyInteractionSignals, interactionSignals } from "../../interaction.js";
 import {
   attachToolResults,
   contentToEvents,
@@ -93,6 +94,10 @@ export function classify(candidate) {
     remotes: git.repository_url ? [git.repository_url] : [],
     startedAt: payload.timestamp ? Date.parse(payload.timestamp) : candidate.mtimeMs,
     model: payload.model || null,
+    interactionSignals:
+      payload.originator || payload.source
+        ? interactionSignals({ originator: payload.originator, source: payload.source })
+        : emptyInteractionSignals(),
   };
 }
 

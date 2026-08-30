@@ -1,3 +1,4 @@
+import { formatCorpusMix } from "../interaction.js";
 import { UserError, color, info, json, out, warn } from "../logger.js";
 import { applyDecisions } from "../apply/writer.js";
 import { closeApplySurface, openApplySurface, pollDecisions, renderApplySurface } from "../apply/lavish.js";
@@ -72,13 +73,14 @@ export async function cmdApply(ctx) {
   if (surfaceFile) await closeApplySurface(surfaceFile);
 
   if (ctx.flags.json) {
-    json({ decisions, results });
+    json({ decisions, results, mix: proposal.stats.corpusMix || null });
     return results.failed.length ? 1 : 0;
   }
 
   out("");
   const prefix = ctx.flags["dry-run"] ? color.yellow("[dry-run] ") : "";
   out(`${prefix}${results.accepted} accepted · ${results.rejected} rejected`);
+  if (proposal.stats.corpusMix) out(`  corpus ${formatCorpusMix(proposal.stats.corpusMix)}`);
 
   for (const written of results.written) {
     out(`  ${color.green("wrote")} ${written.file} (${written.edits.join(", ")})`);

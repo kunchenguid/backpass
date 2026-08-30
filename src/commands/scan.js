@@ -1,4 +1,5 @@
 import { discoverTranscripts } from "../discovery/index.js";
+import { corpusMix, formatCorpusMix } from "../interaction.js";
 import { color, info, json, out } from "../logger.js";
 import { attachSiblingClones } from "../repo.js";
 
@@ -24,9 +25,10 @@ function ago(ms) {
 
 export async function cmdScan(ctx) {
   const { transcripts, perHarness, truncated } = await discoverForRun(ctx);
+  const mix = corpusMix(transcripts);
 
   if (ctx.flags.json) {
-    json({ repo: ctx.repo.name, perHarness, transcripts });
+    json({ repo: ctx.repo.name, perHarness, mix, transcripts });
     return 0;
   }
 
@@ -54,18 +56,20 @@ export async function cmdScan(ctx) {
   out(
     `${transcripts.length} transcript(s) associated with this repo · ` +
       `tier1 ${byTier[1]} (exact) · tier1.5 ${byTier[1.5]} (sibling clone) · ` +
-      `tier2 ${byTier[2]} (remote) · tier3 ${byTier[3]} (best-effort)`,
+      `tier2 ${byTier[2]} (remote) · tier3 ${byTier[3]} (best-effort) · ` +
+      formatCorpusMix(mix),
   );
   if (byTier[3] && !ctx.strict) out(color.dim("  re-run with --strict to exclude the best-effort tier"));
   if (truncated) out(color.dim(`  --limit ${ctx.limit} is hiding ${truncated} more transcript(s)`));
   out("");
 
   const preview = transcripts.slice(0, 25);
-  const detail = [["HARNESS", "SESSION", "WHEN", "SIZE", "TIER", "HOW"]];
+  const detail = [["HARNESS", "SESSION", "KIND", "WHEN", "SIZE", "TIER", "HOW"]];
   for (const t of preview) {
     detail.push([
       t.harness,
       t.nativeId.slice(0, 12),
+      t.interaction,
       ago(t.mtimeMs),
       t.bytes ? `${Math.round(t.bytes / 1024)}KB` : "-",
       `t${t.association.tier}`,

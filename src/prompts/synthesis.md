@@ -57,7 +57,9 @@ To tune an existing skill's trigger, edit its `description:` line under `./{{SKI
 ## Folded evidence
 
 `sessions` is how many distinct sessions produced the item. `relevance` is the share of
-analyzed sessions in which an instruction drew any evidence at all.
+analyzed sessions in which an instruction drew any evidence at all, also split by
+interactive vs non-interactive so a robot-heavy corpus cannot hide a category-specific
+signal.
 
 {{EVIDENCE}}
 
