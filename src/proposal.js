@@ -522,7 +522,9 @@ export function buildProposal(rawResult, context) {
       for (const hunk of hunks) {
         if (!hunk.removed || hunk.added) continue;
         for (const unit of unitsRemovedBy(hunk, memoryFile)) {
-          const harm = rows.get(unit.id)?.harmSessions ?? 0;
+          const directHarm = rows.get(unit.id)?.harmSessions ?? 0;
+          const partHarm = summary?.parentHarmSessions?.[unit.id] ?? 0;
+          const harm = Math.max(directHarm, partHarm);
           if (harm < config.minGapEvidence) unsupported.push({ unit, harm });
         }
       }

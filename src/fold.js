@@ -130,6 +130,16 @@ export function foldEvidence(
   const duplicates = crossSurfaceDuplicates(memoryFile, skills);
   const overlapById = new Map(duplicates.map((hit) => [hit.instruction, hit]));
 
+  const parentHarmSessions = {};
+  for (const unit of memoryFile?.units || []) {
+    if (!unit.parts?.length) continue;
+    const sessions = new Set(instructions.get(unit.id)?.harmSessions || []);
+    for (const part of unit.parts) {
+      for (const session of instructions.get(part.id)?.harmSessions || []) sessions.add(session);
+    }
+    parentHarmSessions[unit.id] = sessions.size;
+  }
+
   const instructionRows = [...instructions.values()]
     .map((entry) => {
       const unit = findInstructionUnit(memoryFile, entry.instruction);
@@ -208,6 +218,7 @@ export function foldEvidence(
       crossSurfaceDuplicates: duplicates.length,
     },
     instructions: instructionRows,
+    parentHarmSessions,
     gaps,
     crossSurfaceDuplicates: duplicates,
     reportOnlyGaps,

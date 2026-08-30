@@ -15,6 +15,8 @@ import {
 } from "../src/proposal.js";
 import { foldEvidence, renderEvidenceForPrompt, renderEvidenceReport } from "../src/fold.js";
 import { estimateTokens } from "../src/tokens.js";
+import { foldEvidence } from "../src/fold.js";
+import { parseMemoryUnits } from "../src/memory.js";
 import { isSuppressedByRejection, recordRejection, State } from "../src/state.js";
 import { applyDecisions } from "../src/apply/writer.js";
 import { injectPayload, parseDecisions, renderApplySurface } from "../src/apply/lavish.js";
@@ -1725,6 +1727,42 @@ test("non-compliance never satisfies the removal-evidence floor; harm does", () 
   });
   assert.deepEqual(harmed.violations, []);
   assert.equal(harmed.proposal.edits.length, 1);
+});
+
+test("sentence-level harm clears removal of its oversized parent paragraph", () => {
+  const blob = Array.from(
+    { length: 5 },
+    (_, i) =>
+      `Sentence ${i + 1} states an independent requirement about builds, releases, adapters, and review that an agent must follow.`,
+  ).join(" ");
+  const text = `# T\n\n${blob}\n\n- Keep this instruction.\n`;
+  const evidence = (id, negative) => ({
+    status: "ok",
+    transcript: { id, harness: "claude" },
+    positive: [],
+    negative,
+    gaps: [],
+  });
+  const summary = foldEvidence(
+    [
+      evidence("s1", [
+        { instruction: "AG-001.2", quote: "following sentence two broke the build", class: "harm" },
+        { instruction: "AG-001.3", quote: "sentence three caused the same failure", class: "harm" },
+      ]),
+      evidence("s2", [{ instruction: "AG-001.2", quote: "the rule broke release signing", class: "harm" }]),
+    ],
+    { memoryFile: { units: parseMemoryUnits(text) } },
+  );
+  assert.equal(summary.parentHarmSessions["AG-001"], 2, "the same session is counted once across sentence parts");
+
+  const result = gate({
+    text,
+    edit: memoryEdit((current) => current.replace(`${blob}\n\n`, "")),
+    annotation: { edits: [claim(["H1"], { kind: "remove", title: "remove the harmful paragraph" })] },
+    context: { summary },
+  });
+  assert.deepEqual(result.violations, []);
+  assert.equal(result.proposal.edits.length, 1);
 });
 
 test("a removal is measured, not declared: relabeling the edit does not dodge the floor", () => {
