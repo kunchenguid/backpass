@@ -228,9 +228,10 @@ run's parallel fan-out corroborate. A failed consolidation call degrades the run
 lexical identity and says so; it never aborts. All sightings cluster before their domain
 is decided. Each sighting votes `project` or `orchestration`; only a majority-orchestration
 cluster is excluded from synthesis, while a tie stays eligible. Mixed clusters are always
-reported with their orchestration count. Every majority-excluded cluster, including a
-pure-orchestration cluster, remains clearly labeled as a report-only diagnostic rather
-than becoming an instruction in the project's memory file.
+reported with their orchestration count, even below the evidence floor. A corroborated
+majority-excluded cluster, including a pure-orchestration cluster, remains clearly labeled
+as a report-only diagnostic rather than becoming an instruction in the project's memory
+file; an uncorroborated pure-orchestration singleton stays hidden.
 
 Only evidence judged against the _current_ memory-surface hash, stamped with one of the two
 interaction categories, and belonging to this run's selected sample is folded into a

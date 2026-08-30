@@ -175,12 +175,14 @@ export function foldEvidence(
     .filter((cluster) => cluster.sessions >= minGapEvidence)
     .sort((a, b) => b.sessions - a.sessions);
   const reportOnlyGaps = decided
-    .filter((cluster) => cluster.majorityOrchestration || (cluster.mixed && cluster.sessions < minGapEvidence))
+    .filter((cluster) =>
+      cluster.mixed
+        ? cluster.majorityOrchestration || cluster.sessions < minGapEvidence
+        : cluster.majorityOrchestration && cluster.sessions >= minGapEvidence,
+    )
     .sort((a, b) => b.sessions - a.sessions);
 
-  const droppedGapSingletons = proposalClusters.filter(
-    (cluster) => cluster.sessions < minGapEvidence && !cluster.mixed,
-  ).length;
+  const droppedGapSingletons = decided.filter((cluster) => cluster.sessions < minGapEvidence && !cluster.mixed).length;
 
   return {
     version: 1,
