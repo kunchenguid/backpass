@@ -101,7 +101,8 @@ test("scheme-default ports share a sibling clone identity", () => {
   const primary = path.join(parent, "primary");
   const secureSibling = path.join(parent, "secure-sibling");
   const plainSibling = path.join(parent, "plain-sibling");
-  for (const dir of [primary, secureSibling, plainSibling]) {
+  const gitSibling = path.join(parent, "git-sibling");
+  for (const dir of [primary, secureSibling, plainSibling, gitSibling]) {
     fs.mkdirSync(dir);
     git(["init", "-q", "-b", "main"], dir);
     git(["config", "user.email", "test@example.com"], dir);
@@ -110,12 +111,15 @@ test("scheme-default ports share a sibling clone identity", () => {
   }
   git(["remote", "add", "secure", "https://example.com/acme/secure.git"], primary);
   git(["remote", "add", "plain", "http://example.com/acme/plain.git"], primary);
+  git(["remote", "add", "git", "git://example.com/acme/git.git"], primary);
   git(["remote", "add", "origin", "https://example.com:443/acme/secure.git"], secureSibling);
   git(["remote", "add", "origin", "http://example.com:80/acme/plain.git"], plainSibling);
+  git(["remote", "add", "origin", "git://example.com:9418/acme/git.git"], gitSibling);
 
   const repo = attachSiblingClones(resolveRepo(primary));
   assert.ok(repo.siblingWorktrees.includes(fs.realpathSync(secureSibling)));
   assert.ok(repo.siblingWorktrees.includes(fs.realpathSync(plainSibling)));
+  assert.ok(repo.siblingWorktrees.includes(fs.realpathSync(gitSibling)));
 });
 
 test("network remote paths remain case-sensitive", () => {

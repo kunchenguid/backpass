@@ -59,7 +59,7 @@ function networkRemoteIdentity(remote) {
   if (/^[a-z][a-z+.-]*:\/\//i.test(remote)) {
     try {
       const parsed = new URL(remote);
-      const defaultPorts = { "http:": "80", "https:": "443", "ssh:": "22" };
+      const defaultPorts = { "git:": "9418", "http:": "80", "https:": "443", "ssh:": "22" };
       const port = parsed.port && parsed.port !== defaultPorts[parsed.protocol.toLowerCase()] ? `:${parsed.port}` : "";
       host = `${parsed.hostname.toLowerCase()}${port}`;
       repositoryPath = `${parsed.pathname}${parsed.search}${parsed.hash}`;
