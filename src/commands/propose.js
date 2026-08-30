@@ -31,6 +31,12 @@ import { transcriptIdentity } from "../transcript.js";
 export async function foldForRun(ctx, memoryFile, memoryHash, skills = [], transcripts = []) {
   const { state, minGapEvidence, gapLedgerMaxAge } = ctx.config;
   const selected = new Set(transcripts.map((transcript) => transcriptIdentity(transcript)));
+  // Gap ledgers from before canonical identities were introduced key observations by the
+  // transcript's old id. Keep those observations eligible while the same selected session
+  // is gradually migrated by ordinary reanalysis.
+  const selectedGapSessions = new Set(
+    transcripts.flatMap((transcript) => [transcriptIdentity(transcript), transcript.id].filter(Boolean)),
+  );
   const evidence = state.listEvidence();
   const relevant = evidence.filter(
     (e) =>
@@ -58,7 +64,7 @@ export async function foldForRun(ctx, memoryFile, memoryHash, skills = [], trans
   state.writeGapLedger(ledger);
 
   const gapObservations = ledgerGapObservations(ledger, memoryFile.path, skills).filter((observation) =>
-    selected.has(observation.sessionId),
+    selectedGapSessions.has(observation.sessionId),
   );
   const summary = foldEvidence(relevant, {
     minGapEvidence,

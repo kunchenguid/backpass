@@ -499,6 +499,72 @@ test("fold selection distinguishes colliding native IDs by source", async () => 
   assert.equal(summary.analyzedSessions, 1);
 });
 
+test("fold keeps legacy-id gap observations for sessions in the selected sample", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-mix-legacy-gap-"));
+  const state = new State(dir).ensure();
+  const memoryHash = "sha256:memory";
+  const transcripts = ["one", "two"].map((id) => ({
+    harness: "claude",
+    id: `claude-${id}`,
+    identity: `canonical:${id}`,
+    path: `/sessions/${id}.jsonl`,
+    mtimeMs: 100,
+    bytes: 200,
+    interaction: INTERACTIVE,
+  }));
+  for (const transcript of transcripts) {
+    state.writeEvidence(transcript, {
+      status: "ok",
+      transcript,
+      memoryHash,
+      memoryPath: "AGENTS.md",
+      positive: [],
+      negative: [],
+      gaps: [],
+    });
+  }
+
+  const observedAt = new Date().toISOString();
+  state.writeGapLedger({
+    version: 1,
+    entries: {
+      legacy: {
+        id: "legacy",
+        memoryPath: "AGENTS.md",
+        proposedInstruction: "Always use the scratch database.",
+        phrasings: ["Always use the scratch database."],
+        sessions: Object.fromEntries(
+          transcripts.map((transcript) => [
+            transcript.id,
+            {
+              firstObservedAt: observedAt,
+              observedAt,
+              source: transcript.id,
+              quote: `${transcript.id} used production`,
+              domain: "project",
+            },
+          ]),
+        ),
+      },
+    },
+  });
+
+  const summary = await foldForRun(
+    {
+      repo: { root: dir },
+      config: { state, minGapEvidence: 2, gapLedgerMaxAge: "90d" },
+    },
+    { path: "AGENTS.md", text: "", units: [] },
+    memoryHash,
+    [],
+    transcripts,
+  );
+
+  assert.equal(summary.analyzedSessions, 2);
+  assert.equal(summary.gaps.length, 1);
+  assert.equal(summary.gaps[0].sessions, 2);
+});
+
 test("fold bounds evidence and ledger observations to the selected sample", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-mix-selected-fold-"));
   const state = new State(dir).ensure();
