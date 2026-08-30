@@ -255,7 +255,13 @@ function mergeCodexConfig(...layers) {
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
     for (const [key, value] of Object.entries(parsed)) {
       if (key === "features" && value && typeof value === "object" && !Array.isArray(value)) {
-        merged.features = { ...(merged.features || {}), ...value };
+        const currentFeatures = merged.features;
+        merged.features = {
+          ...(currentFeatures && typeof currentFeatures === "object" && !Array.isArray(currentFeatures)
+            ? currentFeatures
+            : {}),
+          ...value,
+        };
       } else {
         merged[key] = value;
       }

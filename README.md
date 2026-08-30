@@ -273,8 +273,9 @@ for different things:
   attempt and can trigger a re-prompt. Only a parseable, gate-rejected answer writes a
   rejected proposal, stamped with the attempt that produced it.
 
-When a run does fail, the advice it prints comes from the condition it ended on. Run
-`backpass propose` again to start a fresh synthesis.
+When a run does fail, the advice it prints comes from the condition it ended on. If the
+rejected proposal included notes, the failure prints those too instead of hiding useful
+diagnostic context. Run `backpass propose` again to start a fresh synthesis.
 
 Token deltas shown to you are measured by backpass from the actual text - never taken from
 the model's own arithmetic.
@@ -449,7 +450,8 @@ Bare model ids are resolved against what each adapter advertises (`openai-codex/
 on pi, `openai/gpt-5.6-luna` on opencode, `gpt-5.6-luna` on codex), so nothing is hardcoded
 per harness. Ladders are ordinary config - reorder or shorten them under `"ladders"`.
 
-Pinning an agent skips its ladder entirely:
+Pinning an agent skips its ladder entirely. If that harness fails, backpass reports an
+actionable error and keeps the pin rather than falling through or printing a raw stack:
 
 ```sh
 backpass \

@@ -86,9 +86,9 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   gets `--approve-all` with `cwd` = `.backpass/synthesis/` (`prepareWorkspace`), which holds
   only the memory file and the skills dir; backpass measures the copy (`measureWorkspace`,
   `anchoredHunks`) and the agent annotates the measured changes by id, initially in the
-  same session. Write-capable spawn flags are in `src/harness-invoke.js` (`writeAccess`):
-  Codex code-mode and Grok `--always-approve` / `--permission-mode bypassPermissions`.
-  The model never supplies `find` text - every hunk is cut from the raw
+  same session. Synthesis sessions request `writeAccess`; analysis remains read-only.
+  `src/harness-invoke.js` owns the per-harness write-capability contract. The model never
+  supplies `find` text - every hunk is cut from the raw
   file, widened until unique, so a hunk can only go stale by the file itself changing after
   the proposal, which apply refuses rather than part-applies. Never pass
   `approveAll` with the repo as `cwd`; the repo is fingerprinted and a harness that
