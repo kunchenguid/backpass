@@ -160,7 +160,8 @@ caused damage), `non-compliance` (the agent ignored it), or `irrelevant` - becau
 argue for opposite fates: harm argues against an instruction, non-compliance argues for
 reinforcing it. Every gap carries a domain - `orchestration` when the mistake was caused
 not by this repository but by an external agent harness or tooling that orchestrated the
-task, `project` for every other mistake - and the
+task, `project` for every other mistake (including when this repository is the
+orchestrating tool) - and the
 analysis is shown the ledger's open gaps so it can cite an existing gap id instead of
 coining a paraphrase of it.
 

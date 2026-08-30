@@ -17,7 +17,8 @@ import { renderEvidenceForPrompt } from "../src/fold.js";
  * `backpass propose` does, asserting both halves of the contract a user depends on:
  * the analysis prompt actually handed to the model states the causal test for
  * `orchestration` (the mistake was caused by the harness around the session, not by this
- * repository), and the mechanics behind it are unchanged - orchestration sightings are
+ * repository - except when this repository IS that tool, in which case those mistakes
+ * are `project`), and the mechanics behind it are unchanged - orchestration sightings are
  * recorded and counted but never corroborate, while a gap with no domain at all is still
  * treated as `project`.
  */
@@ -27,6 +28,9 @@ const CLI = path.join(ROOT, "bin", "backpass.js");
 
 const ORCHESTRATION_GAP = "Stop after the report on scout tasks.";
 const UNLABELLED_GAP = "Always run lint before pushing.";
+// Same mistake as ORCHESTRATION_GAP, judged `project` because this repo IS the
+// orchestrating tool (firstmate-class). Fold must cluster it, not exclude it.
+const ORCHESTRATOR_REPO_GAP = ORCHESTRATION_GAP;
 
 const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-domain-bin-"));
 const fakePi = path.join(binDir, "pi");
@@ -72,6 +76,43 @@ process.exit(0);
 );
 fs.chmodSync(fakeAcpx, 0o755);
 
+// The same sighting as the orchestration gap, but the model applied the
+// repo-aware causal test: this repository IS the orchestrating tool, so the
+// mistake is `project` and must reach a cluster.
+const orchRepoBinDir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-domain-orch-bin-"));
+const fakePiOrchRepo = path.join(orchRepoBinDir, "pi");
+const fakeAcpxOrchRepo = path.join(orchRepoBinDir, "acpx");
+fs.writeFileSync(fakePiOrchRepo, `#!${process.execPath}\nprocess.exit(0);\n`);
+fs.chmodSync(fakePiOrchRepo, 0o755);
+fs.writeFileSync(
+  fakeAcpxOrchRepo,
+  `#!${process.execPath}
+const argv = process.argv.slice(2);
+if (argv.includes("config") && argv.includes("show")) {
+  process.stdout.write(JSON.stringify({ agents: {} }) + "\\n");
+  process.exit(0);
+}
+if (argv.includes("--file")) {
+  process.stdout.write(JSON.stringify({
+    positive: [],
+    negative: [],
+    gaps: [
+      {
+        mistake: "kept working after the brief said to report and stop",
+        proposedInstruction: ${JSON.stringify(ORCHESTRATOR_REPO_GAP)},
+        recurrenceRisk: "high",
+        domain: "project",
+        quote: "opened a PR during a scout task",
+      },
+    ],
+  }) + "\\n");
+  process.exit(0);
+}
+process.exit(0);
+`,
+);
+fs.chmodSync(fakeAcpxOrchRepo, 0o755);
+
 function git(args, cwd) {
   spawnSync("git", args, { cwd, stdio: "ignore" });
 }
@@ -104,7 +145,7 @@ function writeSession(home, id, cwd) {
   );
 }
 
-function runAnalyze(dir, home) {
+function runAnalyze(dir, home, { pathBin = binDir, acpx = fakeAcpx } = {}) {
   const args = ["analyze", "--harness", "pi", "--since", "all", "--analysis-agent", "pi", "--jobs", "1", "--json"];
   const result = spawnSync(process.execPath, [CLI, ...args], {
     cwd: dir,
@@ -112,8 +153,8 @@ function runAnalyze(dir, home) {
       ...process.env,
       HOME: home,
       USERPROFILE: home,
-      PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
-      BACKPASS_ACPX_BIN: fakeAcpx,
+      PATH: `${pathBin}${path.delimiter}${process.env.PATH}`,
+      BACKPASS_ACPX_BIN: acpx,
       NO_COLOR: "1",
     },
     encoding: "utf8",
@@ -122,12 +163,12 @@ function runAnalyze(dir, home) {
   return { ...result, output: `${result.stdout}${result.stderr}` };
 }
 
-function analyzedRepo() {
+function analyzedRepo(analyzeOpts) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-domain-home-"));
   const dir = initRepo();
   writeSession(home, "session-a", dir);
   writeSession(home, "session-b", dir);
-  const run = runAnalyze(dir, home);
+  const run = runAnalyze(dir, home, analyzeOpts);
   assert.equal(run.status, 0, run.output);
   return dir;
 }
@@ -151,6 +192,11 @@ test("the analysis prompt the model receives asks what caused the gap, not which
       "the old enumeration no longer stands in for the definition",
     );
     assert.match(prompt, /Orchestration gaps\s+are counted but never proposed into this repository's memory file/);
+    assert.match(
+      prompt,
+      /If this\s+repository IS the orchestrating tool,\s+mistakes in how it orchestrated are `project`/,
+      "an orchestrator repo must not starve its own subject-matter gaps",
+    );
   }
 });
 
@@ -179,4 +225,27 @@ test("an orchestration gap is counted but never corroborates, while a gap with n
   const ledger = state.readGapLedger();
   const domains = Object.values(ledger.entries).map((entry) => Object.values(entry.sessions)[0].domain);
   assert.deepEqual(domains.sort(), ["orchestration", "project"], "the ledger keeps the judged domain of each sighting");
+});
+
+test("a firstmate-class orchestrator-repo sighting judged project corroborates instead of being excluded", async () => {
+  const dir = analyzedRepo({ pathBin: orchRepoBinDir, acpx: fakeAcpxOrchRepo });
+  const state = new State(dir).ensure();
+  const resolved = resolveMemoryFiles(dir, ["AGENTS.md", "CLAUDE.md"]);
+  const summary = await foldForRun(
+    { config: { state, minGapEvidence: 2, gapLedgerMaxAge: "90d" } },
+    resolved.primary,
+    resolved.hash,
+  );
+
+  assert.equal(summary.analyzedSessions, 2);
+  assert.equal(summary.totals.orchestrationGapSightings, 0, "the causal test kept this repo's own mistakes as project");
+  assert.deepEqual(summary.gaps.map((gap) => gap.proposedInstruction), [ORCHESTRATOR_REPO_GAP]);
+
+  const rendered = renderEvidenceForPrompt(summary);
+  assert.ok(rendered.includes(ORCHESTRATOR_REPO_GAP), "the sighting reaches the synthesis prompt");
+  assert.ok(!/orchestration-domain sighting\(s\).*excluded/.test(rendered));
+
+  const ledger = state.readGapLedger();
+  const domains = Object.values(ledger.entries).map((entry) => Object.values(entry.sessions)[0].domain);
+  assert.deepEqual(domains, ["project"]);
 });

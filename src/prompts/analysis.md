@@ -67,8 +67,9 @@ Rules, in order of importance:
    not caused by this repository, but by an external agent harness or tooling that
    orchestrated the task (a task brief, a supervisor's process, the harness itself - by
    way of illustration only, not a list to match against); every other gap is `project`.
-   Ask the causal question, not which category the wording resembles. Orchestration gaps
-   are counted but never proposed into this repository's memory file.
+   Ask the causal question, not which category the wording resembles. If this
+   repository IS the orchestrating tool, mistakes in how it orchestrated are `project`.
+   Orchestration gaps are counted but never proposed into this repository's memory file.
 5. **Do not confabulate influence.** Only call something positive when the trace shows
    the agent doing the specific thing the instruction asks for. An outcome that would
    have happened anyway is not evidence.

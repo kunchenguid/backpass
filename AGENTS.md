@@ -176,6 +176,8 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   orchestrated the task, not by this repo) are counted in
   `totals.orchestrationGapSightings` and excluded from clustering, so they can
   never reach a proposal - there is deliberately no orchestrator-memory write path.
+  When this repository IS that orchestrating tool, those mistakes are `project`
+  (`src/prompts/analysis.md`).
   A gap may also carry `coveredBySkill`: the analysis (shown every skill's name and
   trigger line) judged an existing skill's content to cover the mistake - a failed
   trigger. The fold counts those citations per skill onto the cluster
