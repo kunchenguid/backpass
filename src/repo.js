@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 import { UserError } from "./logger.js";
 
@@ -51,6 +52,25 @@ function listWorktrees(root) {
   return [...new Set(paths)];
 }
 
+function remoteIdentity(remote, root) {
+  const value = String(remote || "").trim();
+  if (!value) return null;
+
+  if (/^file:\/\//i.test(value)) {
+    try {
+      return normalizeRemote(realpathOrSelf(fileURLToPath(value)));
+    } catch {
+      return normalizeRemote(value);
+    }
+  }
+  if (/^[a-z][a-z+.-]*:\/\//i.test(value) || /^(?:[^/@\s]+@)?[^/:\s]+:.+/.test(value)) {
+    return normalizeRemote(value);
+  }
+
+  const expanded = expandUserPath(value);
+  return normalizeRemote(realpathOrSelf(path.isAbsolute(expanded) ? expanded : path.resolve(root, expanded)));
+}
+
 function listRemotes(root) {
   let raw;
   try {
@@ -61,7 +81,7 @@ function listRemotes(root) {
   const out = new Set();
   for (const line of raw.split("\n")) {
     const url = line.split(/\s+/)[1];
-    const norm = normalizeRemote(url);
+    const norm = remoteIdentity(url, root);
     if (norm) out.add(norm);
   }
   return [...out];
@@ -99,9 +119,9 @@ function remotesOverlap(ours, theirs) {
  * immediate children of those directories. Matching is remote identity, not directory
  * name. Fail-soft: an unreadable path is skipped.
  *
- * @param {{ remotes?: string[], worktrees?: string[], cloneRoots?: string[] }} [opts]
+ * @param {{ remotes?: string[], worktrees?: string[], cloneRoots?: string[], repoRoot?: string }} [opts]
  */
-export function listSiblingCloneWorktrees({ remotes, worktrees, cloneRoots = [] } = {}) {
+export function listSiblingCloneWorktrees({ remotes, worktrees, cloneRoots = [], repoRoot } = {}) {
   if (!remotes?.length) return [];
   const known = new Set(worktrees || []);
   const found = [];
@@ -131,7 +151,7 @@ export function listSiblingCloneWorktrees({ remotes, worktrees, cloneRoots = [] 
   for (const extra of cloneRoots) {
     const expanded = expandUserPath(extra);
     if (!expanded) continue;
-    searchRoots.add(path.resolve(expanded));
+    searchRoots.add(path.resolve(repoRoot || worktrees?.[0] || ".", expanded));
   }
 
   for (const root of searchRoots) {
@@ -154,7 +174,7 @@ export function listSiblingCloneWorktrees({ remotes, worktrees, cloneRoots = [] 
 /**
  * Fill `repo.siblingWorktrees` from local clones that share this repo's remotes.
  *
- * @param {{ remotes: string[], worktrees: string[], siblingWorktrees?: string[] }} repo
+ * @param {{ root: string, remotes: string[], worktrees: string[], siblingWorktrees?: string[] }} repo
  * @param {string[]} [cloneRoots]
  */
 export function attachSiblingClones(repo, cloneRoots = []) {
@@ -162,6 +182,7 @@ export function attachSiblingClones(repo, cloneRoots = []) {
     remotes: repo.remotes,
     worktrees: repo.worktrees,
     cloneRoots,
+    repoRoot: repo.root,
   });
   return repo;
 }

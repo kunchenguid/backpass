@@ -95,6 +95,49 @@ test("sibling clones that share a remote are listed; a different remote is not",
   assert.equal(repo.worktrees.includes(siblingReal), false);
 });
 
+test("local relative remotes are resolved from each checkout", () => {
+  const parent = tempDir("backpass-relative-remotes-");
+  const origin = path.join(parent, "origin.git");
+  git(["init", "--bare", "-q", origin], parent);
+
+  const primary = path.join(parent, "primary");
+  const matching = path.join(parent, "nested", "matching");
+  const foreignParent = path.join(parent, "foreign");
+  const foreign = path.join(foreignParent, "checkout");
+  for (const dir of [primary, matching, foreign]) {
+    fs.mkdirSync(dir, { recursive: true });
+    git(["init", "-q", "-b", "main"], dir);
+    git(["config", "user.email", "test@example.com"], dir);
+    git(["config", "user.name", "test"], dir);
+    git(["commit", "--allow-empty", "-q", "-m", "init"], dir);
+  }
+  git(["remote", "add", "origin", "../origin.git"], primary);
+  git(["remote", "add", "origin", "../../origin.git"], matching);
+  git(["remote", "add", "origin", "../origin.git"], foreign);
+
+  const repo = attachSiblingClones(resolveRepo(primary), [path.dirname(matching), foreignParent]);
+  assert.ok(repo.siblingWorktrees.includes(fs.realpathSync(matching)));
+  assert.equal(repo.siblingWorktrees.includes(fs.realpathSync(foreign)), false);
+});
+
+test("relative clone roots are resolved from the repository root", () => {
+  const parent = tempDir("backpass-relative-root-");
+  const primary = path.join(parent, "primary");
+  const sibling = path.join(parent, "catalog", "sibling");
+  const remote = "https://github.com/acme/demo.git";
+  for (const dir of [primary, sibling]) {
+    fs.mkdirSync(dir, { recursive: true });
+    git(["init", "-q", "-b", "main"], dir);
+    git(["config", "user.email", "test@example.com"], dir);
+    git(["config", "user.name", "test"], dir);
+    git(["commit", "--allow-empty", "-q", "-m", "init"], dir);
+    git(["remote", "add", "origin", remote], dir);
+  }
+
+  const repo = attachSiblingClones(resolveRepo(primary), ["../catalog"]);
+  assert.ok(repo.siblingWorktrees.includes(fs.realpathSync(sibling)));
+});
+
 test("a non-git directory is skipped gracefully, without creating anything", () => {
   const dir = tempDir("backpass-nongit-");
 
