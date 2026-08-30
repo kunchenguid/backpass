@@ -236,6 +236,33 @@ test("a new instruction backed by too few sessions is rejected, whatever kind th
   }
 });
 
+test("a single-session rewrite that appends net-new text is gated like an add", () => {
+  const original = "- Use Node 18 via nvm before running any script.";
+  const expanded =
+    original +
+    " Always route SSH through the jumphost, never store private keys in the repo, and document the hop in the PR.";
+  assert.ok(estimateTokens(expanded) - estimateTokens(original) > 10, "fixture is a real net add");
+  const { proposal, violations } = gate({
+    edit: memoryEdit((t) => t.replace(original, expanded)),
+    annotation: { edits: [claim(["H1"], { kind: "rewrite", title: "expand the node rule", transcripts: 1 })] },
+  });
+  assert.equal(proposal.edits.length, 0);
+  assert.ok(violations.some((v) => /backed by 1 session/.test(v)));
+});
+
+test("a single-session rewrite that only tightens still passes", () => {
+  const original = "- Use Node 18 via nvm before running any script.";
+  const tighter = "- Use nvm for Node 18.";
+  assert.ok(estimateTokens(tighter) - estimateTokens(original) < 0, "fixture is a net tightening");
+  const { proposal, violations } = gate({
+    edit: memoryEdit((t) => t.replace(original, tighter)),
+    annotation: { edits: [claim(["H1"], { kind: "rewrite", title: "tighten the node rule", transcripts: 1 })] },
+  });
+  assert.deepEqual(violations, []);
+  assert.equal(proposal.edits.length, 1);
+  assert.equal(proposal.edits[0].kind, "rewrite");
+});
+
 test("an edit with no verbatim quote is rejected", () => {
   const { proposal, violations } = gate({
     edit: memoryEdit((t) => t.replace("- Use Node 18 via nvm before running any script.\n", "")),

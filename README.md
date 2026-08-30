@@ -239,7 +239,9 @@ Then mechanical gates run, and they are not negotiable:
 - every measured change belongs to exactly one annotated edit - an unexplained change
   is a violation, so is an edit that names no change
 - new instructions need evidence from `minGapEvidence` distinct sessions (an edit that
-  only adds text is a new instruction, whatever the model calls it)
+  only adds text is a new instruction, whatever the model calls it; so is a rewrite
+  whose hunks add more than about ten tokens net - a pure tightening may still rest on
+  one session)
 - removing a memory-file instruction outright needs harm-class negatives from
   `minGapEvidence` distinct sessions - non-compliance never counts, because a rule that
   was skipped needs reinforcement, not deletion. A pure deletion in a skill file is also
