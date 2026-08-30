@@ -38,7 +38,7 @@ const discoverNone = async () => ({ transcripts: [], perHarness: {} });
 const discoverTwo = async () => ({ transcripts: [transcript("s1"), transcript("s2")], perHarness: { claude: {} } });
 
 /** Stands in for the tier-1 model: every session reports the same gap against the starter. */
-function writeFakeEvidence({ transcripts, memoryFile, config, memoryHash }, domainAt = () => undefined) {
+function writeFakeEvidence({ transcripts, memoryFile, config, memoryHash }, domainAt = (_index) => undefined) {
   for (const [index, t] of transcripts.entries()) {
     config.state.writeEvidence(t.id, {
       status: "ok",
