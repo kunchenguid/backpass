@@ -1,11 +1,12 @@
 import { similarity } from "./memory.js";
 import { GAP_SIMILARITY_THRESHOLD, gapSource } from "./gap-ledger.js";
+import { crossSurfaceDuplicates } from "./overlap.js";
 
 /**
  * Stage 2 of the pipeline (design section 3): fold per-transcript evidence into one
  * compact summary. Entirely deterministic - no model involved.
  *
- * Three things happen here that the synthesis pass depends on:
+ * Four things happen here that the synthesis pass depends on:
  *
  *  1. Evidence is grouped by instruction id, giving per-instruction positive/negative
  *     counts and, crucially, `relevance` = sessions where the instruction drew any
@@ -21,13 +22,19 @@ import { GAP_SIMILARITY_THRESHOLD, gapSource } from "./gap-ledger.js";
  *     caller passes `gapObservations` (the pruned gap ledger, `src/gap-ledger.js`) the
  *     clusters are built from those instead of this run's records, so a gap seen once now
  *     and once on a later run graduates. Without a ledger the records alone are used.
+ *  4. Memory-file units whose text substantially overlaps a skill description or body are
+ *     flagged (`crossSurfaceDuplicates` in `src/overlap.js`). Report-only: the shrink sees
+ *     the duplicated always-loaded tokens; nothing is deleted here.
  */
 
 /**
  * @param {object[]} evidenceRecords
- * @param {{ minGapEvidence?: number, memoryFile?: object|null, gapObservations?: object[]|null }} [options]
+ * @param {{ minGapEvidence?: number, memoryFile?: object|null, gapObservations?: object[]|null, skills?: object[] }} [options]
  */
-export function foldEvidence(evidenceRecords, { minGapEvidence = 2, memoryFile = null, gapObservations = null } = {}) {
+export function foldEvidence(
+  evidenceRecords,
+  { minGapEvidence = 2, memoryFile = null, gapObservations = null, skills = [] } = {},
+) {
   const usable = evidenceRecords.filter((e) => e && e.status === "ok");
   const analyzedSessions = usable.length;
 
@@ -107,9 +114,13 @@ export function foldEvidence(evidenceRecords, { minGapEvidence = 2, memoryFile =
     for (const unit of memoryFile.units) touch(unit.id);
   }
 
+  const duplicates = crossSurfaceDuplicates(memoryFile, skills);
+  const overlapById = new Map(duplicates.map((hit) => [hit.instruction, hit]));
+
   const instructionRows = [...instructions.values()]
     .map((entry) => {
       const unit = memoryFile?.units.find((u) => u.id === entry.instruction) || null;
+      const skillOverlap = overlapById.get(entry.instruction);
       return {
         instruction: entry.instruction,
         positive: entry.positive,
@@ -121,6 +132,7 @@ export function foldEvidence(evidenceRecords, { minGapEvidence = 2, memoryFile =
         section: unit?.section ?? null,
         known: Boolean(unit),
         quotes: entry.quotes.slice(0, 6),
+        ...(skillOverlap ? { skillOverlap } : {}),
       };
     })
     .sort((a, b) => b.negative - a.negative || b.sessions - a.sessions || a.instruction.localeCompare(b.instruction));
@@ -153,9 +165,11 @@ export function foldEvidence(evidenceRecords, { minGapEvidence = 2, memoryFile =
       droppedGapSingletons,
       orchestrationGapSightings,
       usedRawTranscript: usedRawCount,
+      crossSurfaceDuplicates: duplicates.length,
     },
     instructions: instructionRows,
     gaps,
+    crossSurfaceDuplicates: duplicates,
   };
 }
 
@@ -252,6 +266,14 @@ export function renderEvidenceForPrompt(summary) {
       `- [${row.instruction}] +${row.positive} -${row.negative}${harm} sessions=${row.sessions} relevance=${relevance}${cost}` +
         (row.known ? "" : " (id not found in current file - stale reference)"),
     );
+    if (row.skillOverlap) {
+      const overlap = row.skillOverlap;
+      lines.push(
+        `    CROSS-SURFACE: restates skill "${overlap.skill}" ${overlap.surface} ` +
+          `(similarity ${overlap.score.toFixed(2)}) - duplicated always-loaded tokens; ` +
+          `drop the memory-file copy, do not treat it as a second instruction`,
+      );
+    }
     for (const quote of row.quotes.slice(0, 3)) {
       const sign = quote.polarity === "negative" ? "-" : "+";
       const cls = quote.polarity === "negative" ? ` [${quote.class ?? "unclassified"}]` : "";

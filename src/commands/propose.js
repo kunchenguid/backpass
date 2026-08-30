@@ -54,6 +54,7 @@ export async function foldForRun(ctx, memoryFile, memoryHash, skills = []) {
     minGapEvidence,
     memoryFile,
     gapObservations: ledgerGapObservations(ledger, memoryFile.path, skills),
+    skills,
   });
   summary.consolidation = consolidation;
   return summary;

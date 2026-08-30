@@ -9,6 +9,7 @@ import {
   resolveProjectSkillDirs,
   skillDescriptionTokens,
 } from "../skills.js";
+import { crossSurfaceDuplicates } from "../overlap.js";
 import { budgetBar, budgetStatus, formatTokens } from "../tokens.js";
 import { table } from "./scan.js";
 import { DEFAULT_EFFORT } from "../config.js";
@@ -33,6 +34,10 @@ export async function cmdStatus(ctx) {
   const skills = loadProjectSkills(repo.root, overflow.dir);
   const descriptionTokens = skillDescriptionTokens(skills);
 
+  const duplicates = files
+    .filter((file) => !resolved.pointers.includes(file))
+    .flatMap((file) => crossSurfaceDuplicates(file, skills));
+
   const budgets = files.map((file) => {
     const includesSkills = file === resolved.primary && skills.length > 0;
     return {
@@ -51,6 +56,7 @@ export async function cmdStatus(ctx) {
     json({
       repo: repo.name,
       budgets,
+      crossSurfaceDuplicates: duplicates,
       evidence: counts,
       scanCacheEntries: Object.keys(cache.entries).length,
       summary: summary ? { analyzedSessions: summary.analyzedSessions, totals: summary.totals } : null,
@@ -87,6 +93,17 @@ export async function cmdStatus(ctx) {
           `${formatTokens(descriptionTokens)} tok always loaded`,
       ),
     );
+  }
+  if (duplicates.length) {
+    out("");
+    out(color.dim("CROSS-SURFACE (report-only)"));
+    for (const hit of duplicates) {
+      const where = hit.memoryPath && hit.memoryPath !== resolved.primary?.path ? ` ${hit.memoryPath}` : "";
+      out(
+        `  ${hit.instruction}${where} restates ${hit.skill} ${hit.surface}` +
+          ` · ${formatTokens(hit.tokens)} tok · similarity ${hit.score.toFixed(2)}`,
+      );
+    }
   }
   out("");
 

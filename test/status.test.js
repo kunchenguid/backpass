@@ -51,4 +51,22 @@ test("status reports one always-loaded budget over memory and skill descriptions
   const text = (await captureStatus(repo, false)).join("\n");
   assert.match(text, new RegExp(`AGENTS\\.md \\+ skill descriptions.*${expected} /`));
   assert.equal((text.match(/AGENTS\.md \+ skill descriptions/g) || []).length, 1);
+  assert.equal(structured.crossSurfaceDuplicates.length, 0);
+});
+
+test("status reports a memory unit that restates a skill description", async () => {
+  const repo = makeRepo({
+    "AGENTS.md": `# Rules\n\n- ${DESCRIPTION}\n- Keep changes focused.\n`,
+    ".agents/skills/database/SKILL.md": SKILL,
+  });
+
+  const structured = JSON.parse((await captureStatus(repo, true)).join("\n"));
+  assert.equal(structured.crossSurfaceDuplicates.length, 1);
+  assert.equal(structured.crossSurfaceDuplicates[0].instruction, "AG-001");
+  assert.equal(structured.crossSurfaceDuplicates[0].skill, "database");
+  assert.equal(structured.crossSurfaceDuplicates[0].surface, "description");
+
+  const text = (await captureStatus(repo, false)).join("\n");
+  assert.match(text, /CROSS-SURFACE \(report-only\)/);
+  assert.match(text, /AG-001 restates database description/);
 });
