@@ -272,24 +272,36 @@ test("folded domain votes mechanically control new-instruction eligibility", () 
   ]) {
     const excluded = propose(summary, minGapEvidence);
     assert.equal(excluded.proposal.edits.length, 0);
-    assert.ok(excluded.violations.some((violation) => /does not match any synthesis-eligible gap/.test(violation)));
+    assert.ok(excluded.violations.some((violation) => /cites the report-only gap/.test(violation)));
   }
 
   const reportOnly = folded(["orchestration", "orchestration", "project"], 2);
+  const reportOnlyQuote = reportOnly.reportOnlyGaps[0].quotes[0];
+  const reportOnlyEvidence = [{ polarity: "negative", text: reportOnlyQuote.text, source: reportOnlyQuote.source }];
   const rewritten = gate({
     edit: memoryEdit((text) =>
       text.replace(
-        "- Prefer small commits.",
+        "- Prefer small commits.\n- Use Node 18 via nvm before running any script.",
         "- Prefer focused commits.\n- Consult the SSHHIP guide prior to tunnel edits.",
       ),
     ),
     annotation: {
-      edits: [claim(["H1"], { kind: "rewrite", transcripts: 3 })],
+      edits: [claim(["H1"], { kind: "rewrite", evidence: reportOnlyEvidence, transcripts: 3 })],
     },
     context: { summary: reportOnly },
   });
   assert.equal(rewritten.proposal.edits.length, 0);
-  assert.ok(rewritten.violations.some((violation) => /does not match any synthesis-eligible gap/.test(violation)));
+  assert.ok(rewritten.violations.some((violation) => /cites the report-only gap/.test(violation)));
+
+  const unrelated = gate({
+    edit: memoryEdit((text) => `${text}- Preserve build logs for failed releases.\n`),
+    annotation: {
+      edits: [claim(["H1"], { kind: "add", transcripts: 3 })],
+    },
+    context: { summary: reportOnly },
+  });
+  assert.equal(unrelated.violations.length, 0);
+  assert.equal(unrelated.proposal.edits.length, 1);
 });
 
 test("the per-run edit cap is enforced - it is the learning rate", () => {
