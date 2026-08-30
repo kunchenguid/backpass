@@ -1,9 +1,11 @@
 import { discoverTranscripts } from "../discovery/index.js";
 import { color, info, json, out } from "../logger.js";
+import { attachSiblingClones } from "../repo.js";
 
 /** Shared by every command that needs the transcript set. */
 export async function discoverForRun(ctx) {
   const { repo, config, strict } = ctx;
+  attachSiblingClones(repo, config.discovery.cloneRoots);
   const result = await discoverTranscripts({ repo, config, strict });
   if (ctx.limit && result.transcripts.length > ctx.limit) {
     result.truncated = result.transcripts.length - ctx.limit;

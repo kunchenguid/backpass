@@ -52,6 +52,29 @@ function listWorktrees(root) {
   return [...new Set(paths)];
 }
 
+function networkRemoteIdentity(remote) {
+  let host;
+  let repositoryPath;
+
+  if (/^[a-z][a-z+.-]*:\/\//i.test(remote)) {
+    try {
+      const parsed = new URL(remote);
+      host = `${parsed.hostname.toLowerCase()}${parsed.port ? `:${parsed.port}` : ""}`;
+      repositoryPath = `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    } catch {
+      return null;
+    }
+  } else {
+    const match = remote.match(/^(?:[^/@\s]+@)?([^/:\s]+):(.+)$/);
+    if (!match) return null;
+    host = match[1].toLowerCase();
+    repositoryPath = match[2];
+  }
+
+  repositoryPath = repositoryPath.replace(/^\/+|\/+$/g, "").replace(/\.git$/i, "");
+  return host && repositoryPath ? `remote:${host}/${repositoryPath}` : null;
+}
+
 function cloneRemoteIdentity(remote, root) {
   const value = String(remote || "").trim();
   if (!value) return null;
@@ -64,8 +87,7 @@ function cloneRemoteIdentity(remote, root) {
     }
   }
   if (/^[a-z][a-z+.-]*:\/\//i.test(value) || /^(?:[^/@\s]+@)?[^/:\s]+:.+/.test(value)) {
-    const normalized = normalizeRemote(value);
-    return normalized ? `remote:${normalized}` : null;
+    return networkRemoteIdentity(value);
   }
 
   const expanded = expandUserPath(value);
@@ -126,10 +148,10 @@ function remotesOverlap(ours, theirs) {
  * immediate children of those directories. Matching is remote identity, not directory
  * name. Fail-soft: an unreadable path is skipped.
  *
- * @param {{ remotes?: string[], worktrees?: string[], cloneRoots?: string[], repoRoot?: string }} [opts]
+ * @param {{ cloneRemotes?: string[], worktrees?: string[], cloneRoots?: string[], repoRoot?: string }} [opts]
  */
-export function listSiblingCloneWorktrees({ remotes, worktrees, cloneRoots = [], repoRoot } = {}) {
-  if (!remotes?.length) return [];
+export function listSiblingCloneWorktrees({ cloneRemotes, worktrees, cloneRoots = [], repoRoot } = {}) {
+  if (!cloneRemotes?.length) return [];
   const known = new Set(worktrees || []);
   const found = [];
 
@@ -142,7 +164,7 @@ export function listSiblingCloneWorktrees({ remotes, worktrees, cloneRoots = [],
     }
     if (known.has(real) || !isGitCheckout(real)) return;
     const theirs = listCloneRemotes(real);
-    if (!remotesOverlap(remotes, theirs)) return;
+    if (!remotesOverlap(cloneRemotes, theirs)) return;
     for (const wt of listWorktrees(real)) {
       if (known.has(wt)) continue;
       known.add(wt);
@@ -186,7 +208,7 @@ export function listSiblingCloneWorktrees({ remotes, worktrees, cloneRoots = [],
  */
 export function attachSiblingClones(repo, cloneRoots = []) {
   repo.siblingWorktrees = listSiblingCloneWorktrees({
-    remotes: repo.cloneRemotes,
+    cloneRemotes: repo.cloneRemotes,
     worktrees: repo.worktrees,
     cloneRoots,
     repoRoot: repo.root,

@@ -5,8 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
-import { discoverTranscripts } from "../src/discovery/index.js";
-import { attachSiblingClones, resolveRepo } from "../src/repo.js";
+import { discoverForRun } from "../src/commands/scan.js";
+import { resolveRepo } from "../src/repo.js";
 import { loadConfig } from "../src/config.js";
 
 /**
@@ -69,8 +69,9 @@ function discoverFrom(repoRoot, { homeDir, cloneRoots = [], strict = false }) {
   process.env.HOME = homeDir;
   try {
     const repo = resolveRepo(repoRoot);
-    attachSiblingClones(repo, cloneRoots);
-    return discoverTranscripts({ repo, config: configFor(repoRoot), strict });
+    const config = configFor(repoRoot);
+    config.discovery.cloneRoots = cloneRoots;
+    return discoverForRun({ repo, config, strict, limit: null });
   } finally {
     process.env.HOME = prevHome;
   }

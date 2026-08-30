@@ -86,7 +86,7 @@ test("sibling clones that share a remote are listed; a different remote is not",
     git(["commit", "--allow-empty", "-q", "-m", "init"], dir);
   }
   git(["remote", "add", "origin", remote], primary);
-  git(["remote", "add", "origin", remote], sibling);
+  git(["remote", "add", "origin", "git@github.com:acme/demo.git"], sibling);
   git(["remote", "add", "origin", "https://github.com/acme/other.git"], other);
 
   const repo = attachSiblingClones(resolveRepo(primary));
@@ -94,6 +94,24 @@ test("sibling clones that share a remote are listed; a different remote is not",
   assert.ok(repo.siblingWorktrees.includes(siblingReal));
   assert.equal(repo.siblingWorktrees.includes(fs.realpathSync(other)), false);
   assert.equal(repo.worktrees.includes(siblingReal), false);
+});
+
+test("network remote paths remain case-sensitive", () => {
+  const parent = tempDir("backpass-network-case-");
+  const primary = path.join(parent, "primary");
+  const foreign = path.join(parent, "foreign");
+  for (const dir of [primary, foreign]) {
+    fs.mkdirSync(dir);
+    git(["init", "-q", "-b", "main"], dir);
+    git(["config", "user.email", "test@example.com"], dir);
+    git(["config", "user.name", "test"], dir);
+    git(["commit", "--allow-empty", "-q", "-m", "init"], dir);
+  }
+  git(["remote", "add", "origin", "https://example.com/Team/Repo.git"], primary);
+  git(["remote", "add", "origin", "https://example.com/team/repo.git"], foreign);
+
+  const repo = attachSiblingClones(resolveRepo(primary));
+  assert.equal(repo.siblingWorktrees.includes(fs.realpathSync(foreign)), false);
 });
 
 test("local relative remotes are resolved from each checkout", () => {
