@@ -239,7 +239,16 @@ function mergeCodexConfig(...layers) {
       try {
         parsed = JSON.parse(layer);
       } catch {
-        continue;
+        throw new UserError(
+          "cannot enable Codex file-write access because CODEX_CONFIG is not valid JSON",
+          "unset CODEX_CONFIG or set it to a valid JSON object",
+        );
+      }
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new UserError(
+          "cannot enable Codex file-write access because CODEX_CONFIG is not a JSON object",
+          "unset CODEX_CONFIG or set it to a valid JSON object",
+        );
       }
     }
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;

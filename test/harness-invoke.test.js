@@ -692,6 +692,30 @@ test("a write-access Codex session enables code-mode on the spawn, not by rewrit
   assert.deepEqual(jsonl(codexLog)[0], ["--enable", "code_mode_host"]);
 });
 
+test("a write-access Codex session rejects malformed CODEX_CONFIG before invoking acpx", async () => {
+  resetLogsAndSettings();
+  process.env.CODEX_CONFIG = "{not-json";
+  try {
+    await assert.rejects(
+      openSession({
+        agent: "codex",
+        sessionName: "bp-codex-invalid-config",
+        cwd: workDir,
+        writeAccess: true,
+      }),
+      {
+        name: "UserError",
+        message: /CODEX_CONFIG is not valid JSON/,
+        hint: /unset CODEX_CONFIG or set it to a valid JSON object/,
+      },
+    );
+  } finally {
+    delete process.env.CODEX_CONFIG;
+  }
+
+  assert.deepEqual(acpxCalls(), []);
+});
+
 test("a write-access Grok session launches with native file-write permission flags", async () => {
   resetLogsAndSettings();
   const session = await openSession({
