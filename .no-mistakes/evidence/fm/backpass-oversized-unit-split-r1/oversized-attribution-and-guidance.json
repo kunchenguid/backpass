@@ -1,0 +1,67 @@
+{
+  "instructionIndex": "Oversized paragraph AG-001 (179 tok, L3) <Memory> is one blob; AG-001 is only its line-oriented alias. Attribute evidence only to the sentence-part IDs below (AG-001.1, AG-001.2, AG-001.3, AG-001.4, AG-001.5). If these fail to steer, split the paragraph into list items in place - a bold label on the blob is not a strengthen.\n\n[AG-001.1] (36 tok, L3) <Memory>\nSentence 1 states an independent requirement about builds, releases, adapters, and review that an agent must actually follow rather than skip.\n\n[AG-001.2] (36 tok, L3) <Memory>\nSentence 2 states an independent requirement about builds, releases, adapters, and review that an agent must actually follow rather than skip.\n\n[AG-001.3] (36 tok, L3) <Memory>\nSentence 3 states an independent requirement about builds, releases, adapters, and review that an agent must actually follow rather than skip.\n\n[AG-001.4] (36 tok, L3) <Memory>\nSentence 4 states an independent requirement about builds, releases, adapters, and review that an agent must actually follow rather than skip.\n\n[AG-001.5] (36 tok, L3) <Memory>\nSentence 5 states an independent requirement about builds, releases, adapters, and review that an agent must actually follow rather than skip.",
+  "hotInstruction": {
+    "instruction": "AG-001.2",
+    "positive": 0,
+    "negative": 2,
+    "harmSessions": 0,
+    "sessions": 2,
+    "relevance": 1,
+    "relevanceByInteraction": {
+      "interactive": 1,
+      "non-interactive": 0
+    },
+    "tokens": 36,
+    "section": "Memory",
+    "known": true,
+    "parentId": "AG-001",
+    "nonCompliance": 2,
+    "nonComplianceSessions": 2,
+    "quotes": [
+      {
+        "polarity": "negative",
+        "text": "skipped sentence two",
+        "class": "non-compliance",
+        "source": "claude · s1 · unknown date"
+      },
+      {
+        "polarity": "negative",
+        "text": "ignored sentence two again",
+        "class": "non-compliance",
+        "source": "claude · s2 · unknown date"
+      }
+    ]
+  },
+  "quietSibling": {
+    "instruction": "AG-001.1",
+    "positive": 0,
+    "negative": 0,
+    "harmSessions": 0,
+    "sessions": 0,
+    "relevance": 0,
+    "relevanceByInteraction": {
+      "interactive": 0,
+      "non-interactive": 0
+    },
+    "tokens": 36,
+    "section": "Memory",
+    "known": true,
+    "parentId": "AG-001",
+    "nonCompliance": 0,
+    "nonComplianceSessions": 0,
+    "quotes": []
+  },
+  "oversizedTarget": {
+    "id": "AG-001",
+    "tokens": 179,
+    "parts": [
+      "AG-001.1",
+      "AG-001.2",
+      "AG-001.3",
+      "AG-001.4",
+      "AG-001.5"
+    ],
+    "sessions": 2
+  },
+  "synthesisEvidence": "Sessions analyzed: 2 (interactive 2 · non-interactive 0)\nTotals: 0 positive, 2 negative, 0 gap clusters (0 synthesis eligible, 0 report only, 0 singletons dropped below threshold)\n\n### Per-instruction evidence\nA negative's class is what it means: `harm` = following the instruction caused damage (evidence against it); `non-compliance` = the agent ignored it (evidence it failed to steer - argues for reinforcement, never deletion); `irrelevant` = no real bearing.\n- [AG-001.2] +0 -2 harm-sessions=0 sessions=2 relevance=100.0% (interactive 100.0% · non-interactive 0.0%) cost=36tok\n    - [non-compliance] \"skipped sentence two\" (claude · s1 · unknown date)\n    - [non-compliance] \"ignored sentence two again\" (claude · s2 · unknown date)\n- [AG-001.1] +0 -0 sessions=0 relevance=0.0% (interactive 0.0% · non-interactive 0.0%) cost=36tok\n- [AG-001.3] +0 -0 sessions=0 relevance=0.0% (interactive 0.0% · non-interactive 0.0%) cost=36tok\n- [AG-001.4] +0 -0 sessions=0 relevance=0.0% (interactive 0.0% · non-interactive 0.0%) cost=36tok\n- [AG-001.5] +0 -0 sessions=0 relevance=0.0% (interactive 0.0% · non-interactive 0.0%) cost=36tok\n\n### Oversized units that failed to steer\nThese are one paragraph apiece. Preferred reinforcement is a restructure-in-place: split the paragraph into list items so each claim can be followed. A bold label on the blob is not a strengthen.\n- AG-001 is 179 tokens as one paragraph (attribution: [AG-001.1], [AG-001.2], [AG-001.3], [AG-001.4], [AG-001.5]). Split it into list items; do not decorate the blob.\n\n### Synthesis-eligible gap clusters (mistakes no current instruction covers)\n- none above the evidence threshold"
+}
