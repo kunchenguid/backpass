@@ -156,10 +156,11 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   second full file is warned about, never silently ignored or double-written.
 - **Oversized paragraphs split for attribution only.** `parseMemoryUnits` still emits one
   positional `AG-nnn` per paragraph or list item (apply, reanchor, and the removal floor
-  stay line-oriented). A paragraph above `ATTRIBUTION_SPLIT_TOKENS` also gets `AG-nnn.m`
-  sentence parts in the instruction index and fold so evidence cannot smear across a blob;
-  synthesis is told to restructure that paragraph into list items rather than bold-label
-  it. See `src/memory.js` and `renderEvidenceForPrompt` in `src/fold.js`.
+  stay line-oriented). Eligible prose above `ATTRIBUTION_SPLIT_TOKENS` can also get
+  `AG-nnn.m` parts at high-confidence sentence boundaries; ambiguous spans conservatively remain
+  unsplit. The instruction index and fold use those parts so evidence cannot smear across a
+  blob, and synthesis is told to restructure repeated non-compliance into list items rather
+  than bold-label it. See `src/memory.js` and `renderEvidenceForPrompt` in `src/fold.js`.
 - **Never trust model-reported numbers.** Token deltas and budget projections are measured
   in `src/proposal.js` from the actual text; the synthesis model's own figures are ignored.
   Usage accounting comes from acpx's `[acpx] tokens:` stderr line, which acpx prints
@@ -187,9 +188,10 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   without `--force` after a memory edit reads as "the file changed," not as a broken cache.
 - **Cross-surface duplication is report-only.** `crossSurfaceDuplicates` (`src/overlap.js`)
   flags memory-file units whose text substantially overlaps a skill description or body
-  (Dice >= 0.6, same bar as gap coverage). Fold stamps it on the instruction row and
-  `backpass status` lists it. Description overlap duplicates always-loaded tokens and can
-  guide a shrink to drop the memory-file copy. Body overlap is only placement evidence: a
+  (Dice >= 0.6, same bar as gap coverage). Fold renders each overlap once in the evidence,
+  including an oversized parent that has no instruction row, and `backpass status` lists it.
+  Description overlap duplicates always-loaded tokens and can guide a shrink to drop the
+  memory-file copy. Body overlap is only placement evidence: a
   skill body loads on trigger, so its memory copy may be the only always-loaded coverage.
   Nothing is deleted automatically. Relevance still accrues to the memory-file alias until
   that copy is gone.

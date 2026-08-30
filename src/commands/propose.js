@@ -30,9 +30,7 @@ import { transcriptIdentity } from "../transcript.js";
  */
 export async function foldForRun(ctx, memoryFile, memoryHash, skills = [], transcripts = []) {
   const { state, minGapEvidence, gapLedgerMaxAge } = ctx.config;
-  const selectedByIdentity = new Map(
-    transcripts.map((transcript) => [transcriptIdentity(transcript), transcript]),
-  );
+  const selectedByIdentity = new Map(transcripts.map((transcript) => [transcriptIdentity(transcript), transcript]));
   const selected = new Set(selectedByIdentity.keys());
   const evidence = state.listEvidence();
   const identitiesByLegacyId = new Map();

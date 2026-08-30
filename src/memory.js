@@ -12,13 +12,14 @@ import { estimateTokens } from "./tokens.js";
  *   - units come from list items and paragraphs inside those sections
  *   - each unit gets a content hash (survives cosmetic edits elsewhere in the file)
  *     and a readable alias AG-001, AG-002, ... used in prompts and evidence
- *   - a paragraph above ATTRIBUTION_SPLIT_TOKENS is sentence-split into AG-nnn.m parts
- *     for attribution and fold only; the parent alias and line span stay put
+ *   - eligible prose above ATTRIBUTION_SPLIT_TOKENS is conservatively split at
+ *     high-confidence sentence boundaries into AG-nnn.m attribution parts; the parent
+ *     alias and line span stay put
  *
  * Evidence anchors to an addressable instruction id; the hash lets it re-anchor across runs.
  */
 
-/** Paragraphs above this are too coarse to attribute; sentence parts get dotted ids. */
+/** Eligible prose above this is too coarse to attribute and may get dotted sentence-part ids. */
 export const ATTRIBUTION_SPLIT_TOKENS = 120;
 
 const FENCE = /^\s*(```|~~~)/;

@@ -191,6 +191,13 @@ most important defence against a model confabulating influence. Negative evidenc
 weighted highest, but its class determines what it supports: non-compliance supports
 reinforcement, while only harm supports removal.
 
+To avoid smearing evidence across a large prose blob, backpass splits eligible prose
+paragraphs above 120 tokens at high-confidence sentence boundaries for attribution only.
+Ambiguous boundaries stay unsplit, and the paragraph remains one line-oriented edit unit.
+When its sentence parts
+draw repeated non-compliance, synthesis is steered to restructure the paragraph into list
+items instead of adding a cosmetic label.
+
 Results are cached per transcript, keyed to the transcript's content, the effective
 memory-surface hash, and the analysis-index version. The surface hash covers the memory-file
 set plus every project skill's name and description. Edit a memory file or skill description
