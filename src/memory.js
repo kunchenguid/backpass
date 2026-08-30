@@ -135,48 +135,64 @@ function unitHasFence(text) {
 
 const ABBREVIATIONS = new Set([
   "approx",
+  "capt",
   "cf",
+  "cmdr",
+  "col",
   "dept",
   "dr",
   "e.g",
   "etc",
   "fig",
+  "gen",
+  "gov",
   "i.e",
   "inc",
   "jr",
+  "lt",
   "misc",
   "mr",
   "mrs",
   "ms",
   "no",
   "prof",
+  "rep",
+  "rev",
+  "sen",
   "sr",
   "st",
   "v",
   "vs",
 ]);
 
-function ambiguousPeriodEnding(text) {
-  const token = text.match(/([\p{L}.]+)\.$/u)?.[1] || "";
-  if (!token) return true;
-  return (
-    ABBREVIATIONS.has(token.toLowerCase()) ||
-    /^\p{L}$/u.test(token) ||
-    /^(?:\p{L}\.)+\p{L}$/u.test(token)
-  );
-}
+function confidentSentenceBoundary(text, sentenceStart, terminator) {
+  let end = terminator + 1;
+  while (end < text.length && /["')\]}*_~\u2019\u201d]/u.test(text[end])) end += 1;
+  if (end >= text.length || !/\s/u.test(text[end])) return null;
 
-function startsSentence(text, index) {
-  let start = index;
-  while (start < text.length && /["'([{*`_~\u2018\u201c]/u.test(text[start])) start += 1;
-  return start < text.length && /[\p{L}\p{N}$@/\\]/u.test(text[start]);
-}
+  let next = end;
+  while (next < text.length && /\s/u.test(text[next])) next += 1;
+  let visibleNext = next;
+  while (visibleNext < text.length && /["'([{*`_~\u2018\u201c]/u.test(text[visibleNext])) visibleNext += 1;
+  if (visibleNext >= text.length || !/[\p{L}\p{N}$@/\\]/u.test(text[visibleNext])) return null;
 
-function isDotPathToken(text, index) {
-  let tokenStart = index;
-  while (tokenStart > 0 && !/\s/u.test(text[tokenStart - 1])) tokenStart -= 1;
-  const token = text.slice(tokenStart, index + 1).replace(/^["'([{*_~]+/u, "");
-  return token === "." || token === "..";
+  if (text[terminator] === ".") {
+    if (terminator === 0 || /\s/u.test(text[terminator - 1])) return null;
+    const rawPrefix = text.slice(sentenceStart, terminator).trim();
+    if (/^\d+$/u.test(rawPrefix)) return null;
+    const prefix = rawPrefix.replace(/["')\]}*`_~\u2019\u201d]+$/u, "");
+    const token = prefix.match(/([\p{L}.]+)$/u)?.[1] || "";
+    if (!token) return null;
+    if (
+      ABBREVIATIONS.has(token.toLowerCase()) ||
+      /^\p{L}$/u.test(token) ||
+      /^(?:\p{L}\.)+\p{L}$/u.test(token)
+    ) {
+      return null;
+    }
+  }
+
+  return { end, next };
 }
 
 export function splitAttributionSentences(text) {
@@ -197,17 +213,11 @@ export function splitAttributionSentences(text) {
       continue;
     }
     if (codeDelimiter || ![".", "!", "?"].includes(text[i])) continue;
-    let end = i + 1;
-    while (end < text.length && /["')\]}*_~\u2019\u201d]/u.test(text[end])) end += 1;
-    if (end >= text.length || !/\s/u.test(text[end])) continue;
-    let next = end;
-    while (next < text.length && /\s/u.test(text[next])) next += 1;
-    if (!startsSentence(text, next)) continue;
-    if (text[i] === "." && isDotPathToken(text, i)) continue;
-    if (text[i] === "." && ambiguousPeriodEnding(text.slice(start, i + 1))) continue;
-    sentences.push(text.slice(start, end).trim());
-    start = next;
-    i = next - 1;
+    const boundary = confidentSentenceBoundary(text, start, i);
+    if (!boundary) continue;
+    sentences.push(text.slice(start, boundary.end).trim());
+    start = boundary.next;
+    i = boundary.next - 1;
   }
   sentences.push(text.slice(start).trim());
   return sentences.length >= 2 ? sentences.filter(Boolean) : [];

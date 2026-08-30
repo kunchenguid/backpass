@@ -151,6 +151,21 @@ test("oversized Markdown-heavy paragraphs split realistic sentences without spli
   assert.ok(unit.parts.some((part) => part.text.startsWith("Review with Dr. Smith")));
 });
 
+test("the confidence segmenter handles abbreviations, Markdown endings, and short sentences", () => {
+  const cycle =
+    "Consult Capt. Smith before release. Run **checks**. Deploy safely. Run `pnpm test`. Deploy safely. Run checks. pnpm test verifies them.";
+  const blob = Array.from({ length: 8 }, () => cycle).join(" ");
+  const [unit] = parseMemoryUnits(`# T\n\n${blob}\n`);
+
+  assert.ok(estimateTokens(blob) > ATTRIBUTION_SPLIT_TOKENS);
+  assert.ok(unit.parts?.every((part) => part.text !== "Consult Capt."));
+  assert.ok(unit.parts?.some((part) => part.text === "Consult Capt. Smith before release."));
+  assert.ok(unit.parts?.some((part) => part.text === "Run **checks**."));
+  assert.ok(unit.parts?.some((part) => part.text === "Run `pnpm test`."));
+  assert.ok(unit.parts?.some((part) => part.text === "Run checks."));
+  assert.ok(unit.parts?.some((part) => part.text === "pnpm test verifies them."));
+});
+
 test("clear short sentences split regardless of segment length", () => {
   const cycle = "Run checks. pnpm test verifies them.";
   const blob = Array.from({ length: 20 }, () => cycle).join(" ");
