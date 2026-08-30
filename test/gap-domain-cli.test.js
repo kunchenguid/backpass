@@ -239,7 +239,10 @@ test("a firstmate-class orchestrator-repo sighting judged project corroborates i
 
   assert.equal(summary.analyzedSessions, 2);
   assert.equal(summary.totals.orchestrationGapSightings, 0, "the causal test kept this repo's own mistakes as project");
-  assert.deepEqual(summary.gaps.map((gap) => gap.proposedInstruction), [ORCHESTRATOR_REPO_GAP]);
+  assert.deepEqual(
+    summary.gaps.map((gap) => gap.proposedInstruction),
+    [ORCHESTRATOR_REPO_GAP],
+  );
 
   const rendered = renderEvidenceForPrompt(summary);
   assert.ok(rendered.includes(ORCHESTRATOR_REPO_GAP), "the sighting reaches the synthesis prompt");
