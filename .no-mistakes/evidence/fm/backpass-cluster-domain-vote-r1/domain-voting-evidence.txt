@@ -1,4 +1,4 @@
-=== 1 project + 1 orchestration: tie survives as synthesis eligible ===
+===== TIE SURVIVES: 2 sightings, 1 orchestration, floor 2 =====
 Sessions analyzed: 2
 Totals: 0 positive, 0 negative, 1 gap clusters (1 synthesis eligible, 0 report only, 0 singletons dropped below threshold)
 
@@ -8,10 +8,25 @@ A negative's class is what it means: `harm` = following the instruction caused d
 ### Synthesis-eligible gap clusters (mistakes no current instruction covers)
 - 1 orchestration-domain sighting(s) counted as domain votes (clusters excluded only on a majority vote); they never enter this repository's memory file as their own instruction
 - sessions=2 (2 sightings, 1 orchestration) risk=high :: Read docs/sshhip.md before changing the tunnel.
-    "changed tunnel A" (pi · project · 2026-01-01)
-    "changed tunnel B" (pi · orchestr · 2026-01-01)
+    "missed tunnel process in session-1" (pi · 1 · 2026-08-01)
+    "missed tunnel process in session-2" (pi · 2 · 2026-08-01)
 
-=== 1 project + 2 orchestration: majority is report only ===
+===== MIXED BELOW FLOOR: report only, floor 3 =====
+Sessions analyzed: 2
+Totals: 0 positive, 0 negative, 1 gap clusters (0 synthesis eligible, 1 report only, 0 singletons dropped below threshold)
+
+### Per-instruction evidence
+A negative's class is what it means: `harm` = following the instruction caused damage (evidence against it); `non-compliance` = the agent ignored it (evidence it failed to steer - argues for reinforcement, never deletion); `irrelevant` = no real bearing.
+
+### Synthesis-eligible gap clusters (mistakes no current instruction covers)
+- 1 orchestration-domain sighting(s) counted as domain votes (clusters excluded only on a majority vote); they never enter this repository's memory file as their own instruction
+- no gap cluster is eligible for a repository proposal
+
+### REPORT ONLY - not synthesis-eligible evidence
+Do not create or justify proposals from these diagnostic clusters.
+- sessions=2 (2 sightings, 1 orchestration) risk=high :: Read docs/sshhip.md before changing the tunnel.
+
+===== MAJORITY ORCHESTRATION: report only, floor 2 =====
 Sessions analyzed: 3
 Totals: 0 positive, 0 negative, 1 gap clusters (0 synthesis eligible, 1 report only, 0 singletons dropped below threshold)
 
@@ -25,3 +40,15 @@ A negative's class is what it means: `harm` = following the instruction caused d
 ### REPORT ONLY - not synthesis-eligible evidence
 Do not create or justify proposals from these diagnostic clusters.
 - sessions=3 (3 sightings, 2 orchestration; domain excluded by majority vote) risk=high :: Read docs/sshhip.md before changing the tunnel.
+
+===== PURE ORCHESTRATION SINGLETON: hidden below floor 2 =====
+Sessions analyzed: 1
+Totals: 0 positive, 0 negative, 0 gap clusters (0 synthesis eligible, 0 report only, 1 singletons dropped below threshold)
+
+### Per-instruction evidence
+A negative's class is what it means: `harm` = following the instruction caused damage (evidence against it); `non-compliance` = the agent ignored it (evidence it failed to steer - argues for reinforcement, never deletion); `irrelevant` = no real bearing.
+
+### Synthesis-eligible gap clusters (mistakes no current instruction covers)
+- 1 orchestration-domain sighting(s) counted as domain votes (clusters excluded only on a majority vote); they never enter this repository's memory file as their own instruction
+- none above the evidence threshold
+
