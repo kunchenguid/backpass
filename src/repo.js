@@ -99,16 +99,31 @@ function cloneRemoteIdentity(remote, root) {
 }
 
 function listRemoteUrls(root) {
-  let raw;
+  let names;
   try {
-    raw = git(["remote", "-v"], root);
+    names = git(["remote"], root)
+      .split("\n")
+      .filter(Boolean);
   } catch {
     return [];
   }
-  return raw
-    .split("\n")
-    .map((line) => line.split(/\s+/)[1])
-    .filter(Boolean);
+
+  const urls = new Set();
+  for (const name of names) {
+    for (const args of [
+      ["remote", "get-url", "--all", name],
+      ["remote", "get-url", "--push", "--all", name],
+    ]) {
+      try {
+        for (const url of git(args, root).split("\n")) {
+          if (url) urls.add(url);
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+  return [...urls];
 }
 
 function listRemotes(root) {
