@@ -13,7 +13,7 @@ import {
   SHRINK_EDIT_TOKENS,
   SHRINK_MAX_EDITS,
 } from "../src/proposal.js";
-import { foldEvidence, renderEvidenceForPrompt } from "../src/fold.js";
+import { foldEvidence, renderEvidenceForPrompt, renderEvidenceReport } from "../src/fold.js";
 import { estimateTokens } from "../src/tokens.js";
 import { isSuppressedByRejection, recordRejection, State } from "../src/state.js";
 import { applyDecisions } from "../src/apply/writer.js";
@@ -270,27 +270,13 @@ test("folded domain votes separate synthesis evidence from report-only diagnosti
     folded(["orchestration", "orchestration", "project"], 2),
     folded(["project", "orchestration"], 3),
   ]) {
-    const rendered = renderEvidenceForPrompt(summary);
-    const [eligibleEvidence, reportOnlyEvidence] = rendered.split("### REPORT ONLY");
-    assert.doesNotMatch(eligibleEvidence, /Read docs\/sshhip\.md|quote [123]/);
-    assert.match(reportOnlyEvidence, /not synthesis-eligible evidence/);
-    assert.match(reportOnlyEvidence, /Do not create or justify proposals/);
-    assert.match(reportOnlyEvidence, /Read docs\/sshhip\.md/);
-    assert.doesNotMatch(reportOnlyEvidence, /quote [123]/);
+    const prompt = renderEvidenceForPrompt(summary);
+    assert.doesNotMatch(prompt, /Read docs\/sshhip\.md|quote [123]|REPORT ONLY/);
+    const report = renderEvidenceReport(summary);
+    assert.match(report, /REPORT ONLY - not synthesis-eligible evidence/);
+    assert.match(report, /Read docs\/sshhip\.md/);
+    assert.doesNotMatch(report, /quote [123]/);
   }
-
-  const reportOnly = folded(["orchestration", "orchestration", "project"], 2);
-  const reportOnlyQuote = reportOnly.reportOnlyGaps[0].quotes[0];
-  const reportOnlyEvidence = [{ polarity: "negative", text: reportOnlyQuote.text, source: reportOnlyQuote.source }];
-  const unrelated = gate({
-    edit: memoryEdit((text) => text.replace("- Prefer small commits.", "- Prefer focused commits.")),
-    annotation: {
-      edits: [claim(["H1"], { kind: "rewrite", evidence: reportOnlyEvidence, transcripts: 3 })],
-    },
-    context: { summary: reportOnly },
-  });
-  assert.equal(unrelated.violations.length, 0);
-  assert.equal(unrelated.proposal.edits.length, 1);
 });
 
 test("the per-run edit cap is enforced - it is the learning rate", () => {
@@ -376,6 +362,7 @@ test("the proposal carries the fold's gap-funnel counts for the apply surface", 
           negative: 7,
           gapSightings: 9,
           gapClusters: 0,
+          reportOnlyGapClusters: 2,
           droppedGapSingletons: 3,
           orchestrationGapSightings: 6,
         },
@@ -388,6 +375,7 @@ test("the proposal carries the fold's gap-funnel counts for the apply surface", 
   });
   assert.equal(funneled.proposal.stats.gapSightings, 9);
   assert.equal(funneled.proposal.stats.orchestrationGapSightings, 6);
+  assert.equal(funneled.proposal.stats.reportOnlyGapClusters, 2);
   assert.equal(funneled.proposal.stats.droppedGapSingletons, 3);
   assert.equal(funneled.proposal.stats.gapClusters, 0);
 
@@ -395,6 +383,7 @@ test("the proposal carries the fold's gap-funnel counts for the apply surface", 
   const legacy = gate({ edit, annotation });
   assert.equal(legacy.proposal.stats.gapSightings, null);
   assert.equal(legacy.proposal.stats.orchestrationGapSightings, null);
+  assert.equal(legacy.proposal.stats.reportOnlyGapClusters, null);
   assert.equal(legacy.proposal.stats.droppedGapSingletons, null);
 });
 
