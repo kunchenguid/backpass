@@ -204,7 +204,7 @@ test("generic punctuation cannot suppress later clear attribution boundaries", (
 
 test("paths, URLs, and inline code do not create fragment attribution targets", () => {
   const cycle =
-    'Read docs/config.md before editing. Read docs/config.md. Then verify the result. Read "C:\\Program Files\\Foo. Bar\\config" before editing. Read C:\\Program Files\\Foo. Bar\\config before editing. Read docs/Program Files/Foo. Bar/config before editing. Read docs/Foo. Bar Baz/config before editing. Visit https://example.test/docs/config.md before editing. Run `node app.js. --watch` afterward.';
+    'Read docs/config.md before editing. Read docs/config.md. Then verify the result. Read docs/config.md. src/main.js does the work. Read "C:\\Program Files\\Foo. Bar\\config" before editing. Read C:\\Program Files\\Foo. Bar\\config before editing. Read docs/Program Files/Foo. Bar/config before editing. Read docs/Foo. Bar Baz/config before editing. Visit https://example.test/docs/config.md before editing. Run `node app.js. --watch` afterward.';
   const blob = Array.from({ length: 8 }, () => cycle).join(" ");
   const [unit] = parseMemoryUnits(`# T\n\n${blob}\n`);
 
@@ -214,6 +214,8 @@ test("paths, URLs, and inline code do not create fragment attribution targets", 
   assert.ok(unit.parts.some((part) => part.text === "Read docs/config.md."));
   assert.ok(unit.parts.some((part) => part.text === "Then verify the result."));
   assert.ok(unit.parts.every((part) => part.text !== "Read docs/config.md. Then verify the result."));
+  assert.ok(unit.parts.some((part) => part.text === "src/main.js does the work."));
+  assert.ok(unit.parts.every((part) => part.text !== "Read docs/config.md. src/main.js does the work."));
   assert.ok(unit.parts.some((part) => part.text === 'Read "C:\\Program Files\\Foo. Bar\\config" before editing.'));
   assert.ok(unit.parts.every((part) => part.text !== 'Read "C:\\Program Files\\Foo.'));
   assert.ok(unit.parts.some((part) => part.text === "Read C:\\Program Files\\Foo. Bar\\config before editing."));

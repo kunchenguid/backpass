@@ -183,7 +183,9 @@ function confidentSentenceBoundary(text, sentenceStart, terminator) {
     const precedingToken = beforeTerminator.match(/\S+$/u)?.[0] || "";
     if (/[\\/]/u.test(precedingToken)) {
       const nextTokens = text.slice(next).trimStart().split(/\s+/u).slice(0, 2).join(" ");
-      if (/[\\/]/u.test(nextTokens)) return null;
+      const finalPathSegment = precedingToken.split(/[\\/]/u).at(-1) || "";
+      const pathEndsWithExtension = /\.[\p{L}\p{N}]+$/u.test(finalPathSegment);
+      if (/[\\/]/u.test(nextTokens) && !pathEndsWithExtension) return null;
     }
     const rawPrefix = beforeTerminator.trim();
     if (/^\d+$/u.test(rawPrefix)) return null;
