@@ -237,10 +237,16 @@ test("a firstmate-class orchestrator-repo sighting judged project corroborates i
   const dir = analyzedRepo({ pathBin: orchRepoBinDir, acpx: fakeAcpxOrchRepo });
   const state = new State(dir).ensure();
   const resolved = resolveMemoryFiles(dir, ["AGENTS.md", "CLAUDE.md"]);
+  const transcripts = state
+    .listEvidence()
+    .filter((evidence) => evidence.memoryHash === resolved.hash)
+    .map((evidence) => evidence.transcript);
   const summary = await foldForRun(
     { config: { state, minGapEvidence: 2, gapLedgerMaxAge: "90d" } },
     resolved.primary,
     resolved.hash,
+    [],
+    transcripts,
   );
 
   assert.equal(summary.analyzedSessions, 2);
