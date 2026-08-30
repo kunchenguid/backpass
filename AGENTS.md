@@ -130,7 +130,7 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   pure deletion inside a skill file is refused outright - skill content is rewritten or
   extracted, never dropped. A rewrite whose measured hunks add more than
   `REWRITE_NET_ADD_TOKENS` (~10) net is gated like an add (`minGapEvidence` sessions);
-  a pure tightening is not. Non-compliance never satisfies the floor; the >= 20%-relevance
+  a net-negative or smaller rewrite is not. Non-compliance never satisfies the floor; the >= 20%-relevance
   placement table stays prompt guidance by the captain's explicit decision - do not harden it.
 - **Negative evidence has a sign the pipeline must not lose.** Analysis classifies every
   negative (`harm` / `non-compliance` / `irrelevant`, `sanitizeEvidence` drops other

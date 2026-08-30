@@ -67,7 +67,7 @@ export const SHRINK_MAX_EDITS = 20;
 export const SHRINK_EDIT_TOKENS = 40;
 /**
  * A rewrite that grows the file by more than this many tokens is gated like an add.
- * Pure tightenings (net-negative or at/below this) still clear on one session.
+ * Net-negative rewrites, and rewrites at or below this, still clear on one session.
  */
 export const REWRITE_NET_ADD_TOKENS = 10;
 
@@ -506,12 +506,9 @@ export function buildProposal(rawResult, context) {
 
     // An addition is measured, not declared: text that only goes in is a new instruction.
     // A rewrite that appends net-new text is the same loophole (one quote, one session)
-    // unless the growth is a tiny tightening. Extracts move text; they are not adds.
+    // unless the growth stays below the tolerance. Extracts move text; they are not adds.
     const onlyAdds = hunks.every((h) => h.removed === 0);
-    const netTokens = hunks.reduce(
-      (sum, h) => sum + estimateTokens(h.replace) - estimateTokens(h.find),
-      0,
-    );
+    const netTokens = hunks.reduce((sum, h) => sum + estimateTokens(h.replace) - estimateTokens(h.find), 0);
     if (
       !preservesAlwaysLoaded(edit.kind) &&
       (onlyAdds || netTokens > REWRITE_NET_ADD_TOKENS) &&
