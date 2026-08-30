@@ -129,6 +129,7 @@ async function discoverDirect(adapter, { repo, config, cutoffMs, strict, stats }
     stats.scanned += 1;
     const association = associate({ cwd: row.cwd, remotes: row.remotes || [], gitRoot: row.gitRoot }, repo, {
       worktreeGlobs: config.discovery.worktreeGlobs,
+      cwdAliases: config.discovery.cwdAliases,
     });
     if (!passesStrict(association, strict)) {
       stats.skipped += 1;
@@ -183,7 +184,7 @@ function discoverFiles(adapter, { repo, config, cutoffMs, strict, stats, cache, 
     const association = associate(
       { cwd: descriptor.cwd, remotes: descriptor.remotes || [], gitRoot: descriptor.gitRoot },
       repo,
-      { worktreeGlobs: config.discovery.worktreeGlobs },
+      { worktreeGlobs: config.discovery.worktreeGlobs, cwdAliases: config.discovery.cwdAliases },
     );
     if (!passesStrict(association, strict)) {
       stats.skipped += 1;

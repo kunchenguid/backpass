@@ -91,3 +91,40 @@ test("globToRegExp treats * as one segment and ** as many", () => {
   assert.ok(!globToRegExp("/a/*/c").test("/a/b/x/c"));
   assert.ok(globToRegExp("/a/**/c").test("/a/b/x/c"));
 });
+
+test("tier 1 alias: cwdAliases maps a non-repo cwd onto the repo root", () => {
+  const { repo, live } = makeRepo();
+  try {
+    const alias = { "/Users/someone": "." };
+    const res = associate({ cwd: "/Users/someone", remotes: [] }, repo, { cwdAliases: alias });
+    assert.ok(res, "alias cwd should associate");
+    assert.equal(res.tier, 1);
+    assert.equal(res.confidence, "alias");
+  } finally {
+    fs.rmSync(live, { recursive: true, force: true });
+  }
+});
+
+test("cwdAliases target outside the repo does not associate", () => {
+  const { repo, live } = makeRepo();
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-outside-"));
+  try {
+    const res = associate({ cwd: "/Users/someone", remotes: [] }, repo, {
+      cwdAliases: { "/Users/someone": outside },
+    });
+    assert.equal(res, null);
+  } finally {
+    fs.rmSync(outside, { recursive: true, force: true });
+    fs.rmSync(live, { recursive: true, force: true });
+  }
+});
+
+test("cwdAliases absent leaves existing behaviour unchanged", () => {
+  const { repo, live } = makeRepo();
+  try {
+    const res = associate({ cwd: "/Users/someone", remotes: [] }, repo, {});
+    assert.equal(res, null);
+  } finally {
+    fs.rmSync(live, { recursive: true, force: true });
+  }
+});
