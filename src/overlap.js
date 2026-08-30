@@ -20,6 +20,38 @@ export const CROSS_SURFACE_OVERLAP_THRESHOLD = 0.6;
  * Surfaces a memory-file unit can duplicate: the skill's always-loaded description,
  * the full body, and each body unit (so a restated paragraph still matches).
  */
+function textVariants(text) {
+  const original = String(text || "").trim();
+  if (!original) return [];
+  const withoutListMarker = original.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, "").trim();
+  return withoutListMarker === original ? [original] : [original, withoutListMarker];
+}
+
+function normalizeIndexLabel(text) {
+  return text
+    .toLowerCase()
+    .replace(/[`*_~[\]()]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function overlapScore(unitText, candidate) {
+  const unitVariants = textVariants(unitText);
+  const unmarked = unitVariants.at(-1);
+  const indexed = /^(.*?)(?:::|:|\s+-\s+)([\s\S]+)$/.exec(unmarked);
+  if (indexed && normalizeIndexLabel(indexed[1]) === normalizeIndexLabel(candidate.skill)) {
+    unitVariants.push(indexed[2].trim());
+  }
+
+  let best = 0;
+  for (const unitVariant of unitVariants) {
+    for (const candidateVariant of textVariants(candidate.text)) {
+      best = Math.max(best, similarity(unitVariant, candidateVariant));
+    }
+  }
+  return best;
+}
+
 function skillSurfaces(skill) {
   const surfaces = [];
   const description = String(skill?.description || "").trim();
@@ -61,7 +93,7 @@ export function crossSurfaceDuplicates(memoryFile, skills = [], threshold = CROS
   for (const unit of units) {
     let best = null;
     for (const candidate of catalog) {
-      const score = similarity(unit.text, candidate.text);
+      const score = overlapScore(unit.text, candidate);
       if (score < threshold) continue;
       if (!best || score > best.score) {
         best = {

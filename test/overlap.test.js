@@ -35,6 +35,20 @@ test("a memory unit that restates a skill description is flagged", () => {
   );
 });
 
+test("a short skill index entry is compared without its structural prefix", () => {
+  const memoryFile = {
+    path: "AGENTS.md",
+    units: parseMemoryUnits("# Skills\n\n- deploy: Run deployments.\n"),
+  };
+  const hits = crossSurfaceDuplicates(memoryFile, [
+    skill({ name: "deploy", description: "Run deployments.", body: "Deployment details." }),
+  ]);
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].instruction, "AG-001");
+  assert.equal(hits[0].surface, "description");
+  assert.equal(hits[0].score, 1);
+});
+
 test("a memory unit that restates a skill body paragraph is flagged against the body", () => {
   const body = "Always wrap migrations in a transaction before applying them.";
   const memoryFile = {
