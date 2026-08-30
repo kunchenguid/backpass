@@ -68,7 +68,7 @@ export const SHRINK_EDIT_TOKENS = 40;
 /** A rewrite whose measured changes grow by more than this many tokens is gated like an add. */
 export const REWRITE_NET_ADD_TOKENS = 10;
 
-const REWRITE_OVERLAP_THRESHOLD = 0.3;
+const REWRITE_OVERLAP_THRESHOLD = 0.6;
 const MAX_REWRITE_OVERLAP_WORDS = 512;
 
 function changedWordSet(text) {
@@ -82,23 +82,20 @@ function changedWordSet(text) {
   return words;
 }
 
-function wordSetsOverlap(removed, added) {
-  if (!removed.size || !added.size) return false;
+function rewriteHasSubstantialOverlap(hunks) {
+  const changedText = (type) =>
+    hunks
+      .flatMap((hunk) => (hunk.lines || []).filter((line) => line.type === type).map((line) => line.text))
+      .join("\n");
+  const removed = changedWordSet(changedText("del"));
+  const added = changedWordSet(changedText("ins"));
+  if (!added.size) return true;
+  if (!removed.size) return false;
   let shared = 0;
   for (const word of added) {
     if (removed.has(word)) shared += 1;
   }
-  return (2 * shared) / (removed.size + added.size) >= REWRITE_OVERLAP_THRESHOLD;
-}
-
-function rewriteHasSubstantialOverlap(hunk) {
-  const removed = (hunk.lines || []).filter((line) => line.type === "del").map((line) => changedWordSet(line.text));
-  const added = (hunk.lines || [])
-    .filter((line) => line.type === "ins")
-    .map((line) => changedWordSet(line.text))
-    .filter((words) => words.size);
-  if (!added.length) return true;
-  return added.every((words) => removed.some((candidate) => wordSetsOverlap(candidate, words)));
+  return shared / added.size >= REWRITE_OVERLAP_THRESHOLD;
 }
 
 export function effectiveMaxEdits(memoryFile, config, alwaysLoadedExtraTokens = 0) {
@@ -542,9 +539,7 @@ export function buildProposal(rawResult, context) {
       0,
     );
     const growsAboveRewriteTolerance = estimateTokensFromBytes(Math.max(0, netAddedBytes)) > REWRITE_NET_ADD_TOKENS;
-    const introducesNewText = hunks.some(
-      (hunk) => hunk.added > 0 && (hunk.removed === 0 || !rewriteHasSubstantialOverlap(hunk)),
-    );
+    const introducesNewText = hunks.some((hunk) => hunk.added > 0) && !rewriteHasSubstantialOverlap(hunks);
     if (
       !preservesAlwaysLoaded(edit.kind) &&
       (growsAboveRewriteTolerance || introducesNewText) &&

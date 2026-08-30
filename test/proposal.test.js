@@ -280,7 +280,7 @@ test("a single-session rewrite cannot hide growth through independently rounded 
 test("multiple middle-shortening rewrite hunks remain a single-session tightening", () => {
   const first = "- Whenever a PR is mentioned, include its URL.";
   const second = "- Use Node 18 via nvm before running any script.";
-  const tighterFirst = "- Include the pull request URL.";
+  const tighterFirst = "- Include the PR URL.";
   const tighterSecond = "- Use Node 18 with nvm.";
   assert.ok(estimateTokens(tighterFirst) < estimateTokens(first));
   assert.ok(estimateTokens(tighterSecond) < estimateTokens(second));
@@ -362,6 +362,23 @@ test("overlapping split and joined tightenings remain eligible with one session"
     assert.deepEqual(violations, [], name);
     assert.equal(proposal.edits.length, 1, name);
   }
+});
+
+test("one long rule can tighten into many covered bullets with one session", () => {
+  const words = Array.from({ length: 100 }, (_, index) => `term${index}`);
+  const original = `- ${words.join(" ")}.`;
+  const tighter = Array.from({ length: 5 }, (_, index) => `- ${words.slice(index * 10, index * 10 + 10).join(" ")}.`).join(
+    "\n",
+  );
+  const { proposal, violations, measured } = gate({
+    text: `# Memory\n\n${original}\n`,
+    edit: memoryEdit((t) => t.replace(original, tighter)),
+    annotation: { edits: [claim(["H1"], { kind: "rewrite", title: "split long rule", transcripts: 1 })] },
+  });
+  assert.equal(measured.changes.length, 1);
+  assert.ok(estimateTokens(tighter) < estimateTokens(original));
+  assert.deepEqual(violations, []);
+  assert.equal(proposal.edits.length, 1);
 });
 
 test("a long overlapping tightening remains eligible with one session", () => {
