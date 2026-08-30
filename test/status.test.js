@@ -34,6 +34,23 @@ async function captureStatus(repo, json) {
   return lines;
 }
 
+test("status counts synthesis-eligible and report-only gap clusters", async () => {
+  const repo = makeRepo({ "AGENTS.md": MEMORY });
+  const state = new State(repo.root).ensure();
+  state.writeSummary({
+    analyzedSessions: 4,
+    totals: {
+      positive: 2,
+      negative: 1,
+      gapClusters: 1,
+      reportOnlyGapClusters: 2,
+    },
+  });
+
+  const text = (await captureStatus(repo, false)).join("\n");
+  assert.match(text, /3 gap cluster\(s\) \(1 synthesis eligible · 2 report only\)/);
+});
+
 test("status reports one always-loaded budget over memory and skill descriptions", async () => {
   const repo = makeRepo({
     "AGENTS.md": MEMORY,
