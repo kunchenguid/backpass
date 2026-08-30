@@ -181,7 +181,7 @@ function confidentSentenceBoundary(text, sentenceStart, terminator) {
     const rawPrefix = text.slice(sentenceStart, terminator).trim();
     if (/^\d+$/u.test(rawPrefix)) return null;
     const prefix = rawPrefix.replace(/["')\]}*`_~\u2019\u201d]+$/u, "");
-    const token = prefix.match(/([\p{L}.]+)$/u)?.[1] || "";
+    const token = prefix.match(/([\p{L}\p{N}.]+)$/u)?.[1] || "";
     if (!token) return null;
     if (
       ABBREVIATIONS.has(token.toLowerCase()) ||
@@ -197,7 +197,6 @@ function confidentSentenceBoundary(text, sentenceStart, terminator) {
 
 export function splitAttributionSentences(text) {
   const sentences = [];
-  const spanStack = [];
   let start = 0;
   let codeDelimiter = 0;
   for (let i = 0; i < text.length; i += 1) {
@@ -215,31 +214,7 @@ export function splitAttributionSentences(text) {
       i += run - 1;
       continue;
     }
-    if (codeDelimiter) continue;
-
-    const bracketClose = { "[": "]", "(": ")", "<": ">" }[text[i]];
-    if (!escaped && bracketClose) {
-      spanStack.push(bracketClose);
-      continue;
-    }
-    if (!escaped && spanStack.at(-1) === text[i]) {
-      spanStack.pop();
-      continue;
-    }
-
-    if (["*", "_", "~"].includes(text[i])) {
-      let run = 1;
-      while (text[i + run] === text[i]) run += 1;
-      const marker = text[i].repeat(run);
-      if (!escaped && (text[i] !== "~" || run >= 2)) {
-        if (spanStack.at(-1) === marker) spanStack.pop();
-        else if (text[i + run] && !/\s/u.test(text[i + run])) spanStack.push(marker);
-      }
-      i += run - 1;
-      continue;
-    }
-
-    if (spanStack.length || ![".", "!", "?"].includes(text[i])) continue;
+    if (codeDelimiter || ![".", "!", "?"].includes(text[i])) continue;
     const boundary = confidentSentenceBoundary(text, start, i);
     if (!boundary) continue;
     sentences.push(text.slice(start, boundary.end).trim());
