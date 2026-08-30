@@ -53,7 +53,24 @@ export function globToRegExp(glob) {
 
 export function associate({ cwd, remotes = [], gitRoot = null }, repo, options = {}) {
   const globs = options.worktreeGlobs || [];
+  const aliases = options.cwdAliases || {};
   const candidates = [cwd, gitRoot].filter(Boolean);
+
+  // Tier 1 - explicit cwd alias: sessions whose cwd is not a git repo at all
+  // (e.g. a bare $HOME) can be pinned to this repo by config. The alias only
+  // holds when its target actually resolves into one of the repo's worktrees,
+  // so a stale alias can never capture another repo's sessions.
+  for (const candidate of candidates) {
+    const target = aliases[candidate] ?? aliases[realpathOrResolve(candidate)];
+    if (target == null) continue;
+    const base = repo.realRoot || repo.root;
+    const resolved = realpathOrResolve(path.isAbsolute(target) ? target : path.resolve(base, target));
+    for (const worktree of repo.worktrees) {
+      if (resolved === worktree || isUnder(resolved, worktree)) {
+        return { tier: 1, confidence: "alias", reason: `cwd alias ${candidate} -> ${target}` };
+      }
+    }
+  }
 
   // Tier 1 - live path under a known worktree.
   for (const candidate of candidates) {

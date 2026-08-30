@@ -73,6 +73,10 @@ export const DEFAULT_CONFIG = {
     harnesses: ALL_HARNESSES,
     since: "30d",
     worktreeGlobs: [],
+    /** Map a session cwd (absolute path) to a path in this repo ("." for the
+     *  root) so non-repo cwds - a bare $HOME, a scratch dir - associate at
+     *  tier 1. The alias target must resolve into a worktree of this repo. */
+    cwdAliases: {},
     minUserTurns: 2,
     includeCursorIde: false,
   },
