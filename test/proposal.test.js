@@ -298,9 +298,7 @@ test("a multi-hunk rewrite uses aggregate net growth across tightening and expan
   const expanded = `${original} ${"x".repeat(40)}`;
   const { proposal, violations, measured } = gate({
     edit: memoryEdit((t) =>
-      t
-        .replace("- Whenever a PR is mentioned, include its URL.", "- Include the PR URL.")
-        .replace(original, expanded),
+      t.replace("- Whenever a PR is mentioned, include its URL.", "- Include the PR URL.").replace(original, expanded),
     ),
     annotation: { edits: [claim(["H1", "H2"], { kind: "rewrite", title: "tighten and expand", transcripts: 1 })] },
   });
@@ -367,9 +365,10 @@ test("overlapping split and joined tightenings remain eligible with one session"
 test("one long rule can tighten into many covered bullets with one session", () => {
   const words = Array.from({ length: 100 }, (_, index) => `term${index}`);
   const original = `- ${words.join(" ")}.`;
-  const tighter = Array.from({ length: 5 }, (_, index) => `- ${words.slice(index * 10, index * 10 + 10).join(" ")}.`).join(
-    "\n",
-  );
+  const tighter = Array.from(
+    { length: 5 },
+    (_, index) => `- ${words.slice(index * 10, index * 10 + 10).join(" ")}.`,
+  ).join("\n");
   const { proposal, violations, measured } = gate({
     text: `# Memory\n\n${original}\n`,
     edit: memoryEdit((t) => t.replace(original, tighter)),
@@ -425,9 +424,7 @@ test("repeated unrelated added words count as separate uncovered occurrences", (
 });
 
 test("uncovered occurrences cannot hide between deterministic sample positions", () => {
-  const sampledIndexes = new Set(
-    Array.from({ length: 512 }, (_, index) => Math.floor((index * 1023) / 511)),
-  );
+  const sampledIndexes = new Set(Array.from({ length: 512 }, (_, index) => Math.floor((index * 1023) / 511)));
   const replacementWords = Array.from({ length: 1024 }, (_, index) =>
     sampledIndexes.has(index) ? "shared" : "intruder",
   );

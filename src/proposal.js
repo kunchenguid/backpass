@@ -80,7 +80,9 @@ function rewriteHasSubstantialOverlap(hunks) {
       .flatMap((hunk) => (hunk.lines || []).filter((line) => line.type === type).map((line) => line.text))
       .join("\n");
   const removed = new Set();
-  for (const match of changedText("del").toLowerCase().matchAll(/[\p{L}\p{N}]+/gu)) {
+  for (const match of changedText("del")
+    .toLowerCase()
+    .matchAll(/[\p{L}\p{N}]+/gu)) {
     removed.add(match[0]);
   }
   const insertedText = changedText("ins");
