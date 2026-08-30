@@ -107,7 +107,8 @@ export async function bootstrapRun(ctx, deps = {}) {
   config.state.writeSummary(folded);
   emitProgress("fold:done", {
     instructions: folded.instructions.length,
-    clustersFound: folded.totals.gapClusters + folded.totals.droppedGapSingletons,
+    clustersFound:
+      folded.totals.gapClusters + (folded.totals.reportOnlyGapClusters || 0) + folded.totals.droppedGapSingletons,
     clustersKept: folded.totals.gapClusters,
     minGapEvidence: config.minGapEvidence,
     ms: 0,

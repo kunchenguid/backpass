@@ -132,17 +132,6 @@ function countSources(evidence) {
   return new Set(evidence.map((e) => e?.source).filter(Boolean)).size;
 }
 
-function reportOnlyEvidence(edit, summary) {
-  if (summary?.gapEligibilityEnforced !== true) return null;
-  for (const gap of summary.reportOnlyGaps || []) {
-    const cited = edit.evidence.find((evidence) =>
-      (gap.quotes || []).some((quote) => evidence.text === quote.text && evidence.source === quote.source),
-    );
-    if (cited) return gap;
-  }
-  return null;
-}
-
 /** The del-line texts of a hunk that are not carried by `lineCounts` (blank lines ignored). */
 function unrecoveredRemovedLines(hunk, lineCounts) {
   const missing = [];
@@ -513,13 +502,6 @@ export function buildProposal(rawResult, context) {
 
     // An addition is measured, not declared: text that only goes in is a new instruction.
     const onlyAdds = hunks.every((h) => h.removed === 0);
-    const excludedGap = reportOnlyEvidence(edit, summary);
-    if (excludedGap) {
-      violations.push(
-        `edit ${edit.id} ("${edit.title}") cites the report-only gap "${excludedGap.proposedInstruction}"`,
-      );
-      continue;
-    }
     if (!preservesAlwaysLoaded(edit.kind) && onlyAdds && edit.transcripts < config.minGapEvidence) {
       violations.push(
         `edit ${edit.id} ("${edit.title}") adds a new instruction backed by ${edit.transcripts} session(s); ` +

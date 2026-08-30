@@ -13,6 +13,8 @@ import { loadConfig } from "../src/config.js";
 import { UserError, setLoggerSink } from "../src/logger.js";
 import { isPointerTo, memorySetHash, memoryTextHash, parseMemoryUnits } from "../src/memory.js";
 import { State } from "../src/state.js";
+import { clearProgressSink, setProgressSink } from "../src/progress.js";
+import { ProposalViolation } from "../src/proposal.js";
 
 const CLI = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../bin/backpass");
 
@@ -45,8 +47,8 @@ const discoverNone = async () => ({ transcripts: [], perHarness: {} });
 const discoverTwo = async () => ({ transcripts: [transcript("s1"), transcript("s2")], perHarness: { claude: {} } });
 
 /** Stands in for the tier-1 model: every session reports the same gap against the starter. */
-function fakeAnalyze({ transcripts, memoryFile, config, memoryHash }) {
-  for (const t of transcripts) {
+function writeFakeEvidence({ transcripts, memoryFile, config, memoryHash }, domainAt = () => undefined) {
+  for (const [index, t] of transcripts.entries()) {
     config.state.writeEvidence(t.id, {
       status: "ok",
       transcript: {
@@ -66,11 +68,20 @@ function fakeAnalyze({ transcripts, memoryFile, config, memoryHash }) {
           proposedInstruction: "Run migrations only against a scratch database.",
           recurrenceRisk: "high",
           quote: "applied the migration to prod-db",
+          ...(domainAt(index) ? { domain: domainAt(index) } : {}),
         },
       ],
     });
   }
   return { total: transcripts.length, analyzed: transcripts.length, cached: 0, skipped: 0, failed: 0, usage: [] };
+}
+
+function fakeAnalyze(args) {
+  return writeFakeEvidence(args);
+}
+
+function fakeAnalyzeMixed(args) {
+  return writeFakeEvidence(args, (index) => (index === 1 ? "orchestration" : "project"));
 }
 
 /**
@@ -239,6 +250,28 @@ test("bootstrap analyzes and folds only the balanced capped sample", async () =>
   assert.deepEqual(captured.folded, captured.analyzed);
   assert.equal(captured.analyzed.filter((item) => item.interaction === "interactive").length, 2);
   assert.equal(captured.analyzed.filter((item) => item.interaction === "non-interactive").length, 98);
+});
+
+test("bootstrap progress counts a report-only mixed cluster once", async () => {
+  const repo = makeRepo();
+  const ctx = makeCtx(repo, { minGapEvidence: 3 });
+  const events = [];
+  setProgressSink((event, data) => events.push({ event, data }));
+  try {
+    await bootstrapRun(ctx, {
+      discover: discoverTwo,
+      analyze: fakeAnalyzeMixed,
+      synthesize: async () => {
+        throw new ProposalViolation("stop after fold", []);
+      },
+    });
+  } finally {
+    clearProgressSink();
+  }
+
+  const folded = events.find((entry) => entry.event === "fold:done");
+  assert.equal(folded.data.clustersFound, 1);
+  assert.equal(folded.data.clustersKept, 0);
 });
 
 test("with transcripts: analysis gaps become the first evidence-backed instruction", async () => {

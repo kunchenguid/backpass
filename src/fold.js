@@ -205,7 +205,6 @@ export function foldEvidence(
     gaps,
     crossSurfaceDuplicates: duplicates,
     reportOnlyGaps,
-    gapEligibilityEnforced: true,
   };
 }
 
@@ -398,7 +397,8 @@ function renderEvidence(summary) {
 
   if (summary.reportOnlyGaps?.length) {
     lines.push("");
-    lines.push("### Report-only mixed gap clusters (mechanically ineligible for synthesis)");
+    lines.push("### REPORT ONLY - not synthesis-eligible evidence");
+    lines.push("Do not create or justify proposals from these diagnostic clusters.");
     for (const gap of summary.reportOnlyGaps) {
       lines.push(`- ${gapSessionLabel(gap)} risk=${gap.recurrenceRisk} :: ${gap.proposedInstruction}`);
     }
