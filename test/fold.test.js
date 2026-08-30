@@ -217,6 +217,7 @@ test("a below-threshold mixed cluster remains visible only in the report", () =>
   assert.equal(summary.gaps.length, 0);
   assert.equal(summary.reportOnlyGaps.length, 1);
   assert.equal(summary.totals.reportOnlyGapClusters, 1);
+  assert.equal(summary.totals.droppedGapSingletons, 0);
   assert.match(renderEvidenceReport(summary), /2 sightings, 1 orchestration/);
   assert.match(renderEvidenceForPrompt(summary), /Report-only mixed gap clusters/);
 });

@@ -1,7 +1,6 @@
 import { renderHunkLines } from "./diff.js";
 import { mixFromCounts } from "./interaction.js";
-import { memoryTextHash, parseMemoryUnits, similarity } from "./memory.js";
-import { GAP_SIMILARITY_THRESHOLD } from "./gap-ledger.js";
+import { memoryTextHash } from "./memory.js";
 import { editSkills, parseFrontmatter, skillDescriptionTokens } from "./skills.js";
 import { budgetGateKind, budgetStatus, estimateTokens } from "./tokens.js";
 import { isSkillFilePath, normalizeRecoveryLine, recoveredLineCounts } from "./workspace.js";
@@ -133,47 +132,13 @@ function countSources(evidence) {
   return new Set(evidence.map((e) => e?.source).filter(Boolean)).size;
 }
 
-function changedUnits(hunk, type) {
-  const text = (hunk.lines || [])
-    .filter((line) => line.type === type)
-    .map((line) => line.text)
-    .join("\n");
-  return parseMemoryUnits(text).map((unit) => unit.text);
-}
-
-function eligibleGapForUnit(edit, unit, summary) {
-  return (summary.gaps || []).find(
-    (gap) =>
-      similarity(unit, gap.proposedInstruction) >= GAP_SIMILARITY_THRESHOLD &&
-      edit.evidence.some((evidence) =>
-        (gap.quotes || []).some((quote) => evidence.text === quote.text && evidence.source === quote.source),
-      ),
-  );
-}
-
-function unsupportedNetNewUnit(edit, hunks, summary) {
+function reportOnlyEvidence(edit, summary) {
   if (summary?.gapEligibilityEnforced !== true) return null;
-  for (const hunk of hunks) {
-    const removed = changedUnits(hunk, "del");
-    const inserted = changedUnits(hunk, "ins");
-    if (inserted.length <= removed.length) continue;
-    const unmatchedRemoved = [...removed];
-    for (const unit of inserted) {
-      let bestIndex = -1;
-      let bestScore = 0;
-      for (let index = 0; index < unmatchedRemoved.length; index += 1) {
-        const score = similarity(unit, unmatchedRemoved[index]);
-        if (score > bestScore) {
-          bestIndex = index;
-          bestScore = score;
-        }
-      }
-      if (bestScore >= GAP_SIMILARITY_THRESHOLD) {
-        unmatchedRemoved.splice(bestIndex, 1);
-      } else if (!eligibleGapForUnit(edit, unit, summary)) {
-        return unit;
-      }
-    }
+  for (const gap of summary.reportOnlyGaps || []) {
+    const cited = edit.evidence.find((evidence) =>
+      (gap.quotes || []).some((quote) => evidence.text === quote.text && evidence.source === quote.source),
+    );
+    if (cited) return gap;
   }
   return null;
 }
@@ -548,10 +513,10 @@ export function buildProposal(rawResult, context) {
 
     // An addition is measured, not declared: text that only goes in is a new instruction.
     const onlyAdds = hunks.every((h) => h.removed === 0);
-    const unsupportedAddition = preservesAlwaysLoaded(edit.kind) ? null : unsupportedNetNewUnit(edit, hunks, summary);
-    if (unsupportedAddition) {
+    const excludedGap = reportOnlyEvidence(edit, summary);
+    if (excludedGap) {
       violations.push(
-        `edit ${edit.id} ("${edit.title}") adds "${unsupportedAddition.slice(0, 120)}", which does not match any synthesis-eligible gap and its evidence`,
+        `edit ${edit.id} ("${edit.title}") cites the report-only gap "${excludedGap.proposedInstruction}"`,
       );
       continue;
     }
