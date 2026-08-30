@@ -1,7 +1,7 @@
 import { renderHunkLines } from "./diff.js";
 import { memoryTextHash } from "./memory.js";
 import { editSkills, parseFrontmatter, skillDescriptionTokens } from "./skills.js";
-import { budgetGateKind, budgetStatus, estimateTokens } from "./tokens.js";
+import { budgetGateKind, budgetStatus, estimateTokens, estimateTokensFromBytes } from "./tokens.js";
 import { isSkillFilePath, normalizeRecoveryLine, recoveredLineCounts } from "./workspace.js";
 
 /**
@@ -506,12 +506,18 @@ export function buildProposal(rawResult, context) {
 
     // An addition is measured, not declared: text that only goes in is a new instruction.
     // A rewrite that appends net-new text is the same loophole (one quote, one session)
-    // unless the growth stays below the tolerance. Extracts move text; they are not adds.
+    // unless each hunk's growth stays below the tolerance. Measure the byte delta before
+    // rounding so an unrelated tightening cannot offset growth and rounding cannot hide it.
+    // Extracts move text; they are not adds.
     const onlyAdds = hunks.every((h) => h.removed === 0);
-    const netTokens = hunks.reduce((sum, h) => sum + estimateTokens(h.replace) - estimateTokens(h.find), 0);
+    const growsAboveRewriteTolerance = hunks.some(
+      (h) =>
+        estimateTokensFromBytes(Math.max(0, Buffer.byteLength(h.replace) - Buffer.byteLength(h.find))) >
+        REWRITE_NET_ADD_TOKENS,
+    );
     if (
       !preservesAlwaysLoaded(edit.kind) &&
-      (onlyAdds || netTokens > REWRITE_NET_ADD_TOKENS) &&
+      (onlyAdds || growsAboveRewriteTolerance) &&
       edit.transcripts < config.minGapEvidence
     ) {
       violations.push(
