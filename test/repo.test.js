@@ -86,7 +86,7 @@ test("sibling clones that share a remote are listed; a different remote is not",
     git(["commit", "--allow-empty", "-q", "-m", "init"], dir);
   }
   git(["remote", "add", "origin", remote], primary);
-  git(["remote", "add", "origin", "git@github.com:acme/demo.git"], sibling);
+  git(["remote", "add", "origin", "ssh://git@github.com:22/acme/demo.git"], sibling);
   git(["remote", "add", "origin", "https://github.com/acme/other.git"], other);
 
   const repo = attachSiblingClones(resolveRepo(primary));
@@ -94,6 +94,28 @@ test("sibling clones that share a remote are listed; a different remote is not",
   assert.ok(repo.siblingWorktrees.includes(siblingReal));
   assert.equal(repo.siblingWorktrees.includes(fs.realpathSync(other)), false);
   assert.equal(repo.worktrees.includes(siblingReal), false);
+});
+
+test("scheme-default ports share a sibling clone identity", () => {
+  const parent = tempDir("backpass-default-ports-");
+  const primary = path.join(parent, "primary");
+  const secureSibling = path.join(parent, "secure-sibling");
+  const plainSibling = path.join(parent, "plain-sibling");
+  for (const dir of [primary, secureSibling, plainSibling]) {
+    fs.mkdirSync(dir);
+    git(["init", "-q", "-b", "main"], dir);
+    git(["config", "user.email", "test@example.com"], dir);
+    git(["config", "user.name", "test"], dir);
+    git(["commit", "--allow-empty", "-q", "-m", "init"], dir);
+  }
+  git(["remote", "add", "secure", "https://example.com/acme/secure.git"], primary);
+  git(["remote", "add", "plain", "http://example.com/acme/plain.git"], primary);
+  git(["remote", "add", "origin", "https://example.com:443/acme/secure.git"], secureSibling);
+  git(["remote", "add", "origin", "http://example.com:80/acme/plain.git"], plainSibling);
+
+  const repo = attachSiblingClones(resolveRepo(primary));
+  assert.ok(repo.siblingWorktrees.includes(fs.realpathSync(secureSibling)));
+  assert.ok(repo.siblingWorktrees.includes(fs.realpathSync(plainSibling)));
 });
 
 test("network remote paths remain case-sensitive", () => {
