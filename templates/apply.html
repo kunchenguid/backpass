@@ -491,6 +491,12 @@
         padding: 1px 8px;
         border-top: 1px dashed var(--line-soft);
       }
+      .diff .file {
+        display: block;
+        color: var(--blue);
+        padding: 1px 8px;
+        font-weight: 650;
+      }
 
       .evidence {
         border-top: 1px dashed var(--line-soft);
@@ -997,7 +1003,8 @@
           card.appendChild(head);
 
           var body = el("div", "edit-body");
-          if (!edit.targetsMemoryFile) body.appendChild(el("div", "target", "target: " + edit.file));
+          var files = editFiles(edit);
+          body.appendChild(el("div", "target", (files.length === 1 ? "file: " : "files: ") + files.join(", ")));
           if (edit.rationale) body.appendChild(el("p", "rationale", edit.rationale));
 
           // An extract creates one skill, or several when their removals were measured as
@@ -1078,6 +1085,16 @@
           return line.length > 0;
         }
 
+        function editFiles(edit) {
+          if (!Array.isArray(edit.hunks)) return edit.file ? [edit.file] : [];
+          var files = edit.hunks.reduce(function (files, hunk) {
+            var file = hunk.file || edit.file;
+            if (file && files.indexOf(file) === -1) files.push(file);
+            return files;
+          }, []);
+          return files.length ? files : edit.file ? [edit.file] : [];
+        }
+
         // The skills one extract creates. A proposal saved before an extract could carry
         // several (merged removals) has a single `skill`; both shapes read the same way.
         function editSkills(edit) {
@@ -1096,6 +1113,7 @@
             var out = [];
             edit.hunks.forEach(function (hunk, i) {
               if (i > 0) out.push({ type: "gap", text: "\u2026" });
+              out.push({ type: "file", text: "--- " + (hunk.file || edit.file) + " ---" });
               (hunk.lines || []).forEach(function (line) {
                 out.push(line);
               });

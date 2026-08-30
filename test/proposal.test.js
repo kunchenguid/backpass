@@ -17,6 +17,7 @@ import { estimateTokens } from "../src/tokens.js";
 import { isSuppressedByRejection, recordRejection, State } from "../src/state.js";
 import { applyDecisions } from "../src/apply/writer.js";
 import { injectPayload, parseDecisions, renderApplySurface } from "../src/apply/lavish.js";
+import { renderEdit } from "../src/apply/terminal.js";
 import { extractJson, parseTokenLine, stripAcpxNoise } from "../src/acpx.js";
 import { makeRepo, stageAndMeasure, writeIn } from "./helpers/staging.js";
 
@@ -1254,10 +1255,14 @@ test("the apply surface separates memory, description, and on-trigger deltas", (
         targetsMemoryFile: true,
         deltaTokens: -20,
         descriptionDelta: 5,
-        hunks: [],
-        skills: [
-          { name: "setup", path: ".agents/skills/setup/SKILL.md", description: "Load for setup.", body: "body" },
+        hunks: [
+          { file: "AGENTS.md", lines: [{ type: "del", text: "- setup details" }] },
+          {
+            file: ".agents/skills/setup/SKILL.md",
+            lines: [{ type: "ins", text: "- setup details" }],
+          },
         ],
+        skills: [],
         evidence: [],
       },
       {
@@ -1285,9 +1290,42 @@ test("the apply surface separates memory, description, and on-trigger deltas", (
   const cards = nodes.get("edits").children;
   assert.match(textOf(cards[0]), /Δ memory -20 tok/);
   assert.match(textOf(cards[0]), /Δ description \(always-loaded\) \+5 tok/);
+  assert.match(textOf(cards[0]), /files: AGENTS\.md, \.agents\/skills\/setup\/SKILL\.md/);
+  const fileBoundaries = (function collect(node) {
+    return [node, ...node.children.flatMap(collect)];
+  })(cards[0])
+    .filter((node) => node.className === "file")
+    .map((node) => node.textContent);
+  assert.deepEqual(fileBoundaries, ["--- AGENTS.md ---", "--- .agents/skills/setup/SKILL.md ---"]);
   assert.match(textOf(cards[1]), /Δ on trigger -1 tok/);
   assert.match(textOf(cards[1]), /Δ description \(always-loaded\) -2 tok/);
+  assert.match(textOf(cards[1]), /file: \.agents\/skills\/db\/SKILL\.md/);
   assert.equal(nodes.get("gauge-title").textContent, "Always-loaded budget · AGENTS.md + skill descriptions");
+});
+
+test("terminal review labels every file in a multi-file extraction", () => {
+  const output = renderEdit(
+    {
+      kind: "extract",
+      title: "extract setup",
+      file: "AGENTS.md",
+      targetsMemoryFile: true,
+      hunks: [
+        { file: "AGENTS.md", lines: [{ type: "del", text: "- setup details" }] },
+        {
+          file: ".agents/skills/setup/SKILL.md",
+          lines: [{ type: "ins", text: "- setup details" }],
+        },
+      ],
+      skills: [],
+    },
+    0,
+    1,
+  );
+
+  assert.match(output, /files: AGENTS\.md, \.agents\/skills\/setup\/SKILL\.md/);
+  assert.match(output, /--- AGENTS\.md ---/);
+  assert.match(output, /--- \.agents\/skills\/setup\/SKILL\.md ---/);
 });
 
 test("the decision vector from the review surface is parsed back into decisions", () => {

@@ -13,7 +13,11 @@ import { formatTokens } from "../tokens.js";
 /** Measured edits carry display lines per hunk; a legacy edit shows its find/replace. */
 export function diffLinesOf(edit) {
   if (Array.isArray(edit.hunks)) {
-    return edit.hunks.flatMap((hunk, i) => [...(i > 0 ? [{ type: "gap", text: "" }] : []), ...(hunk.lines || [])]);
+    return edit.hunks.flatMap((hunk, i) => [
+      ...(i > 0 ? [{ type: "gap", text: "" }] : []),
+      { type: "file", text: `--- ${hunk.file || edit.file} ---` },
+      ...(hunk.lines || []),
+    ]);
   }
   return [
     ...(edit.find || "")
@@ -33,6 +37,7 @@ function renderDiff(edit) {
     if (line.type === "del") lines.push(color.red(`  - ${line.text}`));
     else if (line.type === "ins") lines.push(color.green(`  + ${line.text}`));
     else if (line.type === "gap") lines.push(color.dim("  ..."));
+    else if (line.type === "file") lines.push(color.dim(`  ${line.text}`));
     else lines.push(color.dim(`    ${line.text}`));
   }
   return lines.join("\n");
@@ -55,7 +60,11 @@ export function renderEdit(edit, index, total) {
   out.push("");
   out.push(`${color.bold(`[${index + 1}/${total}] ${kind}`)}  ${color.dim(deltaText)}`);
   out.push(`  ${edit.title}`);
-  out.push(`  ${color.dim(`file: ${edit.file}`)}`);
+  const hunkFiles = Array.isArray(edit.hunks)
+    ? [...new Set(edit.hunks.map((hunk) => hunk.file || edit.file).filter(Boolean))]
+    : [];
+  const files = hunkFiles.length ? hunkFiles : [edit.file].filter(Boolean);
+  out.push(`  ${color.dim(`${files.length === 1 ? "file" : "files"}: ${files.join(", ")}`)}`);
   if (edit.rationale) out.push(`  ${color.dim(edit.rationale)}`);
   out.push("");
   out.push(renderDiff(edit));
