@@ -3,14 +3,13 @@ import { foldEvidence } from "../fold.js";
 import { ledgerGapObservations, pruneGapLedger, recordGapObservations } from "../gap-ledger.js";
 import { synthesizeProposal } from "../synthesize.js";
 import { ProposalViolation } from "../proposal.js";
-import { classifyInteraction, formatCorpusMix } from "../interaction.js";
+import { formatCorpusMix, INTERACTIVE, NON_INTERACTIVE } from "../interaction.js";
 import { UserError, color, info, json, out, terminalSafe } from "../logger.js";
 import { budgetBar, formatTokens } from "../tokens.js";
 import { emitProgress } from "../progress.js";
 import { primaryMemoryFile } from "./analyze.js";
 import { printUsage } from "./usage.js";
 import { discoverForRun } from "./scan.js";
-import { transcriptIdentity } from "../transcript.js";
 
 /**
  * Fold on-disk evidence for the memory surface. Gap corroboration is counted through the
@@ -27,24 +26,18 @@ import { transcriptIdentity } from "../transcript.js";
  * immediately, if the memory surface returns to that hash - but folding it into *this*
  * proposal would score it against
  * an instruction index it was never judged against (aliases are positional) and inflate
- * `analyzedSessions` with a session this run never touched. Current-surface records are
- * reconciled with discovery metadata before folding; stale-surface records are only excluded.
+ * `analyzedSessions` with a session this run never touched. Legacy records without a
+ * valid interaction category stay excluded until analysis backfills them.
  */
-export async function foldForRun(ctx, memoryFile, memoryHash, skills = [], transcripts = []) {
+export async function foldForRun(ctx, memoryFile, memoryHash, skills = []) {
   const { state, minGapEvidence, gapLedgerMaxAge } = ctx.config;
-  const discoveredByIdentity = new Map(transcripts.map((t) => [transcriptIdentity(t), t]));
   const evidence = state.listEvidence();
-  const relevant = evidence
-    .filter((e) => e.memoryPath === memoryFile.path && e.memoryHash === memoryHash)
-    .map((record) => {
-      const transcript = discoveredByIdentity.get(transcriptIdentity(record.transcript));
-      if (!transcript) return record;
-      const interaction = classifyInteraction(transcript);
-      if (record.transcript?.interaction === interaction) return record;
-      const reconciled = { ...record, transcript: { ...record.transcript, interaction } };
-      state.writeEvidence(transcript, reconciled);
-      return reconciled;
-    });
+  const relevant = evidence.filter(
+    (e) =>
+      e.memoryPath === memoryFile.path &&
+      e.memoryHash === memoryHash &&
+      (e.transcript?.interaction === INTERACTIVE || e.transcript?.interaction === NON_INTERACTIVE),
+  );
 
   const ledger = state.readGapLedger();
   recordGapObservations(ledger, relevant, { skills });
@@ -86,12 +79,10 @@ export async function runProposal(ctx, precomputed = null) {
   // failures may leave an older proposal available to apply as if it came from this run.
   config.state.clearProposal();
   const { file, hash, skills } = precomputed || primaryMemoryFile(repo, config);
-  const discovery = precomputed ? null : await discoverForRun(ctx);
-  const transcripts = precomputed?.transcripts || discovery.transcripts;
-  const discoveredTranscripts = precomputed?.discoveredTranscripts || discovery?.discoveredTranscripts || transcripts;
+  const transcripts = precomputed?.transcripts || (await discoverForRun(ctx)).transcripts;
 
   const foldStarted = Date.now();
-  const summary = await foldForRun(ctx, file, hash, skills ?? [], discoveredTranscripts);
+  const summary = await foldForRun(ctx, file, hash, skills ?? []);
   config.state.writeSummary(summary);
   emitProgress("fold:done", {
     instructions: summary.instructions.length,

@@ -252,6 +252,28 @@ test("a 40/60 mix past the cap stays proportional rather than being forced to 50
   assert.equal(kept.length - humans, 30);
 });
 
+test("a fractional 20% floor rounds up to the next whole slot", () => {
+  const set = [
+    ...Array.from({ length: 10 }, (_, i) => ({
+      harness: "claude",
+      id: `human-${i}`,
+      interaction: "interactive",
+      startedAt: NOW - i * DAY,
+    })),
+    ...Array.from({ length: 90 }, (_, i) => ({
+      harness: "claude",
+      id: `robot-${i}`,
+      interaction: "non-interactive",
+      startedAt: NOW - i * DAY,
+    })),
+  ];
+  const kept = sampleTranscripts(set, 7, { seed: 1, now: NOW });
+  const humans = kept.filter((t) => t.interaction === "interactive").length;
+  assert.equal(kept.length, 7);
+  assert.equal(humans, 2);
+  assert.equal(kept.length - humans, 5);
+});
+
 test("capTranscripts reports a greppable line only when sampling happened", () => {
   const config = loadConfig(tempDir(), { seed: 3 });
   const small = { transcripts: transcripts(40, 30), perHarness: {} };

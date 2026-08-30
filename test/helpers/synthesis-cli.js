@@ -144,7 +144,14 @@ export function makeCliRepo({ memory, sessions = 3, files = {} }) {
         status: "ok",
         memoryPath: "AGENTS.md",
         memoryHash,
-        transcript: { harness: "claude", id: `claude:s${i}`, path: `/dev/null/s${i}`, mtimeMs: 1, bytes: 10 },
+        transcript: {
+          harness: "claude",
+          id: `claude:s${i}`,
+          path: `/dev/null/s${i}`,
+          mtimeMs: 1,
+          bytes: 10,
+          interaction: "interactive",
+        },
         positive: [],
         negative: [
           {

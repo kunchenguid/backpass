@@ -44,7 +44,7 @@ export async function bootstrapRun(ctx, deps = {}) {
   const fold = deps.fold || foldForRun;
   const { canonical, pointer } = bootstrapTargets(config.memoryFiles);
 
-  const { transcripts, discoveredTranscripts = transcripts, perHarness } = await discover(ctx);
+  const { transcripts, perHarness } = await discover(ctx);
   info(
     `${color.yellow("·")} no memory file found (looked for ${config.memoryFiles.join(", ")}) - ` +
       `bootstrapping ${canonical} from ${transcripts.length} transcript(s) + defaults`,
@@ -102,7 +102,7 @@ export async function bootstrapRun(ctx, deps = {}) {
       `${result.summary.skipped} too short · ${result.summary.failed} failed`,
   );
 
-  const folded = await fold(ctx, memoryFile, memoryHash, [], discoveredTranscripts);
+  const folded = await fold(ctx, memoryFile, memoryHash);
   config.state.writeSummary(folded);
   emitProgress("fold:done", {
     instructions: folded.instructions.length,

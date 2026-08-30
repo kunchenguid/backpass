@@ -50,7 +50,12 @@ const UNRELATED = "Never force-push to main.";
 function record(id, proposedInstruction) {
   return {
     status: "ok",
-    transcript: { id, harness: "claude", startedAt: Date.parse("2026-08-01T00:00:00Z") },
+    transcript: {
+      id,
+      harness: "claude",
+      startedAt: Date.parse("2026-08-01T00:00:00Z"),
+      interaction: "interactive",
+    },
     memoryPath: MEMORY_PATH,
     memoryHash: "h1",
     positive: [],

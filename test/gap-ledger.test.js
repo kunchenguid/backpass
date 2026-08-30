@@ -26,7 +26,7 @@ function memoryFile(text = "# T\n\n- Run pnpm test before pushing.\n- Keep the R
 function record(id, gaps, { startedAt = Date.parse("2026-08-01T00:00:00Z"), memoryHash = "h1" } = {}) {
   return {
     status: "ok",
-    transcript: { id, harness: "claude", startedAt },
+    transcript: { id, harness: "claude", startedAt, interaction: "interactive" },
     memoryPath: MEMORY_PATH,
     memoryHash,
     positive: [],

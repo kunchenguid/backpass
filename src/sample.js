@@ -98,7 +98,7 @@ export function mixAllocations(nInteractive, nNonInteractive, cap, floorRatio = 
   if (nI === 0) return { interactive: 0, nonInteractive: cap };
   if (nN === 0) return { interactive: cap, nonInteractive: 0 };
 
-  const floor = Math.max(1, Math.round(cap * floorRatio));
+  const floor = Math.max(1, Math.ceil(cap * floorRatio));
   const minI = Math.min(nI, floor);
   const minN = Math.min(nN, floor);
 

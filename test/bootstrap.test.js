@@ -40,7 +40,7 @@ function fakeAnalyze({ transcripts, memoryFile, config, memoryHash }) {
   for (const t of transcripts) {
     config.state.writeEvidence(t.id, {
       status: "ok",
-      transcript: { id: t.id, harness: t.harness, startedAt: t.startedAt },
+      transcript: { id: t.id, harness: t.harness, startedAt: t.startedAt, interaction: "interactive" },
       memoryHash,
       memoryPath: memoryFile.path,
       positive: [],

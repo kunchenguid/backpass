@@ -8,7 +8,6 @@ export async function discoverForRun(ctx) {
   const { repo, config, strict } = ctx;
   attachSiblingClones(repo, config.discovery.cloneRoots);
   const result = await discoverTranscripts({ repo, config, strict });
-  result.discoveredTranscripts = result.transcripts;
   if (ctx.limit && result.transcripts.length > ctx.limit) {
     result.truncated = result.transcripts.length - ctx.limit;
     result.transcripts = result.transcripts.slice(0, ctx.limit);

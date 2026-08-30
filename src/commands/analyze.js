@@ -63,13 +63,11 @@ export async function runAnalysis(ctx) {
     units: file.units.length,
   });
   // The cap bounds the expensive per-transcript calls; cached evidence is reused as usual.
-  const discovered = await discoverForRun(ctx);
-  const { transcripts, perHarness } = capTranscripts(discovered, config);
-  const { discoveredTranscripts } = discovered;
+  const { transcripts, perHarness } = capTranscripts(await discoverForRun(ctx), config);
 
   if (!transcripts.length) {
     info(`${color.yellow("·")} no transcripts associated with this repo`);
-    return { file, hash, skills, transcripts, discoveredTranscripts, perHarness, summary: null };
+    return { file, hash, skills, transcripts, perHarness, summary: null };
   }
 
   const summary = await analyzeTranscripts({
@@ -82,7 +80,7 @@ export async function runAnalysis(ctx) {
     force: Boolean(ctx.flags.force),
   });
 
-  return { file, hash, skills, transcripts, discoveredTranscripts, perHarness, summary };
+  return { file, hash, skills, transcripts, perHarness, summary };
 }
 
 export async function cmdAnalyze(ctx) {

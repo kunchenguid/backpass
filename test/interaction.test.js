@@ -22,10 +22,9 @@ import { loadConfig } from "../src/config.js";
 import { foldEvidence, renderEvidenceForPrompt } from "../src/fold.js";
 import { analyzeTranscripts } from "../src/analyze.js";
 import { foldForRun, printProposal } from "../src/commands/propose.js";
-import { cmdScan, discoverForRun } from "../src/commands/scan.js";
+import { cmdScan } from "../src/commands/scan.js";
 import { renderApplySurface } from "../src/apply/lavish.js";
 import { evidenceKey, State } from "../src/state.js";
-import { transcriptIdentity } from "../src/transcript.js";
 import { sampleTranscripts, capTranscripts } from "../src/sample.js";
 import { setLoggerSink } from "../src/logger.js";
 
@@ -418,60 +417,44 @@ test("cached evidence is upgraded with the current interaction category", async 
   });
 });
 
-test("fold upgrades current evidence beyond the analysis limit", async () => {
-  const repo = initRepo();
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-mix-fold-cache-"));
-  writeClaude(home, { id: "robot-1", cwd: repo, entrypoint: "sdk-cli" });
-  writeClaude(home, { id: "robot-2", cwd: repo, entrypoint: "sdk-ts" });
-  const previousHome = process.env.HOME;
-  process.env.HOME = home;
-  try {
-    const state = new State(repo).ensure();
-    const config = loadConfig(repo);
-    config.state = state;
-    config.discovery.harnesses = ["claude"];
-    config.discovery.since = "all";
-    const repoInfo = { name: "demo", root: repo, worktrees: [repo], remotes: [] };
-    const ctx = { repo: repoInfo, config, strict: false, limit: null };
-    const discovered = await discoverForRun(ctx);
-    assert.equal(discovered.transcripts.length, 2);
-    const transcript = discovered.transcripts[1];
-    const memoryHash = "sha256:memory";
-    state.writeEvidence(transcript, {
-      status: "ok",
-      transcript: {
-        harness: "claude",
-        id: transcript.id,
-        identity: transcriptIdentity(transcript),
-        path: transcript.path,
-      },
-      memoryHash,
-      memoryPath: "AGENTS.md",
-      key: evidenceKey(transcript, memoryHash),
-      positive: [{ instruction: "AG-001", quote: "followed the repository rule exactly" }],
-      negative: [],
-      gaps: [],
-    });
+test("fold excludes legacy evidence without an interaction category", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-mix-fold-cache-"));
+  const state = new State(dir).ensure();
+  const transcript = {
+    harness: "codex",
+    id: "codex-robot-outside-window",
+    nativeId: "robot-outside-window",
+    path: "/sessions/robot-outside-window.jsonl",
+    mtimeMs: 100,
+    bytes: 200,
+  };
+  const memoryHash = "sha256:memory";
+  state.writeEvidence(transcript, {
+    status: "ok",
+    transcript: { harness: "codex", id: transcript.id, path: transcript.path },
+    memoryHash,
+    memoryPath: "AGENTS.md",
+    key: evidenceKey(transcript, memoryHash),
+    positive: [{ instruction: "AG-001", quote: "followed the repository rule exactly" }],
+    negative: [],
+    gaps: [],
+  });
 
-    const limited = await discoverForRun({ ...ctx, limit: 1 });
-    assert.equal(limited.transcripts.length, 1);
-    assert.equal(limited.discoveredTranscripts.length, 2);
-    const summary = await foldForRun(
-      ctx,
-      { path: "AGENTS.md", text: "", units: [] },
-      memoryHash,
-      [],
-      limited.discoveredTranscripts,
-    );
+  const summary = await foldForRun(
+    {
+      repo: { root: dir },
+      config: { state, minGapEvidence: 2, gapLedgerMaxAge: "90d" },
+    },
+    { path: "AGENTS.md", text: "", units: [] },
+    memoryHash,
+  );
 
-    assert.deepEqual(summary.analyzedByInteraction, {
-      [INTERACTIVE]: 0,
-      [NON_INTERACTIVE]: 1,
-    });
-    assert.equal(state.readEvidence(transcript).transcript.interaction, NON_INTERACTIVE);
-  } finally {
-    process.env.HOME = previousHome;
-  }
+  assert.equal(summary.analyzedSessions, 0);
+  assert.deepEqual(summary.analyzedByInteraction, {
+    [INTERACTIVE]: 0,
+    [NON_INTERACTIVE]: 0,
+  });
+  assert.equal(state.readEvidence(transcript).transcript.interaction, undefined);
 });
 
 test("evidence records carry the category and fold reports relevance per category", async () => {
