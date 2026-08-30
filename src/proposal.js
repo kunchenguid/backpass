@@ -17,7 +17,7 @@ import { isSkillFilePath, normalizeRecoveryLine, recoveredLineCounts } from "./w
  *
  *   add      only inserts text                  (gated like a new instruction)
  *   remove   only deletes text
- *   rewrite  replaces text; a net add above REWRITE_NET_ADD_TOKENS is gated like an add
+ *   rewrite  replaces text; substantial new text is gated like an add
  *   extract  memory-file change(s) + the SKILL.md file(s) they pay for
  *            (created, or an existing skill that still has every prior line plus
  *            every line the memory hunks remove)
@@ -66,8 +66,8 @@ export const SHRINK_MAX_EDITS = 20;
 /** A typical memory-file instruction removal or tightening trims about this many tokens. */
 export const SHRINK_EDIT_TOKENS = 40;
 /**
- * A rewrite that grows the file by more than this many tokens is gated like an add.
- * Net-negative rewrites, and rewrites at or below this, still clear on one session.
+ * A rewrite that introduces more than this many tokens beyond its retained prefix and
+ * suffix is gated like an add. Pure tightenings and smaller rewrites still clear on one session.
  */
 export const REWRITE_NET_ADD_TOKENS = 10;
 
@@ -505,16 +505,35 @@ export function buildProposal(rawResult, context) {
     }
 
     // An addition is measured, not declared: text that only goes in is a new instruction.
-    // A rewrite that appends net-new text is the same loophole (one quote, one session)
-    // unless each hunk's growth stays below the tolerance. Measure the byte delta before
-    // rounding so an unrelated tightening cannot offset growth and rounding cannot hide it.
+    // A rewrite can hide an addition by deleting text in the same measured hunk, so measure
+    // inserted text after trimming the unchanged prefix and suffix rather than netting it
+    // against every removed byte. This still lets a rewrite purely tighten existing prose.
     // Extracts move text; they are not adds.
     const onlyAdds = hunks.every((h) => h.removed === 0);
-    const growsAboveRewriteTolerance = hunks.some(
-      (h) =>
-        estimateTokensFromBytes(Math.max(0, Buffer.byteLength(h.replace) - Buffer.byteLength(h.find))) >
-        REWRITE_NET_ADD_TOKENS,
-    );
+    const growsAboveRewriteTolerance = hunks.some((h) => {
+      if (!h.removed || !h.added) return false;
+      const removed = h.lines
+        .filter((line) => line.type === "del")
+        .map((line) => line.text)
+        .join("\n");
+      const added = h.lines
+        .filter((line) => line.type === "ins")
+        .map((line) => line.text)
+        .join("\n");
+      let prefix = 0;
+      while (prefix < removed.length && prefix < added.length && removed[prefix] === added[prefix]) prefix += 1;
+      let suffix = 0;
+      while (
+        suffix < removed.length - prefix &&
+        suffix < added.length - prefix &&
+        removed[removed.length - 1 - suffix] === added[added.length - 1 - suffix]
+      ) {
+        suffix += 1;
+      }
+      return (
+        estimateTokensFromBytes(Buffer.byteLength(added.slice(prefix, added.length - suffix))) > REWRITE_NET_ADD_TOKENS
+      );
+    });
     if (
       !preservesAlwaysLoaded(edit.kind) &&
       (onlyAdds || growsAboveRewriteTolerance) &&

@@ -262,6 +262,22 @@ test("a single-session rewrite cannot hide growth through independently rounded 
   assert.ok(violations.some((v) => /backed by 1 session/.test(v)));
 });
 
+test("a same-hunk deletion cannot offset more than ten tokens of new guidance", () => {
+  const original =
+    "- Before every command, first carefully inspect all available local documentation and record the relevant findings in detail.";
+  const replacement =
+    "- Route SSH through the jumphost, keep private keys outside the repo, and document every hop in the pull request.";
+  assert.ok(estimateTokens(replacement) <= estimateTokens(original), "fixture has no net growth");
+  const { proposal, violations, measured } = gate({
+    text: MEMORY_TEXT.replace("- Use Node 18 via nvm before running any script.", original),
+    edit: memoryEdit((t) => t.replace(original, replacement)),
+    annotation: { edits: [claim(["H1"], { kind: "rewrite", title: "replace guidance", transcripts: 1 })] },
+  });
+  assert.equal(measured.changes.length, 1);
+  assert.equal(proposal.edits.length, 0);
+  assert.ok(violations.some((v) => /backed by 1 session/.test(v)));
+});
+
 test("a tightening in one hunk cannot offset a substantial addition in another hunk", () => {
   const original = "- Use Node 18 via nvm before running any script.";
   const expanded = `${original} ${"x".repeat(40)}`;
