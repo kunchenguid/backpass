@@ -23,8 +23,9 @@ import { crossSurfaceDuplicates } from "./overlap.js";
  *     clusters are built from those instead of this run's records, so a gap seen once now
  *     and once on a later run graduates. Without a ledger the records alone are used.
  *  4. Memory-file units whose text substantially overlaps a skill description or body are
- *     flagged (`crossSurfaceDuplicates` in `src/overlap.js`). Report-only: the shrink sees
- *     the duplicated always-loaded tokens; nothing is deleted here.
+ *     flagged (`crossSurfaceDuplicates` in `src/overlap.js`). Description overlap exposes
+ *     duplicated always-loaded tokens; body overlap is placement evidence because skill
+ *     bodies load only on trigger. Both are report-only: nothing is deleted here.
  */
 
 /**

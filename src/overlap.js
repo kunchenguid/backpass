@@ -3,10 +3,11 @@ import { featureSimilarity, parseMemoryUnits, similarityFeatures } from "./memor
 /**
  * Cross-surface duplication (always-loaded memory file vs skills).
  *
- * A skill's description is already always-loaded; an index line or restated procedure
- * in the memory file pays those tokens twice, and relevance credit still lands on the
- * memory-file alias. This pass flags the overlap so a shrink can drop the copy. It
- * never deletes: detection and report only.
+ * A skill's description is already always-loaded, so a matching memory-file unit pays
+ * those tokens twice while relevance credit still lands on the memory-file alias. A
+ * skill-body match is different: the body loads only on trigger, so the memory unit may
+ * be the only always-loaded coverage. This pass reports both for placement decisions and
+ * never deletes; only description matches point a shrink at the memory-file copy.
  *
  * The score is the same Sorensen-Dice word-bigram `similarity` used to re-anchor
  * instructions and to decide gap coverage. The bar matches `GAP_COVERED_THRESHOLD`
@@ -17,8 +18,8 @@ import { featureSimilarity, parseMemoryUnits, similarityFeatures } from "./memor
 export const CROSS_SURFACE_OVERLAP_THRESHOLD = 0.6;
 
 /**
- * Surfaces a memory-file unit can duplicate: the skill's always-loaded description,
- * the full body, and each body unit (so a restated paragraph still matches).
+ * Skill surfaces a memory-file unit can overlap: the always-loaded description, the
+ * full triggered body, and each body unit (so a restated paragraph still matches).
  */
 function textVariants(text) {
   const original = String(text || "").trim();

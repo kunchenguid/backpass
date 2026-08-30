@@ -100,9 +100,7 @@ export async function cmdStatus(ctx) {
     for (const hit of duplicates) {
       const where = hit.memoryPath && hit.memoryPath !== resolved.primary?.path ? ` ${hit.memoryPath}` : "";
       const placement =
-        hit.surface === "description"
-          ? " · duplicated always loaded"
-          : " · body loads on trigger; weigh placement";
+        hit.surface === "description" ? " · duplicated always loaded" : " · body loads on trigger; weigh placement";
       out(
         `  ${hit.instruction}${where} restates ${hit.skill} ${hit.surface}` +
           ` · ${formatTokens(hit.tokens)} tok · similarity ${hit.score.toFixed(2)}${placement}`,

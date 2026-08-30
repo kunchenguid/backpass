@@ -185,9 +185,12 @@ replaced with fresh judgments.
 
 Evidence is grouped by instruction, giving each one a positive/negative count, a count of
 distinct sessions with harm-class negatives, and a **relevance** figure: the share of
-analyzed sessions in which it mattered at all. Duplicate gaps across sessions are
-clustered, and clusters seen in fewer than `minGapEvidence` sessions (default 2) are
-dropped. One bad session never rewrites the weights.
+analyzed sessions in which it mattered at all. The fold also reports memory-file units
+that substantially overlap a project skill. An overlap with a skill description duplicates
+always-loaded tokens and points the shrink at the memory-file copy; an overlap with a
+triggered skill body is placement evidence only, since the memory copy may be the only
+always-loaded coverage. Neither kind is deleted automatically. Duplicate gaps across
+sessions are clustered, and clusters seen in fewer than `minGapEvidence` sessions (default 2) are dropped. One bad session never rewrites the weights.
 
 Whether two sightings are one gap is a judgment call, not a word-overlap score - models
 paraphrase, and a paraphrase that fails a lexical match would hide real recurrence.
@@ -405,7 +408,7 @@ pointer-aware:
 | `backpass analyze` | calculate loss: the tier-1 pass over pending transcripts                                 |
 | `backpass propose` | aggregate gradients + gradient descent: the tier-2 pass from cached evidence             |
 | `backpass apply`   | review and write the accepted edits                                                      |
-| `backpass status`  | cache state, failed transcripts, budget bars                                             |
+| `backpass status`  | cache state, failed transcripts, budget bars, and cross-surface overlaps                 |
 | `backpass init`    | write `.backpassrc.json`, exclude `.backpass/` locally                                   |
 
 Run `backpass --help` for the full flag list.
