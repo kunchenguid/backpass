@@ -18,11 +18,13 @@ import { crossSurfaceDuplicates } from "./overlap.js";
  *     ledger); the clustering here stays deterministic. Per-sighting `domain` votes
  *     travel with the cluster; the fold decides the cluster domain after grouping
  *     (majority orchestration is excluded from proposals; mixed clusters stay visible).
- *  3. Gap clusters below `minGapEvidence` are dropped. Batch size > 1: one bad session
- *     never rewrites the weights. Sessions are counted across runs, not per run: when the
- *     caller passes `gapObservations` (the pruned gap ledger, `src/gap-ledger.js`) the
- *     clusters are built from those instead of this run's records, so a gap seen once now
- *     and once on a later run graduates. Without a ledger the records alone are used.
+ *  3. Gap clusters below `minGapEvidence` are ineligible for synthesis. Mixed-domain
+ *     clusters remain visible as report-only diagnostics; other under-floor clusters are
+ *     dropped. Batch size > 1 means one bad session never rewrites the weights. Sessions
+ *     are counted across runs, not per run: when the caller passes `gapObservations` (the
+ *     pruned gap ledger, `src/gap-ledger.js`) the clusters are built from those instead of
+ *     this run's records, so a gap seen once now and once on a later run graduates. Without
+ *     a ledger the records alone are used.
  *  4. Memory-file units whose text substantially overlaps a skill description or body are
  *     flagged (`crossSurfaceDuplicates` in `src/overlap.js`). Description overlap exposes
  *     duplicated always-loaded tokens; body overlap is placement evidence because skill
