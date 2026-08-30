@@ -1,0 +1,14 @@
+Scenario: single-session net addition
+Measured: AGENTS.md -1/+1
+Decision: REFUSED
+Reason: edit e1 ("single-session net addition") adds a new instruction backed by 1 session(s); 2 are required
+
+Scenario: single-session unrelated net-negative substitution
+Measured: AGENTS.md -1/+1
+Decision: REFUSED
+Reason: edit e1 ("single-session unrelated net-negative substitution") adds a new instruction backed by 1 session(s); 2 are required
+
+Scenario: single-session overlapping tightening split into bullets
+Measured: AGENTS.md -1/+2
+Decision: ACCEPTED
+
