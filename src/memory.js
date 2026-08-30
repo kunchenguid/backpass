@@ -199,6 +199,7 @@ export function splitAttributionSentences(text) {
   const sentences = [];
   let start = 0;
   let codeDelimiter = 0;
+  let quotedPathEnd = -1;
   for (let i = 0; i < text.length; i += 1) {
     let backslashes = 0;
     while (text[i - backslashes - 1] === "\\") backslashes += 1;
@@ -214,7 +215,27 @@ export function splitAttributionSentences(text) {
       i += run - 1;
       continue;
     }
-    if (codeDelimiter || ![".", "!", "?"].includes(text[i])) continue;
+    if (codeDelimiter) continue;
+
+    if (i === quotedPathEnd) {
+      quotedPathEnd = -1;
+      continue;
+    }
+    if (quotedPathEnd > i) continue;
+    if (!escaped && ["\"", "'"].includes(text[i])) {
+      let closing = i + 1;
+      while (closing < text.length) {
+        if (text[closing] === text[i] && text[closing - 1] !== "\\") break;
+        closing += 1;
+      }
+      const value = text.slice(i + 1, closing);
+      if (closing < text.length && /^(?:[A-Za-z]:[\\/]|\\\\|\.{0,2}[\\/]|~[\\/])|[\\/]/u.test(value)) {
+        quotedPathEnd = closing;
+        continue;
+      }
+    }
+
+    if (![".", "!", "?"].includes(text[i])) continue;
     const boundary = confidentSentenceBoundary(text, start, i);
     if (!boundary) continue;
     sentences.push(text.slice(start, boundary.end).trim());
