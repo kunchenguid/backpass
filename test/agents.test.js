@@ -36,9 +36,15 @@ function memoryState(initial = { version: 1, acpxVersion: "0.13.0", entries: {} 
  */
 function scriptedProbe(verdicts) {
   const calls = [];
+  const queues = Object.create(null);
   const probe = async (candidate) => {
     calls.push(candidateKey(candidate));
-    const v = verdicts[candidateKey(candidate)];
+    const key = candidateKey(candidate);
+    let v = verdicts[key];
+    if (Array.isArray(v)) {
+      if (!queues[key]) queues[key] = [...v];
+      v = queues[key].length > 1 ? queues[key].shift() : queues[key][0];
+    }
     if (!v) return { verdict: "unreachable", detail: "not installed", resolvedModel: null };
     if (typeof v === "string") return { verdict: v, detail: "", resolvedModel: null };
     return { verdict: "ok", detail: "", resolvedModel: candidate.model, ...v };
@@ -51,12 +57,16 @@ function scriptedProbe(verdicts) {
  * @param {{ config?: any, state?: ReturnType<typeof memoryState>, now?: () => number,
  *   bypassCache?: boolean, acpxVersion?: () => Promise<string | null> }} [options]
  */
-function resolverWith(verdicts, { config = loadConfig(tmpRepo()), state = memoryState(), ...deps } = {}) {
+function resolverWith(
+  verdicts,
+  { config = loadConfig(tmpRepo()), state = memoryState(), sleep = async () => {}, ...deps } = {},
+) {
   const { probe, calls } = scriptedProbe(verdicts);
   const resolver = new AgentResolver(config, {
     state,
     probeCandidate: probe,
     acpxVersion: async () => "0.13.0",
+    sleep,
     ...deps,
   });
   return { resolver, calls, state };
@@ -126,6 +136,7 @@ test("ordered selection picks the first available+authed candidate per role", as
       "pi|gpt-5.6-luna",
       "opencode|gpt-5.6-luna",
       "codex|gpt-5.6-luna",
+      "pi|gpt-5.6-sol",
       "pi|gpt-5.6-sol",
       "opencode|gpt-5.6-sol",
       "codex|gpt-5.6-sol",
@@ -407,6 +418,103 @@ test("probe verdicts are cached with TTLs and invalidated on an acpx version cha
 
   assert.equal(isProbeEntryFresh(null), false);
   assert.equal(isProbeEntryFresh({ verdict: "ok", checkedAt: "garbage" }), false);
+  assert.equal(
+    isProbeEntryFresh({
+      verdict: "timeout",
+      checkedAt: new Date(now).toISOString(),
+    }),
+    false,
+    "a cached timeout is never treated as a durable negative",
+  );
+});
+
+test("a transient probe timeout retries once and does not poison the cache", async () => {
+  const delays = [];
+  const state = memoryState();
+  const first = resolverWith(
+    {
+      "pi|gpt-5.6-luna": ["timeout", { resolvedModel: "openai-codex/gpt-5.6-luna" }],
+    },
+    {
+      state,
+      sleep: async (ms) => {
+        delays.push(ms);
+      },
+    },
+  );
+
+  const pick = await first.resolver.resolve("analysis");
+  assert.equal(pick.agent, "pi");
+  assert.deepEqual(first.calls, ["pi|gpt-5.6-luna", "pi|gpt-5.6-luna"]);
+  assert.deepEqual(delays, [1000], "the retry waits one backoff interval");
+  assert.equal(state.cache.entries["pi|gpt-5.6-luna"].verdict, "ok");
+
+  const poisoned = memoryState();
+  const miss = resolverWith(
+    {
+      "pi|gpt-5.6-luna": "timeout",
+      "opencode|gpt-5.6-luna": { resolvedModel: "openai/gpt-5.6-luna" },
+    },
+    { state: poisoned },
+  );
+  assert.equal((await miss.resolver.resolve("analysis")).agent, "opencode");
+  assert.equal(miss.calls.filter((c) => c === "pi|gpt-5.6-luna").length, 2, "timeout retries once then falls through");
+  assert.equal(poisoned.cache.entries["pi|gpt-5.6-luna"], undefined, "the timeout is not persisted");
+
+  const replay = resolverWith(
+    {
+      "pi|gpt-5.6-luna": { resolvedModel: "openai-codex/gpt-5.6-luna" },
+    },
+    { state: poisoned },
+  );
+  assert.equal((await replay.resolver.resolve("analysis")).agent, "pi", "the next run is free to re-probe");
+  assert.deepEqual(replay.calls, ["pi|gpt-5.6-luna"]);
+
+  const busyExit = resolverWith({
+    "pi|gpt-5.6-luna": [
+      { verdict: "unreachable", detail: "exit 1", resolvedModel: null },
+      { resolvedModel: "openai-codex/gpt-5.6-luna" },
+    ],
+  });
+  assert.equal((await busyExit.resolver.resolve("analysis")).agent, "pi");
+  assert.deepEqual(busyExit.calls, ["pi|gpt-5.6-luna", "pi|gpt-5.6-luna"]);
+});
+
+test("a busy empty advertised-model list retries; a genuine unsupported model still demotes", async () => {
+  const emptyThenOk = resolverWith({
+    "pi|gpt-5.6-luna": [
+      { verdict: "model-unavailable", detail: "adapter advertised no models", resolvedModel: null },
+      { resolvedModel: "openai-codex/gpt-5.6-luna" },
+    ],
+  });
+  assert.equal((await emptyThenOk.resolver.resolve("analysis")).agent, "pi");
+  assert.deepEqual(emptyThenOk.calls, ["pi|gpt-5.6-luna", "pi|gpt-5.6-luna"]);
+
+  const { resolver, calls, state } = resolverWith({
+    "pi|gpt-5.6-luna": { resolvedModel: "openai-codex/gpt-5.6-luna" },
+    "opencode|gpt-5.6-luna": "model-unavailable",
+    "codex|gpt-5.6-luna": { resolvedModel: "gpt-5.6-luna" },
+  });
+  const attempts = [];
+  const result = await resolver.withFallthrough("analysis", async (pick) => {
+    attempts.push(`${pick.agent}/${pick.model}`);
+    if (pick.agent === "pi") {
+      throw new AcpxError('Cannot apply --model "gpt-5.6-luna": the ACP agent did not advertise that model.', {
+        stderr: 'Cannot apply --model "gpt-5.6-luna": the ACP agent did not advertise that model.',
+        code: 1,
+      });
+    }
+    return "evidence";
+  });
+  assert.equal(result, "evidence");
+  assert.deepEqual(attempts, ["pi/openai-codex/gpt-5.6-luna", "codex/gpt-5.6-luna"]);
+  assert.equal(
+    calls.filter((c) => c === "opencode|gpt-5.6-luna").length,
+    1,
+    "a listed-but-missing model is not retried",
+  );
+  assert.equal(state.cache.entries["pi|gpt-5.6-luna"].verdict, "model-unavailable");
+  assert.equal((await resolver.resolve("analysis")).agent, "codex");
 });
 
 test("bare model ids resolve by segment equality, never by prefix", () => {

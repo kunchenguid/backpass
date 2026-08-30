@@ -203,6 +203,9 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   `AgentResolver.withFallthrough`, which demotes a candidate on a classifiable failure
   (`classifyAcpxFailure`). Effortful calls go through `sessionPrompt` so the overlay in
   `src/harness-invoke.js` can apply. Verdicts cache in `.backpass/agent-probe-cache.json`.
+  A probe miss retries once with backoff (`probeAndRecord` in `src/agents.js`); a timeout,
+  a bare `exit N`, or an empty advertised-model list is never written as a negative cache
+  hit, so a busy harness cannot poison the next run.
 - **The Lavish apply surface is chatty and its output is YAML-quoted.** `lavish-axi poll`
   can return feedback that is not a decision vector (a comment, a queued layout report) any
   number of times before the real one; `pollDecisions` in `src/apply/lavish.js` announces

@@ -21,6 +21,11 @@ import { runCapture } from "./subprocess.js";
  *
  * Verdicts are cached in `.backpass/agent-probe-cache.json` (12h for ok, 30min for
  * negatives, invalidated on an acpx version change) and memoized for the run.
+ *
+ * A busy harness (another backpass run, a wedged ACP session) looks like a probe
+ * timeout, a bare `exit 1`, or an empty advertised-model list. Those retry once with
+ * backoff before the walk demotes. A timeout is never written to the on-disk cache:
+ * a transient miss must not become a 30-minute "model not advertised" for the next run.
  */
 
 const OK_TTL_MS = 12 * 60 * 60 * 1000;
@@ -28,6 +33,7 @@ const NEGATIVE_TTL_MS = 30 * 60 * 1000;
 const NATIVE_TIMEOUT_MS = 5_000;
 const PROBE_TIMEOUT_MS = 20_000;
 const PROBE_TIMEOUT_BY_AGENT = { opencode: 10_000 };
+const PROBE_RETRY_BACKOFF_MS = 1_000;
 
 /** Adapters whose model list is open-ended: any id is forwarded, none can be verified. */
 const TRUSTING_MODEL_AGENTS = new Set(["claude"]);
@@ -176,9 +182,30 @@ export async function probeCandidate(candidate, options = {}) {
  */
 export function isProbeEntryFresh(entry, { now = Date.now() } = {}) {
   if (!entry || !entry.checkedAt) return false;
+  if (isTransientProbeResult(entry)) return false;
   const age = now - Date.parse(entry.checkedAt);
   if (!Number.isFinite(age) || age < 0) return false;
   return age < (entry.verdict === "ok" ? OK_TTL_MS : NEGATIVE_TTL_MS);
+}
+
+/**
+ * Probe misses that are often the harness being busy, not a durable capability gap.
+ * One retry, then skip for this run; never persist them as a negative cache hit.
+ */
+export function isTransientProbeResult(result) {
+  if (!result) return false;
+  if (result.verdict === "timeout") return true;
+  if (result.verdict === "model-unavailable" && /advertised no models/i.test(result.detail || "")) {
+    return true;
+  }
+  if (result.verdict === "unreachable" && /^exit \d+\b/i.test((result.detail || "").trim())) {
+    return true;
+  }
+  return false;
+}
+
+function defaultSleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function hintFor(agent, verdict) {
@@ -199,7 +226,8 @@ export class AgentResolver {
   /**
    * @param {object} config
    * @param {{ state?: { readProbeCache: Function, writeProbeCache: Function }, cwd?: string,
-   *   bypassCache?: boolean, probeCandidate?: Function, acpxVersion?: Function, now?: () => number }} [deps]
+   *   bypassCache?: boolean, probeCandidate?: Function, acpxVersion?: Function, now?: () => number,
+   *   sleep?: (ms: number) => Promise<void>, probeRetryBackoffMs?: number }} [deps]
    */
   constructor(config, deps = {}) {
     this.config = config;
@@ -209,6 +237,8 @@ export class AgentResolver {
     this.probeCandidate = deps.probeCandidate || probeCandidate;
     this.acpxVersion = deps.acpxVersion || acpxVersion;
     this.now = deps.now || (() => Date.now());
+    this.sleep = deps.sleep || defaultSleep;
+    this.probeRetryBackoffMs = deps.probeRetryBackoffMs ?? PROBE_RETRY_BACKOFF_MS;
     /** In-process memo for the run: key -> { verdict, detail, resolvedModel, checkedAt }. */
     this.memo = new Map();
     /** Probes in flight, so parallel analysis workers never double-probe a candidate. */
@@ -251,16 +281,30 @@ export class AgentResolver {
     }
 
     this.probeCount += 1;
-    const sessionName = `backpass-probe-${process.pid}-${this.probeCount}`;
-    const result = await this.probeCandidate(candidate, { cwd: this.cwd, sessionName });
+    let result = await this.probeCandidate(candidate, {
+      cwd: this.cwd,
+      sessionName: `backpass-probe-${process.pid}-${this.probeCount}`,
+    });
+    if (isTransientProbeResult(result)) {
+      await this.sleep(this.probeRetryBackoffMs);
+      this.probeCount += 1;
+      result = await this.probeCandidate(candidate, {
+        cwd: this.cwd,
+        sessionName: `backpass-probe-${process.pid}-${this.probeCount}`,
+      });
+    }
     const entry = {
       verdict: result.verdict,
       detail: result.detail || "",
       resolvedModel: result.resolvedModel || null,
       checkedAt: new Date(this.now()).toISOString(),
     };
-    cache.entries[key] = entry;
     this.memo.set(key, entry);
+    if (isTransientProbeResult(entry)) {
+      delete cache.entries[key];
+    } else {
+      cache.entries[key] = entry;
+    }
     this.saveCache();
     return entry;
   }
