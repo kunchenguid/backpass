@@ -98,8 +98,7 @@ function rewriteHasSubstantialOverlap(hunk) {
     .map((line) => changedWordSet(line.text))
     .filter((words) => words.size);
   if (!added.length) return true;
-  if (removed.length !== added.length) return false;
-  return added.every((words, index) => wordSetsOverlap(removed[index], words));
+  return added.every((words) => removed.some((candidate) => wordSetsOverlap(candidate, words)));
 }
 
 export function effectiveMaxEdits(memoryFile, config, alwaysLoadedExtraTokens = 0) {

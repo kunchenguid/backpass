@@ -342,6 +342,28 @@ test("adjacent tightening and unrelated replacement lines require corroboration"
   assert.ok(violations.some((v) => /backed by 1 session/.test(v)));
 });
 
+test("overlapping split and joined tightenings remain eligible with one session", () => {
+  const oneLine =
+    "- Before deploying production services, verify staging checks, review migration plans, confirm rollback commands, notify the incident channel, and record the release owner.";
+  const twoLines =
+    "- Before deploying, verify staging checks and migration plans.\n- Confirm rollback commands and notify the incident channel.";
+  const joined =
+    "- Before deploying, verify staging checks and migration plans; confirm rollback commands and notify the incident channel.";
+  for (const [name, original, tighter] of [
+    ["split", oneLine, twoLines],
+    ["join", twoLines, joined],
+  ]) {
+    const { proposal, violations, measured } = gate({
+      text: `# Memory\n\n${original}\n`,
+      edit: memoryEdit((t) => t.replace(original, tighter)),
+      annotation: { edits: [claim(["H1"], { kind: "rewrite", title: `${name} long rule`, transcripts: 1 })] },
+    });
+    assert.equal(measured.changes.length, 1, name);
+    assert.deepEqual(violations, [], name);
+    assert.equal(proposal.edits.length, 1, name);
+  }
+});
+
 test("a long overlapping tightening remains eligible with one session", () => {
   const words = Array.from({ length: 513 }, (_, index) => `term${index}`);
   const original = `- ${words.join(" ")}.`;
