@@ -30,7 +30,10 @@ import { transcriptIdentity } from "../transcript.js";
  */
 export async function foldForRun(ctx, memoryFile, memoryHash, skills = [], transcripts = []) {
   const { state, minGapEvidence, gapLedgerMaxAge } = ctx.config;
-  const selected = new Set(transcripts.map((transcript) => transcriptIdentity(transcript)));
+  const selectedByIdentity = new Map(
+    transcripts.map((transcript) => [transcriptIdentity(transcript), transcript]),
+  );
+  const selected = new Set(selectedByIdentity.keys());
   const evidence = state.listEvidence();
   const identitiesByLegacyId = new Map();
   for (const record of evidence) {
@@ -46,14 +49,16 @@ export async function foldForRun(ctx, memoryFile, memoryHash, skills = [], trans
       selectedGapSessions.add(transcript.id);
     }
   }
-  const relevant = evidence.filter(
-    (e) =>
+  const relevant = evidence.filter((e) => {
+    const currentTranscript = selectedByIdentity.get(transcriptIdentity(e.transcript));
+    return (
       e.memoryPath === memoryFile.path &&
       e.memoryHash === memoryHash &&
       (e.transcript?.interaction === INTERACTIVE || e.transcript?.interaction === NON_INTERACTIVE) &&
-      selected.has(transcriptIdentity(e.transcript)) &&
-      isEvidenceFresh(e, e.transcript, memoryHash),
-  );
+      currentTranscript &&
+      isEvidenceFresh(e, currentTranscript, memoryHash)
+    );
+  });
 
   const ledger = state.readGapLedger();
   recordGapObservations(ledger, relevant, { skills });

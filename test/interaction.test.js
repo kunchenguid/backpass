@@ -480,6 +480,7 @@ test("fold selection distinguishes colliding native IDs by source", async () => 
       transcript,
       memoryHash,
       memoryPath: "AGENTS.md",
+      key: evidenceKey(transcript, memoryHash),
       positive: [],
       negative: [],
       gaps: [],
@@ -543,6 +544,7 @@ test("fold keeps legacy-id gap observations for sessions in the selected sample"
       transcript,
       memoryHash,
       memoryPath: "AGENTS.md",
+      key: evidenceKey(transcript, memoryHash),
       positive: [],
       negative: [],
       gaps: [],
@@ -614,6 +616,7 @@ test("fold bounds evidence and ledger observations to the selected sample", asyn
       transcript,
       memoryHash,
       memoryPath: "AGENTS.md",
+      key: evidenceKey(transcript, memoryHash),
       positive: [],
       negative: [],
       gaps,
@@ -645,6 +648,43 @@ test("fold bounds evidence and ledger observations to the selected sample", asyn
   });
   assert.equal(summary.gaps.length, 0);
   assert.equal(Object.keys(state.readGapLedger().entries).length, 1);
+});
+
+test("fold freshness uses the selected transcript's current content signature", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-mix-current-signature-"));
+  const state = new State(dir).ensure();
+  const memoryHash = "sha256:memory";
+  const memoryFile = { path: "AGENTS.md", text: "", units: [] };
+  const stored = {
+    harness: "claude",
+    id: "claude-session",
+    identity: "claude:session",
+    path: "/sessions/session.jsonl",
+    mtimeMs: 100,
+    bytes: 200,
+    interaction: INTERACTIVE,
+  };
+  state.writeEvidence(stored, {
+    status: "ok",
+    transcript: stored,
+    memoryHash,
+    memoryPath: "AGENTS.md",
+    key: evidenceKey(stored, memoryHash),
+    positive: [{ instruction: "AG-001", quote: "followed the old transcript evidence" }],
+    negative: [],
+    gaps: [],
+  });
+  const current = { ...stored, mtimeMs: 101, bytes: 240 };
+  const summary = await foldForRun(
+    { repo: { root: dir }, config: { state, minGapEvidence: 2, gapLedgerMaxAge: "90d" } },
+    memoryFile,
+    memoryHash,
+    [],
+    [current],
+  );
+
+  assert.equal(summary.analyzedSessions, 0);
+  assert.equal(summary.totals.positive, 0);
 });
 
 test("evidence records carry the category and fold reports relevance per category", async () => {
