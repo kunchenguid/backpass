@@ -79,13 +79,15 @@ function rewriteHasSubstantialOverlap(hunks) {
   for (const match of changedText("del").toLowerCase().matchAll(/[\p{L}\p{N}]+/gu)) {
     removed.add(match[0]);
   }
+  const insertedText = changedText("ins");
   let added = 0;
   let shared = 0;
-  for (const match of changedText("ins").toLowerCase().matchAll(/[\p{L}\p{N}]+/gu)) {
+  for (const match of insertedText.toLowerCase().matchAll(/[\p{L}\p{N}]+/gu)) {
     added += 1;
     if (removed.has(match[0])) shared += 1;
   }
-  return added === 0 || shared / added >= REWRITE_OVERLAP_THRESHOLD;
+  if (added === 0) return insertedText.trim() === "";
+  return shared / added >= REWRITE_OVERLAP_THRESHOLD;
 }
 
 export function effectiveMaxEdits(memoryFile, config, alwaysLoadedExtraTokens = 0) {
