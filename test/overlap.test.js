@@ -49,6 +49,26 @@ test("a short skill index entry is compared without its structural prefix", () =
   assert.equal(hits[0].score, 1);
 });
 
+test("a qualifying description match takes precedence over a stronger body match", () => {
+  const memoryText = "Run deployments safely";
+  const memoryFile = {
+    path: "AGENTS.md",
+    units: parseMemoryUnits(`# Skills\n\n- ${memoryText}\n`),
+  };
+  const hits = crossSurfaceDuplicates(memoryFile, [
+    skill({
+      name: "deploy",
+      description: "Run deployments safely in production.",
+      body: memoryText,
+    }),
+  ]);
+
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].surface, "description");
+  assert.ok(hits[0].score >= CROSS_SURFACE_OVERLAP_THRESHOLD);
+  assert.ok(hits[0].score < 1);
+});
+
 test("a memory unit that restates a skill body paragraph is flagged against the body", () => {
   const body = "Always wrap migrations in a transaction before applying them.";
   const memoryFile = {

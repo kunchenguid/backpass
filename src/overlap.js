@@ -78,7 +78,8 @@ function skillSurfaces(skill) {
 
 /**
  * Memory-file units whose normalized text substantially overlaps a skill description
- * or body. One best hit per unit (highest score); report-only.
+ * or body. One preferred hit per unit: a qualifying description match wins over body
+ * matches, then the highest score wins within that surface; report-only.
  *
  * @param {{ path?: string, units?: object[] }|null} memoryFile
  * @param {object[]} [skills]
@@ -106,7 +107,11 @@ export function crossSurfaceDuplicates(memoryFile, skills = [], threshold = CROS
     for (const candidate of catalog) {
       const score = overlapScore(prepared, candidate);
       if (score < threshold) continue;
-      if (!best || score > best.score) {
+      if (
+        !best ||
+        (candidate.surface === "description" && best.surface !== "description") ||
+        (candidate.surface === best.surface && score > best.score)
+      ) {
         best = {
           instruction: unit.id,
           tokens: unit.tokens,
