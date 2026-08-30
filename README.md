@@ -130,12 +130,13 @@ in these same stores under the repo's cwd; every prompt it sends is tagged, and 
 sessions are excluded from the corpus (the `SELF` column in `backpass scan`).
 
 Every remaining session is labelled **interactive** or **non-interactive** (`src/interaction.js`).
-Codex `codex exec` / `originator: codex_exec`, Claude `entrypoint` values that start with
-`sdk`, OpenCode child sessions (`parent_id`), and a cwd with a `.no-mistakes` path segment
-are non-interactive; a no-mistakes pipeline run is just one kind of non-interactive session,
-not its own category. Missing harness metadata defaults to interactive. `backpass scan`,
-the proposal, and apply all print the mix so relevance is never silently computed against
-a robot-skewed pool.
+Codex `codex exec` / `originator: codex_exec`, Claude SDK, GitHub, action, and CI
+entrypoints, OpenCode child sessions (`parent_id`), and a cwd with a `.no-mistakes` path
+segment are non-interactive. Hermes gateway, cron, and WhatsApp sessions are classified the
+same way if they leak past collection's source filter. A no-mistakes pipeline run is just one
+kind of non-interactive session, not its own category. Missing harness metadata defaults to
+interactive. `backpass scan`, the proposal, and apply all print the mix so relevance is never
+silently computed against a robot-skewed pool.
 
 ```sh
 backpass scan --since 7d --strict
@@ -159,9 +160,10 @@ Calculating loss costs one call per transcript, so the set is capped first: past
 everything. Each transcript's weight halves every `sampleHalfLife` (default 14d), and the
 sample is drawn without replacement, so recent sessions are almost always kept and old
 ones stay represented in proportion. When both interactive and non-interactive sessions
-are present, slots are allocated in proportion to the corpus with a 20% floor per
-category, so a 98% non-interactive history cannot drop the interactive sessions from
-the sample. When this happens the run says so on stderr
+are present, slots are allocated in proportion to the corpus with a 20% floor per category,
+subject to available sessions and the cap. This keeps a scarce category in the sample
+without forcing a genuinely mixed corpus to 50/50. When this happens the run says so on
+stderr
 (`discovered 340 transcript(s), analyzing a recency-weighted sample of 100`).
 
 The draw is deterministic and sticky: it is derived from each transcript's own durable
@@ -224,19 +226,20 @@ reported but never cluster: a mistake caused not by this repository but by the e
 agent harness or tooling that orchestrated a session does not become an instruction in the
 project's memory file.
 
-Only evidence judged against the _current_ memory-surface hash is folded into a proposal. A
-transcript that fell out of this run's sample - the time window, `maxTranscripts`, or the
-transcript itself being gone - can leave an older evidence file on disk under a hash the
-memory surface no longer has; that file is left untouched, but it does not count toward this
-run's session total or instruction scores, or add a gap observation, until it is current
-again.
+Only evidence judged against the _current_ memory-surface hash, stamped with one of the two
+interaction categories, and belonging to this run's selected sample is folded into a
+proposal. A transcript that fell outside the time window or `maxTranscripts` cap, disappeared,
+or still has legacy unstamped evidence can leave an evidence file on disk. That file is left
+untouched, but it does not count toward this run's session total or instruction scores, or
+add a gap observation, until ordinary discovery and analysis select and refresh it.
 
-Those sessions are counted across runs, not per run: every gap sighting is kept in
-`.backpass/gap-ledger.json` by gap and session, so a gap seen in one session today and in
-another session next week graduates on the later run. The same session never counts twice,
-a sighting retires once the memory file or a project skill covers it, and a session's
-sightings expire after `gapLedgerMaxAge` (default 90d). Until a gap corroborates it stays
-out of the proposal entirely.
+Gap sightings persist across runs in `.backpass/gap-ledger.json` by gap and session, but a
+run only counts observations whose sessions belong to its selected sample. This prevents
+older observations outside the cap from undoing the sample mix while still allowing
+corroboration across runs when those sessions remain selected. The same session never counts
+twice, a sighting retires once the memory file or a project skill covers it, and a session's
+sightings expire after `gapLedgerMaxAge` (default 90d). Until a gap corroborates it stays out
+of the proposal entirely.
 
 ### 5. Gradient descent - native edits
 

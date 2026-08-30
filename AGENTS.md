@@ -56,10 +56,10 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   `test/sample-reuse.test.js`, not by reading source) and keeps a transcript's draw stable
   as the corpus grows. Recency weights may still evolve with wall-clock time. A top-`count`
   selection by fixed per-transcript draw means inserting new transcripts can only displace
-  existing ones, never reshuffle their draws. When both interactive and non-interactive
-  sessions exceed the cap, `mixAllocations` is proportional-with-floor (20%), not a forced
-  50/50 split - see `src/interaction.js` for the two public categories. Never reintroduce
-  an index- or array-position-derived draw here.
+  existing ones, never reshuffle their draws. When the mixed corpus exceeds the cap,
+  `mixAllocations` is proportional-with-floor (20%, clipped to category availability), not
+  a forced 50/50 split - see `src/interaction.js` for the two public categories. Never
+  reintroduce an index- or array-position-derived draw here.
 - **Corpus mix is two categories, never an unknown bucket.** `classifyInteraction` in
   `src/interaction.js` labels every session interactive or non-interactive from per-harness
   signals (codex `originator`/`source`, claude `entrypoint`, OpenCode `parent_id`, Hermes
@@ -163,24 +163,21 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   `{ agent, usage|null }` (`usageRecord` in `src/acpx.js`) and `src/commands/usage.js` is
   the one place that prints them - never `n/a`: nothing when no call ran, the harness by
   name when it stayed silent.
-- **Fold and this-run gap-ledger ingest are scoped to the current memory-surface hash.**
+- **Fold and this-run gap-ledger ingest are scoped to the selected, current memory surface.**
   The run hash (`primaryMemoryFile` in `src/commands/analyze.js`) is `memorySurfaceHash`:
   the memory-set hash extended with every skill's description line - a description edit
   invalidates cached evidence, a skill-body edit never does, and a repo without skills
   keeps the plain set hash. The always-loaded budget gate measures the same surface
   (memory file + description lines; bodies stay free until triggered), so a repo with
   many skills re-tunes `budgetTokens` once - accepted by the captain's explicit decision.
-  `foldForRun` (`src/commands/propose.js`) filters `state.listEvidence()` by `memoryPath`
-  AND `memoryHash === current surface hash`, not path alone - a transcript that fell out of
-  this run's sample (window, cap, or the transcript itself gone) can leave an evidence file
-  on disk stamped with a stale hash, and it must not count toward `analyzedSessions`,
-  per-instruction scores, or this run's gap-ledger observations (positional `AG-nnn`
-  aliases can point at a different unit once the file changes). Folding does not migrate,
-  rewrite, or delete stale evidence; an untouched evidence file becomes eligible again if
-  the memory bytes return to its hash, while reanalysis replaces it with current evidence.
-  `analyzeTranscripts` separately reports `summary.staleMemoryHash` and names the old/new
-  hash on stderr, so a full reanalysis without `--force` after a memory edit reads as "the
-  file changed," not as a
+  `foldForRun` (`src/commands/propose.js`) matches evidence to the selected sample by
+  canonical `transcriptIdentity`, then requires the current `memoryPath`, surface hash, and
+  a valid interaction stamp. The same selection bounds this run's gap-ledger observations,
+  so an old record outside the window or cap cannot overwhelm the sampled corpus. Folding
+  does not migrate, rewrite, or delete excluded evidence; ordinary discovery and analysis
+  backfill legacy unstamped records when they are selected. `analyzeTranscripts` separately
+  reports `summary.staleMemoryHash` and names the old/new hash on stderr, so a full
+  reanalysis without `--force` after a memory edit reads as "the file changed," not as a
   broken cache - the cache-hit path itself (unchanged file, no `--force`) is unaffected.
 - **Cross-surface duplication is report-only.** `crossSurfaceDuplicates` (`src/overlap.js`)
   flags memory-file units whose text substantially overlaps a skill description or body
@@ -190,12 +187,13 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   skill body loads on trigger, so its memory copy may be the only always-loaded coverage.
   Nothing is deleted automatically. Relevance still accrues to the memory-file alias until
   that copy is gone.
-- **Gap corroboration is counted across runs through `.backpass/gap-ledger.json`**
+- **Gap corroboration persists across runs through `.backpass/gap-ledger.json`**
   (`src/gap-ledger.js`, wired in `foldForRun`): one sighting per (gap, transcript id), so a
-  session never counts twice and a gap seen once per run still graduates at `minGapEvidence`.
-  Record this run's evidence _before_ pruning - old evidence files stay on disk and would
-  re-add an expired or covered sighting otherwise. Uncorroborated gaps stay hidden; never
-  surface singletons to the prompt or report.
+  session never counts twice. A run only folds ledger observations from its selected sample;
+  persisted sessions outside the cap cannot reintroduce a skewed corpus. Record this run's
+  evidence _before_ pruning - old evidence files stay on disk and would re-add an expired or
+  covered sighting otherwise. Uncorroborated gaps stay hidden; never surface singletons to
+  the prompt or report.
 - **Gap identity is judged, not word-matched.** Bigram similarity cannot recognize real
   paraphrase (measured on production data: max cross-session score 0.34 vs the 0.45 bar),
   so it is only the fallback. The analysis turn cites open-gap ids (`matchesGap`, shown via

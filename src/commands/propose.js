@@ -14,22 +14,19 @@ import { capTranscripts } from "../sample.js";
 import { transcriptIdentity } from "../transcript.js";
 
 /**
- * Fold on-disk evidence for the memory surface. Gap corroboration is counted through the
- * persisted ledger so sessions accumulate across runs: record this run's observations,
- * prune what the current surface now covers or what aged out (after recording, because
+ * Fold on-disk evidence for the memory surface. Gap sightings persist across runs, but
+ * corroboration is bounded to sessions in this run's selected sample: record this run's
+ * observations, prune what the current surface now covers or what aged out (after recording, because
  * the evidence files that fed an expired sighting are still on disk and would re-add it),
  * then cluster from the ledger.
  *
- * Evidence is also filtered to `memoryHash`: a transcript's evidence file is rewritten
- * every time it is re-analyzed against a changed memory file or skill description, but a
- * transcript that fell out of this run's sample (window, cap, or discovery drift) leaves
- * its last evidence file on disk under whatever hash it was last judged against. That
- * leftover file is real and reusable the moment its transcript is re-analyzed - or
- * immediately, if the memory surface returns to that hash - but folding it into *this*
- * proposal would score it against
- * an instruction index it was never judged against (aliases are positional) and inflate
- * `analyzedSessions` with a session this run never touched. Legacy records without a
- * valid interaction category stay excluded until analysis backfills them.
+ * Evidence is filtered to the selected transcript identities, `memoryHash`, and a valid
+ * interaction category. Reanalysis rewrites a transcript's evidence against a changed
+ * memory file or skill description, but records outside this run's window or cap remain
+ * on disk. Folding those records would inflate `analyzedSessions` beyond the sampled
+ * corpus; folding another surface's record would also score positional instruction aliases
+ * against an index it never saw. Legacy records without a valid interaction category stay
+ * excluded until ordinary discovery and analysis select and backfill them.
  */
 export async function foldForRun(ctx, memoryFile, memoryHash, skills = [], transcripts = []) {
   const { state, minGapEvidence, gapLedgerMaxAge } = ctx.config;
@@ -86,8 +83,7 @@ export async function runProposal(ctx, precomputed = null) {
   // failures may leave an older proposal available to apply as if it came from this run.
   config.state.clearProposal();
   const { file, hash, skills } = precomputed || primaryMemoryFile(repo, config);
-  const transcripts =
-    precomputed?.transcripts || capTranscripts(await discoverForRun(ctx), config).transcripts;
+  const transcripts = precomputed?.transcripts || capTranscripts(await discoverForRun(ctx), config).transcripts;
 
   const foldStarted = Date.now();
   const summary = await foldForRun(ctx, file, hash, skills ?? [], transcripts);
