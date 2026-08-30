@@ -311,6 +311,30 @@ test("mergeGapEntries unions sessions without double-counting and keeps the shor
   assert.deepEqual(Object.keys(entries[0].sessions).sort(), ["s1", "s2", "shared"], "a session never counts twice");
 });
 
+test("mergeGapEntries reconciles conflicting domain votes without target-order bias", () => {
+  const orchestrationId = "a".repeat(16);
+  const projectId = "b".repeat(16);
+  const phrasing = "Read docs/sshhip.md before changing the tunnel.";
+  const ledger = ledgerWith(
+    { id: orchestrationId, text: `${phrasing} Carefully.`, sessions: ["orch-only", "shared"] },
+    { id: projectId, text: phrasing, sessions: ["project-only", "shared"] },
+  );
+  ledger.entries[orchestrationId].sessions["orch-only"].domain = "orchestration";
+  ledger.entries[orchestrationId].sessions.shared.domain = "orchestration";
+  ledger.entries[projectId].sessions["project-only"].domain = "project";
+  ledger.entries[projectId].sessions.shared.domain = "project";
+
+  mergeGapEntries(ledger, [[orchestrationId, projectId]]);
+  const summary = foldEvidence([], {
+    gapObservations: ledgerGapObservations(ledger, MEMORY_PATH),
+    minGapEvidence: 2,
+  });
+
+  assert.equal(summary.gaps.length, 1, "the chosen merge target cannot turn a conflicting vote into orchestration");
+  assert.equal(summary.gaps[0].sessions, 3);
+  assert.equal(summary.gaps[0].orchestrationSightings, 1);
+});
+
 test("mergeGapEntries preserves absorbed citations for duplicate sessions", () => {
   const targetId = "a".repeat(16);
   const absorbedId = "b".repeat(16);

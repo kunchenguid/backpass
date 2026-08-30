@@ -184,7 +184,10 @@ test("a two-sighting cluster with one orchestration vote survives instead of dro
   );
   assert.equal(majorityOrch.excludedMixedGaps.length, 1);
   assert.equal(majorityOrch.excludedMixedGaps[0].sessions, 3);
-  assert.match(renderEvidenceForPrompt(majorityOrch), /3 sightings, 2 orchestration; majority vote excluded/);
+  const renderedMajority = renderEvidenceForPrompt(majorityOrch);
+  assert.match(renderedMajority, /3 sightings, 2 orchestration; majority vote excluded/);
+  assert.match(renderedMajority, /no gap cluster is eligible for a repository proposal/);
+  assert.doesNotMatch(renderedMajority, /none above the evidence threshold/);
 });
 
 test("the same gap repeated inside one session does not clear the threshold", () => {
