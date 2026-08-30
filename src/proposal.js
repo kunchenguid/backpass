@@ -74,26 +74,32 @@ function hunkHasMeaningfulAddition(hunk) {
   return (hunk.lines || []).some((line) => line.type === "ins" && /[\p{L}\p{N}]/u.test(line.text));
 }
 
-function rewriteHasSubstantialOverlap(hunks) {
-  const changedText = (type) =>
-    hunks
-      .flatMap((hunk) => (hunk.lines || []).filter((line) => line.type === type).map((line) => line.text))
-      .join("\n");
-  const removed = new Set();
-  for (const match of changedText("del")
-    .toLowerCase()
-    .matchAll(/[\p{L}\p{N}]+/gu)) {
-    removed.add(match[0]);
-  }
-  const insertedText = changedText("ins");
-  let added = 0;
+function rewriteChangeStats(hunks) {
+  const changedWords = (type) =>
+    hunks.flatMap((hunk) =>
+      (hunk.lines || [])
+        .filter((line) => line.type === type)
+        .flatMap((line) => [...line.text.toLowerCase().matchAll(/[\p{L}\p{N}]+/gu)].map((match) => match[0])),
+    );
+  const removed = new Map();
+  for (const word of changedWords("del")) removed.set(word, (removed.get(word) || 0) + 1);
+
+  const added = changedWords("ins");
+  const introduced = [];
   let shared = 0;
-  for (const match of insertedText.toLowerCase().matchAll(/[\p{L}\p{N}]+/gu)) {
-    added += 1;
-    if (removed.has(match[0])) shared += 1;
+  for (const word of added) {
+    const available = removed.get(word) || 0;
+    if (available > 0) {
+      shared += 1;
+      removed.set(word, available - 1);
+    } else {
+      introduced.push(word);
+    }
   }
-  if (added === 0) return false;
-  return shared / added >= REWRITE_OVERLAP_THRESHOLD;
+  return {
+    substantialOverlap: added.length > 0 && shared / added.length >= REWRITE_OVERLAP_THRESHOLD,
+    introducedTokens: estimateTokens(introduced.join(" ")),
+  };
 }
 
 export function effectiveMaxEdits(memoryFile, config, alwaysLoadedExtraTokens = 0) {
@@ -537,7 +543,10 @@ export function buildProposal(rawResult, context) {
       0,
     );
     const growsAboveRewriteTolerance = estimateTokensFromBytes(Math.max(0, netAddedBytes)) > REWRITE_NET_ADD_TOKENS;
-    const introducesNewText = hunks.some((hunk) => hunk.added > 0) && !rewriteHasSubstantialOverlap(hunks);
+    const rewriteChanges = rewriteChangeStats(hunks);
+    const introducesNewText =
+      hunks.some((hunk) => hunk.added > 0) &&
+      (!rewriteChanges.substantialOverlap || rewriteChanges.introducedTokens > REWRITE_NET_ADD_TOKENS);
     if (
       !preservesAlwaysLoaded(edit.kind) &&
       (growsAboveRewriteTolerance || introducesNewText) &&

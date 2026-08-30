@@ -293,7 +293,7 @@ test("multiple middle-shortening rewrite hunks remain a single-session tightenin
   assert.equal(proposal.edits.length, 1);
 });
 
-test("a multi-hunk rewrite uses aggregate net growth across tightening and expansion", () => {
+test("a multi-hunk rewrite aggregates newly introduced text despite an overall tightening", () => {
   const original = "- Use Node 18 via nvm before running any script.";
   const expanded = `${original} ${"x".repeat(40)}`;
   const { proposal, violations, measured } = gate({
@@ -303,8 +303,8 @@ test("a multi-hunk rewrite uses aggregate net growth across tightening and expan
     annotation: { edits: [claim(["H1", "H2"], { kind: "rewrite", title: "tighten and expand", transcripts: 1 })] },
   });
   assert.equal(measured.changes.length, 2);
-  assert.deepEqual(violations, []);
-  assert.equal(proposal.edits.length, 1);
+  assert.equal(proposal.edits.length, 0);
+  assert.ok(violations.some((v) => /backed by 1 session/.test(v)));
 });
 
 test("several sub-threshold rewrite hunks are gated on their combined growth", () => {
@@ -409,33 +409,31 @@ test("wordless replacement lines still require harm evidence", () => {
   }
 });
 
-test("repeated unrelated added words count as separate uncovered occurrences", () => {
-  const shared = "alpha beta gamma delta epsilon zeta";
+test("repeated retained vocabulary cannot mask unsupported guidance", () => {
+  const shared = "route ssh safely";
   const original = `- ${shared} ${"x".repeat(1200)}.`;
-  const replacement = `- ${shared} ${Array.from({ length: 100 }, () => "intruder").join(" ")}.`;
+  const replacement = `- ${Array.from({ length: 20 }, () => shared).join(" ")}.`;
   const { proposal, violations } = gate({
     text: `# Memory\n\n${original}\n`,
     edit: memoryEdit((t) => t.replace(original, replacement)),
-    annotation: { edits: [claim(["H1"], { kind: "rewrite", title: "repeat unrelated rule", transcripts: 1 })] },
+    annotation: { edits: [claim(["H1"], { kind: "rewrite", title: "repeat retained words", transcripts: 1 })] },
   });
   assert.ok(estimateTokens(replacement) < estimateTokens(original));
   assert.equal(proposal.edits.length, 0);
   assert.ok(violations.some((v) => /backed by 1 session/.test(v)));
 });
 
-test("uncovered occurrences cannot hide between deterministic sample positions", () => {
-  const sampledIndexes = new Set(Array.from({ length: 512 }, (_, index) => Math.floor((index * 1023) / 511)));
-  const replacementWords = Array.from({ length: 1024 }, (_, index) =>
-    sampledIndexes.has(index) ? "shared" : "intruder",
-  );
-  const original = `- shared ${"x".repeat(10000)}.`;
-  const replacement = `- ${replacementWords.join(" ")}.`;
-  const { proposal, violations } = gate({
-    text: `# Memory\n\n${original}\n`,
-    edit: memoryEdit((t) => t.replace(original, replacement)),
-    annotation: { edits: [claim(["H1"], { kind: "rewrite", title: "interleave unrelated words", transcripts: 1 })] },
+test("distributed replacements aggregate their unsupported guidance", () => {
+  const first = `- alpha beta gamma delta epsilon zeta ${"x".repeat(200)}.`;
+  const second = `- theta iota kappa lambda sigma omega ${"y".repeat(200)}.`;
+  const replacementFirst = "- alpha beta gamma delta epsilon zeta novaa novab novac novad.";
+  const replacementSecond = "- theta iota kappa lambda sigma omega novae novaf novag novah.";
+  const { proposal, violations, measured } = gate({
+    text: `# Memory\n\n${first}\n- Keep this separator unchanged.\n${second}\n`,
+    edit: memoryEdit((t) => t.replace(first, replacementFirst).replace(second, replacementSecond)),
+    annotation: { edits: [claim(["H1", "H2"], { kind: "rewrite", title: "replace two rules", transcripts: 1 })] },
   });
-  assert.ok(estimateTokens(replacement) < estimateTokens(original));
+  assert.equal(measured.changes.length, 2);
   assert.equal(proposal.edits.length, 0);
   assert.ok(violations.some((v) => /backed by 1 session/.test(v)));
 });
