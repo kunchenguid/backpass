@@ -199,16 +199,18 @@ confirmation. A repo without skills keeps the prior memory-set hash. A surface e
 reanalyzes without `--force` - that is not a cache miss, it is the cache doing its job - and
 the run says so on stderr, naming the old and new hash, so a "0 reused" line reads as "the
 surface changed" rather than "reuse is broken." Evidence files that are not refreshed remain
-on disk but are excluded while their hash is stale. They become eligible again if the memory
-surface returns to that hash; evidence for transcripts included in the new analysis is
-replaced with fresh judgments.
+on disk but are excluded while their hash is stale. Returning to that memory-surface hash
+makes them hash-eligible again, but the selected-sample and interaction-stamp rules below
+still apply; evidence for transcripts included in the new analysis is replaced with fresh
+judgments.
 
 ### 4. Aggregate gradients - and one judged consolidation call
 
 Evidence is grouped by instruction, giving each one a positive/negative count, a count of
 distinct sessions with harm-class negatives, and a **relevance** figure: the share of
-analyzed sessions in which it mattered at all. The fold also reports memory-file units
-that substantially overlap a project skill. An overlap with a skill description duplicates
+analyzed sessions in which it mattered at all. Relevance is reported both overall and
+separately for interactive and non-interactive sessions. The fold also reports memory-file
+units that substantially overlap a project skill. An overlap with a skill description duplicates
 always-loaded tokens and points the shrink at the memory-file copy; an overlap with a
 triggered skill body is placement evidence only, since the memory copy may be the only
 always-loaded coverage. Neither kind is deleted automatically. Duplicate gaps across

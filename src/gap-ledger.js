@@ -10,8 +10,9 @@ import { sha256 } from "./state.js";
  * transcript's evidence file is rewritten every time it is re-analyzed against a changed
  * memory file (every apply changes the hash), and the analysis model rephrases gaps
  * between runs, so two observations of one gap rarely line up in a single fold. This
- * ledger keeps every gap observation, keyed by gap identity and session, so a gap seen in
- * one session now and in another session on a later run still reaches the bar.
+ * ledger keeps every gap observation, keyed by gap identity and session, so observations
+ * collected on different runs can still reach the bar when their sessions are together in
+ * a later run's selected sample.
  *
  * Identity and freshness rules:
  *
@@ -32,8 +33,10 @@ import { sha256 } from "./state.js";
  *    Orchestration sightings are recorded for legibility but never counted toward
  *    corroboration and never surface in a proposal; a missing domain counts as project,
  *    so evidence from before the field existed keeps its old behavior.
- *  - Sessions are keyed by transcript id (harness + native session id), so re-analyzing
- *    or re-sampling the same session overwrites its observation and never adds a count.
+ *  - Sessions are keyed by canonical transcript identity (with the legacy id as a fallback),
+ *    so re-analyzing or re-sampling the same source session overwrites its observation and
+ *    never adds a count. Persisted observations only contribute when that identity belongs
+ *    to the current selected sample, so sessions outside the window or cap cannot skew fold.
  *  - A gap is a fact about its session: re-analysis that no longer mentions it is model
  *    noise, not the session changing, so observations are only ever replaced, not removed
  *    by absence. They retire in exactly two ways: the memory surface gains content
