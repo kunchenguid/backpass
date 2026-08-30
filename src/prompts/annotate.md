@@ -32,8 +32,9 @@ Return ONE JSON object and nothing else. No prose, no markdown fence.
 Hard rules - a violation fails the whole proposal:
 
 1. **Every measured change belongs to exactly one edit.** Group the changes that make up
-   one decision (an extraction is the new `SKILL.md` plus the removal it pays for); do
-   not leave a change out. If a change should not ship, revert it in the file first.
+   one decision (an extraction is its created or extended `SKILL.md` plus the removal it
+   pays for); do not leave a change out. If a change should not ship, revert it in the
+   file first.
 2. **At most {{MAX_EDITS}} edits** - the learning rate. Regroup or revert if you are over.
 3. **Every edit carries at least one verbatim quote in `evidence`**, with its source.
 4. **New instructions need evidence from at least {{MIN_GAP_EVIDENCE}} distinct
@@ -57,9 +58,9 @@ Hard rules - a violation fails the whole proposal:
    own extract. Any other kind must not include a created file. An extract may span
    {{MEMORY_PATH}} and the skill file it extends; every other kind changes one file only.
 7. `kind: "move"` is an edit whose changes are all on {{MEMORY_PATH}} and whose **removed
-   lines reappear verbatim** in the same edit's added lines (repositioning a rule, not
-   deleting it). Group the deletion and the re-add as one decision. Text that does not
-   reappear is a removal and needs its own `remove` edit.
+   and added lines match one-for-one** (repositioning a rule, not deleting or adding one).
+   Group the deletion and the re-add as one decision. Any unmatched removal needs its own
+   `remove` edit, and any unmatched addition needs its normal evidence.
 8. **Budget:** {{BUDGET_RULE}}
 
 If you still need to change the files, do that first and then answer; backpass

@@ -110,8 +110,9 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   separately measured skills must stay separate edits. An extract may create `SKILL.md`
   or extend an existing one when the staged file still has every prior line plus every
   line the memory hunks remove (`normalizeRecoveryLine`). A `move` is the same verbatim
-  carry inside the memory file: removed lines must reappear in the same edit's added
-  lines, so repositioning does not hit the harm floor. Edits carry `skills: []` for
+  carry inside the memory file: normalized removed and added line multisets must match
+  exactly, so repositioning cannot smuggle additions and does not hit the harm floor.
+  Edits carry `skills: []` for
   created files; read them through `editSkills` (`src/skills.js`), which also understands
   the pre-0.1.8 single `skill`. Writer apply splits a multi-file extract by hunk `file`
   (`filesOfEdit` / `sliceEditForFile` in `src/proposal.js`).

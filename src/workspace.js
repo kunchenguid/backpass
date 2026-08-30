@@ -123,9 +123,10 @@ export function recoveredLineCounts(texts) {
 
 /**
  * Split one pure-removal memory-file hunk at the boundary between text that lands in a
- * created skill and text that vanishes. Adjacent removals merge into one measured change
- * (`anchoredHunks`), so without this split an extraction and an unrelated deletion that
- * happen to sit next to each other in the file fuse into a single accept/reject decision.
+ * created or extended skill and text that vanishes. Adjacent removals merge into one
+ * measured change (`anchoredHunks`), so without this split an extraction and an unrelated
+ * deletion that happen to sit next to each other in the file fuse into a single
+ * accept/reject decision.
  * The boundary is a decision boundary, and it falls on instruction-unit edges because a
  * skill carries whole sections.
  *

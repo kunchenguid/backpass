@@ -12,7 +12,8 @@ import { isSkillFilePath, normalizeRecoveryLine, recoveredLineCounts } from "./w
  * The synthesis agent edits a staging copy of the memory file and project skills natively
  * (`src/workspace.js`); backpass measures the result as anchored hunks (`src/diff.js`)
  * and the agent annotates them - kind, title, rationale, evidence - by id. An edit is
- * therefore a group of measured changes against one file:
+ * therefore a group of measured changes, normally against one file (an extract also
+ * includes its destination skill files):
  *
  *   add      only inserts text                  (gated like a new instruction)
  *   remove   only deletes text
@@ -20,8 +21,8 @@ import { isSkillFilePath, normalizeRecoveryLine, recoveredLineCounts } from "./w
  *   extract  memory-file change(s) + the SKILL.md file(s) they pay for
  *            (created, or an existing skill that still has every prior line plus
  *            every line the memory hunks remove)
- *   move     memory-file change(s) whose removed lines reappear verbatim in the
- *            same edit's added lines - repositioning, not deletion
+ *   move     memory-file change(s) whose normalized removed and added line
+ *            multisets match exactly - repositioning, not deletion or addition
  *
  * Each hunk carries a `find`/`replace` pair copied out of the original file by
  * construction; `find` occurs exactly once there. That is what the writer applies later,

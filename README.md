@@ -244,8 +244,8 @@ Then mechanical gates run, and they are not negotiable:
 - an extraction preserves every line it removes in the skills it creates or extends, and
   an existing skill must still contain every line it already had; a deletion is never part
   of an extract
-- a move preserves every line it removes by re-adding it verbatim elsewhere in the memory
-  file, so repositioning is not a harm-gated deletion
+- a move's normalized removed and added line multisets match exactly, so it repositions
+  text one-for-one without smuggling additions or triggering the harm floor
 - every edit carries a verbatim quote
 - the post-edit always-loaded surface must fit the budget, measured from the staged files
 

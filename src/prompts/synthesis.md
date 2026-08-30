@@ -85,9 +85,9 @@ analyzed sessions in which an instruction drew any evidence at all.
    extends. Extending an existing skill keeps every line that file already had, then adds
    the extracted lines. A deletion is never part of an extract: it is its own `remove`
    edit, decided on its own evidence.
-5. **A move preserves every line it removes** by re-adding it verbatim elsewhere in
-   `./{{MEMORY_PATH}}`. Group the deletion and the re-add as one change. Do not duplicate
-   a rule in order to "move" it.
+5. **A move's removed and added lines match one-for-one** in `./{{MEMORY_PATH}}`.
+   Group the deletion and the re-add as one change. Do not duplicate, rewrite, or add a
+   rule in order to "move" it.
 6. **Every edit must be backed by at least one verbatim quote** from the evidence. You
    will attach the quotes in the next step, so only make changes you can back.
 7. **Budget:** {{BUDGET_RULE}}
