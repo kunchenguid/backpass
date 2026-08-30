@@ -193,22 +193,24 @@ export function sha256(text) {
 }
 
 function migrateEvidenceRecord(record, transcript, identity) {
-  const legacyKey = `${transcript.mtimeMs}:${transcript.bytes}:${record.memoryHash}`;
-  const key = record.key === legacyKey ? evidenceKey(transcript, record.memoryHash) : record.key;
-  if (record.transcript?.identity === identity && record.key === key) return record;
+  if (record.transcript?.identity === identity) return record;
   return {
     ...record,
     transcript: { ...record.transcript, identity },
-    key,
   };
 }
 
+export const ANALYSIS_INDEX_VERSION = 2;
+
 /**
- * Cache key for a transcript's analysis: the transcript's own content signature plus
- * the memory-surface hash it was judged against. Either changing invalidates the evidence.
+ * Cache key for a transcript's analysis: its content signature, the memory-surface hash,
+ * and the analysis index version. Changing any of them invalidates the evidence.
  */
 export function evidenceKey(transcript, memoryHash) {
-  return `${transcriptIdentity(transcript)}:${transcript.mtimeMs}:${transcript.bytes}:${memoryHash}`;
+  return (
+    `${transcriptIdentity(transcript)}:${transcript.mtimeMs}:${transcript.bytes}:${memoryHash}:` +
+    `analysis-index-v${ANALYSIS_INDEX_VERSION}`
+  );
 }
 
 /**

@@ -11,6 +11,7 @@ import { primaryMemoryFile } from "./analyze.js";
 import { printUsage } from "./usage.js";
 import { discoverForRun } from "./scan.js";
 import { capTranscripts } from "../sample.js";
+import { isEvidenceFresh } from "../state.js";
 import { transcriptIdentity } from "../transcript.js";
 
 /**
@@ -20,13 +21,12 @@ import { transcriptIdentity } from "../transcript.js";
  * the evidence files that fed an expired sighting are still on disk and would re-add it),
  * then cluster from the ledger.
  *
- * Evidence is filtered to the selected transcript identities, `memoryHash`, and a valid
- * interaction category. Reanalysis rewrites a transcript's evidence against a changed
- * memory file or skill description, but records outside this run's window or cap remain
- * on disk. Folding those records would inflate `analyzedSessions` beyond the sampled
- * corpus; folding another surface's record would also score positional instruction aliases
- * against an index it never saw. Legacy records without a valid interaction category stay
- * excluded until ordinary discovery and analysis select and backfill them.
+ * Evidence is filtered to selected transcript identities, the current memory hash and
+ * analysis-index cache key, and a valid interaction category. Reanalysis rewrites a
+ * transcript's evidence when an input changes, but records outside this run's window or
+ * cap remain on disk. Folding those records would inflate `analyzedSessions` beyond the
+ * sampled corpus or score positional instruction aliases against an index they never saw.
+ * Legacy records stay excluded until ordinary discovery and analysis backfill them.
  */
 export async function foldForRun(ctx, memoryFile, memoryHash, skills = [], transcripts = []) {
   const { state, minGapEvidence, gapLedgerMaxAge } = ctx.config;
@@ -51,7 +51,8 @@ export async function foldForRun(ctx, memoryFile, memoryHash, skills = [], trans
       e.memoryPath === memoryFile.path &&
       e.memoryHash === memoryHash &&
       (e.transcript?.interaction === INTERACTIVE || e.transcript?.interaction === NON_INTERACTIVE) &&
-      selected.has(transcriptIdentity(e.transcript)),
+      selected.has(transcriptIdentity(e.transcript)) &&
+      (!e.key || isEvidenceFresh(e, e.transcript, memoryHash)),
   );
 
   const ledger = state.readGapLedger();

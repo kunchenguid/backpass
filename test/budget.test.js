@@ -128,12 +128,27 @@ test("an oversized paragraph keeps its positional alias and exposes sentence par
   assert.ok(units[0].parts.every((p) => blob.includes(p.text)));
 
   const index = renderInstructionIndex({ units });
-  assert.match(index, /Oversized paragraph \[AG-001\]/);
+  assert.match(index, /Oversized paragraph AG-001/);
   assert.match(index, /\[AG-001\.1\]/);
   assert.match(index, /\[AG-001\.2\]/);
   assert.match(index, /split the paragraph into list items/);
   assert.match(index, /bold label on the blob is not a strengthen/);
-  assert.doesNotMatch(index, /^\[AG-001\] \(/m, "the blob itself is not an attribution target");
+  assert.doesNotMatch(index, /\[AG-001\]/, "the blob itself is not an attribution target");
+});
+
+test("oversized Markdown-heavy paragraphs split realistic sentences without splitting abbreviations", () => {
+  const cycle =
+    "Review with Dr. Smith before release. `pnpm test` verifies behavior. deploy now checks lowercase commands. Écrivez les résultats clairement.";
+  const blob = Array.from({ length: 8 }, () => cycle).join(" ");
+  const [unit] = parseMemoryUnits(`# T\n\n${blob}\n`);
+
+  assert.ok(estimateTokens(blob) > ATTRIBUTION_SPLIT_TOKENS);
+  assert.ok(unit.parts?.length > 8);
+  assert.ok(unit.parts.some((part) => part.text.startsWith("`pnpm test`")));
+  assert.ok(unit.parts.some((part) => part.text.startsWith("deploy now")));
+  assert.ok(unit.parts.some((part) => part.text.startsWith("Écrivez")));
+  assert.ok(unit.parts.every((part) => part.text !== "Review with Dr."));
+  assert.ok(unit.parts.some((part) => part.text.startsWith("Review with Dr. Smith")));
 });
 
 test("list items and fenced blocks are not sentence-split even when oversized", () => {

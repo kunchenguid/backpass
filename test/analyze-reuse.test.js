@@ -149,6 +149,29 @@ test("the first analysis performs work, an unchanged second reuses it, and --for
   );
 });
 
+test("evidence from the previous analysis index is reanalyzed once without --force", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-reuse-home-"));
+  const dir = initRepo(MEMORY);
+  writeSession(home, "session-a", dir);
+
+  const first = runAnalyze(dir, home);
+  assert.equal(first.status, 0, first.output);
+  const evidenceDir = path.join(dir, ".backpass", "evidence");
+  const evidenceFile = path.join(evidenceDir, fs.readdirSync(evidenceDir).find((name) => name.endsWith(".json")));
+  const evidence = JSON.parse(fs.readFileSync(evidenceFile, "utf8"));
+  evidence.key =
+    `${evidence.transcript.identity}:${evidence.transcript.mtimeMs}:${evidence.transcript.bytes}:` + evidence.memoryHash;
+  fs.writeFileSync(evidenceFile, `${JSON.stringify(evidence, null, 2)}\n`);
+
+  const upgraded = runAnalyze(dir, home);
+  assert.equal(upgraded.status, 0, upgraded.output);
+  assert.deepEqual([upgraded.summary.analyzed, upgraded.summary.cached], [1, 0]);
+
+  const reused = runAnalyze(dir, home);
+  assert.equal(reused.status, 0, reused.output);
+  assert.deepEqual([reused.summary.analyzed, reused.summary.cached], [0, 1]);
+});
+
 test("editing AGENTS.md without --force reanalyzes and explains that prior evidence is stale, not missing", () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-reuse-home-"));
   const dir = initRepo(MEMORY);

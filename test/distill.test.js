@@ -5,6 +5,7 @@ import { distill, isBoilerplate } from "../src/distill.js";
 import { redact } from "../src/redact.js";
 import { estimateTokens } from "../src/tokens.js";
 import { sanitizeEvidence } from "../src/analyze.js";
+import { parseMemoryUnits } from "../src/memory.js";
 
 const META = {
   id: "claude-abc",
@@ -130,6 +131,27 @@ test("evidence items without a verbatim quote are discarded at parse time", () =
   assert.equal(clean.gaps.length, 1);
   assert.equal(clean.usedRawTranscript, true);
   assert.equal(clean.gaps[0].recurrenceRisk, "high");
+});
+
+test("split paragraphs accept only sentence-part attribution targets", () => {
+  const blob = Array.from(
+    { length: 8 },
+    (_, i) => `Sentence ${i + 1} defines a separate requirement that should receive precise evidence attribution.`,
+  ).join(" ");
+  const memoryFile = { units: parseMemoryUnits(`# T\n\n${blob}\n`) };
+  assert.ok(memoryFile.units[0].parts?.length > 1);
+
+  const clean = sanitizeEvidence(
+    {
+      positive: [
+        { instruction: "AG-001", quote: "followed the entire oversized paragraph" },
+        { instruction: "AG-001.2", quote: "followed the second sentence precisely" },
+        { instruction: "AG-999", quote: "cited an instruction that does not exist" },
+      ],
+    },
+    memoryFile,
+  );
+  assert.deepEqual(clean.positive.map((item) => item.instruction), ["AG-001.2"]);
 });
 
 test("sanitizeEvidence tolerates a malformed model response", () => {

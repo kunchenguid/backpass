@@ -138,7 +138,8 @@ test("state round-trips through disk and survives a corrupt file", () => {
     key: "11:22:sha256:old",
   });
   const migrated = state.readEvidence({ ...legacy, nativeId: "old" });
-  assert.equal(migrated.key, evidenceKey({ ...legacy, nativeId: "old" }, "sha256:old"));
+  assert.equal(migrated.key, "11:22:sha256:old");
+  assert.equal(migrated.transcript.identity.length, 64);
   assert.equal(fs.existsSync(state.evidencePath(legacy.id)), false);
 
   state.writeEvidence(legacy.id, {
@@ -160,7 +161,7 @@ test("state round-trips through disk and survives a corrupt file", () => {
   assert.deepEqual(state.readScanCache(), { version: 1, entries: {} }, "a corrupt cache resets instead of crashing");
 });
 
-test("an interrupted legacy evidence migration still reuses the cached analysis", () => {
+test("an interrupted legacy evidence migration remains stale under the current analysis index", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-state-migration-"));
   const state = new State(dir).ensure();
   const legacy = { harness: "pi", id: "pi-old", path: "/store/old.jsonl", mtimeMs: 11, bytes: 22 };
@@ -176,8 +177,8 @@ test("an interrupted legacy evidence migration still reuses the cached analysis"
   fs.renameSync(state.evidencePath(legacy.id), state.evidencePath(transcript));
 
   const recovered = state.readEvidence(transcript);
-  assert.equal(isEvidenceFresh(recovered, transcript, memoryHash), true);
-  assert.equal(state.readEvidence(transcript).key, evidenceKey(transcript, memoryHash));
+  assert.equal(isEvidenceFresh(recovered, transcript, memoryHash), false);
+  assert.equal(state.readEvidence(transcript).key, `11:22:${memoryHash}`);
 });
 
 test("transcript ids are turned into safe filenames", () => {

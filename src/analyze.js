@@ -5,7 +5,7 @@ import { execOneShot, extractJson, sessionPrompt, usageRecord } from "./acpx.js"
 import { distill } from "./distill.js";
 import { classifyInteraction } from "./interaction.js";
 import { readTranscript } from "./discovery/index.js";
-import { renderInstructionIndex } from "./memory.js";
+import { instructionUnits, renderInstructionIndex } from "./memory.js";
 import { renderSkillIndexForAnalysis } from "./skills.js";
 import { renderPrompt } from "./prompts.js";
 import { renderOpenGapIndex } from "./gap-ledger.js";
@@ -41,17 +41,20 @@ function noteOnce(note) {
 export const NEGATIVE_CLASSES = ["harm", "non-compliance", "irrelevant"];
 
 /** Evidence items without a verbatim quote are dropped - the rubric's central rule. */
-export function sanitizeEvidence(parsed) {
+export function sanitizeEvidence(parsed, memoryFile = null) {
   const clean = { positive: [], negative: [], gaps: [], usedRawTranscript: Boolean(parsed?.usedRawTranscript) };
   if (!parsed || typeof parsed !== "object") return clean;
 
+  const validInstructions = memoryFile ? new Set(instructionUnits(memoryFile).map((unit) => unit.id)) : null;
   const hasQuote = (item) => typeof item?.quote === "string" && item.quote.trim().length >= 8;
 
   for (const key of ["positive", "negative"]) {
     for (const item of Array.isArray(parsed[key]) ? parsed[key] : []) {
       if (!hasQuote(item) || typeof item.instruction !== "string") continue;
+      const instruction = item.instruction.trim();
+      if (validInstructions && !validInstructions.has(instruction)) continue;
       const entry = {
-        instruction: item.instruction.trim(),
+        instruction,
         moment: String(item.moment ?? "").slice(0, 80),
         effect: String(item.effect ?? "").slice(0, 400),
         quote: item.quote.trim().slice(0, 600),
@@ -191,7 +194,7 @@ async function analyzeOne({
 
   return {
     status: "ok",
-    evidence: sanitizeEvidence(parsed),
+    evidence: sanitizeEvidence(parsed, memoryFile),
     usage: usageRecord(ranWith, result),
     distilled,
   };

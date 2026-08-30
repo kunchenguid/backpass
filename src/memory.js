@@ -13,9 +13,9 @@ import { estimateTokens } from "./tokens.js";
  *   - each unit gets a content hash (survives cosmetic edits elsewhere in the file)
  *     and a readable alias AG-001, AG-002, ... used in prompts and evidence
  *   - a paragraph above ATTRIBUTION_SPLIT_TOKENS is sentence-split into AG-nnn.m parts
- *     for the instruction index and fold only; the parent alias and line span stay put
+ *     for attribution and fold only; the parent alias and line span stay put
  *
- * Evidence anchors to the alias; the hash is what lets us re-anchor across runs.
+ * Evidence anchors to an addressable instruction id; the hash lets it re-anchor across runs.
  */
 
 /** Paragraphs above this are too coarse to attribute; sentence parts get dotted ids. */
@@ -133,25 +133,50 @@ function unitHasFence(text) {
   return text.split("\n").some((line) => FENCE.test(line));
 }
 
-/**
- * Split a paragraph on sentence boundaries. Abbreviations followed by a lowercase
- * word stay together; a capital after `.!?` starts a new sentence.
- */
+const ABBREVIATIONS = new Set([
+  "dr",
+  "e.g",
+  "etc",
+  "fig",
+  "i.e",
+  "inc",
+  "jr",
+  "mr",
+  "mrs",
+  "ms",
+  "no",
+  "prof",
+  "sr",
+  "st",
+  "v",
+  "vs",
+]);
+
+function endsWithAbbreviation(text) {
+  const token = text.match(/([\p{L}.]+)\.$/u)?.[1] || "";
+  if (ABBREVIATIONS.has(token.toLowerCase())) return true;
+  if (/^\p{L}$/u.test(token)) return true;
+  return /^(?:\p{L}\.)+\p{L}$/u.test(token);
+}
+
 export function splitAttributionSentences(text) {
-  const raw = text
-    .split(/(?<=[.!?]["')\]]*)\s+(?=[A-Z([{])/)
-    .map((piece) => piece.trim())
-    .filter(Boolean);
-  if (raw.length < 2) return [];
-  const merged = [];
-  for (const piece of raw) {
-    if (merged.length && estimateTokens(piece) < 8) {
-      merged[merged.length - 1] = `${merged[merged.length - 1]} ${piece}`;
-    } else {
-      merged.push(piece);
-    }
+  const sentences = [];
+  let start = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    if (![".", "!", "?"].includes(text[i])) continue;
+    let end = i + 1;
+    while (end < text.length && /["')\]}*`_~\u2019\u201d]/u.test(text[end])) end += 1;
+    if (end >= text.length || !/\s/u.test(text[end])) continue;
+    if (text[i] === "." && endsWithAbbreviation(text.slice(start, i + 1))) continue;
+    let next = end;
+    while (next < text.length && /\s/u.test(text[next])) next += 1;
+    if (next >= text.length) continue;
+    sentences.push(text.slice(start, end).trim());
+    start = next;
+    i = next - 1;
   }
-  return merged.length >= 2 ? merged : [];
+  sentences.push(text.slice(start).trim());
+  return sentences.length >= 2 ? sentences.filter(Boolean) : [];
 }
 
 function attributionParts(unit) {
@@ -243,7 +268,8 @@ function formatIndexEntry(unit) {
  * Render the instruction index that both prompt tiers see. It is a lookup table keyed
  * by alias, never a stand-in for the file: units are listed with the lines they occupy
  * so the synthesis agent can find them in the raw file it edits. Oversized paragraphs
- * keep their positional AG-nnn id and expose AG-nnn.m sentence parts for attribution.
+ * retain an unbracketed positional AG-nnn alias for line-oriented edits and expose only
+ * their bracketed AG-nnn.m sentence parts as attribution targets.
  */
 export function renderInstructionIndex(file) {
   const blocks = [];
@@ -251,8 +277,9 @@ export function renderInstructionIndex(file) {
     if (unit.parts?.length) {
       const lines = unit.startLine === unit.endLine ? `L${unit.startLine}` : `L${unit.startLine}-${unit.endLine}`;
       blocks.push(
-        `Oversized paragraph [${unit.id}] (${unit.tokens} tok, ${lines})` +
-          `${unit.section ? ` <${unit.section}>` : ""} is one blob; attribution is per sentence ` +
+        `Oversized paragraph ${unit.id} (${unit.tokens} tok, ${lines})` +
+          `${unit.section ? ` <${unit.section}>` : ""} is one blob; ${unit.id} is only its line-oriented alias. ` +
+          `Attribute evidence only to the sentence-part IDs below ` +
           `(${unit.parts.map((part) => part.id).join(", ")}). If these fail to steer, split the ` +
           `paragraph into list items in place - a bold label on the blob is not a strengthen.`,
       );
