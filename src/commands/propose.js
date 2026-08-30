@@ -202,6 +202,17 @@ export function printSynthesisFailure(err, state) {
     info(color.dim(`  it is from annotation attempt ${err.saved.attempt}, not the turn above, and it lists:`));
     for (const violation of err.saved.violations) info(color.dim(`    - ${violation}`));
   }
+  const notes = rejectedProposalNotes(err, state);
+  if (notes.length) {
+    info(color.dim("  the rejected proposal noted:"));
+    for (const note of notes) info(`    ${note}`);
+  }
+}
+
+function rejectedProposalNotes(err, state) {
+  if (Array.isArray(err.saved?.notes) && err.saved.notes.length) return err.saved.notes.map(String);
+  const proposal = state?.readProposal?.();
+  return Array.isArray(proposal?.notes) ? proposal.notes.map(String).filter(Boolean) : [];
 }
 
 export async function cmdPropose(ctx) {

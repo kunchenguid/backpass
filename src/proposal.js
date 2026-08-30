@@ -61,7 +61,7 @@ export class ProposalViolation extends Error {
    * @param {string} message
    * @param {string[]} violations
    * @param {{ reason?: string, attempts?: number,
-   *   saved?: { attempt: number, violations: string[] } | null, proposalPath?: string | null }} [detail]
+   *   saved?: { attempt: number, violations: string[], notes?: string[] } | null, proposalPath?: string | null }} [detail]
    */
   constructor(message, violations, detail = {}) {
     super(message);

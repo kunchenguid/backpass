@@ -21,6 +21,15 @@ import { UserError } from "./logger.js";
  *   codex     acpx `--model` at `sessions new`; ACP `set reasoning_effort`
  *   opencode  acpx `--model` at `sessions new`; no effort overlay (report, never pretend)
  *
+ * Synthesis also requests `writeAccess`: native file-write / code-mode must be on for
+ * this spawn, never by rewriting `~/.codex/config.toml` or other harness defaults.
+ *   codex     `INITIAL_AGENT_MODE=agent`, `CODEX_CONFIG` `features.code_mode_host=true`,
+ *             `CODEX_PATH` wrapper `--enable code_mode_host`, ACP `set-mode agent`
+ *   grok      process `--always-approve --permission-mode bypassPermissions`
+ *   pi        no extra flags (the adapter always exposes write/edit; modes are thinking)
+ *   claude    acpx `--approve-all` on the prompt (client-side permission) is the contract
+ *   opencode  no proven process overlay; `--approve-all` remains the client-side gate
+ *
  * No overlay requested means no wrapper, no `--model`, no `set` - same spawn as before.
  * A requested overlay with no proven invocation-scoped mechanism throws rather than
  * writing persistent defaults or silently ignoring the request. OpenCode effort is the
@@ -35,6 +44,8 @@ const SESSION_LOCAL_EFFORT_KEYS = { codex: "reasoning_effort", claude: "effort" 
  *   env: Record<string, string> | undefined,
  *   acpxModel: string | null,
  *   setEffortKey: string | null,
+ *   sessionMode: string | null,
+ *   sessionModeRequired: boolean,
  *   acpxAgentCommand: string | null,
  *   requiredBuiltinAgent: string | null,
  *   notes: string[],
@@ -43,10 +54,10 @@ const SESSION_LOCAL_EFFORT_KEYS = { codex: "reasoning_effort", claude: "effort" 
  */
 
 /**
- * @param {{ agent: string, model?: string | null, effort?: string | null }} options
+ * @param {{ agent: string, model?: string | null, effort?: string | null, writeAccess?: boolean }} options
  * @returns {HarnessInvocation}
  */
-export function prepareHarnessInvocation({ agent, model = null, effort = null }) {
+export function prepareHarnessInvocation({ agent, model = null, effort = null, writeAccess = false }) {
   const notes = [];
   const cleanups = [];
   const dispose = () => {
@@ -61,55 +72,62 @@ export function prepareHarnessInvocation({ agent, model = null, effort = null })
 
   const requestedModel = typeof model === "string" && model.trim() ? model.trim() : null;
   const requestedEffort = typeof effort === "string" && effort.trim() ? effort.trim() : null;
+  const overlay = Boolean(requestedModel || requestedEffort);
 
-  if (!requestedModel && !requestedEffort) {
-    return {
-      env: undefined,
-      acpxModel: null,
-      setEffortKey: null,
-      acpxAgentCommand: null,
-      requiredBuiltinAgent: null,
-      notes,
-      dispose,
-    };
-  }
+  if (!overlay && !writeAccess) return baseInvocation({ notes, dispose });
 
   try {
-    if (agent === "pi") return piInvocation({ requestedModel, requestedEffort, notes, cleanups, dispose });
-    if (agent === "grok") return grokInvocation({ requestedModel, requestedEffort, notes, cleanups, dispose });
-    if (agent === "claude" || agent === "codex") {
-      return {
-        env: undefined,
+    let invocation;
+    if (agent === "pi") {
+      invocation = overlay
+        ? piInvocation({ requestedModel, requestedEffort, notes, cleanups, dispose })
+        : baseInvocation({ notes, dispose });
+    } else if (agent === "grok") {
+      invocation = grokInvocation({ requestedModel, requestedEffort, writeAccess, notes, cleanups, dispose });
+    } else if (agent === "claude" || agent === "codex") {
+      invocation = {
+        ...baseInvocation({ notes, dispose }),
         acpxModel: requestedModel,
         setEffortKey: requestedEffort ? SESSION_LOCAL_EFFORT_KEYS[agent] : null,
-        acpxAgentCommand: null,
-        requiredBuiltinAgent: agent,
-        notes,
-        dispose,
+        requiredBuiltinAgent: overlay ? agent : null,
       };
-    }
-    if (agent === "opencode") {
+    } else if (agent === "opencode") {
       if (requestedEffort) {
         notes.push(`${agent} does not advertise a reasoning-effort option; ran without effort=${requestedEffort}`);
       }
-      return {
-        env: undefined,
+      invocation = {
+        ...baseInvocation({ notes, dispose }),
         acpxModel: requestedModel,
-        setEffortKey: null,
-        acpxAgentCommand: null,
-        requiredBuiltinAgent: agent,
-        notes,
-        dispose,
+        requiredBuiltinAgent: overlay ? agent : null,
       };
+    } else if (overlay) {
+      throw new UserError(
+        `${agent} has no proven invocation-scoped way to apply ${describeOverride(requestedModel, requestedEffort)} without writing persistent harness defaults`,
+        "pin pi, claude, codex, grok, or opencode, or omit the model and effort override",
+      );
+    } else {
+      invocation = baseInvocation({ notes, dispose });
     }
-    throw new UserError(
-      `${agent} has no proven invocation-scoped way to apply ${describeOverride(requestedModel, requestedEffort)} without writing persistent harness defaults`,
-      "pin pi, claude, codex, grok, or opencode, or omit the model and effort override",
-    );
+    if (writeAccess && agent === "codex") applyCodexWriteAccess(invocation, { cleanups });
+    return invocation;
   } catch (err) {
     dispose();
     throw err;
   }
+}
+
+function baseInvocation({ notes, dispose }) {
+  return {
+    env: undefined,
+    acpxModel: null,
+    setEffortKey: null,
+    sessionMode: null,
+    sessionModeRequired: false,
+    acpxAgentCommand: null,
+    requiredBuiltinAgent: null,
+    notes,
+    dispose,
+  };
 }
 
 function describeOverride(model, effort) {
@@ -142,6 +160,8 @@ function piInvocation({ requestedModel, requestedEffort, notes, cleanups, dispos
     env: { PI_ACP_PI_COMMAND: wrapperPath },
     acpxModel: null,
     setEffortKey: null,
+    sessionMode: null,
+    sessionModeRequired: false,
     acpxAgentCommand: null,
     requiredBuiltinAgent: "pi",
     notes,
@@ -149,21 +169,22 @@ function piInvocation({ requestedModel, requestedEffort, notes, cleanups, dispos
   };
 }
 
-function grokInvocation({ requestedModel, requestedEffort, notes, cleanups, dispose }) {
+function grokInvocation({ requestedModel, requestedEffort, writeAccess = false, notes, cleanups, dispose }) {
   if (process.platform === "win32") {
     throw new UserError(
-      `cannot apply ${describeOverride(requestedModel, requestedEffort)} through acpx --agent on Windows`,
+      `cannot apply ${describeOverride(requestedModel, requestedEffort) || "file-write flags"} through acpx --agent on Windows`,
       "pin pi, claude, codex, or opencode, or omit the model and effort override",
     );
   }
   const extra = [];
+  if (writeAccess) extra.push("--always-approve", "--permission-mode", "bypassPermissions");
   if (requestedModel) extra.push("-m", requestedModel);
   if (requestedEffort) extra.push("--reasoning-effort", requestedEffort);
   extra.push("agent", "stdio");
   const real = resolveOnPath("grok");
   if (!real) {
     throw new UserError(
-      `cannot apply ${describeOverride(requestedModel, requestedEffort)} as grok process flags because grok was not found on PATH`,
+      `cannot apply ${describeOverride(requestedModel, requestedEffort) || "file-write flags"} as grok process flags because grok was not found on PATH`,
       "install the grok CLI, or pin a different agent / omit the model and effort override",
     );
   }
@@ -173,11 +194,64 @@ function grokInvocation({ requestedModel, requestedEffort, notes, cleanups, disp
     env: undefined,
     acpxModel: null,
     setEffortKey: null,
+    sessionMode: null,
+    sessionModeRequired: false,
     acpxAgentCommand: nodeCommand,
     requiredBuiltinAgent: null,
     notes,
     dispose,
   };
+}
+
+/**
+ * Codex 0.147+ fails closed when `features.code_mode_host` is off: every file/exec tool
+ * returns "code-mode host is disabled". The adapter honors invocation env
+ * (`INITIAL_AGENT_MODE`, `CODEX_CONFIG`) and a `CODEX_PATH` wrapper; ACP `set-mode agent`
+ * is the session-local follow-through. None of this writes `~/.codex/config.toml`.
+ */
+function applyCodexWriteAccess(invocation, { cleanups }) {
+  invocation.env = { ...(invocation.env || {}) };
+  invocation.env.INITIAL_AGENT_MODE = "agent";
+  invocation.env.CODEX_CONFIG = mergeCodexConfig(process.env.CODEX_CONFIG, invocation.env.CODEX_CONFIG, {
+    features: { code_mode_host: true },
+  });
+  invocation.sessionMode = "agent";
+  invocation.sessionModeRequired = true;
+
+  const real = invocation.env.CODEX_PATH || process.env.CODEX_PATH || resolveOnPath("codex");
+  if (!real || (process.platform === "win32" && /\.(?:cmd|bat)$/i.test(real))) return;
+  const { wrapperPath, dir } = writeArgvWrapper({
+    realCommand: real,
+    extraArgs: ["--enable", "code_mode_host"],
+    binName: "codex",
+  });
+  cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
+  invocation.env.CODEX_PATH = wrapperPath;
+}
+
+function mergeCodexConfig(...layers) {
+  /** @type {Record<string, unknown>} */
+  const merged = {};
+  for (const layer of layers) {
+    if (!layer) continue;
+    let parsed = layer;
+    if (typeof layer === "string") {
+      try {
+        parsed = JSON.parse(layer);
+      } catch {
+        continue;
+      }
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+    for (const [key, value] of Object.entries(parsed)) {
+      if (key === "features" && value && typeof value === "object" && !Array.isArray(value)) {
+        merged.features = { ...(merged.features || {}), ...value };
+      } else {
+        merged[key] = value;
+      }
+    }
+  }
+  return JSON.stringify(merged);
 }
 
 /**

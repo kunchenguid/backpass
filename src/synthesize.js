@@ -272,7 +272,7 @@ async function annotateLoop({
   let violationsToShow = [];
   let justRemeasured = false;
   let owePreface = startFresh;
-  /** @type {{ attempt: number, violations: string[] } | null} */
+  /** @type {{ attempt: number, violations: string[], notes?: string[] } | null} */
   let saved = null;
   /** @type {{ reason: string, violations: string[] }} */
   let terminal;
@@ -370,7 +370,7 @@ async function annotateLoop({
     // Keep the rejected proposal so a loud failure is still inspectable. It records which
     // attempt produced it, so a later empty turn cannot be reported as its author.
     state.writeProposal(proposal);
-    saved = { attempt: attempts, violations };
+    saved = { attempt: attempts, violations, notes: proposal.notes };
     if (attempts >= ANNOTATE_TURNS) {
       terminal = { reason: "gates", violations };
       break;
@@ -494,6 +494,7 @@ export async function synthesizeProposal({ memoryFile, summary, config, repo, tr
       effort: current.effort,
       sessionName,
       cwd: workspace.root,
+      writeAccess: true,
     });
     try {
       return await holder.session.prompt({
@@ -519,6 +520,7 @@ export async function synthesizeProposal({ memoryFile, summary, config, repo, tr
       effort: chosen.effort,
       sessionName: `${sessionName}-r${(serial += 1)}`,
       cwd: workspace.root,
+      writeAccess: true,
     });
 
   try {

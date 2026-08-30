@@ -278,6 +278,28 @@ test("a run that ends on an empty turn says so, and never reads an older proposa
   assert.ok(staged[".agents/skills/incident-response/SKILL.md"]);
 });
 
+test("a rejected proposal's notes are printed with the failure", () => {
+  const dir = makeCliRepo({ memory: MEMORY });
+  const run = runCli(dir, ["propose", ...PIN], {
+    script: {
+      edit: EDIT_TURN,
+      annotations: [
+        {
+          reply: {
+            edits: [extract(["H1", "H2", "H3"], "extract two playbooks", { evidence: [] })],
+            notes: ["Code Mode is unavailable because code-mode host is disabled."],
+          },
+        },
+      ],
+    },
+  });
+
+  assert.equal(run.status, 1, `the run should fail:\n${run.output}`);
+  assert.match(run.stderr, /carries no verbatim evidence quote/);
+  assert.match(run.stderr, /the rejected proposal noted:/);
+  assert.match(run.stderr, /code-mode host is disabled/);
+});
+
 test("a failed synthesis invalidates an older applicable proposal", () => {
   const dir = makeCliRepo({ memory: MEMORY });
   const succeeded = runCli(dir, ["propose", ...PIN], {

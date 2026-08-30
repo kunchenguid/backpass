@@ -342,8 +342,8 @@ export async function execOneShot({
  *     Promise<{ text: string, usage: Record<string, number> | null, raw: string, notes: string[] }>,
  *   close: () => Promise<void> }>}
  */
-export async function openSession({ agent, model = null, effort = null, sessionName, cwd }) {
-  const invocation = prepareHarnessInvocation({ agent, model, effort });
+export async function openSession({ agent, model = null, effort = null, sessionName, cwd, writeAccess = false }) {
+  const invocation = prepareHarnessInvocation({ agent, model, effort, writeAccess });
   const notes = [...invocation.notes];
   const acpxAgentArgs = invocationAgentArgs(invocation, agent);
   const runOpts = { timeoutMs: 60_000, cwd, env: invocation.env };
@@ -400,6 +400,21 @@ export async function openSession({ agent, model = null, effort = null, sessionN
   };
 
   try {
+    if (invocation.sessionMode) {
+      const setMode = await run([...acpxAgentArgs, "-s", sessionName, "set-mode", invocation.sessionMode], runOpts);
+      if (setMode.code !== 0) {
+        const detail = firstLine(setMode.stderr) || `exit ${setMode.code}`;
+        if (invocation.sessionModeRequired) {
+          throw new AcpxError(
+            `acpx ${agent} could not enable write session mode=${invocation.sessionMode}: ${detail}`,
+            setMode,
+          );
+        }
+        notes.push(
+          `${agent} did not accept session mode ${invocation.sessionMode}; continuing with the adapter default`,
+        );
+      }
+    }
     if (effort && invocation.setEffortKey) {
       const set = await run([...acpxAgentArgs, "-s", sessionName, "set", invocation.setEffortKey, effort], runOpts);
       if (set.code !== 0) {

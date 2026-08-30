@@ -363,7 +363,10 @@ export class AgentResolver {
         return await fn(pick);
       } catch (err) {
         const verdict = err instanceof AcpxError ? classifyAcpxFailure(err) : null;
-        if (!verdict || !(await this.demote(role, pick, verdict, err.message))) throw err;
+        if (verdict && !(await this.demote(role, pick, verdict, err.message))) {
+          throw pinnedFailureError(role, pick, verdict, err);
+        }
+        if (!verdict) throw err;
       }
     }
   }
@@ -373,6 +376,20 @@ function describeTrail(trail) {
   const losers = trail.filter((t) => t.verdict !== "ok");
   if (!losers.length) return "first candidate in the ladder";
   return `after skipping ${losers.map((t) => `${t.agent}/${t.model} (${VERDICT_LABELS[t.verdict] || t.verdict})`).join(", ")}`;
+}
+
+function pinnedFailureError(role, pick, verdict, err) {
+  const label = VERDICT_LABELS[verdict] || verdict;
+  const model = pick.model ? ` (${pick.model})` : "";
+  const pin = `or pin a different harness: backpass --${role}-agent <agent>`;
+  let hint = pin;
+  if (verdict === "unauthenticated" && LOGIN_HINTS[pick.agent]) {
+    hint = `run: ${LOGIN_HINTS[pick.agent]}; ${pin}`;
+  } else if (verdict === "unreachable") {
+    hint = `install the ${pick.agent} CLI; ${pin}`;
+  }
+  const detail = err?.message ? ` (${String(err.message).split("\n")[0]})` : "";
+  return new UserError(`pinned ${role} agent ${pick.agent}${model} is ${label}${detail}`, hint);
 }
 
 function exhaustedError(role, trail) {
