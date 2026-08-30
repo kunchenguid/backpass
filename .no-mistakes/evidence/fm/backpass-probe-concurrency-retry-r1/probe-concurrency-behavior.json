@@ -1,0 +1,31 @@
+{
+  "transient_then_recovered": {
+    "probe_sequence": [
+      "busy",
+      "busy"
+    ],
+    "selected": "busy/provider/wanted",
+    "persisted_verdict": "ok"
+  },
+  "repeated_timeout": {
+    "probe_sequence": [
+      "busy",
+      "busy",
+      "fallback"
+    ],
+    "selected_this_run": "fallback",
+    "transient_negative_persisted": false,
+    "next_run_probe_sequence": [
+      "busy"
+    ],
+    "selected_next_run": "busy"
+  },
+  "genuine_unsupported": {
+    "probe_sequence": [
+      "busy",
+      "fallback"
+    ],
+    "selected": "fallback",
+    "persisted_verdict": "model-unavailable"
+  }
+}
