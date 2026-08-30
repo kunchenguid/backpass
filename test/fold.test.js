@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { foldEvidence, renderEvidenceForPrompt } from "../src/fold.js";
+import { foldEvidence, renderEvidenceForPrompt, renderEvidenceReport } from "../src/fold.js";
 import { parseMemoryUnits } from "../src/memory.js";
 
 function record(id, overrides = {}) {
@@ -182,12 +182,40 @@ test("a two-sighting cluster with one orchestration vote survives instead of dro
     0,
     "a majority orchestration vote still withholds the cluster from a proposal",
   );
-  assert.equal(majorityOrch.excludedMixedGaps.length, 1);
-  assert.equal(majorityOrch.excludedMixedGaps[0].sessions, 3);
-  const renderedMajority = renderEvidenceForPrompt(majorityOrch);
+  assert.equal(majorityOrch.reportOnlyGaps.length, 1);
+  assert.equal(majorityOrch.reportOnlyGaps[0].sessions, 3);
+  const renderedMajority = renderEvidenceReport(majorityOrch);
   assert.match(renderedMajority, /3 sightings, 2 orchestration; majority vote excluded/);
   assert.match(renderedMajority, /no gap cluster is eligible for a repository proposal/);
   assert.doesNotMatch(renderedMajority, /none above the evidence threshold/);
+  assert.match(renderEvidenceForPrompt(majorityOrch), /Report-only mixed gap clusters/);
+});
+
+test("a below-threshold mixed cluster remains visible only in the report", () => {
+  const phrasing = "Read docs/sshhip.md before changing the tunnel.";
+  const summary = foldEvidence(
+    [
+      record("s1", {
+        gaps: [{ proposedInstruction: phrasing, quote: "q1", recurrenceRisk: "high" }],
+      }),
+      record("s2", {
+        gaps: [
+          {
+            proposedInstruction: phrasing,
+            quote: "q2",
+            recurrenceRisk: "high",
+            domain: "orchestration",
+          },
+        ],
+      }),
+    ],
+    { minGapEvidence: 3 },
+  );
+
+  assert.equal(summary.gaps.length, 0);
+  assert.equal(summary.reportOnlyGaps.length, 1);
+  assert.match(renderEvidenceReport(summary), /2 sightings, 1 orchestration/);
+  assert.match(renderEvidenceForPrompt(summary), /Report-only mixed gap clusters/);
 });
 
 test("the same gap repeated inside one session does not clear the threshold", () => {
