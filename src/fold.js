@@ -350,6 +350,23 @@ function failedTriggerOf(items, minGapEvidence) {
     : {};
 }
 
+function renderSkillOverlap(lines, overlap) {
+  const match =
+    `    CROSS-SURFACE: restates skill "${overlap.skill}" ${overlap.surface} ` +
+    `(similarity ${overlap.score.toFixed(2)})`;
+  if (overlap.surface === "description") {
+    lines.push(
+      `${match} - duplicated always-loaded tokens; ` +
+        `drop the memory-file copy, do not treat it as a second instruction`,
+    );
+  } else {
+    lines.push(
+      `${match} - triggered skill-body overlap (report-only); weigh relevance and trigger suitability, ` +
+        `do not infer the memory-file copy should be dropped`,
+    );
+  }
+}
+
 /** Compact rendering of the folded evidence for the synthesis prompt. */
 export function renderEvidenceForPrompt(summary) {
   return renderEvidence(summary, { includeReportOnly: false });
@@ -391,23 +408,7 @@ function renderEvidence(summary, { includeReportOnly }) {
       `- [${row.instruction}] +${row.positive} -${row.negative}${harm} sessions=${row.sessions} relevance=${relevance}${byCategory}${cost}` +
         (row.known ? "" : " (id not found in current file - stale reference)"),
     );
-    if (row.skillOverlap) {
-      const overlap = row.skillOverlap;
-      const match =
-        `    CROSS-SURFACE: restates skill "${overlap.skill}" ${overlap.surface} ` +
-        `(similarity ${overlap.score.toFixed(2)})`;
-      if (overlap.surface === "description") {
-        lines.push(
-          `${match} - duplicated always-loaded tokens; ` +
-            `drop the memory-file copy, do not treat it as a second instruction`,
-        );
-      } else {
-        lines.push(
-          `${match} - triggered skill-body overlap (report-only); weigh relevance and trigger suitability, ` +
-            `do not infer the memory-file copy should be dropped`,
-        );
-      }
-    }
+    if (row.skillOverlap) renderSkillOverlap(lines, row.skillOverlap);
     for (const quote of row.quotes.slice(0, 3)) {
       const sign = quote.polarity === "negative" ? "-" : "+";
       const cls = quote.polarity === "negative" ? ` [${quote.class ?? "unclassified"}]` : "";
@@ -416,11 +417,26 @@ function renderEvidence(summary, { includeReportOnly }) {
     }
   }
 
+  const representedOverlaps = new Set(
+    summary.instructions.filter((row) => row.skillOverlap).map((row) => row.instruction),
+  );
+  const parentOverlaps = (summary.crossSurfaceDuplicates || []).filter(
+    (overlap) => !representedOverlaps.has(overlap.instruction),
+  );
+  if (parentOverlaps.length) {
+    lines.push("");
+    lines.push("Parent paragraph cross-surface overlap:");
+    for (const overlap of parentOverlaps) {
+      lines.push(`- ${overlap.instruction} parent paragraph`);
+      renderSkillOverlap(lines, overlap);
+    }
+  }
+
   const parentHarm = Object.entries(summary.parentHarmSessions || {}).filter(([, sessions]) => sessions > 0);
   if (parentHarm.length) {
     lines.push("");
     lines.push("Parent paragraph removal evidence aggregated across sentence parts:");
-    for (const [id, sessions] of parentHarm) lines.push(`- [${id}] harm-sessions=${sessions}`);
+    for (const [id, sessions] of parentHarm) lines.push(`- ${id} harm-sessions=${sessions}`);
   }
 
   if (summary.oversized?.length) {
@@ -432,8 +448,9 @@ function renderEvidence(summary, { includeReportOnly }) {
         "not a strengthen.",
     );
     for (const blob of summary.oversized) {
+      const parts = blob.parts.map((id) => `[${id}]`).join(", ");
       lines.push(
-        `- [${blob.id}] is ${blob.tokens} tokens as one paragraph (attribution: ${blob.parts.join(", ")}). ` +
+        `- ${blob.id} is ${blob.tokens} tokens as one paragraph (attribution: ${parts}). ` +
           `Split it into list items; do not decorate the blob.`,
       );
     }

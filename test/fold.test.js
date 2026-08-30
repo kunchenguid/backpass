@@ -447,8 +447,23 @@ test("sentence-part harm renders the parent paragraph's removal aggregate", () =
   assert.equal(summary.parentHarmSessions["AG-001"], 2);
   assert.match(
     renderEvidenceForPrompt(summary),
-    /Parent paragraph removal evidence aggregated across sentence parts:\n- \[AG-001\] harm-sessions=2/,
+    /Parent paragraph removal evidence aggregated across sentence parts:\n- AG-001 harm-sessions=2/,
   );
+});
+
+test("an oversized parent preserves its cross-surface warning without becoming an attribution target", () => {
+  const blob = oversizedParagraph();
+  const blobFile = { units: parseMemoryUnits(`# T\n\n${blob}\n`) };
+  const summary = foldEvidence([], {
+    memoryFile: blobFile,
+    skills: [{ name: "oversized-rules", path: ".agents/skills/oversized-rules/SKILL.md", description: blob, body: "" }],
+  });
+
+  assert.equal(summary.crossSurfaceDuplicates[0].instruction, "AG-001");
+  const rendered = renderEvidenceForPrompt(summary);
+  assert.match(rendered, /Parent paragraph cross-surface overlap:\n- AG-001 parent paragraph/);
+  assert.match(rendered, /CROSS-SURFACE: restates skill "oversized-rules" description/);
+  assert.doesNotMatch(rendered, /\[AG-001\](?!\.)/);
 });
 
 test("an oversized high-non-compliance paragraph attributes per sentence and invites a restructure, not a bold label", () => {
@@ -513,6 +528,7 @@ test("an oversized high-non-compliance paragraph attributes per sentence and inv
   assert.match(rendered, /### Oversized units that failed to steer/);
   assert.match(rendered, /Preferred reinforcement is a restructure-in-place/);
   assert.match(rendered, /bold label on the blob is not a strengthen/);
-  assert.match(rendered, /\[AG-001\] is \d+ tokens as one paragraph \(attribution: AG-001\.1/);
+  assert.match(rendered, /- AG-001 is \d+ tokens as one paragraph \(attribution: \[AG-001\.1\]/);
+  assert.doesNotMatch(rendered, /\[AG-001\](?!\.)/);
   assert.doesNotMatch(rendered, /\[AG-001\] \+0 -0/);
 });
