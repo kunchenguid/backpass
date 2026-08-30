@@ -105,18 +105,25 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   stronger-model/budget/max-edits line.
 - **An extract is one measured memory change plus the skill(s) it pays for.** `anchoredHunks`
   merges adjacent removals, so extracting neighbouring sections yields one change and N
-  created skills - one honest accept/reject decision, since a merged change cannot be
-  half-accepted. `buildProposal` allows N skills only when they share ONE hunk; separately
-  measured skills must stay separate edits. Edits carry `skills: []`; read them through
-  `editSkills` (`src/skills.js`), which also understands the pre-0.1.8 single `skill`.
+  skills - one honest accept/reject decision, since a merged change cannot be
+  half-accepted. `buildProposal` allows N skills only when they share ONE memory hunk;
+  separately measured skills must stay separate edits. An extract may create `SKILL.md`
+  or extend an existing one when the staged file still has every prior line plus every
+  line the memory hunks remove (`normalizeRecoveryLine`). A `move` is the same verbatim
+  carry inside the memory file: removed lines must reappear in the same edit's added
+  lines, so repositioning does not hit the harm floor. Edits carry `skills: []` for
+  created files; read them through `editSkills` (`src/skills.js`), which also understands
+  the pre-0.1.8 single `skill`. Writer apply splits a multi-file extract by hunk `file`
+  (`filesOfEdit` / `sliceEditForFile` in `src/proposal.js`).
 - **Extraction and deletion never share one decision.** `measureWorkspace` splits a pure
   removal that mixes skill-carried and vanishing text at that boundary (`splitRemovalHunk`;
   a split that cannot anchor uniquely keeps the merged hunk instead of guessing). In
-  `buildProposal`, an extract's skills must carry every line its hunks remove
+  `buildProposal`, an extract's skills must carry every line its memory hunks remove
   (dash-and-whitespace-folded, `normalizeRecoveryLine`), and any other edit whose hunk only
   deletes memory-file text is a removal whatever its kind: each deleted unit needs
   `minGapEvidence` distinct sessions of `class: "harm"` negatives (`harmSessions` in the
-  fold). The same floor covers skill files, where no evidence can attribute at all, so a
+  fold). Extract and move skip that floor because the text never leaves the always-loaded
+  surface. The same floor covers skill files, where no evidence can attribute at all, so a
   pure deletion inside a skill file is refused outright - skill content is rewritten or
   extracted, never dropped. Non-compliance never satisfies the floor; the >= 20%-relevance
   placement table stays prompt guidance by the captain's explicit decision - do not harden it.

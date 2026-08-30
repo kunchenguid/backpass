@@ -188,7 +188,9 @@ export function editSkills(edit) {
 export function extractionBudgetEffect(edit) {
   const skills = editSkills(edit);
   if (edit.kind !== "extract" || !skills.length) return null;
-  const pairs = Array.isArray(edit.hunks) ? edit.hunks : [edit];
+  const pairs = (Array.isArray(edit.hunks) ? edit.hunks : [edit]).filter(
+    (part) => !part.file || !edit.file || part.file === edit.file,
+  );
   const removedFromMemory = pairs.reduce((sum, p) => sum + estimateTokens(p.find) - estimateTokens(p.replace), 0);
   const descriptionCost = skills.reduce((sum, skill) => sum + estimateTokens(skill.description), 0);
   return {

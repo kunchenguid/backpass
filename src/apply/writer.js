@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
-import { applyEdit } from "../proposal.js";
+import { applyEdit, filesOfEdit, sliceEditForFile } from "../proposal.js";
 import { memoryTextHash } from "../memory.js";
 import { budgetGateKind, budgetStatus, estimateTokens, formatTokens } from "../tokens.js";
 import { recordRejection } from "../state.js";
@@ -242,32 +242,37 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
   const expectedTargetHashes = new Map((proposal.targetFiles ?? []).map((t) => [t.file, t.hash]));
   const checkedTargets = new Set();
   for (const edit of [...accepted, ...rejected]) {
-    const relative = edit.file;
-    if (!relative || relative === proposal.memoryFile?.path || checkedTargets.has(relative)) continue;
-    checkedTargets.add(relative);
-    const expected = expectedTargetHashes.get(relative);
-    if (!expected) continue;
-    const absolute = path.join(repo.root, relative);
-    if (!fs.existsSync(absolute)) {
-      results.failed.push({ file: relative, error: "file does not exist" });
-      continue;
-    }
-    const observed = memoryTextHash(fs.readFileSync(absolute, "utf8"));
-    if (observed !== expected) {
-      results.failed.push({
-        file: relative,
-        error:
-          `${relative} changed after this proposal was made (${expected} -> ${observed}), so its edits ` +
-          `no longer describe the file on disk; nothing was written. Run \`backpass\` to re-propose ` +
-          `against the current repository.`,
-      });
+    for (const relative of filesOfEdit(edit)) {
+      if (!relative || relative === proposal.memoryFile?.path || checkedTargets.has(relative)) continue;
+      checkedTargets.add(relative);
+      const expected = expectedTargetHashes.get(relative);
+      if (!expected) continue;
+      const absolute = path.join(repo.root, relative);
+      if (!fs.existsSync(absolute)) {
+        results.failed.push({ file: relative, error: "file does not exist" });
+        continue;
+      }
+      const observed = memoryTextHash(fs.readFileSync(absolute, "utf8"));
+      if (observed !== expected) {
+        results.failed.push({
+          file: relative,
+          error:
+            `${relative} changed after this proposal was made (${expected} -> ${observed}), so its edits ` +
+            `no longer describe the file on disk; nothing was written. Run \`backpass\` to re-propose ` +
+            `against the current repository.`,
+        });
+      }
     }
   }
   if (results.failed.length) return results;
 
   for (const edit of accepted) {
-    if (!byFile.has(edit.file)) byFile.set(edit.file, []);
-    byFile.get(edit.file).push(edit);
+    for (const relative of filesOfEdit(edit)) {
+      const slice = sliceEditForFile(edit, relative);
+      if (!slice) continue;
+      if (!byFile.has(relative)) byFile.set(relative, []);
+      byFile.get(relative).push(slice);
+    }
   }
 
   // Compose first, write later. Each file's accepted edits are applied to one immutable

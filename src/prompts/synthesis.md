@@ -39,7 +39,8 @@ refers to instructions by these ids.
 {{SKILL_INDEX}}
 
 To extract a section into a skill, create `./{{SKILLS_DIR}}/<skill-name>/SKILL.md` with
-this exact shape, then remove the extracted detail from `./{{MEMORY_PATH}}`
+this exact shape, or append the extracted lines to an existing SKILL.md that should own
+them, then remove the extracted detail from `./{{MEMORY_PATH}}`
 (optionally leaving a one-line pointer):
 
 ```
@@ -76,18 +77,24 @@ analyzed sessions in which an instruction drew any evidence at all.
    Only `harm` negatives - following the instruction caused damage - argue against an
    instruction. `non-compliance` means it failed to steer: reinforce it, reposition it,
    or improve its trigger, never delete it for being ignored. Text you delete that does
-   not land in a created skill is a removal, whatever the edit is called - including
-   text deleted from an existing skill file, where no evidence can attribute at all, so
-   no skill-file deletion clears the floor: rewrite skill content, never remove it.
-4. **An extraction preserves every line it removes** in the SKILL.md it creates. A
-   deletion is never part of an extract: it is its own `remove` edit, decided on its
-   own evidence.
-5. **Every edit must be backed by at least one verbatim quote** from the evidence. You
+   not land in a skill (created or extended) and does not reappear verbatim elsewhere in
+   this file is a removal, whatever the edit is called - including text deleted from an
+   existing skill file, where no evidence can attribute at all, so no skill-file deletion
+   clears the floor: rewrite skill content, never remove it.
+4. **An extraction preserves every line it removes** in the SKILL.md it creates or
+   extends. Extending an existing skill keeps every line that file already had, then adds
+   the extracted lines. A deletion is never part of an extract: it is its own `remove`
+   edit, decided on its own evidence.
+5. **A move preserves every line it removes** by re-adding it verbatim elsewhere in
+   `./{{MEMORY_PATH}}`. Group the deletion and the re-add as one change. Do not duplicate
+   a rule in order to "move" it.
+6. **Every edit must be backed by at least one verbatim quote** from the evidence. You
    will attach the quotes in the next step, so only make changes you can back.
-6. **Budget:** {{BUDGET_RULE}}
-7. You can extract a long, narrow, crisply-triggered section instead of deleting it:
-   extraction frees the same always-loaded tokens and loses nothing.
-8. Change only `./{{MEMORY_PATH}}` and files under `./{{SKILLS_DIR}}/`. Never delete a
+7. **Budget:** {{BUDGET_RULE}}
+8. You can extract a long, narrow, crisply-triggered section instead of deleting it:
+   extraction frees the same always-loaded tokens and loses nothing. You can extract into
+   an existing skill when that file is the right home, instead of creating a new one.
+9. Change only `./{{MEMORY_PATH}}` and files under `./{{SKILLS_DIR}}/`. Never delete a
    file. Do not create notes, scripts, or scratch files.
 
 ## Where an instruction belongs

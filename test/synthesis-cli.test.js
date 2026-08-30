@@ -318,7 +318,7 @@ test("skills whose removals merged into one change ship as one decision, and app
   // Extraction is offered as an available option, not urged: the deciding model must not
   // read the prompt as pushing it toward a skill when the evidence does not ask for one.
   assert.match(editPrompt, /You can extract a long, narrow, crisply-triggered section instead of deleting it/);
-  assert.ok(!/Prefer extracting/.test(editPrompt), "hard rule 7 states permission, never preference");
+  assert.ok(!/Prefer extracting/.test(editPrompt), "hard rule 8 states permission, never preference");
   assert.ok(
     !/nearly pure budget profit/.test(editPrompt),
     "the placement table's follow-up states the mechanics, it does not re-add the nudge",

@@ -247,12 +247,20 @@ export function measureWorkspace(workspace) {
     changes.push({ kind: "created", file: relative, text, skill: parseSkillFile(relative, text) });
   }
 
-  // With the created files known, split any memory-file removal that mixes extracted
-  // text (recovered in a created file) with deleted text, so the deletion is its own
+  // Split any memory-file removal that mixes extracted text (recovered in a created
+  // skill or in a modified existing one) with deleted text, so the deletion is its own
   // measured change and stays independently decidable.
   const createdTexts = changes.filter((c) => c.kind === "created").map((c) => c.text);
-  if (createdTexts.length) {
-    const recovered = recoveredLineCounts(createdTexts);
+  const extendedSkillFiles = [
+    ...new Set(
+      changes
+        .filter((c) => c.kind === "hunk" && c.file !== memoryPath && isSkillFilePath(c.file, skillDirs))
+        .map((c) => c.file),
+    ),
+  ];
+  const recoveredTexts = [...createdTexts, ...extendedSkillFiles.map((file) => texts.get(file) ?? "")];
+  if (recoveredTexts.length) {
+    const recovered = recoveredLineCounts(recoveredTexts);
     const oldText = originals.get(memoryPath) ?? "";
     const oldLines = oldText.split("\n");
     const measured = [];

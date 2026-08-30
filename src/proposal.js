@@ -17,7 +17,11 @@ import { isSkillFilePath, normalizeRecoveryLine, recoveredLineCounts } from "./w
  *   add      only inserts text                  (gated like a new instruction)
  *   remove   only deletes text
  *   rewrite  replaces text
- *   extract  memory-file change(s) + the created SKILL.md file(s) they pay for
+ *   extract  memory-file change(s) + the SKILL.md file(s) they pay for
+ *            (created, or an existing skill that still has every prior line plus
+ *            every line the memory hunks remove)
+ *   move     memory-file change(s) whose removed lines reappear verbatim in the
+ *            same edit's added lines - repositioning, not deletion
  *
  * Each hunk carries a `find`/`replace` pair copied out of the original file by
  * construction; `find` occurs exactly once there. That is what the writer applies later,
@@ -25,7 +29,28 @@ import { isSkillFilePath, normalizeRecoveryLine, recoveredLineCounts } from "./w
  * rather than guessed at - a memory file is not something to fuzzy-patch.
  */
 
-export const EDIT_KINDS = ["add", "remove", "rewrite", "extract"];
+export const EDIT_KINDS = ["add", "remove", "rewrite", "extract", "move"];
+
+/** Kinds whose deletions stay on the always-loaded surface, so the harm floor does not apply. */
+function preservesAlwaysLoaded(kind) {
+  return kind === "extract" || kind === "move";
+}
+
+/** Every file an edit's hunks touch. Created skills are not hunks; they live on `edit.skills`. */
+export function filesOfEdit(edit) {
+  if (Array.isArray(edit.hunks) && edit.hunks.length) {
+    return [...new Set(edit.hunks.map((hunk) => hunk.file || edit.file).filter(Boolean))];
+  }
+  return edit.file ? [edit.file] : [];
+}
+
+/** The subset of an edit that applies to one file, or null when that file is not a target. */
+export function sliceEditForFile(edit, file) {
+  if (!Array.isArray(edit.hunks)) return edit.file === file ? edit : null;
+  const hunks = edit.hunks.filter((hunk) => (hunk.file || edit.file) === file);
+  if (!hunks.length) return null;
+  return { ...edit, file, hunks };
+}
 
 /**
  * The per-run edit cap is adaptive (design section 6). Near or under budget it is the
@@ -133,14 +158,21 @@ function unitsRemovedBy(hunk, memoryFile) {
  * an existing skill pays (or earns) the change to its `description:` line. Everything
  * else in a skill file is body - loaded on trigger, never billed here.
  */
-function descriptionDeltaOf(edit, before, next, skillsDir) {
-  if (edit.kind === "extract") {
-    return editSkills(edit).reduce((sum, skill) => sum + estimateTokens(skill.description || ""), 0);
-  }
-  if (edit.targetsMemoryFile || !edit.file || !skillsDir || !isSkillFilePath(edit.file, skillsDir)) return 0;
-  const beforeDescription = parseFrontmatter(before).description || "";
-  const nextDescription = parseFrontmatter(next).description || "";
-  return estimateTokens(nextDescription) - estimateTokens(beforeDescription);
+function descriptionLineDelta(before, next) {
+  return (
+    estimateTokens(parseFrontmatter(next).description || "") -
+    estimateTokens(parseFrontmatter(before).description || "")
+  );
+}
+
+function createdDescriptionCost(edit) {
+  return editSkills(edit).reduce((sum, skill) => sum + estimateTokens(skill.description || ""), 0);
+}
+
+function addedLineCounts(hunks) {
+  return recoveredLineCounts(
+    hunks.flatMap((hunk) => (hunk.lines || []).filter((line) => line.type === "ins").map((line) => line.text)),
+  );
 }
 
 /** Overlapping count: a run of identical lines must not pass as unique. */
@@ -320,18 +352,27 @@ export function buildProposal(rawResult, context) {
       violations.push(`edit ${edit.id} ("${edit.title}") names no measured change`);
       continue;
     }
-    if (files.length > 1) {
-      violations.push(`edit ${edit.id} ("${edit.title}") changes ${files.join(" and ")}; an edit changes one file`);
-      continue;
-    }
     if (!edit.evidence.length) {
       violations.push(`edit ${edit.id} ("${edit.title}") carries no verbatim evidence quote`);
       continue;
     }
+
+    const skillsDir = config.skillDirs || config.skillsDir;
+    const memoryHunks = hunks.filter((hunk) => hunk.file === memoryFile.path);
+    const otherHunks = hunks.filter((hunk) => hunk.file !== memoryFile.path);
+    const destFiles = [...new Set(otherHunks.map((hunk) => hunk.file))];
+
     if (edit.kind === "extract") {
-      if (!created.length || !hunks.length || files[0] !== memoryFile.path) {
+      if (!memoryHunks.length || (!created.length && !destFiles.length)) {
         violations.push(
-          `edit ${edit.id}: kind "extract" must group created SKILL.md file(s) with change(s) to ${memoryFile.path}`,
+          `edit ${edit.id}: kind "extract" must group SKILL.md file(s) (created or extended) with change(s) to ${memoryFile.path}`,
+        );
+        continue;
+      }
+      const notSkill = destFiles.find((file) => !isSkillFilePath(file, skillsDir));
+      if (notSkill) {
+        violations.push(
+          `edit ${edit.id} ("${edit.title}") changes ${notSkill}; an extract only extends a skill file alongside ${memoryFile.path}`,
         );
         continue;
       }
@@ -339,10 +380,12 @@ export function buildProposal(rawResult, context) {
       // single measured change - a merged change cannot be accepted in halves, so that
       // grouping is the measurement's, not the model's. Skills whose removals were measured
       // separately stay separately decidable.
-      if (created.length > 1 && hunks.length > 1) {
+      const skillCount = created.length + destFiles.length;
+      if (skillCount > 1 && memoryHunks.length > 1) {
+        const grouped = destFiles.length ? `${skillCount} skills` : `${created.length} created skills`;
         violations.push(
-          `edit ${edit.id}: groups ${created.length} created skills against ${hunks.length} separate changes to ` +
-            `${memoryFile.path} (${hunks.map((h) => h.id).join(", ")}); give each skill its own extract, or group ` +
+          `edit ${edit.id}: groups ${grouped} against ${memoryHunks.length} separate changes to ` +
+            `${memoryFile.path} (${memoryHunks.map((h) => h.id).join(", ")}); give each skill its own extract, or group ` +
             `several skills only when they share one measured change`,
         );
         continue;
@@ -352,14 +395,41 @@ export function buildProposal(rawResult, context) {
         violations.push(`edit ${edit.id}: ${unusable.file} needs YAML frontmatter with \`name:\` and \`description:\``);
         continue;
       }
-      // An extraction moves text; it never doubles as a deletion. Every line its hunks
-      // remove must land in the skills it creates - a real deletion goes in its own
-      // remove edit, where the removal-evidence floor below can judge it on its own.
-      const carried = recoveredLineCounts(created.map((c) => c.text));
-      const missing = hunks.flatMap((h) => unrecoveredRemovedLines(h, carried));
+      // Extending an existing skill must not drop what was already there: the staged file
+      // still contains every prior line, then the extracted lines on top of that.
+      let droppedPrior = null;
+      for (const file of destFiles) {
+        const original = measured.originals?.get(file) ?? "";
+        const staged = measured.texts?.get(file) ?? "";
+        const missingPrior = unrecoveredRemovedLines(
+          {
+            lines: String(original)
+              .split("\n")
+              .map((text) => ({ type: "del", text })),
+          },
+          recoveredLineCounts([staged]),
+        );
+        if (missingPrior.length) {
+          droppedPrior = missingPrior[0];
+          break;
+        }
+      }
+      if (droppedPrior) {
+        violations.push(
+          `edit ${edit.id} ("${edit.title}") drops text the existing skill already had ` +
+            `(first: "${droppedPrior.trim().slice(0, 80)}"); extending a skill keeps every line it had`,
+        );
+        continue;
+      }
+      // An extraction moves text; it never doubles as a deletion. Every line its memory
+      // hunks remove must land in the skills it creates or extends - a real deletion goes
+      // in its own remove edit, where the removal-evidence floor below can judge it.
+      const destTexts = [...created.map((c) => c.text), ...destFiles.map((file) => measured.texts?.get(file) ?? "")];
+      const carried = recoveredLineCounts(destTexts);
+      const missing = memoryHunks.flatMap((h) => unrecoveredRemovedLines(h, carried));
       if (missing.length) {
         violations.push(
-          `edit ${edit.id} ("${edit.title}") removes text its created skill(s) do not carry ` +
+          `edit ${edit.id} ("${edit.title}") removes text its skill(s) do not carry ` +
             `(first: "${missing[0].trim().slice(0, 80)}"); an extraction preserves every line it removes - ` +
             `revert that text, or make its deletion a separate "remove" edit`,
         );
@@ -368,11 +438,38 @@ export function buildProposal(rawResult, context) {
     } else if (created.length) {
       violations.push(`edit ${edit.id}: only kind "extract" may include a created file (${created[0].id})`);
       continue;
+    } else if (files.length > 1) {
+      violations.push(`edit ${edit.id} ("${edit.title}") changes ${files.join(" and ")}; an edit changes one file`);
+      continue;
+    }
+
+    if (edit.kind === "move") {
+      if (!memoryHunks.length || destFiles.length || files[0] !== memoryFile.path) {
+        violations.push(`edit ${edit.id}: kind "move" must be change(s) to ${memoryFile.path} only`);
+        continue;
+      }
+      const hasRemoval = memoryHunks.some((hunk) => hunk.removed);
+      const hasAddition = memoryHunks.some((hunk) => hunk.added);
+      if (!hasRemoval || !hasAddition) {
+        violations.push(
+          `edit ${edit.id} ("${edit.title}") is not a move: a move both removes text and re-adds it verbatim elsewhere in ${memoryFile.path}`,
+        );
+        continue;
+      }
+      const missing = memoryHunks.flatMap((hunk) => unrecoveredRemovedLines(hunk, addedLineCounts(memoryHunks)));
+      if (missing.length) {
+        violations.push(
+          `edit ${edit.id} ("${edit.title}") removes text that does not reappear verbatim in the same edit ` +
+            `(first: "${missing[0].trim().slice(0, 80)}"); a move preserves every line it removes - ` +
+            `revert that text, or make its deletion a separate "remove" edit`,
+        );
+        continue;
+      }
     }
 
     // An addition is measured, not declared: text that only goes in is a new instruction.
     const onlyAdds = hunks.every((h) => h.removed === 0);
-    if (edit.kind !== "extract" && onlyAdds && edit.transcripts < config.minGapEvidence) {
+    if (!preservesAlwaysLoaded(edit.kind) && onlyAdds && edit.transcripts < config.minGapEvidence) {
       violations.push(
         `edit ${edit.id} ("${edit.title}") adds a new instruction backed by ${edit.transcripts} session(s); ` +
           `${config.minGapEvidence} are required`,
@@ -381,12 +478,12 @@ export function buildProposal(rawResult, context) {
     }
 
     // A removal is measured the same way: a hunk that only deletes text, outside an
-    // extraction, deletes instructions - whatever the edit's kind says. Deleting an
-    // instruction needs the same corroboration adding one does, and only negatives the
+    // extraction or move, deletes instructions - whatever the edit's kind says. Deleting
+    // an instruction needs the same corroboration adding one does, and only negatives the
     // analysis classified as `harm` (following the rule caused damage) count toward it.
     // Non-compliance is the rule failing to steer; it never justifies deletion. This is
     // the removal-evidence floor; the >= 20%-relevance placement table stays guidance.
-    if (edit.kind !== "extract" && files[0] === memoryFile.path) {
+    if (!preservesAlwaysLoaded(edit.kind) && files[0] === memoryFile.path) {
       const rows = new Map((summary?.instructions ?? []).map((row) => [row.instruction, row]));
       const unsupported = [];
       for (const hunk of hunks) {
@@ -412,7 +509,7 @@ export function buildProposal(rawResult, context) {
     // skill-file text at all - there are no instruction ids for it - so no pure
     // deletion there can reach the harm bar, whatever the edit is called. Rewrites
     // (a hunk that also adds text) stay possible; only vanishing text is refused.
-    if (edit.kind !== "extract" && files[0] !== memoryFile.path) {
+    if (!preservesAlwaysLoaded(edit.kind) && files[0] !== memoryFile.path) {
       const deleted = hunks
         .filter((hunk) => hunk.removed && !hunk.added)
         .flatMap((hunk) => (hunk.lines || []).filter((line) => line.type === "del").map((line) => line.text))
@@ -427,7 +524,7 @@ export function buildProposal(rawResult, context) {
       }
     }
 
-    const file = files[0];
+    const file = memoryHunks.length ? memoryFile.path : files[0];
     const proposed = {
       id: edit.id,
       kind: edit.kind,
@@ -440,6 +537,7 @@ export function buildProposal(rawResult, context) {
       skills: created.map((c) => c.skill),
       hunks: hunks.map((h) => ({
         id: h.id,
+        file: h.file,
         find: h.find,
         replace: h.replace,
         oldStart: h.oldStart,
@@ -464,11 +562,27 @@ export function buildProposal(rawResult, context) {
   // free-until-triggered and never enter it.
   const running = new Map();
   for (const edit of accepted) {
-    const before =
-      running.get(edit.file) ?? (edit.targetsMemoryFile ? memoryFile.text : (measured.originals?.get(edit.file) ?? ""));
-    let next;
+    const targets = filesOfEdit(edit);
+    let memoryDelta = 0;
+    let otherDelta = 0;
+    let descriptionDelta = edit.kind === "extract" ? createdDescriptionCost(edit) : 0;
     try {
-      next = applyEdit(before, edit);
+      for (const target of targets) {
+        const slice = sliceEditForFile(edit, target);
+        const before =
+          running.get(target) ??
+          (target === memoryFile.path ? memoryFile.text : (measured.originals?.get(target) ?? ""));
+        const next = applyEdit(before, slice);
+        running.set(target, next);
+        const delta = estimateTokens(next) - estimateTokens(before);
+        if (target === memoryFile.path) memoryDelta += delta;
+        else {
+          otherDelta += delta;
+          if (isSkillFilePath(target, config.skillDirs || config.skillsDir)) {
+            descriptionDelta += descriptionLineDelta(before, next);
+          }
+        }
+      }
     } catch (err) {
       violations.push(err.message);
       edit.applicable = false;
@@ -477,9 +591,8 @@ export function buildProposal(rawResult, context) {
       continue;
     }
     edit.applicable = true;
-    edit.deltaTokens = estimateTokens(next) - estimateTokens(before);
-    edit.descriptionDelta = descriptionDeltaOf(edit, before, next, config.skillDirs || config.skillsDir);
-    running.set(edit.file, next);
+    edit.deltaTokens = edit.targetsMemoryFile ? memoryDelta : otherDelta;
+    edit.descriptionDelta = descriptionDelta;
   }
 
   const projectedText = running.get(memoryFile.path) ?? memoryFile.text;
@@ -531,7 +644,9 @@ export function buildProposal(rawResult, context) {
   // image its hunks were cut from. The writer re-checks these before composing, the
   // same freshness contract `memoryFileSnapshot` gives the memory file - a skill file
   // that changed after the proposal must refuse the apply, never be patched blind.
-  const targetFiles = [...new Set(accepted.filter((edit) => !edit.targetsMemoryFile).map((edit) => edit.file))]
+  const targetFiles = [
+    ...new Set(accepted.flatMap((edit) => filesOfEdit(edit).filter((file) => file !== memoryFile.path))),
+  ]
     .filter((file) => measured.originals?.has(file))
     .map((file) => ({ file, hash: memoryTextHash(measured.originals.get(file)) }));
 
@@ -565,7 +680,12 @@ export function buildProposal(rawResult, context) {
       gapSightings: summary?.totals?.gapSightings ?? null,
       orchestrationGapSightings: summary?.totals?.orchestrationGapSightings ?? null,
       droppedGapSingletons: summary?.totals?.droppedGapSingletons ?? null,
-      skillExtractions: accepted.reduce((n, e) => n + editSkills(e).length, 0),
+      skillExtractions: accepted.reduce((n, e) => {
+        if (e.kind !== "extract") return n;
+        const createdSkills = editSkills(e).length;
+        const extended = new Set(filesOfEdit(e).filter((file) => file !== memoryFile.path)).size;
+        return n + Math.max(createdSkills, extended);
+      }, 0),
     },
     edits: accepted,
     verdicts: Array.isArray(rawResult?.verdicts) ? rawResult.verdicts : [],
@@ -597,7 +717,8 @@ export function projectWithDecisions(memoryText, edits, acceptedIds, capTokens, 
   let text = memoryText;
   for (const edit of chosen) {
     try {
-      text = applyEdit(text, edit);
+      const slice = sliceEditForFile(edit, edit.file) ?? edit;
+      text = applyEdit(text, slice);
     } catch {
       // Skip an edit that no longer applies; the writer reports it.
     }

@@ -219,7 +219,7 @@ out of the proposal entirely.
 ### 5. Gradient descent - native edits
 
 A high-reasoning synthesis run turns the aggregated gradients into concrete edits: ADD,
-REMOVE, REWRITE, or EXTRACT→SKILL. The agent does not describe edits for backpass to
+REMOVE, REWRITE, EXTRACT→SKILL, or MOVE. The agent does not describe edits for backpass to
 splice in - it makes them, with its harness's own file tools, in a **staging copy** of the
 memory file and project skills under `.backpass/synthesis/` (the repo itself is read-only
 to it, for grounding). backpass then diffs the copy against the original and shows the agent the
@@ -241,12 +241,16 @@ Then mechanical gates run, and they are not negotiable:
   `minGapEvidence` distinct sessions - non-compliance never counts, because a rule that
   was skipped needs reinforcement, not deletion. A pure deletion in a skill file is also
   a removal, but no evidence can attribute harm to skill-file text, so it is refused.
-- an extraction preserves every line it removes in the skills it creates; a deletion is
-  never part of an extract
+- an extraction preserves every line it removes in the skills it creates or extends, and
+  an existing skill must still contain every line it already had; a deletion is never part
+  of an extract
+- a move preserves every line it removes by re-adding it verbatim elsewhere in the memory
+  file, so repositioning is not a harm-gated deletion
 - every edit carries a verbatim quote
 - the post-edit always-loaded surface must fit the budget, measured from the staged files
 
-An extraction is the created `SKILL.md` plus the memory-file change that pays for it.
+An extraction is the `SKILL.md` (created, or an existing skill file that still carries
+every prior line plus the extracted ones) plus the memory-file change that pays for it.
 Neighbouring removals are merged into one measured change, and a merged change cannot be
 accepted in halves - so when several sections leave together, their skills arrive as one
 extract with several skills, which is one honest accept/reject decision. Skills whose
