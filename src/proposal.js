@@ -707,10 +707,10 @@ export function buildProposal(rawResult, context) {
       positive: summary?.totals?.positive ?? 0,
       negative: summary?.totals?.negative ?? 0,
       gapClusters: summary?.totals?.gapClusters ?? 0,
-      // The gap funnel, for the apply surface: sightings -> project-domain (sightings
-      // minus orchestration) -> distinct gaps (clusters + dropped) -> eligible
-      // (clusters). `null`, never 0, when the summary predates a count - the surface
-      // hides what was not recorded rather than showing an invented zero.
+      // Gap counts retained for the apply surface: all sightings, orchestration-domain
+      // votes, synthesis-eligible clusters, and clusters dropped below the evidence floor.
+      // `null`, never 0, when the summary predates a count - the surface hides what was
+      // not recorded rather than showing an invented zero.
       gapSightings: summary?.totals?.gapSightings ?? null,
       orchestrationGapSightings: summary?.totals?.orchestrationGapSightings ?? null,
       droppedGapSingletons: summary?.totals?.droppedGapSingletons ?? null,
