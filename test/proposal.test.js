@@ -325,6 +325,37 @@ test("several sub-threshold rewrite hunks are gated on their combined growth", (
   assert.ok(violations.some((v) => /backed by 1 session/.test(v)));
 });
 
+test("adjacent tightening and unrelated replacement lines require corroboration", () => {
+  const originalNode = "- Use Node 18 via nvm before running any script.";
+  const discarded = `- ${"x".repeat(120)}`;
+  const text = `# Memory\n\n${originalNode}\n${discarded}\n`;
+  const { proposal, violations, measured } = gate({
+    text,
+    edit: memoryEdit((t) =>
+      t.replace(`${originalNode}\n${discarded}`, "- Use Node 18.\n- Route SSH through the bastion."),
+    ),
+    annotation: { edits: [claim(["H1"], { kind: "rewrite", title: "tighten and replace", transcripts: 1 })] },
+  });
+  assert.equal(measured.changes.length, 1);
+  assert.ok(measured.changes[0].removed === 2 && measured.changes[0].added === 2);
+  assert.equal(proposal.edits.length, 0);
+  assert.ok(violations.some((v) => /backed by 1 session/.test(v)));
+});
+
+test("a long overlapping tightening remains eligible with one session", () => {
+  const words = Array.from({ length: 513 }, (_, index) => `term${index}`);
+  const original = `- ${words.join(" ")}.`;
+  const tighter = `- ${words.slice(0, -1).join(" ")}.`;
+  const { proposal, violations, measured } = gate({
+    text: `# Memory\n\n${original}\n`,
+    edit: memoryEdit((t) => t.replace(original, tighter)),
+    annotation: { edits: [claim(["H1"], { kind: "rewrite", title: "tighten long rule", transcripts: 1 })] },
+  });
+  assert.equal(measured.changes.length, 1);
+  assert.deepEqual(violations, []);
+  assert.equal(proposal.edits.length, 1);
+});
+
 test("an overlapping tightening cannot mask an unrelated pure insertion", () => {
   const original = "- Use Node 18 via nvm before running any script.";
   const tighter = "- Use Node 18.";

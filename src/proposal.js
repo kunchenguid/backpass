@@ -71,31 +71,35 @@ export const REWRITE_NET_ADD_TOKENS = 10;
 const REWRITE_OVERLAP_THRESHOLD = 0.3;
 const MAX_REWRITE_OVERLAP_WORDS = 512;
 
-function changedWordSet(hunks, type) {
+function changedWordSet(text) {
   const words = new Set();
   let count = 0;
-  for (const hunk of hunks) {
-    for (const line of hunk.lines || []) {
-      if (line.type !== type) continue;
-      for (const match of line.text.toLowerCase().matchAll(/[\p{L}\p{N}]+/gu)) {
-        count += 1;
-        if (count > MAX_REWRITE_OVERLAP_WORDS) return null;
-        words.add(match[0]);
-      }
-    }
+  for (const match of text.toLowerCase().matchAll(/[\p{L}\p{N}]+/gu)) {
+    words.add(match[0]);
+    count += 1;
+    if (count === MAX_REWRITE_OVERLAP_WORDS) break;
   }
   return words;
 }
 
-function rewriteHasSubstantialOverlap(hunk) {
-  const removed = changedWordSet([hunk], "del");
-  const added = changedWordSet([hunk], "ins");
-  if (!removed || !added || !removed.size || !added.size) return false;
+function wordSetsOverlap(removed, added) {
+  if (!removed.size || !added.size) return false;
   let shared = 0;
   for (const word of added) {
     if (removed.has(word)) shared += 1;
   }
   return (2 * shared) / (removed.size + added.size) >= REWRITE_OVERLAP_THRESHOLD;
+}
+
+function rewriteHasSubstantialOverlap(hunk) {
+  const removed = (hunk.lines || []).filter((line) => line.type === "del").map((line) => changedWordSet(line.text));
+  const added = (hunk.lines || [])
+    .filter((line) => line.type === "ins")
+    .map((line) => changedWordSet(line.text))
+    .filter((words) => words.size);
+  if (!added.length) return true;
+  if (removed.length !== added.length) return false;
+  return added.every((words, index) => wordSetsOverlap(removed[index], words));
 }
 
 export function effectiveMaxEdits(memoryFile, config, alwaysLoadedExtraTokens = 0) {
