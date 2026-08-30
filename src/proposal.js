@@ -535,7 +535,9 @@ export function buildProposal(rawResult, context) {
       ) {
         suffix += 1;
       }
-      introducedBytes += Buffer.byteLength(added.slice(prefix, added.length - suffix));
+      const addedMiddleBytes = Buffer.byteLength(added.slice(prefix, added.length - suffix));
+      const removedMiddleBytes = Buffer.byteLength(removed.slice(prefix, removed.length - suffix));
+      introducedBytes += Math.max(0, addedMiddleBytes - removedMiddleBytes);
     }
     const growsAboveRewriteTolerance = estimateTokensFromBytes(introducedBytes) > REWRITE_NET_ADD_TOKENS;
     if (
