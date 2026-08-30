@@ -1,0 +1,69 @@
+=== EXTEND-EXTRACT: end-user review and accepted result ===
+
+[1/1] EXTRACT -> SKILL  -6 tok
+  Move Node setup details into the existing skill
+  files: AGENTS.md, .agents/skills/node-setup/SKILL.md
+
+  --- AGENTS.md ---
+  - - Use Node 18 via nvm before running any script.
+  + - See the node-setup skill.
+  ...
+  --- .agents/skills/node-setup/SKILL.md ---
+    - Prefer nvm over a system Node.
+  + - Use Node 18 via nvm before running any script.
+
+  evidence (3 transcript(s)):
+    - "The layout caused the rule to be missed."
+      claude · demo · turn 3
+
+Persisted AGENTS.md:
+# Demo instructions
+
+## Rules
+
+- Keep PR links complete.
+- See the node-setup skill.
+
+## Later
+
+- Keep this nearby.
+
+Persisted existing .agents/skills/node-setup/SKILL.md:
+---
+name: node-setup
+description: Load when configuring Node.
+---
+
+- Prefer nvm over a system Node.
+- Use Node 18 via nvm before running any script.
+
+=== MOVE: end-user review and accepted result ===
+
+[1/1] MOVE  0 tok
+  Reposition the Node rule under Later
+  file: AGENTS.md
+
+  --- AGENTS.md ---
+  - - Use Node 18 via nvm before running any script.
+  ...
+  --- AGENTS.md ---
+    - Keep this nearby.
+  + - Use Node 18 via nvm before running any script.
+
+  evidence (3 transcript(s)):
+    - "The layout caused the rule to be missed."
+      claude · demo · turn 3
+
+Persisted AGENTS.md (rule occurs exactly once):
+# Demo instructions
+
+## Rules
+
+- Keep PR links complete.
+
+## Later
+
+- Keep this nearby.
+- Use Node 18 via nvm before running any script.
+
+Verified occurrence count: 1
