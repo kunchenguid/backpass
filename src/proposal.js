@@ -506,11 +506,13 @@ export function buildProposal(rawResult, context) {
 
     // An addition is measured, not declared: text that only goes in is a new instruction.
     // A rewrite can hide an addition by deleting text in the same measured hunk, so measure
-    // inserted text after trimming the unchanged prefix and suffix rather than netting it
-    // against every removed byte. This still lets a rewrite purely tighten existing prose.
+    // inserted text after trimming the unchanged prefix and suffix. Aggregate net growth catches
+    // small additions across hunks; the largest inserted middle catches substantial new guidance
+    // hidden behind a larger same-hunk deletion. Small pure tightenings remain below the tolerance.
     // Extracts move text; they are not adds.
     const onlyAdds = hunks.every((h) => h.removed === 0);
     let introducedBytes = 0;
+    let largestInsertedMiddleBytes = 0;
     for (const hunk of hunks) {
       if (!hunk.added) continue;
       const added = hunk.lines
@@ -538,8 +540,11 @@ export function buildProposal(rawResult, context) {
       const addedMiddleBytes = Buffer.byteLength(added.slice(prefix, added.length - suffix));
       const removedMiddleBytes = Buffer.byteLength(removed.slice(prefix, removed.length - suffix));
       introducedBytes += Math.max(0, addedMiddleBytes - removedMiddleBytes);
+      largestInsertedMiddleBytes = Math.max(largestInsertedMiddleBytes, addedMiddleBytes);
     }
-    const growsAboveRewriteTolerance = estimateTokensFromBytes(introducedBytes) > REWRITE_NET_ADD_TOKENS;
+    const growsAboveRewriteTolerance =
+      estimateTokensFromBytes(introducedBytes) > REWRITE_NET_ADD_TOKENS ||
+      estimateTokensFromBytes(largestInsertedMiddleBytes) > REWRITE_NET_ADD_TOKENS;
     if (
       !preservesAlwaysLoaded(edit.kind) &&
       (onlyAdds || growsAboveRewriteTolerance) &&
