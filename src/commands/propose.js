@@ -104,7 +104,8 @@ export async function runProposal(ctx, precomputed = null) {
   config.state.writeSummary(summary);
   emitProgress("fold:done", {
     instructions: summary.instructions.length,
-    clustersFound: summary.totals.gapClusters + summary.totals.droppedGapSingletons,
+    clustersFound:
+      summary.totals.gapClusters + (summary.totals.reportOnlyGapClusters || 0) + summary.totals.droppedGapSingletons,
     clustersKept: summary.totals.gapClusters,
     minGapEvidence: config.minGapEvidence,
     ms: Date.now() - foldStarted,

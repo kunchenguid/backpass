@@ -1,6 +1,6 @@
 import { renderHunkLines } from "./diff.js";
 import { mixFromCounts } from "./interaction.js";
-import { memoryTextHash, similarity } from "./memory.js";
+import { memoryTextHash, parseMemoryUnits, similarity } from "./memory.js";
 import { GAP_SIMILARITY_THRESHOLD } from "./gap-ledger.js";
 import { editSkills, parseFrontmatter, skillDescriptionTokens } from "./skills.js";
 import { budgetGateKind, budgetStatus, estimateTokens } from "./tokens.js";
@@ -133,33 +133,49 @@ function countSources(evidence) {
   return new Set(evidence.map((e) => e?.source).filter(Boolean)).size;
 }
 
-function insertedCandidates(hunks) {
-  const lines = hunks
-    .flatMap((hunk) => (hunk.lines || []).filter((line) => line.type === "ins").map((line) => line.text.trim()))
-    .filter(Boolean);
-  return [...lines, lines.join("\n")].filter(Boolean);
+function changedUnits(hunk, type) {
+  const text = (hunk.lines || [])
+    .filter((line) => line.type === type)
+    .map((line) => line.text)
+    .join("\n");
+  return parseMemoryUnits(text).map((unit) => unit.text);
 }
 
-function matchesInsertedGap(hunks, gap) {
-  return insertedCandidates(hunks).some(
-    (inserted) => similarity(inserted, gap.proposedInstruction) >= GAP_SIMILARITY_THRESHOLD,
-  );
-}
-
-function reportOnlyGapForInsertion(hunks, summary) {
-  if (summary?.gapEligibilityEnforced !== true) return null;
-  return (summary.reportOnlyGaps || []).find((gap) => matchesInsertedGap(hunks, gap));
-}
-
-function eligibleGapForAddition(edit, hunks, summary) {
-  if (summary?.gapEligibilityEnforced !== true) return true;
+function eligibleGapForUnit(edit, unit, summary) {
   return (summary.gaps || []).find(
     (gap) =>
-      matchesInsertedGap(hunks, gap) &&
+      similarity(unit, gap.proposedInstruction) >= GAP_SIMILARITY_THRESHOLD &&
       edit.evidence.some((evidence) =>
         (gap.quotes || []).some((quote) => evidence.text === quote.text && evidence.source === quote.source),
       ),
   );
+}
+
+function unsupportedNetNewUnit(edit, hunks, summary) {
+  if (summary?.gapEligibilityEnforced !== true) return null;
+  for (const hunk of hunks) {
+    const removed = changedUnits(hunk, "del");
+    const inserted = changedUnits(hunk, "ins");
+    if (inserted.length <= removed.length) continue;
+    const unmatchedRemoved = [...removed];
+    for (const unit of inserted) {
+      let bestIndex = -1;
+      let bestScore = 0;
+      for (let index = 0; index < unmatchedRemoved.length; index += 1) {
+        const score = similarity(unit, unmatchedRemoved[index]);
+        if (score > bestScore) {
+          bestIndex = index;
+          bestScore = score;
+        }
+      }
+      if (bestScore >= GAP_SIMILARITY_THRESHOLD) {
+        unmatchedRemoved.splice(bestIndex, 1);
+      } else if (!eligibleGapForUnit(edit, unit, summary)) {
+        return unit;
+      }
+    }
+  }
+  return null;
 }
 
 /** The del-line texts of a hunk that are not carried by `lineCounts` (blank lines ignored). */
@@ -532,10 +548,10 @@ export function buildProposal(rawResult, context) {
 
     // An addition is measured, not declared: text that only goes in is a new instruction.
     const onlyAdds = hunks.every((h) => h.removed === 0);
-    const reportOnlyGap = preservesAlwaysLoaded(edit.kind) ? null : reportOnlyGapForInsertion(hunks, summary);
-    if (reportOnlyGap) {
+    const unsupportedAddition = preservesAlwaysLoaded(edit.kind) ? null : unsupportedNetNewUnit(edit, hunks, summary);
+    if (unsupportedAddition) {
       violations.push(
-        `edit ${edit.id} ("${edit.title}") inserts the report-only gap "${reportOnlyGap.proposedInstruction}"`,
+        `edit ${edit.id} ("${edit.title}") adds "${unsupportedAddition.slice(0, 120)}", which does not match any synthesis-eligible gap and its evidence`,
       );
       continue;
     }
@@ -543,12 +559,6 @@ export function buildProposal(rawResult, context) {
       violations.push(
         `edit ${edit.id} ("${edit.title}") adds a new instruction backed by ${edit.transcripts} session(s); ` +
           `${config.minGapEvidence} are required`,
-      );
-      continue;
-    }
-    if (edit.kind !== "extract" && onlyAdds && !eligibleGapForAddition(edit, hunks, summary)) {
-      violations.push(
-        `edit ${edit.id} ("${edit.title}") adds a new instruction that does not match any synthesis-eligible gap and its evidence`,
       );
       continue;
     }
