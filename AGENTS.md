@@ -169,7 +169,7 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   `{ agent, usage|null }` (`usageRecord` in `src/acpx.js`) and `src/commands/usage.js` is
   the one place that prints them - never `n/a`: nothing when no call ran, the harness by
   name when it stayed silent.
-- **Fold and this-run gap-ledger ingest are scoped to the selected, current memory surface.**
+- **Fold and this-run gap-ledger ingest require selected, current evidence.**
   The run hash (`primaryMemoryFile` in `src/commands/analyze.js`) is `memorySurfaceHash`:
   the memory-set hash extended with every skill's description line - a description edit
   invalidates cached evidence, a skill-body edit never does, and a repo without skills
@@ -177,14 +177,14 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   (memory file + description lines; bodies stay free until triggered), so a repo with
   many skills re-tunes `budgetTokens` once - accepted by the captain's explicit decision.
   `foldForRun` (`src/commands/propose.js`) matches evidence to the selected sample by
-  canonical `transcriptIdentity`, then requires the current `memoryPath`, surface hash, and
-  a valid interaction stamp. The same selection bounds this run's gap-ledger observations,
-  so an old record outside the window or cap cannot overwhelm the sampled corpus. Folding
-  does not migrate, rewrite, or delete excluded evidence; ordinary discovery and analysis
-  backfill legacy unstamped records when they are selected. `analyzeTranscripts` separately
-  reports `summary.staleMemoryHash` and names the old/new hash on stderr, so a full
-  reanalysis without `--force` after a memory edit reads as "the file changed," not as a
-  broken cache - the cache-hit path itself (unchanged file, no `--force`) is unaffected.
+  canonical `transcriptIdentity`, then requires the current memory path, surface hash,
+  transcript signature, `ANALYSIS_INDEX_VERSION`, and a valid interaction stamp through
+  `isEvidenceFresh`. The same selection bounds this run's gap-ledger observations, so an
+  old record outside the window or cap cannot overwhelm the sampled corpus. Folding does
+  not migrate, rewrite, or delete excluded evidence; ordinary discovery and analysis
+  backfill legacy records when selected. `analyzeTranscripts` separately reports
+  `summary.staleMemoryHash` and names the old/new hash on stderr, so a full reanalysis
+  without `--force` after a memory edit reads as "the file changed," not as a broken cache.
 - **Cross-surface duplication is report-only.** `crossSurfaceDuplicates` (`src/overlap.js`)
   flags memory-file units whose text substantially overlaps a skill description or body
   (Dice >= 0.6, same bar as gap coverage). Fold stamps it on the instruction row and

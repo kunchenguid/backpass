@@ -151,7 +151,10 @@ test("split paragraphs accept only sentence-part attribution targets", () => {
     },
     memoryFile,
   );
-  assert.deepEqual(clean.positive.map((item) => item.instruction), ["AG-001.2"]);
+  assert.deepEqual(
+    clean.positive.map((item) => item.instruction),
+    ["AG-001.2"],
+  );
 });
 
 test("sanitizeEvidence tolerates a malformed model response", () => {

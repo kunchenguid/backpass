@@ -186,11 +186,7 @@ function confidentSentenceBoundary(text, sentenceStart, terminator) {
     const prefix = rawPrefix.replace(/["')\]}*`_~\u2019\u201d]+$/u, "");
     const token = prefix.match(/([\p{L}\p{N}.]+)$/u)?.[1] || "";
     if (!token) return null;
-    if (
-      ABBREVIATIONS.has(token.toLowerCase()) ||
-      /^\p{L}$/u.test(token) ||
-      /^(?:\p{L}\.)+\p{L}$/u.test(token)
-    ) {
+    if (ABBREVIATIONS.has(token.toLowerCase()) || /^\p{L}$/u.test(token) || /^(?:\p{L}\.)+\p{L}$/u.test(token)) {
       return null;
     }
   }
@@ -225,7 +221,7 @@ export function splitAttributionSentences(text) {
       continue;
     }
     if (quotedPathEnd > i) continue;
-    if (!escaped && ["\"", "'"].includes(text[i])) {
+    if (!escaped && ['"', "'"].includes(text[i])) {
       let closing = i + 1;
       while (closing < text.length) {
         if (text[closing] === text[i] && text[closing - 1] !== "\\") break;

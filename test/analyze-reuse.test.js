@@ -157,10 +157,14 @@ test("evidence from the previous analysis index is reanalyzed once without --for
   const first = runAnalyze(dir, home);
   assert.equal(first.status, 0, first.output);
   const evidenceDir = path.join(dir, ".backpass", "evidence");
-  const evidenceFile = path.join(evidenceDir, fs.readdirSync(evidenceDir).find((name) => name.endsWith(".json")));
+  const evidenceFile = path.join(
+    evidenceDir,
+    fs.readdirSync(evidenceDir).find((name) => name.endsWith(".json")),
+  );
   const evidence = JSON.parse(fs.readFileSync(evidenceFile, "utf8"));
   evidence.key =
-    `${evidence.transcript.identity}:${evidence.transcript.mtimeMs}:${evidence.transcript.bytes}:` + evidence.memoryHash;
+    `${evidence.transcript.identity}:${evidence.transcript.mtimeMs}:${evidence.transcript.bytes}:` +
+    evidence.memoryHash;
   fs.writeFileSync(evidenceFile, `${JSON.stringify(evidence, null, 2)}\n`);
 
   const upgraded = runAnalyze(dir, home);

@@ -28,9 +28,10 @@ skill bodies are free until triggered.
 Every always-loaded token is paid on every future session, forever, and instruction
 following dilutes as the file grows. The budget is the constraint you optimize under.
 
-The index below is a lookup table, not the file: it names each instruction (`AG-nnn`),
-its always-loaded cost, and the lines it occupies in `./{{MEMORY_PATH}}`. The evidence
-refers to instructions by these ids.
+The index below is a lookup table, not the file: it names each instruction (`AG-nnn`,
+or `AG-nnn.m` attribution parts for an oversized paragraph), its always-loaded cost,
+and the lines it occupies in `./{{MEMORY_PATH}}`. The evidence refers to instructions
+by these ids.
 
 {{INSTRUCTION_INDEX}}
 

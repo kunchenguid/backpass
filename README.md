@@ -191,18 +191,18 @@ most important defence against a model confabulating influence. Negative evidenc
 weighted highest, but its class determines what it supports: non-compliance supports
 reinforcement, while only harm supports removal.
 
-Results are cached per transcript, keyed to both the transcript's content _and_ the effective
-memory-surface hash: the memory-file set plus every project skill's name and description.
-Edit a memory file or skill description and the evidence correctly re-computes; edit only a
-skill body and the cache remains valid because bodies are inspected only for failed-trigger
-confirmation. A repo without skills keeps the prior memory-set hash. A surface edit therefore
-reanalyzes without `--force` - that is not a cache miss, it is the cache doing its job - and
-the run says so on stderr, naming the old and new hash, so a "0 reused" line reads as "the
-surface changed" rather than "reuse is broken." Evidence files that are not refreshed remain
-on disk but are excluded while their hash is stale. Returning to that memory-surface hash
-makes them hash-eligible again, but the selected-sample and interaction-stamp rules below
-still apply; evidence for transcripts included in the new analysis is replaced with fresh
-judgments.
+Results are cached per transcript, keyed to the transcript's content, the effective
+memory-surface hash, and the analysis-index version. The surface hash covers the memory-file
+set plus every project skill's name and description. Edit a memory file or skill description
+and the evidence correctly re-computes; edit only a skill body and the cache remains valid
+because bodies are inspected only for failed-trigger confirmation. A repo without skills
+keeps the prior memory-set hash. A surface edit therefore reanalyzes without `--force` - that
+is not a cache miss, it is the cache doing its job - and the run says so on stderr, naming the
+old and new hash, so a "0 reused" line reads as "the surface changed" rather than "reuse is
+broken." Evidence files that are not refreshed remain on disk but are excluded while their
+full cache key is stale. They become eligible again only when that complete key is current
+and the selected-sample and interaction-stamp rules below apply; evidence for transcripts
+included in the new analysis is replaced with fresh judgments.
 
 ### 4. Aggregate gradients - and one judged consolidation call
 
@@ -233,12 +233,13 @@ majority-excluded cluster, including a pure-orchestration cluster, remains clear
 as a report-only diagnostic rather than becoming an instruction in the project's memory
 file; an uncorroborated pure-orchestration singleton stays hidden.
 
-Only evidence judged against the _current_ memory-surface hash, stamped with one of the two
-interaction categories, and belonging to this run's selected sample is folded into a
-proposal. A transcript that fell outside the time window or `maxTranscripts` cap, disappeared,
-or still has legacy unstamped evidence can leave an evidence file on disk. That file is left
-untouched, but it does not count toward this run's session total or instruction scores, or
-add a gap observation, until ordinary discovery and analysis select and refresh it.
+Only evidence with the current transcript, memory-surface, and analysis-index cache key,
+stamped with one of the two interaction categories, and belonging to this run's selected
+sample is folded into a proposal. A transcript that fell outside the time window or
+`maxTranscripts` cap, disappeared, or still has legacy evidence can leave an evidence file
+on disk. That file is left untouched, but it does not count toward this run's session total
+or instruction scores, or add a gap observation, until ordinary discovery and analysis
+select and refresh it.
 
 Gap sightings persist across runs in `.backpass/gap-ledger.json` by gap and session, but a
 run only counts observations whose sessions belong to its selected sample. This prevents
