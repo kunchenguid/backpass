@@ -433,6 +433,19 @@ test("an oversized high-non-compliance paragraph attributes per sentence and inv
   assert.ok(blobFile.units[0].parts?.length >= 2);
   assert.equal(blobFile.units[1].id, "AG-002");
 
+  const oneSession = foldEvidence(
+    [
+      record("s1", {
+        negative: [
+          { instruction: "AG-001.2", quote: "skipped sentence two", class: "non-compliance" },
+          { instruction: "AG-001.3", quote: "skipped sentence three", class: "non-compliance" },
+        ],
+      }),
+    ],
+    { memoryFile: blobFile, minGapEvidence: 2 },
+  );
+  assert.equal(oneSession.oversized.length, 0, "several misses in one session do not corroborate a rewrite");
+
   const summary = foldEvidence(
     [
       record("s1", {
@@ -468,6 +481,7 @@ test("an oversized high-non-compliance paragraph attributes per sentence and inv
   assert.equal(parent, undefined, "the parent blob is not a dead removal candidate of its own");
   assert.equal(summary.oversized.length, 1);
   assert.equal(summary.oversized[0].id, "AG-001");
+  assert.equal(summary.oversized[0].sessions, 2);
   assert.ok(summary.oversized[0].tokens > 120);
 
   const rendered = renderEvidenceForPrompt(summary);

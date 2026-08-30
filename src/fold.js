@@ -61,6 +61,7 @@ export function foldEvidence(
         sessions: new Set(),
         sessionsByInteraction: { [INTERACTIVE]: new Set(), [NON_INTERACTIVE]: new Set() },
         harmSessions: new Set(),
+        nonComplianceSessions: new Set(),
         quotes: [],
       });
     }
@@ -84,6 +85,9 @@ export function foldEvidence(
         // `harmSessions` is what the removal-evidence floor counts. A record from
         // before the class existed carries none and never counts as harm.
         if (polarity === "negative" && item.class === "harm") entry.harmSessions.add(sessionIdentity);
+        if (polarity === "negative" && item.class === "non-compliance") {
+          entry.nonComplianceSessions.add(sessionIdentity);
+        }
         entry.quotes.push({
           polarity,
           text: item.quote,
@@ -130,15 +134,8 @@ export function foldEvidence(
   const duplicates = crossSurfaceDuplicates(memoryFile, skills);
   const overlapById = new Map(duplicates.map((hit) => [hit.instruction, hit]));
 
-  const parentHarmSessions = {};
-  for (const unit of memoryFile?.units || []) {
-    if (!unit.parts?.length) continue;
-    const sessions = new Set(instructions.get(unit.id)?.harmSessions || []);
-    for (const part of unit.parts) {
-      for (const session of instructions.get(part.id)?.harmSessions || []) sessions.add(session);
-    }
-    parentHarmSessions[unit.id] = sessions.size;
-  }
+  const parentHarmSessions = parentSessionCounts(memoryFile, instructions, "harmSessions");
+  const parentNonComplianceSessions = parentSessionCounts(memoryFile, instructions, "nonComplianceSessions");
 
   const instructionRows = [...instructions.values()]
     .map((entry) => {
@@ -164,6 +161,7 @@ export function foldEvidence(
         known: Boolean(unit),
         parentId: unit?.parentId ?? null,
         nonCompliance: entry.quotes.filter((q) => q.polarity === "negative" && q.class === "non-compliance").length,
+        nonComplianceSessions: entry.nonComplianceSessions.size,
         quotes: entry.quotes.slice(0, 6),
         ...(skillOverlap ? { skillOverlap } : {}),
       };
@@ -222,27 +220,39 @@ export function foldEvidence(
     gaps,
     crossSurfaceDuplicates: duplicates,
     reportOnlyGaps,
-    oversized: oversizedRestructureTargets(memoryFile, instructionRows),
+    oversized: oversizedRestructureTargets(memoryFile, parentNonComplianceSessions, minGapEvidence),
   };
+}
+
+function parentSessionCounts(memoryFile, instructions, field) {
+  const counts = {};
+  for (const unit of memoryFile?.units || []) {
+    if (!unit.parts?.length) continue;
+    const sessions = new Set(instructions.get(unit.id)?.[field] || []);
+    for (const part of unit.parts) {
+      for (const session of instructions.get(part.id)?.[field] || []) sessions.add(session);
+    }
+    counts[unit.id] = sessions.size;
+  }
+  return counts;
 }
 
 /**
  * An oversized paragraph whose sentence-parts drew repeated non-compliance. Synthesis
  * should split that blob into list items, not slap a bold label on it.
  */
-function oversizedRestructureTargets(memoryFile, rows) {
+function oversizedRestructureTargets(memoryFile, nonComplianceSessions, minGapEvidence) {
   if (!memoryFile) return [];
-  const byId = new Map(rows.map((row) => [row.instruction, row]));
   const targets = [];
   for (const unit of memoryFile.units) {
     if (!unit.parts?.length) continue;
-    const related = [unit.id, ...unit.parts.map((part) => part.id)].map((id) => byId.get(id)).filter(Boolean);
-    const nonCompliance = related.reduce((n, row) => n + (row.nonCompliance ?? 0), 0);
-    if (nonCompliance < 2) continue;
+    const sessions = nonComplianceSessions[unit.id] || 0;
+    if (sessions < minGapEvidence) continue;
     targets.push({
       id: unit.id,
       tokens: unit.tokens,
       parts: unit.parts.map((part) => part.id),
+      sessions,
     });
   }
   return targets;
