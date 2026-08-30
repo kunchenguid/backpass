@@ -15,8 +15,9 @@ import { crossSurfaceDuplicates } from "./overlap.js";
  *  2. Near-duplicate gaps from different sessions are clustered, so "three sessions
  *     re-derived the db schema" arrives as one item with three quotes. Judged identity
  *     happens upstream (analysis citations and the consolidation pass reshape the
- *     ledger); the clustering here stays deterministic. Orchestration-domain sightings
- *     are excluded before clustering and surfaced only as a count.
+ *     ledger); the clustering here stays deterministic. Per-sighting `domain` votes
+ *     travel with the cluster; the fold decides the cluster domain after grouping
+ *     (majority orchestration is excluded from proposals; mixed clusters stay visible).
  *  3. Gap clusters below `minGapEvidence` are dropped. Batch size > 1: one bad session
  *     never rewrites the weights. Sessions are counted across runs, not per run: when the
  *     caller passes `gapObservations` (the pruned gap ledger, `src/gap-ledger.js`) the
@@ -100,14 +101,15 @@ export function foldEvidence(
     }
   }
 
-  // Orchestration-domain sightings are mistakes caused not by this repository but by the
-  // external agent harness or tooling that orchestrated the session; they are counted for
-  // legibility but never cluster, so they can never corroborate into a project proposal.
+  // Orchestration-domain votes are mistakes caused not by this repository but by the
+  // external agent harness or tooling that orchestrated the session. They still cluster
+  // with project sightings of the same gap; a cluster is withheld from proposals only
+  // when a majority of its sightings vote orchestration. Mixed clusters stay visible
+  // so one inconsistent classifier call cannot drop a real recurrence below the floor.
   const allObservations = gapObservations ?? recordObservations;
-  const projectObservations = allObservations.filter((obs) => obs?.domain !== "orchestration");
-  const orchestrationGapSightings = allObservations.length - projectObservations.length;
+  const orchestrationGapSightings = allObservations.filter((obs) => obs?.domain === "orchestration").length;
 
-  const gapClusters = clusterGapObservations(projectObservations);
+  const gapClusters = clusterGapObservations(allObservations);
 
   // Instructions that exist in the file but drew no evidence at all are the strongest
   // removal / extraction candidates, so they must appear in the summary too.
@@ -138,18 +140,29 @@ export function foldEvidence(
     })
     .sort((a, b) => b.negative - a.negative || b.sessions - a.sessions || a.instruction.localeCompare(b.instruction));
 
-  const gaps = gapClusters
-    .map((cluster) => ({
+  const decided = gapClusters.map((cluster) => {
+    const vote = clusterDomainVote(cluster.items);
+    return {
       proposedInstruction: cluster.proposedInstruction,
       sessions: cluster.sessions.size,
       recurrenceRisk: highestRisk(cluster.items),
       quotes: cluster.items.slice(0, 6).map((i) => ({ text: i.quote, effect: i.mistake, source: i.source })),
+      orchestrationSightings: vote.orchestrationSightings,
+      mixed: vote.mixed,
+      majorityOrchestration: vote.majorityOrchestration,
       ...failedTriggerOf(cluster.items, minGapEvidence),
-    }))
+    };
+  });
+
+  const proposalClusters = decided.filter((cluster) => !cluster.majorityOrchestration);
+  const gaps = proposalClusters
     .filter((cluster) => cluster.sessions >= minGapEvidence)
     .sort((a, b) => b.sessions - a.sessions);
+  const excludedMixedGaps = decided
+    .filter((cluster) => cluster.majorityOrchestration && cluster.mixed && cluster.sessions >= minGapEvidence)
+    .sort((a, b) => b.sessions - a.sessions);
 
-  const droppedGapSingletons = gapClusters.length - gaps.length;
+  const droppedGapSingletons = proposalClusters.length - gaps.length;
 
   return {
     version: 1,
@@ -159,8 +172,8 @@ export function foldEvidence(
       positive: positiveCount,
       negative: negativeCount,
       // The gap funnel's top: every sighting this fold clustered over (the pruned ledger
-      // when one is passed, this run's records otherwise). Orchestration sightings are the
-      // slice excluded before clustering; project-domain is the difference.
+      // when one is passed, this run's records otherwise). Orchestration sightings are
+      // per-sighting votes; cluster domain is decided after grouping.
       gapSightings: allObservations.length,
       gapClusters: gaps.length,
       droppedGapSingletons,
@@ -171,6 +184,7 @@ export function foldEvidence(
     instructions: instructionRows,
     gaps,
     crossSurfaceDuplicates: duplicates,
+    excludedMixedGaps,
   };
 }
 
@@ -191,12 +205,17 @@ export function clusterGapObservations(observations) {
       recurrenceRisk: obs.recurrenceRisk,
       source: obs.source,
       sessionId: obs.sessionId,
+      domain: observationDomain(obs),
       coveredBySkills: new Set(obs.coveredBySkill ? [obs.coveredBySkill] : []),
     };
     if (cluster) {
       const sessionItem = cluster.items.find((candidate) => candidate.sessionId === obs.sessionId);
       if (sessionItem) {
         if (obs.coveredBySkill) sessionItem.coveredBySkills.add(obs.coveredBySkill);
+        // One session, one vote: a project classification from the same session
+        // keeps the cluster eligible rather than letting a later orchestration
+        // label silently win.
+        if (observationDomain(obs) !== "orchestration") sessionItem.domain = "project";
       } else {
         cluster.items.push(item);
       }
@@ -214,6 +233,24 @@ export function clusterGapObservations(observations) {
     }
   }
   return clusters;
+}
+
+function observationDomain(obs) {
+  return obs?.domain === "orchestration" ? "orchestration" : "project";
+}
+
+/**
+ * Cluster domain is a majority of per-sighting votes, not a pre-filter. Ties (including
+ * 1 of 2) stay project so one inconsistent analysis call cannot kill a real recurrence.
+ */
+function clusterDomainVote(items) {
+  const orchestrationSightings = items.filter((item) => item.domain === "orchestration").length;
+  const sightings = items.length;
+  return {
+    orchestrationSightings,
+    mixed: orchestrationSightings > 0 && orchestrationSightings < sightings,
+    majorityOrchestration: sightings > 0 && orchestrationSightings * 2 > sightings,
+  };
 }
 
 function highestRisk(items) {
@@ -296,15 +333,19 @@ export function renderEvidenceForPrompt(summary) {
   lines.push("### Gap clusters (mistakes no current instruction covers)");
   if (summary.totals.orchestrationGapSightings) {
     lines.push(
-      `- ${summary.totals.orchestrationGapSightings} orchestration-domain sighting(s) caused by the ` +
-        `orchestrating harness or tooling were excluded; they never enter this repository's memory file`,
+      `- ${summary.totals.orchestrationGapSightings} orchestration-domain sighting(s) counted as domain ` +
+        `votes (clusters excluded only on a majority vote); they never enter this repository's memory file ` +
+        `as their own instruction`,
     );
+  }
+  for (const gap of summary.excludedMixedGaps || []) {
+    lines.push(`- ${gapSessionLabel(gap)} risk=${gap.recurrenceRisk} :: ${gap.proposedInstruction}`);
   }
   if (!summary.gaps.length) {
     lines.push("- none above the evidence threshold");
   }
   for (const gap of summary.gaps) {
-    lines.push(`- sessions=${gap.sessions} risk=${gap.recurrenceRisk} :: ${gap.proposedInstruction}`);
+    lines.push(`- ${gapSessionLabel(gap)} risk=${gap.recurrenceRisk} :: ${gap.proposedInstruction}`);
     if (gap.failedTriggerSkill) {
       lines.push(
         `    FAILED TRIGGER: the existing skill "${gap.failedTriggerSkill}" already covers this ` +
@@ -318,6 +359,13 @@ export function renderEvidenceForPrompt(summary) {
   }
 
   return lines.join("\n");
+}
+
+function gapSessionLabel(gap) {
+  const orch = gap.orchestrationSightings || 0;
+  if (!orch) return `sessions=${gap.sessions}`;
+  const extra = gap.majorityOrchestration ? "; majority vote excluded" : "";
+  return `sessions=${gap.sessions} (${gap.sessions} sightings, ${orch} orchestration${extra})`;
 }
 
 function oneLine(text, max = 240) {

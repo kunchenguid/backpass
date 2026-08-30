@@ -259,6 +259,20 @@ test("orchestration-domain gaps are counted but never cluster into a proposal", 
   assert.equal(clustered.gaps.length, 1);
 });
 
+test("a mixed two-sighting cluster with one orchestration vote still graduates", async () => {
+  const h = harness();
+  const phrasing = "Read docs/sshhip.md before changing the tunnel.";
+  const summary = await run(h, [
+    record("claude-s1", [{ proposedInstruction: phrasing, domain: "project" }]),
+    record("codex-s2", [{ proposedInstruction: phrasing, domain: "orchestration" }]),
+  ]);
+
+  assert.equal(summary.gaps.length, 1, "the cluster is not silently dropped below the two-session floor");
+  assert.equal(summary.gaps[0].sessions, 2);
+  assert.equal(summary.gaps[0].orchestrationSightings, 1);
+  assert.match(renderEvidenceForPrompt(summary), /2 sightings, 1 orchestration/);
+});
+
 // ---------- consolidation-pass merges (the mechanical half) ----------
 
 function ledgerWith(...entries) {

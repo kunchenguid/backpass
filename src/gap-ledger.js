@@ -29,9 +29,10 @@ import { sha256 } from "./state.js";
  *  - Every observation carries the `domain` the analysis judged: `orchestration` when the
  *    mistake was not caused by this repository but by an external agent harness or tooling
  *    that orchestrated the task, `project` for every other mistake.
- *    Orchestration sightings are recorded for legibility but never counted toward
- *    corroboration and never surface in a proposal; a missing domain counts as project,
- *    so evidence from before the field existed keeps its old behavior.
+ *    Each observation stores that vote. The fold clusters first and decides domain
+ *    afterward (majority orchestration withholds a cluster from proposals; a mixed
+ *    cluster stays visible). A missing domain counts as project, so evidence from
+ *    before the field existed keeps its old behavior.
  *  - Sessions are keyed by transcript id (harness + native session id), so re-analyzing
  *    or re-sampling the same session overwrites its observation and never adds a count.
  *  - A gap is a fact about its session: re-analysis that no longer mentions it is model

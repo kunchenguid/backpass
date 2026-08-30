@@ -18,9 +18,9 @@ import { renderEvidenceForPrompt } from "../src/fold.js";
  * the analysis prompt actually handed to the model states the causal test for
  * `orchestration` (the mistake was caused by the harness around the session, not by this
  * repository - except when this repository IS that tool, in which case those mistakes
- * are `project`), and the mechanics behind it are unchanged - orchestration sightings are
- * recorded and counted but never corroborate, while a gap with no domain at all is still
- * treated as `project`.
+ * are `project`), and the mechanics behind it: orchestration sightings are recorded as
+ * votes and a cluster is withheld from a proposal only on a majority vote, while a gap
+ * with no domain at all is still treated as `project`.
  */
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
