@@ -176,6 +176,7 @@ export function foldEvidence(
       // per-sighting votes; cluster domain is decided after grouping.
       gapSightings: allObservations.length,
       gapClusters: gaps.length,
+      reportOnlyGapClusters: reportOnlyGaps.length,
       droppedGapSingletons,
       orchestrationGapSightings,
       usedRawTranscript: usedRawCount,
@@ -294,9 +295,12 @@ function renderEvidence(summary) {
   const lines = [];
 
   lines.push(`Sessions analyzed: ${summary.analyzedSessions}`);
+  const reportOnlyGapClusters = summary.totals.reportOnlyGapClusters || 0;
+  const totalGapClusters = summary.totals.gapClusters + reportOnlyGapClusters;
   lines.push(
     `Totals: ${summary.totals.positive} positive, ${summary.totals.negative} negative, ` +
-      `${summary.totals.gapClusters} gap clusters (${summary.totals.droppedGapSingletons} singletons dropped below threshold)`,
+      `${totalGapClusters} gap clusters (${summary.totals.gapClusters} synthesis eligible, ` +
+      `${reportOnlyGapClusters} report only, ${summary.totals.droppedGapSingletons} singletons dropped below threshold)`,
   );
   lines.push("");
   lines.push("### Per-instruction evidence");

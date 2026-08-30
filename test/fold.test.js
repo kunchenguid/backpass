@@ -184,7 +184,9 @@ test("a two-sighting cluster with one orchestration vote survives instead of dro
   );
   assert.equal(majorityOrch.reportOnlyGaps.length, 1);
   assert.equal(majorityOrch.reportOnlyGaps[0].sessions, 3);
+  assert.equal(majorityOrch.totals.reportOnlyGapClusters, 1);
   const renderedMajority = renderEvidenceReport(majorityOrch);
+  assert.match(renderedMajority, /1 gap clusters \(0 synthesis eligible, 1 report only/);
   assert.match(renderedMajority, /3 sightings, 2 orchestration; majority vote excluded/);
   assert.match(renderedMajority, /no gap cluster is eligible for a repository proposal/);
   assert.doesNotMatch(renderedMajority, /none above the evidence threshold/);
@@ -214,6 +216,7 @@ test("a below-threshold mixed cluster remains visible only in the report", () =>
 
   assert.equal(summary.gaps.length, 0);
   assert.equal(summary.reportOnlyGaps.length, 1);
+  assert.equal(summary.totals.reportOnlyGapClusters, 1);
   assert.match(renderEvidenceReport(summary), /2 sightings, 1 orchestration/);
   assert.match(renderEvidenceForPrompt(summary), /Report-only mixed gap clusters/);
 });
