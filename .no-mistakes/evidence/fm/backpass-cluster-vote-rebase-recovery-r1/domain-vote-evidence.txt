@@ -1,0 +1,41 @@
+=== USER-FACING EVIDENCE REPORT ===
+Sessions analyzed: 6 (interactive 6 · non-interactive 0)
+Totals: 0 positive, 0 negative, 2 gap clusters (1 synthesis eligible, 1 report only, 1 singletons dropped below threshold)
+
+### Per-instruction evidence
+A negative's class is what it means: `harm` = following the instruction caused damage (evidence against it); `non-compliance` = the agent ignored it (evidence it failed to steer - argues for reinforcement, never deletion); `irrelevant` = no real bearing.
+
+### Synthesis-eligible gap clusters (mistakes no current instruction covers)
+- 4 orchestration-domain sighting(s) counted as domain votes (clusters excluded only on a majority vote); they never enter this repository's memory file as their own instruction
+- sessions=2 (2 sightings, 1 orchestration) risk=high :: Read docs/ship.md before changing the tunnel.
+    "quote from tie-project" (pi · project · 2026-01-01)
+    "quote from tie-orchestration" (pi · orchestr · 2026-01-01)
+
+### REPORT ONLY - not synthesis-eligible evidence
+- sessions=3 (3 sightings, 2 orchestration; domain excluded by majority vote) risk=high :: Stop after the report on scout tasks.
+
+=== SYNTHESIS INPUT ===
+Sessions analyzed: 6 (interactive 6 · non-interactive 0)
+Totals: 0 positive, 0 negative, 2 gap clusters (1 synthesis eligible, 1 report only, 1 singletons dropped below threshold)
+
+### Per-instruction evidence
+A negative's class is what it means: `harm` = following the instruction caused damage (evidence against it); `non-compliance` = the agent ignored it (evidence it failed to steer - argues for reinforcement, never deletion); `irrelevant` = no real bearing.
+
+### Synthesis-eligible gap clusters (mistakes no current instruction covers)
+- 4 orchestration-domain sighting(s) counted as domain votes (clusters excluded only on a majority vote); they never enter this repository's memory file as their own instruction
+- sessions=2 (2 sightings, 1 orchestration) risk=high :: Read docs/ship.md before changing the tunnel.
+    "quote from tie-project" (pi · project · 2026-01-01)
+    "quote from tie-orchestration" (pi · orchestr · 2026-01-01)
+
+=== OBSERVABLE CHECKS ===
+{
+  "synthesisEligible": [
+    "Read docs/ship.md before changing the tunnel."
+  ],
+  "reportOnly": [
+    "Stop after the report on scout tasks."
+  ],
+  "droppedBelowFloor": 1,
+  "majorityClusterAbsentFromSynthesis": true,
+  "pureOrchestrationSingletonAbsentFromReport": true
+}
