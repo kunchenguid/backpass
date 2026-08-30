@@ -362,11 +362,11 @@ export class AgentResolver {
       try {
         return await fn(pick);
       } catch (err) {
-        const verdict = err instanceof AcpxError ? classifyAcpxFailure(err) : null;
-        if (verdict && !(await this.demote(role, pick, verdict, err.message))) {
-          throw pinnedFailureError(role, pick, verdict, err);
-        }
+        const isAcpxError = err instanceof AcpxError;
+        const verdict = isAcpxError ? classifyAcpxFailure(err) : null;
+        if (isAcpxError && pick.pinned) throw pinnedFailureError(role, pick, verdict, err);
         if (!verdict) throw err;
+        await this.demote(role, pick, verdict, err.message);
       }
     }
   }
@@ -379,17 +379,19 @@ function describeTrail(trail) {
 }
 
 function pinnedFailureError(role, pick, verdict, err) {
-  const label = VERDICT_LABELS[verdict] || verdict;
+  const label = verdict ? VERDICT_LABELS[verdict] || verdict : "failed unexpectedly";
   const model = pick.model ? ` (${pick.model})` : "";
   const pin = `or pin a different harness: backpass --${role}-agent <agent>`;
-  let hint = pin;
+  let hint = `check the ${pick.agent}/acpx failure above and retry; ${pin}`;
   if (verdict === "unauthenticated" && LOGIN_HINTS[pick.agent]) {
     hint = `run: ${LOGIN_HINTS[pick.agent]}; ${pin}`;
   } else if (verdict === "unreachable") {
     hint = `install the ${pick.agent} CLI; ${pin}`;
+  } else if (verdict) {
+    hint = pin;
   }
   const detail = err?.message ? ` (${String(err.message).split("\n")[0]})` : "";
-  return new UserError(`pinned ${role} agent ${pick.agent}${model} is ${label}${detail}`, hint);
+  return new UserError(`pinned ${role} agent ${pick.agent}${model} ${label}${detail}`, hint);
 }
 
 function exhaustedError(role, trail) {

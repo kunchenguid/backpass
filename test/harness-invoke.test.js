@@ -30,6 +30,9 @@ const fakeAcpx = path.join(binDir, "acpx");
 const fakePi = path.join(binDir, "pi");
 const fakeGrok = path.join(binDir, "grok");
 const fakeCodex = path.join(binDir, "codex");
+const adapterModules = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-codex-adapter-"));
+const adapterBin = path.join(adapterModules, ".bin");
+const bundledCodex = path.join(adapterModules, "@openai", "codex", "bin", "codex.js");
 const settingsPath = path.join(fakeHome, ".pi", "agent", "settings.json");
 const acpxLog = path.join(binDir, "acpx.log");
 const piLog = path.join(binDir, "pi.log");
@@ -77,20 +80,23 @@ process.exit(0);
 );
 fs.chmodSync(fakeGrok, 0o755);
 
-fs.writeFileSync(
-  fakeCodex,
-  `#!${process.execPath}
+const codexScript = `#!${process.execPath}
 const fs = require("node:fs");
 fs.appendFileSync(process.env.FAKE_CODEX_LOG, JSON.stringify(process.argv.slice(2)) + "\\n");
 process.exit(0);
-`,
-);
+`;
+fs.writeFileSync(fakeCodex, codexScript);
 fs.chmodSync(fakeCodex, 0o755);
+fs.mkdirSync(path.dirname(bundledCodex), { recursive: true });
+fs.mkdirSync(adapterBin, { recursive: true });
+fs.writeFileSync(bundledCodex, codexScript);
+fs.chmodSync(bundledCodex, 0o755);
 
 fs.writeFileSync(
   fakeAcpx,
   `#!${process.execPath}
 const fs = require("node:fs");
+const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const argv = process.argv.slice(2);
 fs.appendFileSync(process.env.FAKE_ACPX_LOG, JSON.stringify({
@@ -125,7 +131,11 @@ function spawnWrappedPi() {
 function spawnWrappedCodex() {
   const wrap = process.env.CODEX_PATH;
   if (!wrap) return;
-  spawnSync(wrap, [], { stdio: "ignore", env: process.env });
+  const env = { ...process.env };
+  if (env.FAKE_CODEX_ADAPTER_BIN) {
+    env.PATH = env.FAKE_CODEX_ADAPTER_BIN + path.delimiter + (env.PATH || "");
+  }
+  spawnSync(wrap, ["app-server"], { stdio: "ignore", env });
 }
 function splitAgentCommand(value) {
   const parts = [];
@@ -201,6 +211,7 @@ process.env.FAKE_ACPX_LOG = acpxLog;
 process.env.FAKE_PI_LOG = piLog;
 process.env.FAKE_GROK_LOG = grokLog;
 process.env.FAKE_CODEX_LOG = codexLog;
+process.env.FAKE_CODEX_ADAPTER_BIN = adapterBin;
 process.env.FAKE_HARNESS_SETTINGS = settingsPath;
 fs.writeFileSync(acpxLog, "");
 fs.writeFileSync(piLog, "");
@@ -689,7 +700,28 @@ test("a write-access Codex session enables code-mode on the spawn, not by rewrit
   assert.notEqual(created.CODEX_PATH, fakeCodex);
   assert.ok(calls.some((c) => c.argv.includes("set-mode") && c.argv.includes("agent")));
   assert.deepEqual(setCalls(calls).map(setKey), ["reasoning_effort"]);
-  assert.deepEqual(jsonl(codexLog)[0], ["--enable", "code_mode_host"]);
+  assert.deepEqual(jsonl(codexLog)[0], ["--enable", "code_mode_host", "app-server"]);
+});
+
+test("write-access Codex wraps the adapter's bundled executable when codex is absent from PATH", async () => {
+  resetLogsAndSettings();
+  const originalPath = process.env.PATH;
+  const nodeOnlyBin = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-node-only-"));
+  fs.symlinkSync(process.execPath, path.join(nodeOnlyBin, "node"));
+  process.env.PATH = nodeOnlyBin;
+  try {
+    const session = await openSession({
+      agent: "codex",
+      sessionName: "bp-codex-bundled",
+      cwd: workDir,
+      writeAccess: true,
+    });
+    await session.close();
+  } finally {
+    process.env.PATH = originalPath;
+  }
+
+  assert.deepEqual(jsonl(codexLog), [["--enable", "code_mode_host", "app-server"]]);
 });
 
 test("a write-access Codex session rejects malformed CODEX_CONFIG before invoking acpx", async () => {

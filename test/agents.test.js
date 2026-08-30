@@ -314,6 +314,20 @@ test("explicit config or CLI flags pin the role and skip the ladder entirely", a
       return true;
     },
   );
+
+  await assert.rejects(
+    resolver.withFallthrough("synthesis", async () => {
+      throw new AcpxError("acpx claude could not enable write session mode=agent: unsupported command");
+    }),
+    (err) => {
+      assert.ok(err instanceof UserError);
+      assert.match(err.message, /pinned synthesis agent claude/);
+      assert.match(err.message, /failed unexpectedly/);
+      assert.match(err.message, /unsupported command/);
+      assert.match(err.hint, /check the claude\/acpx failure above and retry/);
+      return true;
+    },
+  );
 });
 
 test("--no-auto-agent pins the pre-ladder defaults", async () => {

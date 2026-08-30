@@ -218,15 +218,16 @@ function applyCodexWriteAccess(invocation, { cleanups }) {
   invocation.sessionMode = "agent";
   invocation.sessionModeRequired = true;
 
-  const real = invocation.env.CODEX_PATH || process.env.CODEX_PATH || resolveOnPath("codex");
-  if (!real || (process.platform === "win32" && /\.(?:cmd|bat)$/i.test(real))) return;
+  const real = process.env.CODEX_PATH || null;
   const { wrapperPath, dir } = writeArgvWrapper({
     realCommand: real,
+    bundledPackageBin: real ? null : ["@openai", "codex", "bin", "codex.js"],
     extraArgs: ["--enable", "code_mode_host"],
     binName: "codex",
   });
   cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
   invocation.env.CODEX_PATH = wrapperPath;
+  invocation.requiredBuiltinAgent = "codex";
 }
 
 function mergeCodexConfig(...layers) {
@@ -267,17 +268,19 @@ function mergeCodexConfig(...layers) {
  * Write a node wrapper that prepends `extraArgs` and execs `realCommand` with
  * inherited stdio. Args are JSON-encoded so values with spaces or `$()` stay literal.
  *
- * @param {{ realCommand: string, extraArgs: string[], binName: string }} options
+ * @param {{ realCommand: string | null, bundledPackageBin?: string[] | null, extraArgs: string[], binName: string }} options
  */
-function writeArgvWrapper({ realCommand, extraArgs, binName }) {
+function writeArgvWrapper({ realCommand, bundledPackageBin = null, extraArgs, binName }) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-harness-wrap-"));
   const scriptPath = path.join(dir, `${binName}.cjs`);
-  const payload = JSON.stringify({ real: realCommand, extra: extraArgs });
+  const payload = JSON.stringify({ real: realCommand, bundledPackageBin, extra: extraArgs });
   fs.writeFileSync(
     scriptPath,
     `#!/usr/bin/env node
+const fs = require("node:fs");
+const path = require("node:path");
 const { spawn } = require("node:child_process");
-const { real, extra } = ${payload};
+const { real, bundledPackageBin, extra } = ${payload};
 const signals = ["SIGTERM", "SIGINT", "SIGHUP"];
 let child = null;
 let pendingSignal = null;
@@ -300,7 +303,24 @@ const forwardSignal = (signal) => {
 };
 const signalHandlers = new Map(signals.map((signal) => [signal, () => forwardSignal(signal)]));
 for (const [signal, handler] of signalHandlers) process.on(signal, handler);
-child = spawn(real, extra.concat(process.argv.slice(2)), { stdio: "inherit" });
+let command = real;
+let args = extra.concat(process.argv.slice(2));
+if (bundledPackageBin) {
+  const pathEntries = (process.env.PATH || "").split(path.delimiter).filter(Boolean);
+  const packageBin = pathEntries
+    .map((entry) => path.resolve(entry.replace(/^"|"$/g, ""), "..", ...bundledPackageBin))
+    .find((candidate) => {
+      try { return fs.statSync(candidate).isFile(); } catch { return false; }
+    });
+  if (!packageBin) {
+    console.error("could not locate the Codex executable bundled with the acpx adapter");
+    process.exit(1);
+  }
+  command = process.execPath;
+  args = [packageBin, ...args];
+}
+const shell = process.platform === "win32" && /\\.(?:cmd|bat)$/i.test(command);
+child = spawn(command, args, { stdio: "inherit", shell });
 if (pendingSignal) forwardSignal(pendingSignal);
 child.on("error", (err) => {
   console.error(err.message);
