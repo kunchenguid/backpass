@@ -3,7 +3,7 @@ import { foldEvidence } from "../fold.js";
 import { ledgerGapObservations, pruneGapLedger, recordGapObservations } from "../gap-ledger.js";
 import { synthesizeProposal } from "../synthesize.js";
 import { ProposalViolation } from "../proposal.js";
-import { UserError, color, info, json, out } from "../logger.js";
+import { UserError, color, info, json, out, terminalSafe } from "../logger.js";
 import { budgetBar, formatTokens } from "../tokens.js";
 import { emitProgress } from "../progress.js";
 import { primaryMemoryFile } from "./analyze.js";
@@ -142,7 +142,7 @@ export function printProposal(proposal, { applied = false, analysisUsage = [] } 
     );
   }
 
-  for (const note of proposal.notes || []) out(color.dim(`  note: ${note}`));
+  for (const note of proposal.notes || []) out(color.dim(`  note: ${terminalSafe(note)}`));
 
   printUsage({ tier1: analysisUsage, tier2: proposal.usage || [] });
   if (applied) return;
@@ -205,7 +205,7 @@ export function printSynthesisFailure(err, state) {
   const notes = rejectedProposalNotes(err, state);
   if (notes.length) {
     info(color.dim("  the rejected proposal noted:"));
-    for (const note of notes) info(`    ${note}`);
+    for (const note of notes) info(`    ${terminalSafe(note)}`);
   }
 }
 

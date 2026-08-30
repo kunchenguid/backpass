@@ -25,7 +25,7 @@ import { UserError } from "./logger.js";
  * this spawn, never by rewriting `~/.codex/config.toml` or other harness defaults.
  *   codex     `INITIAL_AGENT_MODE=agent`, `CODEX_CONFIG` `features.code_mode_host=true`,
  *             `CODEX_PATH` wrapper `--enable code_mode_host`, ACP `set-mode agent`
- *   grok      process `--always-approve --permission-mode bypassPermissions`
+ *   grok      process `--always-approve --permission-mode bypassPermissions --sandbox workspace`
  *   pi        no extra flags (the adapter always exposes write/edit; modes are thinking)
  *   claude    acpx `--approve-all` on the prompt (client-side permission) is the contract
  *   opencode  no proven process overlay; `--approve-all` remains the client-side gate
@@ -177,7 +177,11 @@ function grokInvocation({ requestedModel, requestedEffort, writeAccess = false, 
     );
   }
   const extra = [];
-  if (writeAccess) extra.push("--always-approve", "--permission-mode", "bypassPermissions");
+  if (writeAccess) {
+    // Permission bypass prevents edit prompts; the OS sandbox still confines approved
+    // file and command tools to the staging cwd rather than granting host-wide writes.
+    extra.push("--always-approve", "--permission-mode", "bypassPermissions", "--sandbox", "workspace");
+  }
   if (requestedModel) extra.push("-m", requestedModel);
   if (requestedEffort) extra.push("--reasoning-effort", requestedEffort);
   extra.push("agent", "stdio");

@@ -761,8 +761,14 @@ test("a write-access Grok session launches with native file-write permission fla
   await session.close();
   const spawned = jsonl(grokLog);
   assert.ok(spawned.length >= 1);
-  assert.deepEqual(spawned[0].slice(0, 3), ["--always-approve", "--permission-mode", "bypassPermissions"]);
-  assert.deepEqual(spawned[0].slice(3, 7), ["-m", "grok-4.6", "--reasoning-effort", "high"]);
+  assert.deepEqual(spawned[0].slice(0, 5), [
+    "--always-approve",
+    "--permission-mode",
+    "bypassPermissions",
+    "--sandbox",
+    "workspace",
+  ]);
+  assert.deepEqual(spawned[0].slice(5, 9), ["-m", "grok-4.6", "--reasoning-effort", "high"]);
 });
 
 test("a write-access Pi session does not invent a permission overlay", async () => {

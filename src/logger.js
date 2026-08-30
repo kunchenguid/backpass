@@ -20,6 +20,12 @@ export function setQuiet(value) {
   quiet = Boolean(value);
 }
 
+/** Make untrusted text safe to place inside one terminal diagnostic line. */
+export function terminalSafe(value) {
+  // eslint-disable-next-line no-control-regex -- terminal control bytes are the attack surface
+  return String(value).replace(/[\u0000-\u001f\u007f-\u009f]/g, " ");
+}
+
 /**
  * While the live progress view owns stderr, progress lines are diverted here,
  * buffered, and replayed verbatim on teardown - so scrollback after a TUI run
