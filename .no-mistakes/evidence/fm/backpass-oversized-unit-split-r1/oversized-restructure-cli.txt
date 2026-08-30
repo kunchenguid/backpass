@@ -1,0 +1,32 @@
+$ backpass propose --synthesis-agent claude --synthesis-model fake-model
+exit: 0
+proposal · backpass-cli-rq4EKW · AGENTS.md · 1 edit(s) from 2 session(s)
+  budget [#...............................] 217 -> 221 / 5,000 tok
+  evidence: 0 positive · 2 negative · 0 gap clusters
+
+  e1 REWRITE  split the blob into list items (+4 tok, 2 transcript(s))
+
+  tier-2 tokens: input=1,500 output=50 total=1,550
+
+Review and apply with `backpass apply` (nothing has been written).
+· synthesizing with claude (fake-model) effort=high
+
+Persisted proposal outcome:
+{
+  "editKind": "rewrite",
+  "editTitle": "split the blob into list items",
+  "attributedInstructions": [
+    "AG-001.2"
+  ],
+  "replacementPreview": [
+    "- Sentence 1 states an independent requirement about builds, releases, adapters, and review that an agent must actually follow rather than skip.",
+    "- Sentence 2 states an independent requirement about builds, releases, adapters, and review that an agent must actually follow rather than skip.",
+    "- Sentence 3 states an independent requirement about builds, releases, adapters, and review that an agent must actually follow rather than skip."
+  ],
+  "containsBoldLabel": false
+}
+
+Generated synthesis guidance observed by the harness:
+Oversized paragraph AG-001 (215 tok, L3) <Memory> is one blob; AG-001 is only its line-oriented alias. Attribute evidence only to the sentence-part IDs below (AG-001.1, AG-001.2, AG-001.3, AG-001.4, AG-001.5, AG-001.6). If these fail to steer, split the paragraph into list items in place - a bold label on the blob is not a strengthen.
+These are one paragraph apiece. Preferred reinforcement is a restructure-in-place: split the paragraph into list items so each claim can be followed. A bold label on the blob is not a strengthen.
+- [AG-001] is 215 tokens as one paragraph (attribution: AG-001.1, AG-001.2, AG-001.3, AG-001.4, AG-001.5, AG-001.6). Split it into list items; do not decorate the blob.
