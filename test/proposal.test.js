@@ -272,8 +272,19 @@ test("folded domain votes mechanically control new-instruction eligibility", () 
   ]) {
     const excluded = propose(summary, minGapEvidence);
     assert.equal(excluded.proposal.edits.length, 0);
-    assert.ok(excluded.violations.some((violation) => /does not match any synthesis-eligible gap/.test(violation)));
+    assert.ok(excluded.violations.some((violation) => /report-only gap/.test(violation)));
   }
+
+  const reportOnly = folded(["orchestration", "orchestration", "project"], 2);
+  const rewritten = gate({
+    edit: memoryEdit((text) => text.replace("- Prefer small commits.", `- Prefer focused commits.\n- ${phrasing}`)),
+    annotation: {
+      edits: [claim(["H1"], { kind: "rewrite", transcripts: 3 })],
+    },
+    context: { summary: reportOnly },
+  });
+  assert.equal(rewritten.proposal.edits.length, 0);
+  assert.ok(rewritten.violations.some((violation) => /inserts the report-only gap/.test(violation)));
 });
 
 test("the per-run edit cap is enforced - it is the learning rate", () => {
