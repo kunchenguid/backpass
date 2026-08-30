@@ -65,7 +65,7 @@ export async function runAnalysis(ctx) {
   // The cap bounds the expensive per-transcript calls; cached evidence is reused as usual.
   const discovered = await discoverForRun(ctx);
   const { transcripts, perHarness } = capTranscripts(discovered, config);
-  const discoveredTranscripts = discovered.transcripts;
+  const { discoveredTranscripts } = discovered;
 
   if (!transcripts.length) {
     info(`${color.yellow("·")} no transcripts associated with this repo`);

@@ -88,7 +88,7 @@ export async function runProposal(ctx, precomputed = null) {
   const { file, hash, skills } = precomputed || primaryMemoryFile(repo, config);
   const discovery = precomputed ? null : await discoverForRun(ctx);
   const transcripts = precomputed?.transcripts || discovery.transcripts;
-  const discoveredTranscripts = precomputed?.discoveredTranscripts || discovery?.transcripts || transcripts;
+  const discoveredTranscripts = precomputed?.discoveredTranscripts || discovery?.discoveredTranscripts || transcripts;
 
   const foldStarted = Date.now();
   const summary = await foldForRun(ctx, file, hash, skills ?? [], discoveredTranscripts);

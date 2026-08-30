@@ -22,7 +22,7 @@ import { loadConfig } from "../src/config.js";
 import { foldEvidence, renderEvidenceForPrompt } from "../src/fold.js";
 import { analyzeTranscripts } from "../src/analyze.js";
 import { foldForRun, printProposal } from "../src/commands/propose.js";
-import { cmdScan } from "../src/commands/scan.js";
+import { cmdScan, discoverForRun } from "../src/commands/scan.js";
 import { renderApplySurface } from "../src/apply/lavish.js";
 import { evidenceKey, State } from "../src/state.js";
 import { transcriptIdentity } from "../src/transcript.js";
@@ -418,52 +418,60 @@ test("cached evidence is upgraded with the current interaction category", async 
   });
 });
 
-test("fold upgrades current evidence outside the analyzed sample", async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-mix-fold-cache-"));
-  const state = new State(dir).ensure();
-  const transcript = {
-    harness: "claude",
-    id: "claude-robot-unsampled",
-    nativeId: "robot-unsampled",
-    path: "/sessions/robot-unsampled.jsonl",
-    mtimeMs: 100,
-    bytes: 200,
-    interactionSignals: { entrypoint: "sdk-cli" },
-    interaction: NON_INTERACTIVE,
-  };
-  const memoryHash = "sha256:memory";
-  state.writeEvidence(transcript, {
-    status: "ok",
-    transcript: {
-      harness: "claude",
-      id: transcript.id,
-      identity: transcriptIdentity(transcript),
-      path: transcript.path,
-    },
-    memoryHash,
-    memoryPath: "AGENTS.md",
-    key: evidenceKey(transcript, memoryHash),
-    positive: [{ instruction: "AG-001", quote: "followed the repository rule exactly" }],
-    negative: [],
-    gaps: [],
-  });
+test("fold upgrades current evidence beyond the analysis limit", async () => {
+  const repo = initRepo();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-mix-fold-cache-"));
+  writeClaude(home, { id: "robot-1", cwd: repo, entrypoint: "sdk-cli" });
+  writeClaude(home, { id: "robot-2", cwd: repo, entrypoint: "sdk-ts" });
+  const previousHome = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    const state = new State(repo).ensure();
+    const config = loadConfig(repo);
+    config.state = state;
+    config.discovery.harnesses = ["claude"];
+    config.discovery.since = "all";
+    const repoInfo = { name: "demo", root: repo, worktrees: [repo], remotes: [] };
+    const ctx = { repo: repoInfo, config, strict: false, limit: null };
+    const discovered = await discoverForRun(ctx);
+    assert.equal(discovered.transcripts.length, 2);
+    const transcript = discovered.transcripts[1];
+    const memoryHash = "sha256:memory";
+    state.writeEvidence(transcript, {
+      status: "ok",
+      transcript: {
+        harness: "claude",
+        id: transcript.id,
+        identity: transcriptIdentity(transcript),
+        path: transcript.path,
+      },
+      memoryHash,
+      memoryPath: "AGENTS.md",
+      key: evidenceKey(transcript, memoryHash),
+      positive: [{ instruction: "AG-001", quote: "followed the repository rule exactly" }],
+      negative: [],
+      gaps: [],
+    });
 
-  const summary = await foldForRun(
-    {
-      repo: { root: dir },
-      config: { state, minGapEvidence: 2, gapLedgerMaxAge: "90d" },
-    },
-    { path: "AGENTS.md", text: "", units: [] },
-    memoryHash,
-    [],
-    [transcript],
-  );
+    const limited = await discoverForRun({ ...ctx, limit: 1 });
+    assert.equal(limited.transcripts.length, 1);
+    assert.equal(limited.discoveredTranscripts.length, 2);
+    const summary = await foldForRun(
+      ctx,
+      { path: "AGENTS.md", text: "", units: [] },
+      memoryHash,
+      [],
+      limited.discoveredTranscripts,
+    );
 
-  assert.deepEqual(summary.analyzedByInteraction, {
-    [INTERACTIVE]: 0,
-    [NON_INTERACTIVE]: 1,
-  });
-  assert.equal(state.readEvidence(transcript).transcript.interaction, NON_INTERACTIVE);
+    assert.deepEqual(summary.analyzedByInteraction, {
+      [INTERACTIVE]: 0,
+      [NON_INTERACTIVE]: 1,
+    });
+    assert.equal(state.readEvidence(transcript).transcript.interaction, NON_INTERACTIVE);
+  } finally {
+    process.env.HOME = previousHome;
+  }
 });
 
 test("evidence records carry the category and fold reports relevance per category", async () => {
