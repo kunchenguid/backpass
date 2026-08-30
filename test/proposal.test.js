@@ -395,6 +395,25 @@ test("repeated unrelated added words count as separate uncovered occurrences", (
   assert.ok(violations.some((v) => /backed by 1 session/.test(v)));
 });
 
+test("uncovered occurrences cannot hide between deterministic sample positions", () => {
+  const sampledIndexes = new Set(
+    Array.from({ length: 512 }, (_, index) => Math.floor((index * 1023) / 511)),
+  );
+  const replacementWords = Array.from({ length: 1024 }, (_, index) =>
+    sampledIndexes.has(index) ? "shared" : "intruder",
+  );
+  const original = `- shared ${"x".repeat(10000)}.`;
+  const replacement = `- ${replacementWords.join(" ")}.`;
+  const { proposal, violations } = gate({
+    text: `# Memory\n\n${original}\n`,
+    edit: memoryEdit((t) => t.replace(original, replacement)),
+    annotation: { edits: [claim(["H1"], { kind: "rewrite", title: "interleave unrelated words", transcripts: 1 })] },
+  });
+  assert.ok(estimateTokens(replacement) < estimateTokens(original));
+  assert.equal(proposal.edits.length, 0);
+  assert.ok(violations.some((v) => /backed by 1 session/.test(v)));
+});
+
 test("a long tightening can retain words from beyond the sampling prefix", () => {
   const words = Array.from({ length: 1024 }, (_, index) => `term${index}`);
   const original = `- ${words.join(" ")}.`;
