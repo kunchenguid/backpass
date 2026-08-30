@@ -1,0 +1,50 @@
+{
+  "scenario": "A firstmate-class repository is itself the orchestrating tool; two sessions report the same orchestration-subject-matter mistake.",
+  "persistedAnalysisEvidence": [
+    {
+      "session": "pi-session-b",
+      "gaps": [
+        {
+          "mistake": "kept working after the brief said to report and stop",
+          "proposedInstruction": "Stop after the report on scout tasks.",
+          "domain": "project",
+          "quote": "opened a PR during a scout task"
+        }
+      ]
+    },
+    {
+      "session": "pi-session-a",
+      "gaps": [
+        {
+          "mistake": "kept working after the brief said to report and stop",
+          "proposedInstruction": "Stop after the report on scout tasks.",
+          "domain": "project",
+          "quote": "opened a PR during a scout task"
+        }
+      ]
+    }
+  ],
+  "aggregateResult": {
+    "analyzedSessions": 2,
+    "orchestrationGapSightingsExcluded": 0,
+    "proposalEligibleGaps": [
+      {
+        "proposedInstruction": "Stop after the report on scout tasks.",
+        "sessions": 2,
+        "quotes": [
+          {
+            "text": "opened a PR during a scout task",
+            "effect": "kept working after the brief said to report and stop",
+            "source": "pi · b · 2026-08-30"
+          },
+          {
+            "text": "opened a PR during a scout task",
+            "effect": "kept working after the brief said to report and stop",
+            "source": "pi · a · 2026-08-30"
+          }
+        ]
+      }
+    ]
+  },
+  "synthesisPromptEvidence": "Sessions analyzed: 2\nTotals: 0 positive, 0 negative, 1 gap clusters (0 singletons dropped below threshold)\n\n### Per-instruction evidence\nA negative's class is what it means: `harm` = following the instruction caused damage (evidence against it); `non-compliance` = the agent ignored it (evidence it failed to steer - argues for reinforcement, never deletion); `irrelevant` = no real bearing.\n- [AG-001] +0 -0 sessions=0 relevance=0.0% cost=10tok\n\n### Gap clusters (mistakes no current instruction covers)\n- sessions=2 risk=high :: Stop after the report on scout tasks.\n    \"opened a PR during a scout task\" (pi · b · 2026-08-30)\n    \"opened a PR during a scout task\" (pi · a · 2026-08-30)"
+}
