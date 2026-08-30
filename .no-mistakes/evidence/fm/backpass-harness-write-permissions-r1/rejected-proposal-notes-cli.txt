@@ -1,0 +1,13 @@
+$ backpass propose --synthesis-agent claude --synthesis-model fake-model
+exit status: 1
+· synthesizing with claude (fake-model) effort=high
+warn synthesis violated 1 gate(s); re-prompting with the exact violations
+warn synthesis violated 1 gate(s); re-prompting with the exact violations
+
+  x edit e1 ("extract release checklist") carries no verbatim evidence quote
+
+  the rejected proposal was saved to /private/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/backpass-cli-vUmQGZ/.backpass/proposal.json
+  the rejected proposal noted:
+    Code Mode is unavailable because code-mode host is disabled.
+error synthesis could not produce a valid proposal after 2 re-prompt(s) (1 violation(s))
+  the gates above are what the next synthesis must satisfy; run `backpass propose` again
