@@ -9,7 +9,7 @@ import {
   probeCandidate,
   resolveModelId,
 } from "../src/agents.js";
-import { AcpxError, acpxAgentName, classifyAcpxFailure, effortOptionKey } from "../src/acpx.js";
+import { AcpxError, acpxAgentName, classifyAcpxFailure, effortOptionKey, probeSession } from "../src/acpx.js";
 import { DEFAULT_LADDERS, loadConfig } from "../src/config.js";
 import { UserError, setQuiet } from "../src/logger.js";
 
@@ -205,6 +205,23 @@ test("claude is decided by `claude auth status`, not by the acpx session probe",
   }
 });
 
+test("an unclassified acpx probe exit remains transient when stderr has detail", async () => {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-fake-acpx-"));
+  const script = path.join(bin, "acpx");
+  fs.writeFileSync(script, "#!/bin/sh\necho 'another session is already running' >&2\nexit 1\n");
+  fs.chmodSync(script, 0o755);
+  const oldPath = process.env.PATH;
+  process.env.PATH = `${bin}${path.delimiter}${oldPath}`;
+  try {
+    const result = await probeSession({ agent: "pi", sessionName: "busy-probe" });
+    assert.equal(result.verdict, "unreachable");
+    assert.equal(result.detail, "another session is already running");
+    assert.equal(result.transient, true);
+  } finally {
+    process.env.PATH = oldPath;
+  }
+});
+
 test("native probe transients retry without caching while unsupported models demote", async () => {
   function nativeResolver(agent, nativeResults) {
     const config = loadConfig(tmpRepo());
@@ -249,6 +266,13 @@ test("native probe transients retry without caching while unsupported models dem
   assert.equal((await timedOut.resolver.resolve("analysis")).agent, "codex");
   assert.equal(timedOut.nativeCalls(), 2);
   assert.equal(timedOut.state.cache.entries["claude|gpt-5.6-luna"], undefined);
+
+  const stderrThenReady = nativeResolver("claude", [
+    { code: 1, stdout: "", stderr: "another session is already running\n" },
+    { code: 0, stdout: '{"loggedIn":true}\n', stderr: "" },
+  ]);
+  assert.equal((await stderrThenReady.resolver.resolve("analysis")).agent, "claude");
+  assert.equal(stderrThenReady.nativeCalls(), 2);
 
   const unsupported = nativeResolver("opencode", [{ code: 0, stdout: "anthropic/claude-opus-5\n", stderr: "" }]);
   assert.equal((await unsupported.resolver.resolve("analysis")).agent, "codex");
@@ -533,7 +557,12 @@ test("a transient probe timeout retries once and does not poison the cache", asy
 
   const busyExit = resolverWith({
     "pi|gpt-5.6-luna": [
-      { verdict: "unreachable", detail: "exit 1", resolvedModel: null },
+      {
+        verdict: "unreachable",
+        detail: "another session is already running",
+        resolvedModel: null,
+        transient: true,
+      },
       { resolvedModel: "openai-codex/gpt-5.6-luna" },
     ],
   });

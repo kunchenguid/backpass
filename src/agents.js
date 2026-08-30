@@ -78,7 +78,11 @@ const NATIVE_PROBES = {
       return null;
     }
     if (result.code !== 0) {
-      return { verdict: "unreachable", detail: firstLine(result.stderr) || `claude auth status exit ${result.code}` };
+      return {
+        verdict: "unreachable",
+        detail: firstLine(result.stderr) || `claude auth status exit ${result.code}`,
+        transient: true,
+      };
     }
     return null;
   },
@@ -148,9 +152,9 @@ export function candidateKey({ agent, model }) {
  * @param {{ agent: string, model: string }} candidate
  * @param {{ cwd?: string, sessionName?: string,
  *   probeSession?: (args: { agent: string, sessionName: string, cwd?: string, timeoutMs?: number }) =>
- *     Promise<{ verdict: string, detail: string, availableModels?: string[] }>,
+ *     Promise<{ verdict: string, detail: string, availableModels?: string[], transient?: boolean }>,
  *   runCapture?: typeof runCapture }} [options]
- * @returns {Promise<{ verdict: string, detail: string, resolvedModel: string | null }>}
+ * @returns {Promise<{ verdict: string, detail: string, resolvedModel: string | null, transient?: boolean }>}
  */
 export async function probeCandidate(candidate, options = {}) {
   const { cwd, sessionName, probeSession: probe = probeSession, runCapture: capture = runCapture } = options;
@@ -167,7 +171,14 @@ export async function probeCandidate(candidate, options = {}) {
     cwd,
     timeoutMs: PROBE_TIMEOUT_BY_AGENT[agent] || PROBE_TIMEOUT_MS,
   });
-  if (result.verdict !== "ok") return { verdict: result.verdict, detail: result.detail, resolvedModel: null };
+  if (result.verdict !== "ok") {
+    return {
+      verdict: result.verdict,
+      detail: result.detail,
+      resolvedModel: null,
+      ...(result.transient ? { transient: true } : {}),
+    };
+  }
 
   if (TRUSTING_MODEL_AGENTS.has(agent)) {
     return { verdict: "ok", detail: "model accepted on faith; the first real call verifies it", resolvedModel: model };
@@ -202,7 +213,7 @@ export function isProbeEntryFresh(entry, { now = Date.now() } = {}) {
  */
 export function isTransientProbeResult(result) {
   if (!result) return false;
-  if (result.verdict === "timeout") return true;
+  if (result.transient || result.verdict === "timeout") return true;
   if (result.verdict === "model-unavailable" && /advertised no models/i.test(result.detail || "")) {
     return true;
   }

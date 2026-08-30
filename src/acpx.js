@@ -232,7 +232,7 @@ export async function acpxVersion({ timeoutMs = 10_000 } = {}) {
  * checks `claude auth status` before ever calling this.
  *
  * @returns {Promise<{ verdict: "ok" | "unauthenticated" | "model-unavailable" | "unreachable" | "timeout",
- *   detail: string, availableModels: string[] }>}
+ *   detail: string, availableModels: string[], transient?: boolean }>}
  */
 export async function probeSession({ agent, sessionName, cwd = undefined, timeoutMs = 20_000 }) {
   const acpxAgent = acpxAgentName(agent);
@@ -246,8 +246,13 @@ export async function probeSession({ agent, sessionName, cwd = undefined, timeou
     };
   }
   if (created.code !== 0) {
-    const verdict = classifyAcpxFailure(created) || "unreachable";
-    return { verdict, detail: firstLine(created.stderr) || `exit ${created.code}`, availableModels: [] };
+    const classified = classifyAcpxFailure(created);
+    return {
+      verdict: classified || "unreachable",
+      detail: firstLine(created.stderr) || `exit ${created.code}`,
+      availableModels: [],
+      ...(!classified ? { transient: true } : {}),
+    };
   }
 
   try {
