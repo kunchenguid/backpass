@@ -162,8 +162,11 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
 - **Cross-surface duplication is report-only.** `crossSurfaceDuplicates` (`src/overlap.js`)
   flags memory-file units whose text substantially overlaps a skill description or body
   (Dice >= 0.6, same bar as gap coverage). Fold stamps it on the instruction row and
-  `backpass status` lists it so a shrink can drop the memory-file copy; nothing is deleted
-  automatically. Relevance still accrues to the memory-file alias until that copy is gone.
+  `backpass status` lists it. Description overlap duplicates always-loaded tokens and can
+  guide a shrink to drop the memory-file copy. Body overlap is only placement evidence: a
+  skill body loads on trigger, so its memory copy may be the only always-loaded coverage.
+  Nothing is deleted automatically. Relevance still accrues to the memory-file alias until
+  that copy is gone.
 - **Gap corroboration is counted across runs through `.backpass/gap-ledger.json`**
   (`src/gap-ledger.js`, wired in `foldForRun`): one sighting per (gap, transcript id), so a
   session never counts twice and a gap seen once per run still graduates at `minGapEvidence`.
