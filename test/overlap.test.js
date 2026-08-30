@@ -61,6 +61,24 @@ test("a memory unit that restates a skill body paragraph is flagged against the 
   assert.equal(hits[0].skill, "database");
 });
 
+test("fold renders body overlap without always-loaded drop advice", () => {
+  const body = "Always wrap migrations in a transaction before applying them.";
+  const memoryFile = {
+    path: "AGENTS.md",
+    units: parseMemoryUnits(`# Rules\n\n- ${body}\n`),
+  };
+  const summary = foldEvidence([], {
+    memoryFile,
+    skills: [skill({ description: "Database skill.", body })],
+  });
+
+  const rendered = renderEvidenceForPrompt(summary);
+  assert.match(rendered, /triggered skill-body overlap \(report-only\)/);
+  assert.match(rendered, /weigh relevance and trigger suitability/);
+  assert.doesNotMatch(rendered, /duplicated always-loaded tokens/);
+  assert.doesNotMatch(rendered, /drop the memory-file copy/);
+});
+
 test("empty skills or empty memory produce no flags", () => {
   const memoryFile = { path: "AGENTS.md", units: parseMemoryUnits("# T\n\n- Keep changes focused.\n") };
   assert.deepEqual(crossSurfaceDuplicates(memoryFile, []), []);

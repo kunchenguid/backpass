@@ -268,11 +268,20 @@ export function renderEvidenceForPrompt(summary) {
     );
     if (row.skillOverlap) {
       const overlap = row.skillOverlap;
-      lines.push(
+      const match =
         `    CROSS-SURFACE: restates skill "${overlap.skill}" ${overlap.surface} ` +
-          `(similarity ${overlap.score.toFixed(2)}) - duplicated always-loaded tokens; ` +
-          `drop the memory-file copy, do not treat it as a second instruction`,
-      );
+        `(similarity ${overlap.score.toFixed(2)})`;
+      if (overlap.surface === "description") {
+        lines.push(
+          `${match} - duplicated always-loaded tokens; ` +
+            `drop the memory-file copy, do not treat it as a second instruction`,
+        );
+      } else {
+        lines.push(
+          `${match} - triggered skill-body overlap (report-only); weigh relevance and trigger suitability, ` +
+            `do not infer the memory-file copy should be dropped`,
+        );
+      }
     }
     for (const quote of row.quotes.slice(0, 3)) {
       const sign = quote.polarity === "negative" ? "-" : "+";

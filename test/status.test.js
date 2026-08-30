@@ -68,5 +68,21 @@ test("status reports a memory unit that restates a skill description", async () 
 
   const text = (await captureStatus(repo, false)).join("\n");
   assert.match(text, /CROSS-SURFACE \(report-only\)/);
-  assert.match(text, /AG-001 restates database description/);
+  assert.match(text, /AG-001 restates database description.*duplicated always loaded/);
+});
+
+test("status identifies body overlap as triggered placement evidence", async () => {
+  const body = "Always wrap migrations in a transaction before applying them.";
+  const repo = makeRepo({
+    "AGENTS.md": `# Rules\n\n- ${body}\n`,
+    ".agents/skills/database/SKILL.md": `---\nname: database\ndescription: Database skill.\n---\n\n${body}\n`,
+  });
+
+  const structured = JSON.parse((await captureStatus(repo, true)).join("\n"));
+  assert.equal(structured.crossSurfaceDuplicates.length, 1);
+  assert.equal(structured.crossSurfaceDuplicates[0].surface, "body");
+
+  const text = (await captureStatus(repo, false)).join("\n");
+  assert.match(text, /AG-001 restates database body.*body loads on trigger; weigh placement/);
+  assert.doesNotMatch(text, /duplicated always loaded/);
 });
