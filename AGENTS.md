@@ -154,6 +154,12 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
 - **Memory resolution is pointer-aware** (`resolveMemoryFiles` in `src/memory.js`): the
   first configured file is canonical, a `@AGENTS.md`-only CLAUDE.md is a pointer, and a
   second full file is warned about, never silently ignored or double-written.
+- **Oversized paragraphs split for attribution only.** `parseMemoryUnits` still emits one
+  positional `AG-nnn` per paragraph or list item (apply, reanchor, and the removal floor
+  stay line-oriented). A paragraph above `ATTRIBUTION_SPLIT_TOKENS` also gets `AG-nnn.m`
+  sentence parts in the instruction index and fold so evidence cannot smear across a blob;
+  synthesis is told to restructure that paragraph into list items rather than bold-label
+  it. See `src/memory.js` and `renderEvidenceForPrompt` in `src/fold.js`.
 - **Never trust model-reported numbers.** Token deltas and budget projections are measured
   in `src/proposal.js` from the actual text; the synthesis model's own figures are ignored.
   Usage accounting comes from acpx's `[acpx] tokens:` stderr line, which acpx prints

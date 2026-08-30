@@ -1,5 +1,5 @@
 import { classifyInteraction, INTERACTIVE, NON_INTERACTIVE } from "./interaction.js";
-import { similarity } from "./memory.js";
+import { findInstructionUnit, instructionUnits, similarity } from "./memory.js";
 import { GAP_SIMILARITY_THRESHOLD, gapSource } from "./gap-ledger.js";
 import { crossSurfaceDuplicates } from "./overlap.js";
 
@@ -124,7 +124,7 @@ export function foldEvidence(
   // Instructions that exist in the file but drew no evidence at all are the strongest
   // removal / extraction candidates, so they must appear in the summary too.
   if (memoryFile) {
-    for (const unit of memoryFile.units) touch(unit.id);
+    for (const unit of instructionUnits(memoryFile)) touch(unit.id);
   }
 
   const duplicates = crossSurfaceDuplicates(memoryFile, skills);
@@ -132,7 +132,7 @@ export function foldEvidence(
 
   const instructionRows = [...instructions.values()]
     .map((entry) => {
-      const unit = memoryFile?.units.find((u) => u.id === entry.instruction) || null;
+      const unit = findInstructionUnit(memoryFile, entry.instruction);
       const skillOverlap = overlapById.get(entry.instruction);
       return {
         instruction: entry.instruction,
@@ -152,6 +152,8 @@ export function foldEvidence(
         tokens: unit?.tokens ?? null,
         section: unit?.section ?? null,
         known: Boolean(unit),
+        parentId: unit?.parentId ?? null,
+        nonCompliance: entry.quotes.filter((q) => q.polarity === "negative" && q.class === "non-compliance").length,
         quotes: entry.quotes.slice(0, 6),
         ...(skillOverlap ? { skillOverlap } : {}),
       };
@@ -209,7 +211,30 @@ export function foldEvidence(
     gaps,
     crossSurfaceDuplicates: duplicates,
     reportOnlyGaps,
+    oversized: oversizedRestructureTargets(memoryFile, instructionRows),
   };
+}
+
+/**
+ * An oversized paragraph whose sentence-parts drew repeated non-compliance. Synthesis
+ * should split that blob into list items, not slap a bold label on it.
+ */
+function oversizedRestructureTargets(memoryFile, rows) {
+  if (!memoryFile) return [];
+  const byId = new Map(rows.map((row) => [row.instruction, row]));
+  const targets = [];
+  for (const unit of memoryFile.units) {
+    if (!unit.parts?.length) continue;
+    const related = [unit.id, ...unit.parts.map((part) => part.id)].map((id) => byId.get(id)).filter(Boolean);
+    const nonCompliance = related.reduce((n, row) => n + (row.nonCompliance ?? 0), 0);
+    if (nonCompliance < 2) continue;
+    targets.push({
+      id: unit.id,
+      tokens: unit.tokens,
+      parts: unit.parts.map((part) => part.id),
+    });
+  }
+  return targets;
 }
 
 /**
@@ -367,6 +392,22 @@ function renderEvidence(summary, { includeReportOnly }) {
       const cls = quote.polarity === "negative" ? ` [${quote.class ?? "unclassified"}]` : "";
       const effect = quote.effect ? ` :: ${oneLine(quote.effect, 200)}` : "";
       lines.push(`    ${sign}${cls} "${oneLine(quote.text)}"${effect} (${quote.source})`);
+    }
+  }
+
+  if (summary.oversized?.length) {
+    lines.push("");
+    lines.push("### Oversized units that failed to steer");
+    lines.push(
+      "These are one paragraph apiece. Preferred reinforcement is a restructure-in-place: split " +
+        "the paragraph into list items so each claim can be followed. A bold label on the blob is " +
+        "not a strengthen.",
+    );
+    for (const blob of summary.oversized) {
+      lines.push(
+        `- [${blob.id}] is ${blob.tokens} tokens as one paragraph (attribution: ${blob.parts.join(", ")}). ` +
+          `Split it into list items; do not decorate the blob.`,
+      );
     }
   }
 

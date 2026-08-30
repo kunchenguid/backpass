@@ -2,7 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { budgetBar, budgetGateKind, budgetStatus, estimateTokens, formatTokens } from "../src/tokens.js";
-import { parseMemoryUnits, similarity, reanchor, unitHash } from "../src/memory.js";
+import {
+  ATTRIBUTION_SPLIT_TOKENS,
+  parseMemoryUnits,
+  renderInstructionIndex,
+  similarity,
+  reanchor,
+  unitHash,
+} from "../src/memory.js";
 import { extractionBudgetEffect, parseFrontmatter, renderSkillFile } from "../src/skills.js";
 
 test("token estimation prices UTF-8 bytes, not characters", () => {
@@ -91,6 +98,54 @@ test("a fenced code block stays one unit instead of splitting into lines", () =>
   const units = parseMemoryUnits(text);
   assert.equal(units.length, 1);
   assert.ok(units[0].text.includes("const b = 2;"));
+});
+
+function oversizedParagraph(count = 5) {
+  return Array.from(
+    { length: count },
+    (_, i) =>
+      `Sentence ${i + 1} states an independent requirement about builds, releases, adapters, and review that an agent must actually follow rather than skip.`,
+  ).join(" ");
+}
+
+test("an oversized paragraph keeps its positional alias and exposes sentence parts for attribution", () => {
+  const blob = oversizedParagraph();
+  const units = parseMemoryUnits(`# Memory\n\n${blob}\n\n- Keep the next unit's id stable.\n`);
+  assert.ok(estimateTokens(blob) > ATTRIBUTION_SPLIT_TOKENS);
+  assert.deepEqual(
+    units.map((u) => u.id),
+    ["AG-001", "AG-002"],
+    "later units keep positional aliases; parts are dotted, not extra AG-nnn ids",
+  );
+  assert.equal(units[1].text, "- Keep the next unit's id stable.");
+  assert.ok(units[0].parts?.length >= 2, "the blob splits on sentence boundaries");
+  assert.deepEqual(
+    units[0].parts.map((p) => p.id),
+    units[0].parts.map((_, i) => `AG-001.${i + 1}`),
+  );
+  assert.equal(units[0].parts[0].parentId, "AG-001");
+  assert.ok(units[0].parts.every((p) => p.startLine === units[0].startLine && p.endLine === units[0].endLine));
+  assert.ok(units[0].parts.every((p) => blob.includes(p.text)));
+
+  const index = renderInstructionIndex({ units });
+  assert.match(index, /Oversized paragraph \[AG-001\]/);
+  assert.match(index, /\[AG-001\.1\]/);
+  assert.match(index, /\[AG-001\.2\]/);
+  assert.match(index, /split the paragraph into list items/);
+  assert.match(index, /bold label on the blob is not a strengthen/);
+  assert.doesNotMatch(index, /^\[AG-001\] \(/m, "the blob itself is not an attribution target");
+});
+
+test("list items and fenced blocks are not sentence-split even when oversized", () => {
+  const blob = oversizedParagraph();
+  const listed = parseMemoryUnits(`# T\n\n- ${blob}\n`);
+  assert.equal(listed.length, 1);
+  assert.equal(listed[0].id, "AG-001");
+  assert.equal(listed[0].parts, undefined);
+
+  const fenced = parseMemoryUnits(`# T\n\n\`\`\`\n${blob}\n\`\`\`\n`);
+  assert.equal(fenced.length, 1);
+  assert.equal(fenced[0].parts, undefined);
 });
 
 test("instruction hashes survive cosmetic reformatting but not meaning changes", () => {

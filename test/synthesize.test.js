@@ -75,7 +75,8 @@ process.env.BACKPASS_ACPX_BIN = fakeAcpx;
 const { synthesizeProposal, ANNOTATE_TURNS } = await import("../src/synthesize.js");
 const { applyDecisions } = await import("../src/apply/writer.js");
 const { loadConfig } = await import("../src/config.js");
-const { readMemoryFile } = await import("../src/memory.js");
+const { parseMemoryUnits, readMemoryFile } = await import("../src/memory.js");
+const { foldEvidence } = await import("../src/fold.js");
 const { ProposalViolation } = await import("../src/proposal.js");
 const { State } = await import("../src/state.js");
 const { UserError, setLoggerSink } = await import("../src/logger.js");
@@ -139,7 +140,7 @@ function summaryFor(sessions = 3) {
 const pick = { agent: "claude", model: "claude-opus-5", effort: "high", pinned: true };
 const agents = { resolve: async () => pick, withFallthrough: async (_role, fn) => fn(pick) };
 
-function setup(script, { text = AGENTS, overrides = {} } = {}) {
+function setup(script, { text = AGENTS, overrides = {}, summary = summaryFor() } = {}) {
   const repo = makeRepo({ "AGENTS.md": text });
   const config = loadConfig(repo.root, overrides);
   config.state = new State(repo.root).ensure();
@@ -151,8 +152,7 @@ function setup(script, { text = AGENTS, overrides = {} } = {}) {
   process.env.FAKE_ACPX_STATE = path.join(repo.root, "fake-state.json");
   fs.writeFileSync(process.env.FAKE_ACPX_SCRIPT, JSON.stringify(script));
   const memoryFile = readMemoryFile(repo.root, "AGENTS.md");
-  const run = () =>
-    synthesizeProposal({ memoryFile, summary: summaryFor(), config, repo, transcripts: [{ harness: "claude" }] });
+  const run = () => synthesizeProposal({ memoryFile, summary, config, repo, transcripts: [{ harness: "claude" }] });
   const calls = () =>
     fs
       .readFileSync(log, "utf8")
@@ -365,4 +365,108 @@ test("an agent that changes nothing yields an empty proposal, never an invented 
   assert.deepEqual(violations, []);
   assert.equal(proposal.edits.length, 0);
   assert.equal(proposal.budget.delta, 0);
+});
+
+function oversizedParagraph(count = 5) {
+  return Array.from(
+    { length: count },
+    (_, i) =>
+      `Sentence ${i + 1} states an independent requirement about builds, releases, adapters, and review that an agent must actually follow rather than skip.`,
+  ).join(" ");
+}
+
+test("an oversized non-compliance blob synthesizes as a list-item restructure, not a bold-label strengthen", async () => {
+  const blob = oversizedParagraph();
+  const listed = blob
+    .split(/(?<=\.)\s+(?=[A-Z])/)
+    .map((sentence) => `- ${sentence}`)
+    .join("\n");
+  const text = `# Memory\n\n${blob}\n`;
+  const summary = foldEvidence(
+    [
+      {
+        status: "ok",
+        transcript: { id: "s1", harness: "claude" },
+        positive: [],
+        negative: [
+          {
+            instruction: "AG-001.2",
+            quote: "skipped the second sentence of the blob entirely here",
+            class: "non-compliance",
+          },
+        ],
+        gaps: [],
+      },
+      {
+        status: "ok",
+        transcript: { id: "s2", harness: "claude" },
+        positive: [],
+        negative: [
+          {
+            instruction: "AG-001.2",
+            quote: "ignored sentence two again on the follow-up session",
+            class: "non-compliance",
+          },
+        ],
+        gaps: [],
+      },
+    ],
+    { memoryFile: { path: "AGENTS.md", units: parseMemoryUnits(text) } },
+  );
+
+  const { repo, run } = setup(
+    {
+      edit: { "AGENTS.md": { replace: [[blob, `${listed}\n`]] } },
+      annotations: [
+        {
+          reply: {
+            edits: [
+              {
+                changes: ["H1"],
+                kind: "rewrite",
+                title: "split the blob into list items",
+                evidence: [
+                  {
+                    polarity: "negative",
+                    text: "skipped the second sentence of the blob entirely here",
+                    source: "claude · s1 · turn 4",
+                  },
+                ],
+                transcripts: 2,
+                instructions: ["AG-001.2"],
+              },
+            ],
+            verdicts: [
+              {
+                instruction: "AG-001.2",
+                verdict: "strengthen",
+                positive: 0,
+                negative: 2,
+                note: "restructure into list items",
+              },
+            ],
+          },
+        },
+      ],
+    },
+    { text, summary },
+  );
+
+  const { proposal, violations } = await run();
+  assert.deepEqual(violations, []);
+  assert.equal(proposal.edits.length, 1);
+  assert.equal(proposal.edits[0].kind, "rewrite");
+  const hunk = proposal.edits[0].hunks[0];
+  assert.equal(hunk.find.includes(blob), true);
+  assert.match(hunk.replace, /^- Sentence 1 /m);
+  assert.match(hunk.replace, /^- Sentence 2 /m);
+  assert.doesNotMatch(hunk.replace, /\*\*[^*]+\*\*/);
+  assert.equal(hunk.replace.includes(blob), false);
+
+  const editPrompt = fs.readFileSync(path.join(repo.root, ".backpass", "prompts", "synthesis-edit.md"), "utf8");
+  assert.match(editPrompt, /Oversized paragraph \[AG-001\]/);
+  assert.match(editPrompt, /\[AG-001\.2\]/);
+  assert.match(editPrompt, /### Oversized units that failed to steer/);
+  assert.match(editPrompt, /Preferred reinforcement is a restructure-in-place/);
+  assert.match(editPrompt, /bold label on the blob is not a strengthen/);
 });

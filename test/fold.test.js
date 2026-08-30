@@ -418,3 +418,63 @@ test("a cluster nobody tied to a skill renders without a failed-trigger line", (
   assert.equal(summary.gaps[0].failedTriggerSkill, undefined);
   assert.ok(!renderEvidenceForPrompt(summary).includes("FAILED TRIGGER"));
 });
+
+function oversizedParagraph(count = 5) {
+  return Array.from(
+    { length: count },
+    (_, i) =>
+      `Sentence ${i + 1} states an independent requirement about builds, releases, adapters, and review that an agent must actually follow rather than skip.`,
+  ).join(" ");
+}
+
+test("an oversized high-non-compliance paragraph attributes per sentence and invites a restructure, not a bold label", () => {
+  const blob = oversizedParagraph();
+  const blobFile = { units: parseMemoryUnits(`# T\n\n${blob}\n\n- Keep this list item whole.\n`) };
+  assert.ok(blobFile.units[0].parts?.length >= 2);
+  assert.equal(blobFile.units[1].id, "AG-002");
+
+  const summary = foldEvidence(
+    [
+      record("s1", {
+        negative: [
+          {
+            instruction: "AG-001.2",
+            quote: "skipped the second sentence of the blob entirely here",
+            effect: "the rest of the paragraph never steered",
+            class: "non-compliance",
+          },
+        ],
+      }),
+      record("s2", {
+        negative: [
+          {
+            instruction: "AG-001.2",
+            quote: "ignored sentence two again on the follow-up session",
+            class: "non-compliance",
+          },
+        ],
+      }),
+    ],
+    { memoryFile: blobFile },
+  );
+
+  const hot = summary.instructions.find((row) => row.instruction === "AG-001.2");
+  const quiet = summary.instructions.find((row) => row.instruction === "AG-001.1");
+  const parent = summary.instructions.find((row) => row.instruction === "AG-001");
+  assert.equal(hot.negative, 2);
+  assert.equal(hot.parentId, "AG-001");
+  assert.equal(hot.nonCompliance, 2);
+  assert.equal(quiet.sessions, 0, "a sibling sentence is not smeared with the hot one's evidence");
+  assert.equal(parent, undefined, "the parent blob is not a dead removal candidate of its own");
+  assert.equal(summary.oversized.length, 1);
+  assert.equal(summary.oversized[0].id, "AG-001");
+  assert.ok(summary.oversized[0].tokens > 120);
+
+  const rendered = renderEvidenceForPrompt(summary);
+  assert.match(rendered, /\[AG-001\.2\] \+0 -2/);
+  assert.match(rendered, /### Oversized units that failed to steer/);
+  assert.match(rendered, /Preferred reinforcement is a restructure-in-place/);
+  assert.match(rendered, /bold label on the blob is not a strengthen/);
+  assert.match(rendered, /\[AG-001\] is \d+ tokens as one paragraph \(attribution: AG-001\.1/);
+  assert.doesNotMatch(rendered, /\[AG-001\] \+0 -0/);
+});

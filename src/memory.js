@@ -12,9 +12,14 @@ import { estimateTokens } from "./tokens.js";
  *   - units come from list items and paragraphs inside those sections
  *   - each unit gets a content hash (survives cosmetic edits elsewhere in the file)
  *     and a readable alias AG-001, AG-002, ... used in prompts and evidence
+ *   - a paragraph above ATTRIBUTION_SPLIT_TOKENS is sentence-split into AG-nnn.m parts
+ *     for the instruction index and fold only; the parent alias and line span stay put
  *
  * Evidence anchors to the alias; the hash is what lets us re-anchor across runs.
  */
+
+/** Paragraphs above this are too coarse to attribute; sentence parts get dotted ids. */
+export const ATTRIBUTION_SPLIT_TOKENS = 120;
 
 const FENCE = /^\s*(```|~~~)/;
 
@@ -108,12 +113,78 @@ export function parseMemoryUnits(text) {
   }
   flush(lines.length);
 
-  return units.map((unit, index) => ({
-    id: alias(index),
-    hash: unitHash(unit.text),
-    tokens: estimateTokens(unit.text),
-    ...unit,
+  return units.map((unit, index) => {
+    const base = {
+      id: alias(index),
+      hash: unitHash(unit.text),
+      tokens: estimateTokens(unit.text),
+      ...unit,
+    };
+    const parts = attributionParts(base);
+    return parts ? { ...base, parts } : base;
+  });
+}
+
+function isListItemText(text) {
+  return /^\s*([-*+]|\d+[.)])\s+/m.test(text);
+}
+
+function unitHasFence(text) {
+  return text.split("\n").some((line) => FENCE.test(line));
+}
+
+/**
+ * Split a paragraph on sentence boundaries. Abbreviations followed by a lowercase
+ * word stay together; a capital after `.!?` starts a new sentence.
+ */
+export function splitAttributionSentences(text) {
+  const raw = text
+    .split(/(?<=[.!?]["')\]]*)\s+(?=[A-Z([{])/)
+    .map((piece) => piece.trim())
+    .filter(Boolean);
+  if (raw.length < 2) return [];
+  const merged = [];
+  for (const piece of raw) {
+    if (merged.length && estimateTokens(piece) < 8) {
+      merged[merged.length - 1] = `${merged[merged.length - 1]} ${piece}`;
+    } else {
+      merged.push(piece);
+    }
+  }
+  return merged.length >= 2 ? merged : [];
+}
+
+function attributionParts(unit) {
+  if (unit.tokens <= ATTRIBUTION_SPLIT_TOKENS) return null;
+  if (isListItemText(unit.text) || unitHasFence(unit.text)) return null;
+  const sentences = splitAttributionSentences(unit.text);
+  if (sentences.length < 2) return null;
+  return sentences.map((text, index) => ({
+    id: `${unit.id}.${index + 1}`,
+    hash: unitHash(text),
+    tokens: estimateTokens(text),
+    text,
+    section: unit.section,
+    startLine: unit.startLine,
+    endLine: unit.endLine,
+    parentId: unit.id,
   }));
+}
+
+/** Addressable instructions for analysis, fold, and prompts: sentence parts when present. */
+export function instructionUnits(memoryFile) {
+  return (memoryFile?.units || []).flatMap((unit) => (unit.parts?.length ? unit.parts : [unit]));
+}
+
+/** Resolve an AG-nnn or AG-nnn.m id onto the parent unit or an attribution part. */
+export function findInstructionUnit(memoryFile, id) {
+  if (!memoryFile?.units || !id) return null;
+  for (const unit of memoryFile.units) {
+    if (unit.id === id) return unit;
+    const part = unit.parts?.find((candidate) => candidate.id === id);
+    if (part) return part;
+  }
+  return null;
 }
 
 /**
@@ -163,18 +234,34 @@ export function memorySurfaceHash(setHash, skills) {
   return `sha256:${sha256(`${setHash}|${layer}`).slice(0, 16)}`;
 }
 
+function formatIndexEntry(unit) {
+  const lines = unit.startLine === unit.endLine ? `L${unit.startLine}` : `L${unit.startLine}-${unit.endLine}`;
+  return `[${unit.id}] (${unit.tokens} tok, ${lines})${unit.section ? ` <${unit.section}>` : ""}\n${unit.text}`;
+}
+
 /**
  * Render the instruction index that both prompt tiers see. It is a lookup table keyed
  * by alias, never a stand-in for the file: units are listed with the lines they occupy
- * so the synthesis agent can find them in the raw file it edits.
+ * so the synthesis agent can find them in the raw file it edits. Oversized paragraphs
+ * keep their positional AG-nnn id and expose AG-nnn.m sentence parts for attribution.
  */
 export function renderInstructionIndex(file) {
-  return file.units
-    .map((u) => {
-      const lines = u.startLine === u.endLine ? `L${u.startLine}` : `L${u.startLine}-${u.endLine}`;
-      return `[${u.id}] (${u.tokens} tok, ${lines})${u.section ? ` <${u.section}>` : ""}\n${u.text}`;
-    })
-    .join("\n\n");
+  const blocks = [];
+  for (const unit of file.units) {
+    if (unit.parts?.length) {
+      const lines = unit.startLine === unit.endLine ? `L${unit.startLine}` : `L${unit.startLine}-${unit.endLine}`;
+      blocks.push(
+        `Oversized paragraph [${unit.id}] (${unit.tokens} tok, ${lines})` +
+          `${unit.section ? ` <${unit.section}>` : ""} is one blob; attribution is per sentence ` +
+          `(${unit.parts.map((part) => part.id).join(", ")}). If these fail to steer, split the ` +
+          `paragraph into list items in place - a bold label on the blob is not a strengthen.`,
+      );
+      for (const part of unit.parts) blocks.push(formatIndexEntry(part));
+    } else {
+      blocks.push(formatIndexEntry(unit));
+    }
+  }
+  return blocks.join("\n\n");
 }
 
 export function similarityFeatures(text) {
