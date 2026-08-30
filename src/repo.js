@@ -60,8 +60,7 @@ function networkRemoteIdentity(remote) {
     try {
       const parsed = new URL(remote);
       const defaultPorts = { "http:": "80", "https:": "443", "ssh:": "22" };
-      const port =
-        parsed.port && parsed.port !== defaultPorts[parsed.protocol.toLowerCase()] ? `:${parsed.port}` : "";
+      const port = parsed.port && parsed.port !== defaultPorts[parsed.protocol.toLowerCase()] ? `:${parsed.port}` : "";
       host = `${parsed.hostname.toLowerCase()}${port}`;
       repositoryPath = `${parsed.pathname}${parsed.search}${parsed.hash}`;
     } catch {
@@ -101,9 +100,7 @@ function cloneRemoteIdentity(remote, root) {
 function listRemoteUrls(root) {
   let names;
   try {
-    names = git(["remote"], root)
-      .split("\n")
-      .filter(Boolean);
+    names = git(["remote"], root).split("\n").filter(Boolean);
   } catch {
     return [];
   }
@@ -131,7 +128,13 @@ function listRemotes(root) {
 }
 
 function listCloneRemotes(root) {
-  return [...new Set(listRemoteUrls(root).map((remote) => cloneRemoteIdentity(remote, root)).filter(Boolean))];
+  return [
+    ...new Set(
+      listRemoteUrls(root)
+        .map((remote) => cloneRemoteIdentity(remote, root))
+        .filter(Boolean),
+    ),
+  ];
 }
 
 function expandUserPath(p) {
