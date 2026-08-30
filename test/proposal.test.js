@@ -563,6 +563,53 @@ test("an extract may extend an existing SKILL.md when the staged file keeps prio
   );
 });
 
+test("an extended extraction requires prior skill lines plus separately carried memory lines", () => {
+  const extracted = "- Use Node 18 via nvm before running any script.";
+  const skill = skillFile("node-setup", `${extracted}\n`);
+  const reusedPriorCopy = gate({
+    files: { ".agents/skills/node-setup/SKILL.md": skill },
+    edit: (root) => {
+      writeIn(root, "AGENTS.md", (text) => text.replace(extracted, "- See the node-setup skill."));
+      writeIn(root, ".agents/skills/node-setup/SKILL.md", (text) => `${text}- Added unrelated guidance.\n`);
+    },
+    annotation: { edits: [claim(["H1", "H2"], { kind: "extract", title: "extract node setup" })] },
+  });
+
+  assert.ok(
+    reusedPriorCopy.violations.some((violation) => /removes text its skill\(s\) do not carry/.test(violation)),
+    reusedPriorCopy.violations.join("\n"),
+  );
+});
+
+test("an extract cannot bypass addition evidence without removing memory text", () => {
+  const skill = skillFile("node-setup", "- Keep this setup guidance.\n");
+  const files = { ".agents/skills/node-setup/SKILL.md": skill };
+  const addOnly = (root) => {
+    writeIn(root, "AGENTS.md", (text) => `${text}- Unsupported new memory rule.\n`);
+    writeIn(root, ".agents/skills/node-setup/SKILL.md", (text) => `${text}- More skill guidance.\n`);
+  };
+
+  const unsupported = gate({
+    files,
+    edit: addOnly,
+    annotation: { edits: [claim(["H1", "H2"], { kind: "extract", title: "add setup guidance", transcripts: 1 })] },
+  });
+  assert.ok(
+    unsupported.violations.some((violation) => /adds a new instruction backed by 1 session/.test(violation)),
+    unsupported.violations.join("\n"),
+  );
+
+  const corroborated = gate({
+    files,
+    edit: addOnly,
+    annotation: { edits: [claim(["H1", "H2"], { kind: "extract", title: "add setup guidance" })] },
+  });
+  assert.ok(
+    corroborated.violations.some((violation) => /kind "extract" must remove text/.test(violation)),
+    corroborated.violations.join("\n"),
+  );
+});
+
 test("a move repositions verbatim memory-file text without the harm floor", () => {
   const text = `${MEMORY_TEXT}\n## Later\n\n- Keep this nearby.\n`;
   const node = "- Use Node 18 via nvm before running any script.";
@@ -622,6 +669,49 @@ test("a move repositions verbatim memory-file text without the harm floor", () =
   assert.ok(
     fake.violations.some((v) => /does not reappear verbatim/.test(v)),
     fake.violations.join("\n"),
+  );
+
+  const extraAddition = gate({
+    text,
+    edit: memoryEdit((t) =>
+      t
+        .replace(`${node}\n`, "")
+        .replace("- Keep this nearby.", `- Keep this nearby.\n${node}\n- Unsupported extra rule.`),
+    ),
+    annotation: { edits: [claim(["H1", "H2"], { kind: "move", title: "move and smuggle an addition" })] },
+    context: { summary: noHarmRows() },
+  });
+  assert.ok(
+    extraAddition.violations.some((v) => /removed and added lines must match exactly/.test(v)),
+    extraAddition.violations.join("\n"),
+  );
+
+  const duplicateText = [
+    MEMORY_TEXT,
+    "## Middle",
+    "",
+    node,
+    "",
+    "## Spacer",
+    "",
+    "- Leave enough unique context between copies.",
+    "",
+    "## Destination",
+    "",
+    "- Keep this last.",
+    "",
+  ].join("\n");
+  const doubleRemoval = gate({
+    text: duplicateText,
+    edit: memoryEdit((t) => t.replaceAll(`${node}\n`, "").replace("- Keep this last.", `- Keep this last.\n${node}`)),
+    annotation: {
+      edits: [claim(["H1", "H2", "H3"], { kind: "move", title: "collapse two copies into one" })],
+    },
+    context: { summary: noHarmRows() },
+  });
+  assert.ok(
+    doubleRemoval.violations.some((v) => /removed and added lines must match exactly/.test(v)),
+    doubleRemoval.violations.join("\n"),
   );
 });
 

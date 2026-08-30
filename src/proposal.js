@@ -169,10 +169,17 @@ function createdDescriptionCost(edit) {
   return editSkills(edit).reduce((sum, skill) => sum + estimateTokens(skill.description || ""), 0);
 }
 
-function addedLineCounts(hunks) {
+function changedLineCounts(hunks, type) {
   return recoveredLineCounts(
-    hunks.flatMap((hunk) => (hunk.lines || []).filter((line) => line.type === "ins").map((line) => line.text)),
+    hunks.flatMap((hunk) => (hunk.lines || []).filter((line) => line.type === type).map((line) => line.text)),
   );
+}
+
+function firstLineCountMismatch(left, right) {
+  for (const line of new Set([...left.keys(), ...right.keys()])) {
+    if ((left.get(line) || 0) !== (right.get(line) || 0)) return line;
+  }
+  return null;
 }
 
 /** Overlapping count: a run of identical lines must not pass as unique. */
@@ -369,6 +376,18 @@ export function buildProposal(rawResult, context) {
         );
         continue;
       }
+      const hasMemoryRemoval = memoryHunks.some((hunk) => hunk.removed > 0);
+      if (!hasMemoryRemoval) {
+        if (edit.transcripts < config.minGapEvidence) {
+          violations.push(
+            `edit ${edit.id} ("${edit.title}") adds a new instruction backed by ${edit.transcripts} session(s); ` +
+              `${config.minGapEvidence} are required`,
+          );
+        } else {
+          violations.push(`edit ${edit.id}: kind "extract" must remove text from ${memoryFile.path}`);
+        }
+        continue;
+      }
       const notSkill = destFiles.find((file) => !isSkillFilePath(file, skillsDir));
       if (notSkill) {
         violations.push(
@@ -426,6 +445,16 @@ export function buildProposal(rawResult, context) {
       // in its own remove edit, where the removal-evidence floor below can judge it.
       const destTexts = [...created.map((c) => c.text), ...destFiles.map((file) => measured.texts?.get(file) ?? "")];
       const carried = recoveredLineCounts(destTexts);
+      for (const file of destFiles) {
+        unrecoveredRemovedLines(
+          {
+            lines: String(measured.originals?.get(file) ?? "")
+              .split("\n")
+              .map((text) => ({ type: "del", text })),
+          },
+          carried,
+        );
+      }
       const missing = memoryHunks.flatMap((h) => unrecoveredRemovedLines(h, carried));
       if (missing.length) {
         violations.push(
@@ -456,12 +485,14 @@ export function buildProposal(rawResult, context) {
         );
         continue;
       }
-      const missing = memoryHunks.flatMap((hunk) => unrecoveredRemovedLines(hunk, addedLineCounts(memoryHunks)));
-      if (missing.length) {
+      const removed = changedLineCounts(memoryHunks, "del");
+      const added = changedLineCounts(memoryHunks, "ins");
+      const mismatch = firstLineCountMismatch(removed, added);
+      if (mismatch) {
         violations.push(
-          `edit ${edit.id} ("${edit.title}") removes text that does not reappear verbatim in the same edit ` +
-            `(first: "${missing[0].trim().slice(0, 80)}"); a move preserves every line it removes - ` +
-            `revert that text, or make its deletion a separate "remove" edit`,
+          `edit ${edit.id} ("${edit.title}") removes text that does not reappear verbatim one-for-one in the same edit ` +
+            `(first mismatch: "${mismatch.slice(0, 80)}"); a move's removed and added lines must match exactly - ` +
+            `revert that text, or use a different edit kind`,
         );
         continue;
       }
