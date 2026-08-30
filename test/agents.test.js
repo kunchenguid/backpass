@@ -204,6 +204,61 @@ test("claude is decided by `claude auth status`, not by the acpx session probe",
   }
 });
 
+test("native probe transients retry without caching while unsupported models demote", async () => {
+  function nativeResolver(agent, nativeResults) {
+    const config = loadConfig(tmpRepo());
+    config.ladders.analysis = [{ model: "gpt-5.6-luna", agents: [agent, "codex"] }];
+    const state = memoryState();
+    const results = [...nativeResults];
+    let nativeCalls = 0;
+    const resolver = new AgentResolver(config, {
+      state,
+      acpxVersion: async () => "0.13.0",
+      sleep: async () => {},
+      probeCandidate: (candidate, options) =>
+        probeCandidate(candidate, {
+          ...options,
+          runCapture: async () => {
+            nativeCalls += 1;
+            return results.length > 1 ? results.shift() : results[0];
+          },
+          probeSession: async () => ({
+            verdict: "ok",
+            detail: "",
+            availableModels: ["openai-codex/gpt-5.6-luna"],
+          }),
+        }),
+    });
+    return { resolver, state, nativeCalls: () => nativeCalls };
+  }
+
+  const emptyThenReady = nativeResolver("opencode", [
+    { code: 0, stdout: "", stderr: "" },
+    { code: 0, stdout: "openai-codex/gpt-5.6-luna\n", stderr: "" },
+  ]);
+  assert.equal((await emptyThenReady.resolver.resolve("analysis")).agent, "opencode");
+  assert.equal(emptyThenReady.nativeCalls(), 2);
+
+  const empty = nativeResolver("opencode", [{ code: 0, stdout: "", stderr: "" }]);
+  assert.equal((await empty.resolver.resolve("analysis")).agent, "codex");
+  assert.equal(empty.nativeCalls(), 2);
+  assert.equal(empty.state.cache.entries["opencode|gpt-5.6-luna"], undefined);
+
+  const timedOut = nativeResolver("claude", [
+    { code: null, stdout: "", stderr: "", timedOut: true },
+  ]);
+  assert.equal((await timedOut.resolver.resolve("analysis")).agent, "codex");
+  assert.equal(timedOut.nativeCalls(), 2);
+  assert.equal(timedOut.state.cache.entries["claude|gpt-5.6-luna"], undefined);
+
+  const unsupported = nativeResolver("opencode", [
+    { code: 0, stdout: "anthropic/claude-opus-5\n", stderr: "" },
+  ]);
+  assert.equal((await unsupported.resolver.resolve("analysis")).agent, "codex");
+  assert.equal(unsupported.nativeCalls(), 1);
+  assert.equal(unsupported.state.cache.entries["opencode|gpt-5.6-luna"].verdict, "model-unavailable");
+});
+
 test("non-claude candidates resolve the bare id against the advertised list", async () => {
   const piLike = async () => ({
     verdict: "ok",
@@ -425,6 +480,15 @@ test("probe verdicts are cached with TTLs and invalidated on an acpx version cha
     }),
     false,
     "a cached timeout is never treated as a durable negative",
+  );
+  assert.equal(
+    isProbeEntryFresh({
+      verdict: "unreachable",
+      detail: "claude auth status exit null",
+      checkedAt: new Date(now).toISOString(),
+    }),
+    false,
+    "a legacy native timeout is never treated as a durable negative",
   );
 });
 

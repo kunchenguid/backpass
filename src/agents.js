@@ -59,10 +59,13 @@ const LOGIN_HINTS = {
  * the acpx probe decides). See the module header for why this table exists at all.
  */
 const NATIVE_PROBES = {
-  async claude({ model }) {
-    const result = await runCapture("claude", ["auth", "status"], { timeoutMs: NATIVE_TIMEOUT_MS });
+  async claude({ model }, capture) {
+    const result = await capture("claude", ["auth", "status"], { timeoutMs: NATIVE_TIMEOUT_MS });
     if (result.spawnError?.code === "ENOENT") {
       return { verdict: "unreachable", detail: "claude CLI not found on PATH", resolvedModel: model };
+    }
+    if (result.timedOut) {
+      return { verdict: "timeout", detail: "claude auth status timed out" };
     }
     let parsed = null;
     try {
@@ -79,16 +82,20 @@ const NATIVE_PROBES = {
     }
     return null;
   },
-  async opencode({ model }) {
-    const result = await runCapture("opencode", ["models"], { timeoutMs: NATIVE_TIMEOUT_MS });
+  async opencode({ model }, capture) {
+    const result = await capture("opencode", ["models"], { timeoutMs: NATIVE_TIMEOUT_MS });
     if (result.spawnError?.code === "ENOENT") {
       return { verdict: "unreachable", detail: "opencode CLI not found on PATH" };
     }
-    if (result.timedOut || result.code !== 0) return null;
+    if (result.timedOut) return { verdict: "timeout", detail: "opencode models timed out" };
+    if (result.code !== 0) return null;
     const advertised = result.stdout
       .split("\n")
       .map((l) => l.trim())
       .filter(Boolean);
+    if (!advertised.length) {
+      return { verdict: "model-unavailable", detail: "`opencode models` advertised no models" };
+    }
     const resolved = resolveModelId(model, advertised);
     if (!resolved.id) {
       return {
@@ -141,15 +148,16 @@ export function candidateKey({ agent, model }) {
  * @param {{ agent: string, model: string }} candidate
  * @param {{ cwd?: string, sessionName?: string,
  *   probeSession?: (args: { agent: string, sessionName: string, cwd?: string, timeoutMs?: number }) =>
- *     Promise<{ verdict: string, detail: string, availableModels?: string[] }> }} [options]
+ *     Promise<{ verdict: string, detail: string, availableModels?: string[] }>,
+ *   runCapture?: typeof runCapture }} [options]
  * @returns {Promise<{ verdict: string, detail: string, resolvedModel: string | null }>}
  */
 export async function probeCandidate(candidate, options = {}) {
-  const { cwd, sessionName, probeSession: probe = probeSession } = options;
+  const { cwd, sessionName, probeSession: probe = probeSession, runCapture: capture = runCapture } = options;
   const { agent, model } = candidate;
   const native = NATIVE_PROBES[agent];
   if (native) {
-    const early = await native(candidate);
+    const early = await native(candidate, capture);
     if (early) return { resolvedModel: null, ...early };
   }
 
@@ -198,7 +206,10 @@ export function isTransientProbeResult(result) {
   if (result.verdict === "model-unavailable" && /advertised no models/i.test(result.detail || "")) {
     return true;
   }
-  if (result.verdict === "unreachable" && /^exit \d+\b/i.test((result.detail || "").trim())) {
+  if (
+    result.verdict === "unreachable" &&
+    /^(?:claude auth status )?exit (?:\d+|null)\b/i.test((result.detail || "").trim())
+  ) {
     return true;
   }
   return false;
