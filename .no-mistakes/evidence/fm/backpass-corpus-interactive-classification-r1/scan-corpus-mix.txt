@@ -1,0 +1,11 @@
+repo · 1 worktree(s) · since all
+
+HARNESS  SCANNED  MATCHED  SELF  CACHED  NOTE
+claude   3        3        0     0
+
+3 transcript(s) associated with this repo · tier1 3 (exact) · tier2 0 (remote) · tier3 0 (best-effort) · interactive 1 · non-interactive 2
+
+HARNESS  SESSION  KIND             WHEN   SIZE  TIER  HOW
+claude   robot-2  non-interactive  today  0KB   t1    cwd is worktree /private<temporary-fixture>/repo
+claude   robot-1  non-interactive  today  0KB   t1    cwd is worktree /private<temporary-fixture>/repo
+claude   human-1  interactive      today  0KB   t1    cwd is worktree /private<temporary-fixture>/repo
