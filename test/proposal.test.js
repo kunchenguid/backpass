@@ -13,7 +13,7 @@ import {
   SHRINK_EDIT_TOKENS,
   SHRINK_MAX_EDITS,
 } from "../src/proposal.js";
-import { foldEvidence } from "../src/fold.js";
+import { foldEvidence, renderEvidenceForPrompt } from "../src/fold.js";
 import { estimateTokens } from "../src/tokens.js";
 import { isSuppressedByRejection, recordRejection, State } from "../src/state.js";
 import { applyDecisions } from "../src/apply/writer.js";
@@ -214,7 +214,7 @@ test("an edit spanning several single-newline list items lands: find is measured
 
 // ---------- evidence gates ----------
 
-test("folded domain votes mechanically control new-instruction eligibility", () => {
+test("folded domain votes separate synthesis evidence from report-only diagnostics", () => {
   const phrasing = "Read docs/sshhip.md before changing the tunnel.";
   const folded = (domains, minGapEvidence) =>
     foldEvidence(
@@ -266,37 +266,26 @@ test("folded domain votes mechanically control new-instruction eligibility", () 
   assert.equal(eligible.violations.length, 0);
   assert.equal(eligible.proposal.edits.length, 1);
 
-  for (const [summary, minGapEvidence] of [
-    [folded(["orchestration", "orchestration", "project"], 2), 2],
-    [folded(["project", "orchestration"], 3), 3],
+  for (const summary of [
+    folded(["orchestration", "orchestration", "project"], 2),
+    folded(["project", "orchestration"], 3),
   ]) {
-    const excluded = propose(summary, minGapEvidence);
-    assert.equal(excluded.proposal.edits.length, 0);
-    assert.ok(excluded.violations.some((violation) => /cites the report-only gap/.test(violation)));
+    const rendered = renderEvidenceForPrompt(summary);
+    const [eligibleEvidence, reportOnlyEvidence] = rendered.split("### REPORT ONLY");
+    assert.doesNotMatch(eligibleEvidence, /Read docs\/sshhip\.md|quote [123]/);
+    assert.match(reportOnlyEvidence, /not synthesis-eligible evidence/);
+    assert.match(reportOnlyEvidence, /Do not create or justify proposals/);
+    assert.match(reportOnlyEvidence, /Read docs\/sshhip\.md/);
+    assert.doesNotMatch(reportOnlyEvidence, /quote [123]/);
   }
 
   const reportOnly = folded(["orchestration", "orchestration", "project"], 2);
   const reportOnlyQuote = reportOnly.reportOnlyGaps[0].quotes[0];
   const reportOnlyEvidence = [{ polarity: "negative", text: reportOnlyQuote.text, source: reportOnlyQuote.source }];
-  const rewritten = gate({
-    edit: memoryEdit((text) =>
-      text.replace(
-        "- Prefer small commits.\n- Use Node 18 via nvm before running any script.",
-        "- Prefer focused commits.\n- Consult the SSHHIP guide prior to tunnel edits.",
-      ),
-    ),
+  const unrelated = gate({
+    edit: memoryEdit((text) => text.replace("- Prefer small commits.", "- Prefer focused commits.")),
     annotation: {
       edits: [claim(["H1"], { kind: "rewrite", evidence: reportOnlyEvidence, transcripts: 3 })],
-    },
-    context: { summary: reportOnly },
-  });
-  assert.equal(rewritten.proposal.edits.length, 0);
-  assert.ok(rewritten.violations.some((violation) => /cites the report-only gap/.test(violation)));
-
-  const unrelated = gate({
-    edit: memoryEdit((text) => `${text}- Preserve build logs for failed releases.\n`),
-    annotation: {
-      edits: [claim(["H1"], { kind: "add", transcripts: 3 })],
     },
     context: { summary: reportOnly },
   });
