@@ -1,19 +1,20 @@
 $ backpass scan --harness claude --since all
-demo-repo · 1 worktree(s) · since all
+backpass-evidence-demo-repo · 1 worktree(s) · since all
 
 HARNESS  SCANNED  MATCHED  SELF  CACHED  NOTE
 claude   3        3        0     0
 
-3 transcript(s) associated with this repo · tier1 3 (exact) · tier2 0 (remote) · tier3 0 (best-effort) · interactive 1 · non-interactive 2
+3 transcript(s) associated with this repo · tier1 0 (exact) · tier1.5 0 (sibling clone) · tier2 0 (remote) · tier3 3 (best-effort) · interactive 1 · non-interactive 2
+  re-run with --strict to exclude the best-effort tier
 
 HARNESS  SESSION  KIND             WHEN   SIZE  TIER  HOW
-claude   robot-2  non-interactive  today  0KB   t1    cwd is worktree /private/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/tmp.sDsAnX9Lp8/demo-repo
-claude   robot-1  non-interactive  today  0KB   t1    cwd is worktree /private/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/tmp.sDsAnX9Lp8/demo-repo
-claude   human-1  interactive      today  0KB   t1    cwd is worktree /private/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/tmp.sDsAnX9Lp8/demo-repo
+claude   robot-2  non-interactive  today  1KB   t3    dead path ending in /backpass-evidence-demo-repo
+claude   robot-1  non-interactive  today  1KB   t3    dead path ending in /backpass-evidence-demo-repo
+claude   human-1  interactive      today  1KB   t3    dead path ending in /backpass-evidence-demo-repo
 
 $ backpass scan --harness claude --since all --json
 {
-  "repo": "demo-repo",
+  "repo": "backpass-evidence-demo-repo",
   "perHarness": {
     "claude": {
       "scanned": 3,
@@ -34,75 +35,75 @@ $ backpass scan --harness claude --since all --json
       "harness": "claude",
       "id": "claude-robot-2",
       "nativeId": "robot-2",
-      "path": "/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/tmp.sDsAnX9Lp8/home/.claude/projects/-var-folders-0k-bf8mwt2n5qddzk24r20gfk0c0000gn-T-tmp-sDsAnX9Lp8-demo-repo/robot-2.jsonl",
-      "cwd": "/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/tmp.sDsAnX9Lp8/demo-repo",
+      "path": "/Users/kunchen/.no-mistakes/worktrees/26c81f74111f/01M18JJXTKSWG96WZEDN4YA0CM/.test-e2e.Pcn2Rl/home/.claude/projects/-tmp-backpass-evidence-demo-repo/robot-2.jsonl",
+      "cwd": "/tmp/backpass-evidence-demo-repo",
       "gitBranch": "main",
       "title": null,
       "model": null,
-      "startedAt": 1787220000000,
-      "mtimeMs": 1788071227079.1917,
-      "bytes": 495,
+      "startedAt": 1772359200000,
+      "mtimeMs": 1788072847070.9922,
+      "bytes": 523,
       "experimental": false,
       "association": {
-        "tier": 1,
-        "confidence": "exact",
-        "reason": "cwd is worktree /private/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/tmp.sDsAnX9Lp8/demo-repo"
+        "tier": 3,
+        "confidence": "path",
+        "reason": "dead path ending in /backpass-evidence-demo-repo"
       },
       "extra": {},
       "interactionSignals": {
         "entrypoint": "sdk-ts"
       },
-      "identity": "991fec2744d6cf0e319607256e2035da6cf7e5dc9413957a2b7a8b221d61e2ae",
+      "identity": "7003fde1f07002d0b28c9ac274feb97f305c3d583c5daae74ec3b61874e0bde7",
       "interaction": "non-interactive"
     },
     {
       "harness": "claude",
       "id": "claude-robot-1",
       "nativeId": "robot-1",
-      "path": "/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/tmp.sDsAnX9Lp8/home/.claude/projects/-var-folders-0k-bf8mwt2n5qddzk24r20gfk0c0000gn-T-tmp-sDsAnX9Lp8-demo-repo/robot-1.jsonl",
-      "cwd": "/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/tmp.sDsAnX9Lp8/demo-repo",
+      "path": "/Users/kunchen/.no-mistakes/worktrees/26c81f74111f/01M18JJXTKSWG96WZEDN4YA0CM/.test-e2e.Pcn2Rl/home/.claude/projects/-tmp-backpass-evidence-demo-repo/robot-1.jsonl",
+      "cwd": "/tmp/backpass-evidence-demo-repo",
       "gitBranch": "main",
       "title": null,
       "model": null,
-      "startedAt": 1787220000000,
-      "mtimeMs": 1788071227075.2446,
-      "bytes": 496,
+      "startedAt": 1772359200000,
+      "mtimeMs": 1788072847065.5784,
+      "bytes": 524,
       "experimental": false,
       "association": {
-        "tier": 1,
-        "confidence": "exact",
-        "reason": "cwd is worktree /private/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/tmp.sDsAnX9Lp8/demo-repo"
+        "tier": 3,
+        "confidence": "path",
+        "reason": "dead path ending in /backpass-evidence-demo-repo"
       },
       "extra": {},
       "interactionSignals": {
         "entrypoint": "sdk-cli"
       },
-      "identity": "ba9f027e25b1e9faf3f462ab3667c15f5635bf648bef1ff533134bf01082a537",
+      "identity": "0db14b9a25570d431053c0613b39642fa2bb792189f71e026199639993272696",
       "interaction": "non-interactive"
     },
     {
       "harness": "claude",
       "id": "claude-human-1",
       "nativeId": "human-1",
-      "path": "/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/tmp.sDsAnX9Lp8/home/.claude/projects/-var-folders-0k-bf8mwt2n5qddzk24r20gfk0c0000gn-T-tmp-sDsAnX9Lp8-demo-repo/human-1.jsonl",
-      "cwd": "/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/tmp.sDsAnX9Lp8/demo-repo",
+      "path": "/Users/kunchen/.no-mistakes/worktrees/26c81f74111f/01M18JJXTKSWG96WZEDN4YA0CM/.test-e2e.Pcn2Rl/home/.claude/projects/-tmp-backpass-evidence-demo-repo/human-1.jsonl",
+      "cwd": "/tmp/backpass-evidence-demo-repo",
       "gitBranch": "main",
       "title": null,
       "model": null,
-      "startedAt": 1787220000000,
-      "mtimeMs": 1788071227072.064,
-      "bytes": 492,
+      "startedAt": 1772359200000,
+      "mtimeMs": 1788072847050.4214,
+      "bytes": 520,
       "experimental": false,
       "association": {
-        "tier": 1,
-        "confidence": "exact",
-        "reason": "cwd is worktree /private/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/tmp.sDsAnX9Lp8/demo-repo"
+        "tier": 3,
+        "confidence": "path",
+        "reason": "dead path ending in /backpass-evidence-demo-repo"
       },
       "extra": {},
       "interactionSignals": {
         "entrypoint": "cli"
       },
-      "identity": "866452533f25d60ed1451bd6785b375cd33b343056fcb10d46ce2cb3828dc6a8",
+      "identity": "2a877ca26ea8f7892e9812da17b2a4a4958dbc1b62bd8d2eff92e62c3d648d63",
       "interaction": "interactive"
     }
   ]
