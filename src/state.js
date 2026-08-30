@@ -227,9 +227,19 @@ export function isEvidenceFresh(evidence, transcript, memoryHash) {
  * backed by strictly more transcripts than when it was turned down.
  */
 export function rejectionKey(edit) {
-  const body = Array.isArray(edit.hunks)
-    ? edit.hunks.map((h) => `${h.find}\u0000${h.replace}`).join("\u0001")
-    : `${edit.find || ""}\u0000${edit.replace || ""}`;
+  let body;
+  if (Array.isArray(edit.hunks)) {
+    const files = new Set(edit.hunks.map((hunk) => hunk.file || edit.file).filter(Boolean));
+    body = edit.hunks
+      .map((hunk) =>
+        files.size > 1
+          ? `${hunk.file || edit.file}\u0000${hunk.find}\u0000${hunk.replace}`
+          : `${hunk.find}\u0000${hunk.replace}`,
+      )
+      .join("\u0001");
+  } else {
+    body = `${edit.find || ""}\u0000${edit.replace || ""}`;
+  }
   return sha256([edit.kind, edit.file, body].join(" ")).slice(0, 16);
 }
 

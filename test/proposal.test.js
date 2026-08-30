@@ -479,6 +479,20 @@ test("an extract may extend an existing SKILL.md when the staged file keeps prio
     [".agents/skills/node-setup/SKILL.md"],
   );
 
+  const mixed = gate({
+    files,
+    edit: (root) => {
+      extend(root);
+      writeIn(root, ".agents/skills/release-signing/SKILL.md", skillFile("release-signing"));
+    },
+    annotation: {
+      edits: [claim(["H1", "H2", "H3"], { kind: "extract", title: "extend setup and add signing" })],
+    },
+    context: { summary: noHarmRows() },
+  });
+  assert.deepEqual(mixed.violations, [], mixed.violations.join("\n"));
+  assert.equal(mixed.proposal.stats.skillExtractions, 2, "created and extended destinations both count");
+
   const applied = applyDecisions({
     proposal: good.proposal,
     decisions: { e1: "accepted" },
@@ -679,6 +693,43 @@ test("a previously rejected edit is suppressed until new evidence arrives", () =
     context: { rejections, isSuppressed: isSuppressedByRejection },
   });
   assert.equal(revived.proposal.edits.length, 1, "materially new evidence revives the edit");
+});
+
+test("rejection suppression distinguishes multi-file extraction destinations", () => {
+  const sharedSkill = skillFile("setup", "- Keep the existing setup step.\n");
+  const files = {
+    ".agents/skills/setup-a/SKILL.md": sharedSkill,
+    ".agents/skills/setup-b/SKILL.md": sharedSkill,
+  };
+  const extracted = "- Use Node 18 via nvm before running any script.";
+  const extractTo = (destination) => (root) => {
+    writeIn(root, "AGENTS.md", (text) => text.replace(extracted, "- See the setup skill."));
+    writeIn(root, destination, (text) => `${text}${extracted}\n`);
+  };
+  const annotation = {
+    edits: [claim(["H1", "H2"], { kind: "extract", title: "extract setup" })],
+  };
+
+  const first = gate({ files, edit: extractTo(".agents/skills/setup-a/SKILL.md"), annotation });
+  assert.deepEqual(first.violations, [], first.violations.join("\n"));
+  const rejections = recordRejection(first.proposal.edits[0], { version: 1, entries: {} });
+
+  const sameDestination = gate({
+    files,
+    edit: extractTo(".agents/skills/setup-a/SKILL.md"),
+    annotation,
+    context: { rejections, isSuppressed: isSuppressedByRejection },
+  });
+  assert.equal(sameDestination.proposal.edits.length, 0);
+
+  const otherDestination = gate({
+    files,
+    edit: extractTo(".agents/skills/setup-b/SKILL.md"),
+    annotation,
+    context: { rejections, isSuppressed: isSuppressedByRejection },
+  });
+  assert.deepEqual(otherDestination.violations, [], otherDestination.violations.join("\n"));
+  assert.equal(otherDestination.proposal.edits.length, 1, "a different destination is a materially different edit");
 });
 
 test("projectWithDecisions tracks the budget for the subset the human accepted", () => {

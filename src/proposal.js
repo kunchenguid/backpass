@@ -684,7 +684,7 @@ export function buildProposal(rawResult, context) {
         if (e.kind !== "extract") return n;
         const createdSkills = editSkills(e).length;
         const extended = new Set(filesOfEdit(e).filter((file) => file !== memoryFile.path)).size;
-        return n + Math.max(createdSkills, extended);
+        return n + createdSkills + extended;
       }, 0),
     },
     edits: accepted,
