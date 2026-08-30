@@ -151,6 +151,20 @@ test("oversized Markdown-heavy paragraphs split realistic sentences without spli
   assert.ok(unit.parts.some((part) => part.text.startsWith("Review with Dr. Smith")));
 });
 
+test("paths, URLs, and inline code do not create fragment attribution targets", () => {
+  const cycle =
+    "Read docs/config.md before editing. Visit https://example.test/docs/config.md before editing. Run `node app.js. --watch` afterward.";
+  const blob = Array.from({ length: 8 }, () => cycle).join(" ");
+  const [unit] = parseMemoryUnits(`# T\n\n${blob}\n`);
+
+  assert.ok(estimateTokens(blob) > ATTRIBUTION_SPLIT_TOKENS);
+  assert.ok(unit.parts?.length > 8);
+  assert.ok(unit.parts.some((part) => part.text === "Read docs/config.md before editing."));
+  assert.ok(unit.parts.some((part) => part.text === "Visit https://example.test/docs/config.md before editing."));
+  assert.ok(unit.parts.some((part) => part.text === "Run `node app.js. --watch` afterward."));
+  assert.ok(unit.parts.every((part) => !part.text.startsWith("--watch`")));
+});
+
 test("list items and fenced blocks are not sentence-split even when oversized", () => {
   const blob = oversizedParagraph();
   const listed = parseMemoryUnits(`# T\n\n- ${blob}\n`);

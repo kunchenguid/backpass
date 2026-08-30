@@ -159,14 +159,32 @@ function endsWithAbbreviation(text) {
   return /^(?:\p{L}\.)+\p{L}$/u.test(token);
 }
 
+function embeddedReferencePunctuation(text, index) {
+  let tokenStart = index;
+  while (tokenStart > 0 && !/\s/u.test(text[tokenStart - 1])) tokenStart -= 1;
+  const token = text.slice(tokenStart, index + 1).replace(/^["'([{*_~]+/u, "");
+  if (["?", "!"].includes(text[index]) && /^[a-z][a-z0-9+.-]*:\/\//iu.test(token)) return true;
+  return text[index] === "." && /^(?:\.{1,2}|.*[\\/]\.{1,2})$/u.test(token);
+}
+
 export function splitAttributionSentences(text) {
   const sentences = [];
   let start = 0;
+  let codeDelimiter = 0;
   for (let i = 0; i < text.length; i += 1) {
-    if (![".", "!", "?"].includes(text[i])) continue;
+    if (text[i] === "`") {
+      let run = 1;
+      while (text[i + run] === "`") run += 1;
+      if (codeDelimiter === 0) codeDelimiter = run;
+      else if (codeDelimiter === run) codeDelimiter = 0;
+      i += run - 1;
+      continue;
+    }
+    if (codeDelimiter || ![".", "!", "?"].includes(text[i])) continue;
     let end = i + 1;
-    while (end < text.length && /["')\]}*`_~\u2019\u201d]/u.test(text[end])) end += 1;
+    while (end < text.length && /["')\]}*_~\u2019\u201d]/u.test(text[end])) end += 1;
     if (end >= text.length || !/\s/u.test(text[end])) continue;
+    if (embeddedReferencePunctuation(text, i)) continue;
     if (text[i] === "." && endsWithAbbreviation(text.slice(start, i + 1))) continue;
     let next = end;
     while (next < text.length && /\s/u.test(text[next])) next += 1;
