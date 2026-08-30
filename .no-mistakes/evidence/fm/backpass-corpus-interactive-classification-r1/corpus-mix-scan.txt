@@ -1,0 +1,109 @@
+$ backpass scan --harness claude --since all
+demo-repo · 1 worktree(s) · since all
+
+HARNESS  SCANNED  MATCHED  SELF  CACHED  NOTE
+claude   3        3        0     0
+
+3 transcript(s) associated with this repo · tier1 3 (exact) · tier2 0 (remote) · tier3 0 (best-effort) · interactive 1 · non-interactive 2
+
+HARNESS  SESSION  KIND             WHEN   SIZE  TIER  HOW
+claude   robot-2  non-interactive  today  0KB   t1    cwd is worktree /private/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/tmp.sDsAnX9Lp8/demo-repo
+claude   robot-1  non-interactive  today  0KB   t1    cwd is worktree /private/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/tmp.sDsAnX9Lp8/demo-repo
+claude   human-1  interactive      today  0KB   t1    cwd is worktree /private/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/tmp.sDsAnX9Lp8/demo-repo
+
+$ backpass scan --harness claude --since all --json
+{
+  "repo": "demo-repo",
+  "perHarness": {
+    "claude": {
+      "scanned": 3,
+      "matched": 3,
+      "cached": 3,
+      "skipped": 0,
+      "self": 0,
+      "error": null
+    }
+  },
+  "mix": {
+    "interactive": 1,
+    "nonInteractive": 2,
+    "total": 3
+  },
+  "transcripts": [
+    {
+      "harness": "claude",
+      "id": "claude-robot-2",
+      "nativeId": "robot-2",
+      "path": "/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/tmp.sDsAnX9Lp8/home/.claude/projects/-var-folders-0k-bf8mwt2n5qddzk24r20gfk0c0000gn-T-tmp-sDsAnX9Lp8-demo-repo/robot-2.jsonl",
+      "cwd": "/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/tmp.sDsAnX9Lp8/demo-repo",
+      "gitBranch": "main",
+      "title": null,
+      "model": null,
+      "startedAt": 1787220000000,
+      "mtimeMs": 1788071227079.1917,
+      "bytes": 495,
+      "experimental": false,
+      "association": {
+        "tier": 1,
+        "confidence": "exact",
+        "reason": "cwd is worktree /private/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/tmp.sDsAnX9Lp8/demo-repo"
+      },
+      "extra": {},
+      "interactionSignals": {
+        "entrypoint": "sdk-ts"
+      },
+      "identity": "991fec2744d6cf0e319607256e2035da6cf7e5dc9413957a2b7a8b221d61e2ae",
+      "interaction": "non-interactive"
+    },
+    {
+      "harness": "claude",
+      "id": "claude-robot-1",
+      "nativeId": "robot-1",
+      "path": "/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/tmp.sDsAnX9Lp8/home/.claude/projects/-var-folders-0k-bf8mwt2n5qddzk24r20gfk0c0000gn-T-tmp-sDsAnX9Lp8-demo-repo/robot-1.jsonl",
+      "cwd": "/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/tmp.sDsAnX9Lp8/demo-repo",
+      "gitBranch": "main",
+      "title": null,
+      "model": null,
+      "startedAt": 1787220000000,
+      "mtimeMs": 1788071227075.2446,
+      "bytes": 496,
+      "experimental": false,
+      "association": {
+        "tier": 1,
+        "confidence": "exact",
+        "reason": "cwd is worktree /private/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/tmp.sDsAnX9Lp8/demo-repo"
+      },
+      "extra": {},
+      "interactionSignals": {
+        "entrypoint": "sdk-cli"
+      },
+      "identity": "ba9f027e25b1e9faf3f462ab3667c15f5635bf648bef1ff533134bf01082a537",
+      "interaction": "non-interactive"
+    },
+    {
+      "harness": "claude",
+      "id": "claude-human-1",
+      "nativeId": "human-1",
+      "path": "/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/tmp.sDsAnX9Lp8/home/.claude/projects/-var-folders-0k-bf8mwt2n5qddzk24r20gfk0c0000gn-T-tmp-sDsAnX9Lp8-demo-repo/human-1.jsonl",
+      "cwd": "/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/tmp.sDsAnX9Lp8/demo-repo",
+      "gitBranch": "main",
+      "title": null,
+      "model": null,
+      "startedAt": 1787220000000,
+      "mtimeMs": 1788071227072.064,
+      "bytes": 492,
+      "experimental": false,
+      "association": {
+        "tier": 1,
+        "confidence": "exact",
+        "reason": "cwd is worktree /private/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/tmp.sDsAnX9Lp8/demo-repo"
+      },
+      "extra": {},
+      "interactionSignals": {
+        "entrypoint": "cli"
+      },
+      "identity": "866452533f25d60ed1451bd6785b375cd33b343056fcb10d46ce2cb3828dc6a8",
+      "interaction": "interactive"
+    }
+  ]
+}
