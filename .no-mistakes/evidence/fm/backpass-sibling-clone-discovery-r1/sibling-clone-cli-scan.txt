@@ -1,0 +1,14 @@
+$ HOME=<isolated> node bin/backpass.js scan --harness claude --since all --strict
+primary · 1 worktree(s) · since all
+
+HARNESS  SCANNED  MATCHED  SELF  CACHED  NOTE
+claude   2        1        0     0
+
+1 transcript(s) associated with this repo · tier1 0 (exact) · tier1.5 1 (sibling clone) · tier2 0 (remote) · tier3 0 (best-effort)
+
+HARNESS  SESSION       WHEN   SIZE  TIER  HOW
+claude   sibling-hist  today  0KB   t1.5  cwd is sibling clone /private/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/backpass-cli-e2e.TfSQfU/sibling
+
+Sibling clone status unchanged: yes
+Sibling marker unchanged: yes
+Sibling .backpass created: no
