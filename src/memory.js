@@ -133,30 +133,11 @@ function unitHasFence(text) {
   return text.split("\n").some((line) => FENCE.test(line));
 }
 
-const ABBREVIATIONS = new Set([
-  "dr",
-  "e.g",
-  "etc",
-  "fig",
-  "i.e",
-  "inc",
-  "jr",
-  "mr",
-  "mrs",
-  "ms",
-  "no",
-  "prof",
-  "sr",
-  "st",
-  "v",
-  "vs",
-]);
-
-function endsWithAbbreviation(text) {
+function ambiguousPeriodEnding(text) {
   const token = text.match(/([\p{L}.]+)\.$/u)?.[1] || "";
-  if (ABBREVIATIONS.has(token.toLowerCase())) return true;
-  if (/^\p{L}$/u.test(token)) return true;
-  return /^(?:\p{L}\.)+\p{L}$/u.test(token);
+  if (!token || /^\p{L}$/u.test(token) || /^(?:\p{L}\.)+\p{L}$/u.test(token)) return true;
+  const words = text.match(/[\p{L}\p{N}]+/gu)?.length || 0;
+  return token.replace(/\./g, "").length <= 8 && words <= 3;
 }
 
 function startsSentence(text, index) {
@@ -197,7 +178,7 @@ export function splitAttributionSentences(text) {
     while (next < text.length && /\s/u.test(text[next])) next += 1;
     if (!startsSentence(text, next)) continue;
     if (text[i] === "." && isDotPathToken(text, i)) continue;
-    if (text[i] === "." && endsWithAbbreviation(text.slice(start, i + 1))) continue;
+    if (text[i] === "." && ambiguousPeriodEnding(text.slice(start, i + 1))) continue;
     sentences.push(text.slice(start, end).trim());
     start = next;
     i = next - 1;

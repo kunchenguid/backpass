@@ -151,6 +151,18 @@ test("oversized Markdown-heavy paragraphs split realistic sentences without spli
   assert.ok(unit.parts.some((part) => part.text.startsWith("Review with Dr. Smith")));
 });
 
+test("ambiguous abbreviations stay attached while clear sentence boundaries still split", () => {
+  const cycle = "See approx. Five checks follow. A clear requirement governs deployment.";
+  const blob = Array.from({ length: 12 }, () => cycle).join(" ");
+  const [unit] = parseMemoryUnits(`# T\n\n${blob}\n`);
+
+  assert.ok(estimateTokens(blob) > ATTRIBUTION_SPLIT_TOKENS);
+  assert.ok(unit.parts?.length > 12);
+  assert.ok(unit.parts.every((part) => part.text !== "See approx."));
+  assert.ok(unit.parts.some((part) => part.text === "See approx. Five checks follow."));
+  assert.ok(unit.parts.some((part) => part.text === "A clear requirement governs deployment."));
+});
+
 test("paths, URLs, and inline code do not create fragment attribution targets", () => {
   const cycle =
     "Read docs/config.md before editing. Visit https://example.test/docs/config.md before editing. Run `node app.js. --watch` afterward.";
