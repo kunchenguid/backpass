@@ -159,12 +159,17 @@ function endsWithAbbreviation(text) {
   return /^(?:\p{L}\.)+\p{L}$/u.test(token);
 }
 
-function embeddedReferencePunctuation(text, index) {
+function startsSentence(text, index) {
+  let start = index;
+  while (start < text.length && /["'([{*`_~\u2018\u201c]/u.test(text[start])) start += 1;
+  return start < text.length && /[\p{L}\p{N}$@/\\]/u.test(text[start]);
+}
+
+function isDotPathToken(text, index) {
   let tokenStart = index;
   while (tokenStart > 0 && !/\s/u.test(text[tokenStart - 1])) tokenStart -= 1;
   const token = text.slice(tokenStart, index + 1).replace(/^["'([{*_~]+/u, "");
-  if (["?", "!"].includes(text[index]) && /^[a-z][a-z0-9+.-]*:\/\//iu.test(token)) return true;
-  return text[index] === "." && /^(?:\.{1,2}|.*[\\/]\.{1,2})$/u.test(token);
+  return token === "." || token === "..";
 }
 
 export function splitAttributionSentences(text) {
@@ -188,11 +193,11 @@ export function splitAttributionSentences(text) {
     let end = i + 1;
     while (end < text.length && /["')\]}*_~\u2019\u201d]/u.test(text[end])) end += 1;
     if (end >= text.length || !/\s/u.test(text[end])) continue;
-    if (embeddedReferencePunctuation(text, i)) continue;
-    if (text[i] === "." && endsWithAbbreviation(text.slice(start, i + 1))) continue;
     let next = end;
     while (next < text.length && /\s/u.test(text[next])) next += 1;
-    if (next >= text.length) continue;
+    if (!startsSentence(text, next)) continue;
+    if (text[i] === "." && isDotPathToken(text, i)) continue;
+    if (text[i] === "." && endsWithAbbreviation(text.slice(start, i + 1))) continue;
     sentences.push(text.slice(start, end).trim());
     start = next;
     i = next - 1;

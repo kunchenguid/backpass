@@ -165,6 +165,19 @@ test("paths, URLs, and inline code do not create fragment attribution targets", 
   assert.ok(unit.parts.every((part) => !part.text.startsWith("--watch`")));
 });
 
+test("URL-ending questions and exclamations remain sentence boundaries", () => {
+  const cycle =
+    "Is it https://example.com/docs? Check the result! Visit https://example.com/search?q=one!two before release. Follow AG-001.2 before editing.";
+  const blob = Array.from({ length: 8 }, () => cycle).join(" ");
+  const [unit] = parseMemoryUnits(`# T\n\n${blob}\n`);
+
+  assert.ok(estimateTokens(blob) > ATTRIBUTION_SPLIT_TOKENS);
+  assert.ok(unit.parts?.some((part) => part.text === "Is it https://example.com/docs?"));
+  assert.ok(unit.parts?.some((part) => part.text === "Check the result!"));
+  assert.ok(unit.parts?.some((part) => part.text === "Visit https://example.com/search?q=one!two before release."));
+  assert.ok(unit.parts?.some((part) => part.text === "Follow AG-001.2 before editing."));
+});
+
 test("an escaped literal backtick cannot disable sentence attribution", () => {
   const blob =
     "Write \\` for literal output. " +
