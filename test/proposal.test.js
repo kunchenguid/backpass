@@ -299,7 +299,7 @@ test("a multi-hunk rewrite uses aggregate net growth across tightening and expan
   const { proposal, violations, measured } = gate({
     edit: memoryEdit((t) =>
       t
-        .replace("- Whenever a PR is mentioned, include its URL.", "- Include pull request URLs.")
+        .replace("- Whenever a PR is mentioned, include its URL.", "- Include the PR URL.")
         .replace(original, expanded),
     ),
     annotation: { edits: [claim(["H1", "H2"], { kind: "rewrite", title: "tighten and expand", transcripts: 1 })] },
@@ -321,6 +321,21 @@ test("several sub-threshold rewrite hunks are gated on their combined growth", (
     annotation: { edits: [claim(["H1", "H2"], { kind: "rewrite", title: "expand two rules", transcripts: 1 })] },
   });
   assert.equal(measured.changes.length, 2);
+  assert.equal(proposal.edits.length, 0);
+  assert.ok(violations.some((v) => /backed by 1 session/.test(v)));
+});
+
+test("an overlapping tightening cannot mask an unrelated pure insertion", () => {
+  const original = "- Use Node 18 via nvm before running any script.";
+  const tighter = "- Use Node 18.";
+  const inserted = "- Route SSH through the bastion.\n";
+  const { proposal, violations, measured } = gate({
+    edit: memoryEdit((t) => t.replace("## Rules\n\n", `## Rules\n\n${inserted}`).replace(original, tighter)),
+    annotation: { edits: [claim(["H1", "H2"], { kind: "rewrite", title: "tighten and insert", transcripts: 1 })] },
+  });
+  assert.equal(measured.changes.length, 2);
+  assert.ok(measured.changes.some((h) => h.added > 0 && h.removed === 0));
+  assert.ok(estimateTokens(tighter) + estimateTokens(inserted) <= estimateTokens(original) + 10);
   assert.equal(proposal.edits.length, 0);
   assert.ok(violations.some((v) => /backed by 1 session/.test(v)));
 });

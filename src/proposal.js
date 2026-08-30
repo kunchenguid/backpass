@@ -87,9 +87,9 @@ function changedWordSet(hunks, type) {
   return words;
 }
 
-function rewriteHasSubstantialOverlap(hunks) {
-  const removed = changedWordSet(hunks, "del");
-  const added = changedWordSet(hunks, "ins");
+function rewriteHasSubstantialOverlap(hunk) {
+  const removed = changedWordSet([hunk], "del");
+  const added = changedWordSet([hunk], "ins");
   if (!removed || !added || !removed.size || !added.size) return false;
   let shared = 0;
   for (const word of added) {
@@ -534,17 +534,17 @@ export function buildProposal(rawResult, context) {
     // An addition is measured, not declared: text that only goes in is a new instruction.
     // Replacements also need corroboration when they grow substantially or substitute
     // unrelated text. Extracts and moves preserve the always-loaded instruction surface.
-    const onlyAdds = hunks.every((h) => h.removed === 0);
-    const replacesText = hunks.some((h) => h.removed > 0) && hunks.some((h) => h.added > 0);
     const netAddedBytes = hunks.reduce(
       (sum, hunk) => sum + Buffer.byteLength(hunk.replace) - Buffer.byteLength(hunk.find),
       0,
     );
     const growsAboveRewriteTolerance = estimateTokensFromBytes(Math.max(0, netAddedBytes)) > REWRITE_NET_ADD_TOKENS;
-    const substitutesUnrelatedText = replacesText && !rewriteHasSubstantialOverlap(hunks);
+    const introducesNewText = hunks.some(
+      (hunk) => hunk.added > 0 && (hunk.removed === 0 || !rewriteHasSubstantialOverlap(hunk)),
+    );
     if (
       !preservesAlwaysLoaded(edit.kind) &&
-      (onlyAdds || growsAboveRewriteTolerance || substitutesUnrelatedText) &&
+      (growsAboveRewriteTolerance || introducesNewText) &&
       edit.transcripts < config.minGapEvidence
     ) {
       violations.push(
