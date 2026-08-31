@@ -1,0 +1,9 @@
+SCENARIO 1: Pi collision has a rankable subscription winner
+· analysis: pi (openai-codex/gpt-5.6-luna) effort=medium
+    preferred subscription provider openai-codex/gpt-5.6-luna over openai/gpt-5.6-luna
+RESULT: pi/openai-codex/gpt-5.6-luna
+
+SCENARIO 2: Pi collision has unknown auth types
+· analysis: codex (gpt-5.6-luna) effort=medium
+    skipped pi/gpt-5.6-luna: model not advertised (ambiguous among advertised ids: openai/gpt-5.6-luna, openai-codex/gpt-5.6-luna (cannot rank auth types; disambiguate with a provider-qualified id))
+RESULT: codex/gpt-5.6-luna
