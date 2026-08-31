@@ -155,6 +155,36 @@ test("the resolved model id is the adapter's spelling, never the bare id", async
   assert.equal(pick.ladderModel, "gpt-5.6-luna");
 });
 
+test("the real ladder keeps Pi when its ambiguous model has a subscription winner", async () => {
+  const config = loadConfig(tmpRepo());
+  config.ladders.analysis = [{ model: "gpt-5.6-luna", agents: ["pi", "codex"] }];
+  const calls = [];
+  const resolver = new AgentResolver(config, {
+    state: memoryState(),
+    acpxVersion: async () => "0.13.0",
+    probeCandidate: (candidate, options) => {
+      calls.push(candidate.agent);
+      return probeCandidate(candidate, {
+        ...options,
+        providerAuthTypes: { openai: "api_key", "openai-codex": "subscription" },
+        probeSession: async () => ({
+          verdict: "ok",
+          detail: "",
+          availableModels:
+            candidate.agent === "pi"
+              ? ["openai/gpt-5.6-luna", "openai-codex/gpt-5.6-luna"]
+              : ["gpt-5.6-luna"],
+        }),
+      });
+    },
+  });
+
+  const pick = await resolver.resolve("analysis");
+  assert.equal(pick.agent, "pi");
+  assert.equal(pick.model, "openai-codex/gpt-5.6-luna");
+  assert.deepEqual(calls, ["pi"]);
+});
+
 test("claude is decided by `claude auth status`, not by the acpx session probe", async () => {
   // The acpx probe for claude always says ok (a logged-out claude still creates a
   // session). Run the real native check against a fake `claude` on PATH and assert
@@ -404,7 +434,36 @@ test("explicit config or CLI flags pin the role and skip the ladder entirely", a
   assert.equal(opencodeSynthesis.effort, "xhigh");
   assert.deepEqual(opencodeCalls, [], "pinned OpenCode skips the ladder");
 
-  assert.deepEqual(calls, [], "nothing was probed");
+  assert.deepEqual(calls, [], "pins without a bare resolvable id are not probed");
+
+  const bareConfig = loadConfig(tmpRepo({ analysis: { agent: "pi", model: "gpt-5.6-luna" } }));
+  const { resolver: bareResolver, calls: bareCalls } = resolverWith(
+    { "pi|gpt-5.6-luna": { resolvedModel: "openai-codex/gpt-5.6-luna" } },
+    { config: bareConfig },
+  );
+  const barePick = await bareResolver.resolve("analysis");
+  assert.equal(barePick.model, "openai-codex/gpt-5.6-luna");
+  assert.equal(barePick.pinned, true);
+  assert.deepEqual(bareCalls, ["pi|gpt-5.6-luna"]);
+
+  const { resolver: refusedPinned } = resolverWith(
+    {
+      "pi|gpt-5.6-luna": {
+        verdict: "model-unavailable",
+        detail:
+          "ambiguous among advertised ids: openai/gpt-5.6-luna, other/gpt-5.6-luna (disambiguate with a provider-qualified id)",
+      },
+    },
+    { config: bareConfig },
+  );
+  await assert.rejects(
+    () => refusedPinned.resolve("analysis"),
+    (err) =>
+      err instanceof UserError &&
+      /openai\/gpt-5\.6-luna/.test(err.message) &&
+      /other\/gpt-5\.6-luna/.test(err.message) &&
+      /provider-qualified/.test(err.hint),
+  );
 
   // A pinned agent is the user's decision: an auth failure surfaces as a UserError, it does not fall through.
   await assert.rejects(
@@ -492,42 +551,42 @@ test("a missing acpx is reported once, not once per candidate", async () => {
 test("probe verdicts are cached with TTLs and invalidated on an acpx version change", async () => {
   let now = Date.parse("2026-08-22T00:00:00Z");
   const state = memoryState();
+  const config = loadConfig(tmpRepo());
+  config.ladders.analysis = [{ model: "gpt-5.6-luna", agents: ["codex", "grok"] }];
   const verdicts = {
-    "pi|gpt-5.6-luna": "unauthenticated",
-    "opencode|gpt-5.6-luna": { resolvedModel: "openai/gpt-5.6-luna" },
+    "codex|gpt-5.6-luna": "unauthenticated",
+    "grok|gpt-5.6-luna": { resolvedModel: "gpt-5.6-luna" },
   };
 
-  const first = resolverWith(verdicts, { state, now: () => now });
-  assert.equal((await first.resolver.resolve("analysis")).agent, "opencode");
+  const first = resolverWith(verdicts, { config, state, now: () => now });
+  assert.equal((await first.resolver.resolve("analysis")).agent, "grok");
   assert.equal(first.calls.length, 2);
 
-  // 10 minutes later: both verdicts are fresh, nothing is probed.
   now += 10 * 60 * 1000;
-  const second = resolverWith(verdicts, { state, now: () => now });
-  assert.equal((await second.resolver.resolve("analysis")).agent, "opencode");
+  const second = resolverWith(verdicts, { config, state, now: () => now });
+  assert.equal((await second.resolver.resolve("analysis")).agent, "grok");
   assert.deepEqual(second.calls, []);
 
-  // 45 minutes later: the negative expired (30min) and is re-probed; the ok (12h) is not.
   now += 35 * 60 * 1000;
   const third = resolverWith(
-    { ...verdicts, "pi|gpt-5.6-luna": { resolvedModel: "openai-codex/gpt-5.6-luna" } },
-    {
-      state,
-      now: () => now,
-    },
+    { ...verdicts, "codex|gpt-5.6-luna": { resolvedModel: "gpt-5.6-luna" } },
+    { config, state, now: () => now },
   );
-  assert.equal((await third.resolver.resolve("analysis")).agent, "pi", "logging in is picked up within 30min");
-  assert.deepEqual(third.calls, ["pi|gpt-5.6-luna"]);
+  assert.equal((await third.resolver.resolve("analysis")).agent, "codex", "logging in is picked up within 30min");
+  assert.deepEqual(third.calls, ["codex|gpt-5.6-luna"]);
 
-  // --force bypasses the cache.
-  const forced = resolverWith(verdicts, { state, now: () => now, bypassCache: true });
+  const forced = resolverWith(verdicts, { config, state, now: () => now, bypassCache: true });
   await forced.resolver.resolve("analysis");
   assert.ok(forced.calls.length >= 1);
 
-  // A new acpx drops every entry.
-  const upgraded = resolverWith(verdicts, { state, now: () => now, acpxVersion: async () => "0.14.0" });
+  const upgraded = resolverWith(verdicts, {
+    config,
+    state,
+    now: () => now,
+    acpxVersion: async () => "0.14.0",
+  });
   await upgraded.resolver.resolve("analysis");
-  assert.deepEqual(upgraded.calls, ["pi|gpt-5.6-luna", "opencode|gpt-5.6-luna"]);
+  assert.deepEqual(upgraded.calls, ["codex|gpt-5.6-luna", "grok|gpt-5.6-luna"]);
   assert.equal(state.cache.acpxVersion, "0.14.0");
 
   assert.equal(isProbeEntryFresh(null), false);
@@ -549,6 +608,29 @@ test("probe verdicts are cached with TTLs and invalidated on an acpx version cha
     false,
     "a legacy native timeout is never treated as a durable negative",
   );
+});
+
+test("provider-auth-sensitive harnesses re-probe instead of serving stale resolutions", async () => {
+  const now = Date.parse("2026-08-22T00:00:00Z");
+  const state = memoryState({
+    version: 1,
+    acpxVersion: "0.13.0",
+    entries: {
+      "pi|gpt-5.6-luna": {
+        verdict: "ok",
+        detail: "",
+        resolvedModel: "openai/gpt-5.6-luna",
+        checkedAt: new Date(now).toISOString(),
+      },
+    },
+  });
+  const { resolver, calls } = resolverWith(
+    { "pi|gpt-5.6-luna": { resolvedModel: "openai-codex/gpt-5.6-luna" } },
+    { state, now: () => now + 60_000 },
+  );
+  const pick = await resolver.resolve("analysis");
+  assert.equal(pick.model, "openai-codex/gpt-5.6-luna");
+  assert.deepEqual(calls, ["pi|gpt-5.6-luna"]);
 });
 
 test("a transient probe timeout retries once and does not poison the cache", async () => {

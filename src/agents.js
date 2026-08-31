@@ -44,6 +44,7 @@ const PROBE_RETRY_BACKOFF_MS = 1_000;
 
 /** Adapters whose model list is open-ended: any id is forwarded, none can be verified. */
 const TRUSTING_MODEL_AGENTS = new Set(["claude"]);
+const PROVIDER_AUTH_SENSITIVE_AGENTS = new Set(["pi", "opencode"]);
 
 export const VERDICT_LABELS = {
   ok: "ok",
@@ -324,7 +325,8 @@ export class AgentResolver {
   async probeAndRecord(candidate, key) {
     const cache = await this.loadCache();
     const cached = cache.entries[key];
-    if (!this.bypassCache && isProbeEntryFresh(cached, { now: this.now() })) {
+    const providerAuthSensitive = PROVIDER_AUTH_SENSITIVE_AGENTS.has(candidate.agent);
+    if (!this.bypassCache && !providerAuthSensitive && isProbeEntryFresh(cached, { now: this.now() })) {
       this.memo.set(key, { ...cached, cached: true });
       return this.memo.get(key);
     }
@@ -384,7 +386,19 @@ export class AgentResolver {
 
     const pinned = this.pinned(role);
     if (pinned) {
-      this.picks[role] = { ...pinned, effort: resolvedEffort(role, pinned.agent, this.config) };
+      let model = pinned.model;
+      if (model && !model.includes("/") && !TRUSTING_MODEL_AGENTS.has(pinned.agent)) {
+        let entry;
+        try {
+          entry = await this.verdictFor({ agent: pinned.agent, model });
+        } catch (err) {
+          if (err instanceof AcpxError) throw new UserError(err.message, "install acpx (npm i -g acpx) and retry");
+          throw err;
+        }
+        if (entry.verdict !== "ok") throw pinnedResolutionError(role, pinned, entry);
+        model = entry.resolvedModel || model;
+      }
+      this.picks[role] = { ...pinned, model, effort: resolvedEffort(role, pinned.agent, this.config) };
       return this.picks[role];
     }
 
@@ -487,6 +501,15 @@ function describeTrail(trail) {
   const losers = trail.filter((t) => t.verdict !== "ok");
   if (!losers.length) return "first candidate in the ladder";
   return `after skipping ${losers.map((t) => `${t.agent}/${t.model} (${VERDICT_LABELS[t.verdict] || t.verdict})`).join(", ")}`;
+}
+
+function pinnedResolutionError(role, pick, entry) {
+  const label = VERDICT_LABELS[entry.verdict] || entry.verdict;
+  const detail = entry.detail ? ` (${entry.detail})` : "";
+  const hint = entry.detail?.includes("provider-qualified")
+    ? `pass a provider-qualified id with --${role}-model`
+    : `pin a different model or harness with --${role}-model <id> or --${role}-agent <agent>`;
+  return new UserError(`pinned ${role} agent ${pick.agent} (${pick.model}) ${label}${detail}`, hint);
 }
 
 function pinnedFailureError(role, pick, verdict, err) {

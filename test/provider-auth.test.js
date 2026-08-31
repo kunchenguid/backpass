@@ -71,7 +71,7 @@ test("rankCollidingIds prefers the sole subscription provider and refuses the re
   assert.equal(unknownHalf.id, null);
 });
 
-test("pi auth.json types overlay definitions; missing advertised prefixes infer api_key", () => {
+test("pi auth.json types overlay definitions while unknown providers stay unknown", () => {
   const dir = tmpDir();
   const authFile = path.join(dir, "auth.json");
   fs.writeFileSync(
@@ -87,9 +87,17 @@ test("pi auth.json types overlay definitions; missing advertised prefixes infer 
     homedir: dir,
   });
   assert.equal(types["openai-codex"], "subscription");
-  assert.equal(types.openai, "api_key", "definition plus env-var inference");
+  assert.equal(types.openai, "api_key", "provider definition");
   assert.equal(types.xai, "subscription", "live dual-auth type from auth.json");
   assert.equal(PI_PROVIDER_AUTH_MODE.openai, "api_key");
+
+  const withoutAuth = readProviderAuthTypes("pi", {
+    advertised: ["openai-codex/gpt-5.6-luna", "xai/gpt-5.6-luna"],
+    authFile: path.join(dir, "missing.json"),
+  });
+  assert.equal(withoutAuth["openai-codex"], "subscription");
+  assert.equal(withoutAuth.xai, undefined);
+  assert.equal(rankCollidingIds(["openai-codex/gpt-5.6-luna", "xai/gpt-5.6-luna"], withoutAuth).id, null);
 });
 
 test("pi definitions alone rank openai vs openai-codex without an auth file", () => {

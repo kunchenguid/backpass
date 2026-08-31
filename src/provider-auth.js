@@ -49,8 +49,8 @@ import path from "node:path";
 /**
  * Pi built-in provider auth modes from Pi's own provider definitions
  * (`docs/providers.md`). Dual-auth providers (`xai`, `anthropic`, `openrouter`,
- * `radius`) are omitted so a live `auth.json` `type` decides; advertised-but-unstored
- * providers infer `api_key` (env-var keys never appear in the file).
+ * `radius`) are omitted so a live `auth.json` `type` decides. Without that signal,
+ * their auth class remains unknown.
  *
  * This is a mode table, not a winner list: ranking is always subscription over
  * API key, never a named-provider preference order.
@@ -102,7 +102,7 @@ function readJsonObject(file) {
     const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
   } catch {
-    // Missing, unreadable, or invalid: degrade to definitions / inference.
+    // Missing, unreadable, or invalid: degrade to provider definitions.
   }
   return null;
 }
@@ -128,7 +128,7 @@ export function opencodeAuthFilePath({ env = process.env, homedir = os.homedir()
  * @returns {Record<string, AuthClass>}
  */
 export function readProviderAuthTypes(agent, options = {}) {
-  const { advertised = [], env = process.env, homedir = os.homedir() } = options;
+  const { env = process.env, homedir = os.homedir() } = options;
   /** @type {Record<string, AuthClass>} */
   const types = {};
   if (agent === "pi") Object.assign(types, PI_PROVIDER_AUTH_MODE);
@@ -146,15 +146,6 @@ export function readProviderAuthTypes(agent, options = {}) {
     if (parsed) Object.assign(types, parseAuthFileTypes(parsed));
   }
 
-  // Pi and OpenCode only advertise a provider when some credential resolved, and
-  // env-var API keys never appear in the auth file. Remaining advertised prefixes
-  // therefore infer as api_key. OAuth-only prefixes are already classified above.
-  if (agent === "pi" || agent === "opencode") {
-    for (const id of advertised) {
-      const provider = providerOf(id);
-      if (provider && !types[provider]) types[provider] = "api_key";
-    }
-  }
   return types;
 }
 
