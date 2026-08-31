@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { UserError } from "./logger.js";
+import { resolveOnPath } from "./subprocess.js";
 
 /**
  * Invocation-scoped model and effort overlays (`src/acpx.js` is the caller).
@@ -357,24 +358,5 @@ function cmdQuote(value) {
   return `"${value.replaceAll("%", "%%").replaceAll('"', '""')}"`;
 }
 
-function resolveOnPath(bin) {
-  if (path.isAbsolute(bin) && isExecutable(bin)) return bin;
-  const extensions = process.platform === "win32" ? (process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD").split(";") : [""];
-  for (const dir of (process.env.PATH || "").split(path.delimiter)) {
-    if (!dir) continue;
-    for (const extension of extensions) {
-      const candidate = path.join(dir, process.platform === "win32" ? `${bin}${extension.toLowerCase()}` : bin);
-      if (isExecutable(candidate)) return candidate;
-    }
-  }
-  return null;
-}
-
-function isExecutable(file) {
-  try {
-    const st = fs.statSync(file);
-    return st.isFile() && (process.platform === "win32" || Boolean(st.mode & 0o111));
-  } catch {
-    return false;
-  }
-}
+// `resolveOnPath` now lives in `src/subprocess.js`: the Windows npm-shim launch needs
+// the same PATHEXT resolution, and one resolver keeps the two in step.

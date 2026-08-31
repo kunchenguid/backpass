@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { UserError, color, info, warn } from "../logger.js";
+import { windowsShimLaunch } from "../subprocess.js";
 
 /**
  * The apply surface (captain decision 4).
@@ -45,7 +46,17 @@ export function renderApplySurface(proposal, state, toolVersion) {
 
 function runLavish(args, { inherit = false } = {}) {
   return new Promise((resolve) => {
-    const child = spawn(LAVISH_BIN, args, { stdio: inherit ? "inherit" : ["ignore", "pipe", "pipe"] });
+    // `lavish-axi` is an npm bin, so on Windows it is a `.cmd` shim that CreateProcess
+    // cannot start: same spawn policy as `runCapture` (issue #43).
+    const launch = windowsShimLaunch(LAVISH_BIN, args);
+    if (launch.error) {
+      resolve({ code: null, stdout: "", stderr: launch.error.message, spawnError: launch.error });
+      return;
+    }
+    const child = spawn(launch.file, launch.args, {
+      stdio: inherit ? "inherit" : ["ignore", "pipe", "pipe"],
+      ...(launch.verbatim ? { windowsVerbatimArguments: true } : {}),
+    });
     let stdout = "";
     let stderr = "";
     if (!inherit) {

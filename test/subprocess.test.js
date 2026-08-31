@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { runCapture } from "../src/subprocess.js";
+import { quoteShimArg, runCapture } from "../src/subprocess.js";
 
 test(
   "a timed leader close still kills a descendant that ignores termination",
@@ -127,3 +128,132 @@ setInterval(() => {}, 1000);
     }
   },
 );
+
+/**
+ * Windows npm-shim launch (issue #43).
+ *
+ * These drive the real `runCapture` with an injected platform and spawn, so they run,
+ * and can fail, on every CI platform. A win32-gated test would be skipped exactly
+ * where the regression it guards would land.
+ */
+
+const SPACED_PATH = "C:\\dir with spaces\\repo";
+
+function fakeSpawn(record) {
+  return (file, args, options) => {
+    record.push({ file, args, options });
+    const child = Object.assign(new EventEmitter(), {
+      pid: 4242,
+      stdout: new EventEmitter(),
+      stderr: new EventEmitter(),
+      stdin: { end() {} },
+    });
+    setImmediate(() => child.emit("close", 0));
+    return child;
+  };
+}
+
+function shimFixture() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-win-shim-"));
+  fs.writeFileSync(path.join(dir, "acpx.cmd"), "@echo off\r\n");
+  return {
+    dir,
+    lookupEnv: { PATH: dir, PATHEXT: ".COM;.EXE;.BAT;.CMD", ComSpec: "C:\\Windows\\system32\\cmd.exe" },
+  };
+}
+
+test("a windows npm .cmd shim is launched through the command interpreter", async () => {
+  const { dir, lookupEnv } = shimFixture();
+  const calls = [];
+  try {
+    await runCapture("acpx", ["--cwd", SPACED_PATH, "--format", "quiet"], {
+      platform: "win32",
+      lookupEnv,
+      spawnFn: fakeSpawn(calls),
+    });
+    assert.equal(calls.length, 1);
+    const [call] = calls;
+    assert.equal(call.file, "C:\\Windows\\system32\\cmd.exe");
+    assert.deepEqual(call.args.slice(0, 3), ["/d", "/s", "/c"]);
+    assert.equal(call.options.windowsVerbatimArguments, true);
+    assert.ok(call.args[3].includes(path.join(dir, "acpx.cmd")), "the resolved shim leads the command line");
+    // The path with spaces must survive as ONE quoted argument. Node's own
+    // `shell: true` joins argv with bare spaces and would split it here.
+    assert.ok(
+      call.args[3].includes(`"${SPACED_PATH}"`),
+      `a path with spaces must stay one quoted argument, got: ${call.args[3]}`,
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a binary that is genuinely missing still reaches spawn as itself", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-win-shim-empty-"));
+  const calls = [];
+  try {
+    await runCapture("definitely-not-installed", ["--version"], {
+      platform: "win32",
+      lookupEnv: { PATH: dir, PATHEXT: ".COM;.EXE;.BAT;.CMD" },
+      spawnFn: fakeSpawn(calls),
+    });
+    // Not rewritten into a cmd.exe call: the caller must still see its own ENOENT,
+    // which `classifyAcpxFailure` maps to `unreachable`.
+    assert.equal(calls[0].file, "definitely-not-installed");
+    assert.deepEqual(calls[0].args, ["--version"]);
+    assert.equal(calls[0].options.windowsVerbatimArguments, undefined);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a real executable and every non-windows platform are left alone", async () => {
+  const { dir, lookupEnv } = shimFixture();
+  fs.writeFileSync(path.join(dir, "acpx.exe"), "");
+  const calls = [];
+  try {
+    await runCapture("acpx", ["--version"], { platform: "win32", lookupEnv, spawnFn: fakeSpawn(calls) });
+    assert.equal(calls[0].file, "acpx", ".exe resolves ahead of .cmd in PATHEXT and needs no shim");
+
+    await runCapture("acpx", ["--version"], { platform: "linux", lookupEnv, spawnFn: fakeSpawn(calls) });
+    assert.equal(calls[1].file, "acpx");
+    assert.equal(calls[1].options.windowsVerbatimArguments, undefined);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("shim arguments are quoted for both cmd.exe and the target's argv parser", () => {
+  // Left bare: nothing either parser acts on.
+  assert.equal(quoteShimArg("--format"), "--format");
+  assert.equal(quoteShimArg("gpt-5.6-luna"), "gpt-5.6-luna");
+  assert.equal(quoteShimArg("100%done"), "100%done");
+  // Quoted: whitespace, or an operator cmd.exe would act on outside quotes.
+  assert.equal(quoteShimArg("with space"), '"with space"');
+  for (const operator of ["a&b", "a|b", "a<b", "a>b", "a^b", "a(b", "a)b", "a!b"]) {
+    assert.equal(quoteShimArg(operator), `"${operator}"`, `${operator} must not reach cmd.exe unquoted`);
+  }
+  // A trailing backslash must not escape the closing quote: MSVCRT doubles the run.
+  assert.equal(quoteShimArg("C:\\dir with spaces\\"), '"C:\\dir with spaces\\\\"');
+  assert.equal(quoteShimArg('has"quote'), '"has\\"quote"');
+  assert.equal(quoteShimArg(""), '""');
+});
+
+test("an argument cmd.exe would expand is refused by name, not passed on", async () => {
+  const { dir, lookupEnv } = shimFixture();
+  const calls = [];
+  try {
+    const result = await runCapture("acpx", ["--cwd", "%USERPROFILE%\\repo"], {
+      platform: "win32",
+      lookupEnv,
+      spawnFn: fakeSpawn(calls),
+    });
+    // Quoting cannot suppress %VAR% on a command line, and expansion would silently
+    // become several arguments. Fail loud and named instead.
+    assert.equal(calls.length, 0);
+    assert.equal(result.spawnError.code, "ERR_WINDOWS_SHIM_UNSAFE_ARG");
+    assert.match(result.stderr, /%VAR%/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
