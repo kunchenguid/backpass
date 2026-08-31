@@ -127,9 +127,10 @@ function firstLine(text) {
 }
 
 /**
- * Match a bare model id against what an adapter advertises (design section 4.1):
- * exact, then a unique last-`/`-segment match (`openai-codex/x`, `xai/x`), then a
- * unique `x[...]` variant. Segment *equality* is deliberate: `gpt-5.6-luna-fast`
+ * Match a model id against what an adapter advertises (design section 4.1): exact,
+ * then a unique match after the provider prefix (`openai-codex/x`,
+ * `openrouter/vendor/x`), then a unique `x[...]` variant. Equality is deliberate:
+ * `gpt-5.6-luna-fast`
  * must not satisfy `gpt-5.6-luna`. More than one survivor is ranked by auth class
  * (subscription over API key) when `providerAuthTypes` can decide; otherwise it is
  * a loud non-match that names the ids - never an arbitrary pick.
@@ -142,10 +143,14 @@ function firstLine(text) {
  */
 export function resolveModelId(bareId, advertised, options = {}) {
   if (advertised.includes(bareId)) return { id: bareId };
-  const bySegment = advertised.filter((id) => id.split("/").at(-1) === bareId);
+  const modelName = (id) => {
+    const slash = id.indexOf("/");
+    return slash === -1 ? id : id.slice(slash + 1);
+  };
+  const bySegment = advertised.filter((id) => modelName(id) === bareId);
   if (bySegment.length === 1) return { id: bySegment[0] };
   if (bySegment.length > 1) return rankCollidingIds(bySegment, options.providerAuthTypes);
-  const byVariant = advertised.filter((id) => id.startsWith(`${bareId}[`));
+  const byVariant = advertised.filter((id) => modelName(id).startsWith(`${bareId}[`));
   if (byVariant.length === 1) return { id: byVariant[0] };
   if (byVariant.length > 1) return rankCollidingIds(byVariant, options.providerAuthTypes);
   return { id: null };

@@ -751,6 +751,15 @@ test("bare model ids resolve by segment equality, never by prefix", () => {
   const ambiguous = resolveModelId("grok-4.6", ["xai/grok-4.6", "other/grok-4.6"]);
   assert.equal(ambiguous.id, null);
   assert.deepEqual(ambiguous.ambiguous, ["xai/grok-4.6", "other/grok-4.6"]);
+
+  const nested = resolveModelId("vendor/x", ["openrouter/vendor/x", "direct/vendor/x"], {
+    providerAuthTypes: { openrouter: "subscription", direct: "api_key" },
+  });
+  assert.equal(nested.id, "openrouter/vendor/x");
+  assert.deepEqual(nested.tieBreak, {
+    preferred: "openrouter/vendor/x",
+    over: ["direct/vendor/x"],
+  });
 });
 
 test("pi openai vs openai-codex gpt-5.6-luna prefers the subscription provider", () => {

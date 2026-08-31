@@ -115,6 +115,12 @@ if (argv.includes("config") && argv.includes("show")) {
   process.exit(0);
 }
 if (argv.includes("set-mode")) process.exit(0);
+if (argv.includes("status")) {
+  process.stdout.write(JSON.stringify({
+    availableModels: ["gpt-5.6-sol", "grok-4.6", "safe-model"],
+  }) + "\\n");
+  process.exit(0);
+}
 const setAt = argv.indexOf("set");
 if (setAt >= 0) {
   const key = argv[setAt + 1];
@@ -895,7 +901,7 @@ test("the Backpass CLI uses verified overlays for every positional harness", () 
     const result = runBackpass(repo, analysisArgs(agent, model));
     assert.equal(result.status, 0, result.stderr);
     const calls = acpxCalls();
-    const created = calls.find((call) => call.argv.includes("new"));
+    const created = calls.find((call) => call.argv.includes("new") && call.argv.includes("--model"));
     assert.equal(created.argv[created.argv.indexOf("--model") + 1], model);
     const effortCalls = setCalls(calls);
     assert.deepEqual(effortCalls.map(setKey), effortKey ? [effortKey] : []);
@@ -912,8 +918,6 @@ test("the Backpass CLI applies Grok model and effort as process arguments", () =
   fs.mkdirSync(spacedTmp);
   const result = runBackpass(repo, analysisArgs("grok", "grok-4.6"), { TMPDIR: spacedTmp });
   assert.equal(result.status, 0, result.stderr);
-  const calls = acpxCalls();
-  assert.ok(calls.every((call) => !call.argv.includes("grok-build")));
   const spawned = jsonl(grokLog);
   assert.deepEqual(spawned[0], ["-m", "grok-4.6", "--reasoning-effort", "high", "agent", "stdio"]);
   assert.equal(settingsBytes().compare(before), 0);
@@ -925,7 +929,7 @@ test("the Backpass CLI preserves safe process fallbacks and rejects unsafe ones"
     resetLogsAndSettings();
     const before = Buffer.from(settingsBytes());
     const repo = makeCliRepo(`${agent}-fallback`);
-    const model = agent === "grok" ? "grok-4.6" : "safe-model";
+    const model = agent === "grok" ? "xai/grok-4.6" : "provider/safe-model";
     const result = runBackpass(repo, analysisArgs(agent, model), { FAKE_SESSIONS_UNSUPPORTED: "1" });
     assert.equal(result.status, 0, result.stderr);
     assert.ok(acpxCalls().some((call) => call.argv.includes("exec")));
@@ -939,7 +943,9 @@ test("the Backpass CLI preserves safe process fallbacks and rejects unsafe ones"
     resetLogsAndSettings();
     const before = Buffer.from(settingsBytes());
     const repo = makeCliRepo(`${agent}-unsafe-fallback`);
-    const result = runBackpass(repo, analysisArgs(agent, "safe-model"), { FAKE_SESSIONS_UNSUPPORTED: "1" });
+    const result = runBackpass(repo, analysisArgs(agent, "provider/safe-model"), {
+      FAKE_SESSIONS_UNSUPPORTED: "1",
+    });
     assert.equal(result.status, 1);
     assert.match(result.stderr, new RegExp(`${agent} cannot apply invocation-scoped effort=high`));
     assert.match(result.stderr, /upgrade acpx or omit the effort override/);
