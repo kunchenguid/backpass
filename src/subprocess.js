@@ -3,6 +3,14 @@ import fs from "node:fs";
 import path from "node:path";
 
 /**
+ * A spawn failure. `value` is set only on a Windows shim refusal
+ * (`ERR_WINDOWS_SHIM_UNSAFE_ARG`), and holds the argument that was refused, so the
+ * boundary reporting it can name the value rather than a generic spawn failure.
+ *
+ * @typedef {NodeJS.ErrnoException & { value?: string }} ShimError
+ */
+
+/**
  * Spawn a command, capture both streams, and resolve (never reject) with a
  * uniform result. Shared by the acpx boundary (`src/acpx.js`) and the native
  * harness probes (`src/agents.js`), so every subprocess in backpass is killed the
@@ -13,7 +21,7 @@ import path from "node:path";
  * @param {{ timeoutMs?: number, cwd?: string, input?: string, env?: NodeJS.ProcessEnv,
  *   platform?: NodeJS.Platform, lookupEnv?: NodeJS.ProcessEnv,
  *   spawnFn?: (file: string, args: string[], options: object) => any }} [options]
- * @returns {Promise<{ code: number | null, stdout: string, stderr: string, timedOut?: boolean, spawnError?: NodeJS.ErrnoException }>}
+ * @returns {Promise<{ code: number | null, stdout: string, stderr: string, timedOut?: boolean, spawnError?: ShimError }>}
  */
 export function runCapture(
   bin,
@@ -102,7 +110,7 @@ export function runCapture(
  * genuinely missing binary still surfaces as its own ENOENT rather than as a shim
  * failure.
  *
- * @returns {{ file: string, args: string[], verbatim: boolean, error?: NodeJS.ErrnoException }}
+ * @returns {{ file: string, args: string[], verbatim: boolean, error?: ShimError }}
  */
 export function windowsShimLaunch(bin, args, { platform = process.platform, env = process.env } = {}) {
   const shim = resolveShimPath(bin, { platform, env });
@@ -111,7 +119,7 @@ export function windowsShimLaunch(bin, args, { platform = process.platform, env 
   for (const value of [shim, ...args]) {
     const reason = unsafeShimReason(String(value));
     if (!reason) continue;
-    /** @type {NodeJS.ErrnoException & { value?: string }} */
+    /** @type {ShimError} */
     const error = new Error(
       `cannot safely pass ${JSON.stringify(String(value))} to the Windows command shim for ${bin}: ${reason}`,
     );

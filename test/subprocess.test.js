@@ -273,12 +273,7 @@ test("an argument no quoting can neutralise is refused by name, not passed on", 
   // Quoting suppresses none of these: cmd.exe expands %VAR% inside quotes, the two
   // parsers disagree on how a quote is escaped, and a newline ends the command line.
   // Passing any of them on would silently become several arguments, or commands.
-  const refused = [
-    ["--cwd", "%USERPROFILE%\\repo"],
-    ['a"&whoami&"b'],
-    ["a\nwhoami"],
-    ["a\rwhoami"],
-  ];
+  const refused = [["--cwd", "%USERPROFILE%\\repo"], ['a"&whoami&"b'], ["a\nwhoami"], ["a\rwhoami"]];
   try {
     for (const args of refused) {
       const calls = [];
