@@ -240,6 +240,10 @@ test("synthesis edits the staging copy natively; measured hunks anchor to the ra
   assert.match(editPrompt, /^<!-- backpass:self-session -->/);
   assert.ok(editPrompt.includes(`The repository itself is at \`${repo.root}\``));
   assert.ok(editPrompt.includes("[AG-001] ("), "the index stays as the lookup table");
+  assert.ok(
+    editPrompt.includes("Do not assert or dramatize an agent's motives or intent beyond what the evidence"),
+    "synthesis prompt guards against unsupported motive claims",
+  );
   const annotatePrompt = fs.readFileSync(
     path.join(repo.root, ".backpass", "prompts", "synthesis-annotate-1.md"),
     "utf8",

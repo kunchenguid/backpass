@@ -117,12 +117,23 @@ export function parseFrontmatter(text) {
   if (!match) return {};
   const result = {};
   let currentKey = null;
+  let blockStyle = null; // "fold" (>) | "literal" (|) | null for plain scalars
+  let blockIndent = null;
   for (const line of match[1].split("\n")) {
     const kv = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
     if (kv) {
       currentKey = kv[1];
-      result[currentKey] = kv[2].trim().replace(/^["']|["']$/g, "");
-    } else if (currentKey && /^\s+\S/.test(line)) {
+      const rawValue = kv[2].trim();
+      const blockIndicator = /^([>|])[+-]?$/.exec(rawValue);
+      blockStyle = blockIndicator ? (blockIndicator[1] === "|" ? "literal" : "fold") : null;
+      blockIndent = null;
+      result[currentKey] = blockIndicator ? "" : rawValue.replace(/^["']|["']$/g, "");
+    } else if (currentKey && blockStyle && /^\s+\S/.test(line)) {
+      if (blockIndent === null) blockIndent = /^\s+/.exec(line)[0].length;
+      const content = line.slice(blockIndent);
+      const separator = blockStyle === "literal" ? "\n" : " ";
+      result[currentKey] = result[currentKey] ? `${result[currentKey]}${separator}${content}` : content;
+    } else if (currentKey && !blockStyle && /^\s+\S/.test(line)) {
       result[currentKey] = `${result[currentKey]} ${line.trim()}`.trim();
     }
   }

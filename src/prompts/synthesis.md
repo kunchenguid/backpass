@@ -99,6 +99,8 @@ signal.
    an existing skill when that file is the right home, instead of creating a new one.
 9. Change only `./{{MEMORY_PATH}}` and files under `./{{SKILLS_DIR}}/`. Never delete a
    file. Do not create notes, scripts, or scratch files.
+10. Do not assert or dramatize an agent's motives or intent beyond what the evidence
+    supports.
 
 ## Where an instruction belongs
 

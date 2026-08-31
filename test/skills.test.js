@@ -50,6 +50,52 @@ test("generated SKILL.md frontmatter marks the skill non-invocable and internal"
   assert.ok(text.endsWith("2. Sign the tarball.\n"));
 });
 
+test("parseFrontmatter folds a >- block-scalar description without leaking the indicator", () => {
+  const text = [
+    "---",
+    "name: away-mode",
+    "description: >-",
+    "  Enter away-mode when the user asks to step away from the",
+    "  keyboard for an extended period.",
+    "---",
+    "# Away mode",
+    "",
+  ].join("\n");
+  const frontmatter = parseFrontmatter(text);
+  assert.equal(
+    frontmatter.description,
+    "Enter away-mode when the user asks to step away from the keyboard for an extended period.",
+  );
+  assert.ok(!/^[>|]/.test(frontmatter.description));
+  assert.ok(!frontmatter.description.includes(">-"));
+});
+
+test("parseFrontmatter handles > and | block-scalar indicators with all chomping suffixes", () => {
+  const cases = [
+    { indicator: ">", expected: "Enter away-mode when idle." },
+    { indicator: ">-", expected: "Enter away-mode when idle." },
+    { indicator: ">+", expected: "Enter away-mode when idle." },
+    { indicator: "|", expected: "Enter away-mode\nwhen idle." },
+    { indicator: "|-", expected: "Enter away-mode\nwhen idle." },
+    { indicator: "|+", expected: "Enter away-mode\nwhen idle." },
+  ];
+  for (const { indicator, expected } of cases) {
+    const text = [
+      "---",
+      "name: away-mode",
+      `description: ${indicator}`,
+      "  Enter away-mode",
+      "  when idle.",
+      "---",
+      "# Away mode",
+      "",
+    ].join("\n");
+    const frontmatter = parseFrontmatter(text);
+    assert.equal(frontmatter.description, expected, `indicator ${indicator}`);
+    assert.ok(!/^[>|]/.test(frontmatter.description), `indicator ${indicator} leaked marker`);
+  }
+});
+
 test("writeSkill lands in .agents/skills and links .claude/skills to it", () => {
   const root = tmpRepo();
   const result = writeSkill(root, SKILL);
