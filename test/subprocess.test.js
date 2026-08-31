@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { classifyAcpxFailure, shimRefusalError } from "../src/acpx.js";
+import { classifyAcpxFailure } from "../src/acpx.js";
 import { quoteShimArg, runCapture } from "../src/subprocess.js";
 
 test(
@@ -287,26 +287,19 @@ test("a percent that is not a variable reference still runs", async () => {
   }
 });
 
-test("a shim refusal reaches acpx as its own named error, not as missing session support", async () => {
+test("a refusal is not an availability verdict: it must not demote the harness", async () => {
   const { dir, lookupEnv } = shimFixture();
   const calls = [];
   try {
-    // The failure the acpx boundary actually receives, produced by the real refusal.
     const failure = await runCapture("acpx", ["--cwd", "%USERPROFILE%\\repo"], {
       platform: "win32",
       lookupEnv,
       spawnFn: fakeSpawn(calls),
     });
-    const err = shimRefusalError(failure);
-    assert.equal(err.name, "UserError");
-    assert.ok(err.message.includes("%USERPROFILE%"), err.message);
-    // Not a session-support verdict and not an availability verdict: falling through to
-    // the next harness would fail on the very same argument.
-    assert.equal(err.unsupported, undefined);
+    // Classifying it would silently drop the candidate, and the next harness would
+    // fail on the very same argument. `test/acpx-shim-refusal.test.js` covers how the
+    // acpx boundary does surface it.
     assert.equal(classifyAcpxFailure(failure), null);
-
-    assert.equal(shimRefusalError({ code: 1, stderr: "boom" }), null);
-    assert.equal(shimRefusalError({ code: null, spawnError: Object.assign(new Error("x"), { code: "ENOENT" }) }), null);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
