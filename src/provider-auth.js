@@ -61,10 +61,10 @@ export const PI_PROVIDER_AUTH_MODE = {
   openai: "api_key",
 };
 
-/** Last `/`-segment's provider prefix; empty when the id is bare. */
+/** Provider prefix before the first `/`; empty when the id is bare. */
 export function providerOf(advertisedId) {
   const text = String(advertisedId);
-  const slash = text.lastIndexOf("/");
+  const slash = text.indexOf("/");
   return slash === -1 ? "" : text.slice(0, slash);
 }
 

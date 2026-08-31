@@ -69,6 +69,12 @@ test("rankCollidingIds prefers the sole subscription provider and refuses the re
 
   const unknownHalf = rankCollidingIds(["a/x", "b/x"], { a: "subscription" });
   assert.equal(unknownHalf.id, null);
+
+  const nested = rankCollidingIds(["openrouter/vendor/x", "direct/vendor/x"], {
+    openrouter: "subscription",
+    direct: "api_key",
+  });
+  assert.equal(nested.id, "openrouter/vendor/x");
 });
 
 test("pi auth.json types overlay definitions while unknown providers stay unknown", () => {
@@ -164,5 +170,6 @@ test("ambiguousModelDetail names the ids and how to disambiguate", () => {
   assert.match(detail, /other\/gpt-5.6-luna/);
   assert.match(detail, /provider-qualified/);
   assert.equal(providerOf("openai-codex/gpt-5.6-luna"), "openai-codex");
+  assert.equal(providerOf("openrouter/vendor/gpt-5.6-luna"), "openrouter");
   assert.equal(providerOf("gpt-5.6-luna"), "");
 });
