@@ -1,6 +1,7 @@
 import { UserError, color, info, warn } from "./logger.js";
 import { DEFAULT_EFFORT, LEGACY_DEFAULT_AGENTS } from "./config.js";
 import { AcpxError, acpxVersion, classifyAcpxFailure, probeSession } from "./acpx.js";
+import { ambiguousModelDetail, rankCollidingIds, readProviderAuthTypes } from "./provider-auth.js";
 import { runCapture } from "./subprocess.js";
 
 /**
@@ -12,6 +13,12 @@ import { runCapture } from "./subprocess.js";
  * zero-token probe per candidate. The probe is a *filter*, not a guarantee: the first
  * real call is the decider, and a classifiable failure there (AUTH_REQUIRED, model
  * rejected, adapter missing) demotes the candidate and falls through to the next one.
+ *
+ * Bare ladder ids are matched against the advertised list (`resolveModelId`). A unique
+ * `provider/id` wins; a collision is ranked by auth class (subscription over API key)
+ * from `src/provider-auth.js`. An unrankable collision is a loud non-match that names
+ * the ids - never an arbitrary pick, and never silent fallthrough disguised as
+ * "model not advertised".
  *
  * All model invocation still goes through `src/acpx.js`. The one documented exception
  * is `NATIVE_PROBES` below: the claude adapter creates sessions happily while logged
@@ -86,7 +93,7 @@ const NATIVE_PROBES = {
     }
     return null;
   },
-  async opencode({ model }, capture) {
+  async opencode({ model }, capture, options = {}) {
     const result = await capture("opencode", ["models"], { timeoutMs: NATIVE_TIMEOUT_MS });
     if (result.spawnError?.code === "ENOENT") {
       return { verdict: "unreachable", detail: "opencode CLI not found on PATH" };
@@ -100,12 +107,12 @@ const NATIVE_PROBES = {
     if (!advertised.length) {
       return { verdict: "model-unavailable", detail: "`opencode models` advertised no models" };
     }
-    const resolved = resolveModelId(model, advertised);
+    const resolved = resolveAdvertisedModel(model, advertised, "opencode", options);
     if (!resolved.id) {
       return {
         verdict: "model-unavailable",
         detail: resolved.ambiguous
-          ? `ambiguous in \`opencode models\`: ${resolved.ambiguous.join(", ")}`
+          ? ambiguousModelDetail(resolved.ambiguous, { source: "`opencode models`" })
           : "absent from `opencode models` (provider not logged in?)",
       };
     }
@@ -121,19 +128,31 @@ function firstLine(text) {
  * Match a bare model id against what an adapter advertises (design section 4.1):
  * exact, then a unique last-`/`-segment match (`openai-codex/x`, `xai/x`), then a
  * unique `x[...]` variant. Segment *equality* is deliberate: `gpt-5.6-luna-fast`
- * must not satisfy `gpt-5.6-luna`. More than one survivor is a non-match, reported.
+ * must not satisfy `gpt-5.6-luna`. More than one survivor is ranked by auth class
+ * (subscription over API key) when `providerAuthTypes` can decide; otherwise it is
+ * a loud non-match that names the ids - never an arbitrary pick.
  *
- * @returns {{ id: string | null, ambiguous?: string[] }}
+ * @param {string} bareId
+ * @param {string[]} advertised
+ * @param {{ providerAuthTypes?: Record<string, "subscription" | "api_key"> }} [options]
+ * @returns {{ id: string | null, ambiguous?: string[],
+ *   tieBreak?: { preferred: string, over: string[] } }}
  */
-export function resolveModelId(bareId, advertised) {
+export function resolveModelId(bareId, advertised, options = {}) {
   if (advertised.includes(bareId)) return { id: bareId };
   const bySegment = advertised.filter((id) => id.split("/").at(-1) === bareId);
   if (bySegment.length === 1) return { id: bySegment[0] };
-  if (bySegment.length > 1) return { id: null, ambiguous: bySegment };
+  if (bySegment.length > 1) return rankCollidingIds(bySegment, options.providerAuthTypes);
   const byVariant = advertised.filter((id) => id.startsWith(`${bareId}[`));
   if (byVariant.length === 1) return { id: byVariant[0] };
-  if (byVariant.length > 1) return { id: null, ambiguous: byVariant };
+  if (byVariant.length > 1) return rankCollidingIds(byVariant, options.providerAuthTypes);
   return { id: null };
+}
+
+function resolveAdvertisedModel(bareId, advertised, agent, options = {}) {
+  const types =
+    options.providerAuthTypes ?? (options.readProviderAuthTypes || readProviderAuthTypes)(agent, { advertised });
+  return resolveModelId(bareId, advertised, { providerAuthTypes: types });
 }
 
 /** Flatten a ladder model-outer / harness-inner into `{ model, agent }` candidates. */
@@ -153,15 +172,18 @@ export function candidateKey({ agent, model }) {
  * @param {{ cwd?: string, sessionName?: string,
  *   probeSession?: (args: { agent: string, sessionName: string, cwd?: string, timeoutMs?: number }) =>
  *     Promise<{ verdict: string, detail: string, availableModels?: string[], transient?: boolean }>,
- *   runCapture?: typeof runCapture }} [options]
- * @returns {Promise<{ verdict: string, detail: string, resolvedModel: string | null, transient?: boolean }>}
+ *   runCapture?: typeof runCapture,
+ *   providerAuthTypes?: Record<string, "subscription" | "api_key">,
+ *   readProviderAuthTypes?: typeof readProviderAuthTypes }} [options]
+ * @returns {Promise<{ verdict: string, detail: string, resolvedModel: string | null,
+ *   transient?: boolean, tieBreak?: { preferred: string, over: string[] } }>}
  */
 export async function probeCandidate(candidate, options = {}) {
   const { cwd, sessionName, probeSession: probe = probeSession, runCapture: capture = runCapture } = options;
   const { agent, model } = candidate;
   const native = NATIVE_PROBES[agent];
   if (native) {
-    const early = await native(candidate, capture);
+    const early = await native(candidate, capture, options);
     if (early) return { resolvedModel: null, ...early };
   }
 
@@ -183,16 +205,21 @@ export async function probeCandidate(candidate, options = {}) {
   if (TRUSTING_MODEL_AGENTS.has(agent)) {
     return { verdict: "ok", detail: "model accepted on faith; the first real call verifies it", resolvedModel: model };
   }
-  const resolved = resolveModelId(model, result.availableModels || []);
+  const advertised = result.availableModels || [];
+  const resolved = resolveAdvertisedModel(model, advertised, agent, options);
   if (!resolved.id) {
     const detail = resolved.ambiguous
-      ? `ambiguous among advertised ids: ${resolved.ambiguous.join(", ")}`
-      : result.availableModels?.length
-        ? `not among ${result.availableModels.length} advertised model(s)`
+      ? ambiguousModelDetail(resolved.ambiguous)
+      : advertised.length
+        ? `not among ${advertised.length} advertised model(s)`
         : "adapter advertised no models";
     return { verdict: "model-unavailable", detail, resolvedModel: null };
   }
-  return { verdict: "ok", detail: "", resolvedModel: resolved.id };
+  const tieBreak = resolved.tieBreak;
+  const detail = tieBreak
+    ? `preferred subscription provider ${tieBreak.preferred} over ${tieBreak.over.join(", ")}`
+    : "";
+  return { verdict: "ok", detail, resolvedModel: resolved.id, ...(tieBreak ? { tieBreak } : {}) };
 }
 
 /**
@@ -320,6 +347,7 @@ export class AgentResolver {
       detail: result.detail || "",
       resolvedModel: result.resolvedModel || null,
       checkedAt: new Date(this.now()).toISOString(),
+      ...(result.tieBreak ? { tieBreak: result.tieBreak } : {}),
     };
     this.memo.set(key, entry);
     if (isTransientProbeResult(entry)) {
@@ -389,10 +417,20 @@ export class AgentResolver {
 
   announce(role, pick, trail) {
     const losers = trail.filter((t) => t.verdict !== "ok");
-    const cached = trail.at(-1)?.cached ? color.dim(" (cached)") : "";
+    const winner = trail.at(-1);
+    const cached = winner?.cached ? color.dim(" (cached)") : "";
     info(`${color.cyan("·")} ${role}: ${pick.agent} (${pick.model}) effort=${pick.effort || "unset"}${cached}`);
+    if (winner?.tieBreak) {
+      info(
+        color.dim(
+          `    preferred subscription provider ${winner.tieBreak.preferred} over ${winner.tieBreak.over.join(", ")}`,
+        ),
+      );
+    }
     for (const t of losers) {
-      info(color.dim(`    skipped ${t.agent}/${t.model}: ${VERDICT_LABELS[t.verdict] || t.verdict}`));
+      const label = VERDICT_LABELS[t.verdict] || t.verdict;
+      const extra = t.detail && /ambiguous/i.test(t.detail) ? ` (${t.detail})` : "";
+      info(color.dim(`    skipped ${t.agent}/${t.model}: ${label}${extra}`));
     }
   }
 

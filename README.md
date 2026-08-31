@@ -492,7 +492,11 @@ ladder is exhausted the error lists every candidate with what to run to fix it.
 
 Bare model ids are resolved against what each adapter advertises (`openai-codex/gpt-5.6-luna`
 on pi, `openai/gpt-5.6-luna` on opencode, `gpt-5.6-luna` on codex), so nothing is hardcoded
-per harness. Ladders are ordinary config - reorder or shorten them under `"ladders"`.
+per harness. When the same bare id is advertised under more than one provider, backpass
+ranks by auth class - a subscription/OAuth provider over an API-key provider - from that
+harness's provider definitions and auth file (see `src/provider-auth.js`). An unrankable
+collision is refused with the colliding ids named; it is never an arbitrary pick. Ladders
+are ordinary config - reorder or shorten them under `"ladders"`.
 
 Pinning an agent skips its ladder entirely. If that harness fails, backpass reports an
 actionable error and keeps the pin rather than falling through or printing a raw stack:

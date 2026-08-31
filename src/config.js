@@ -17,8 +17,11 @@ export const OPT_IN_HARNESSES = ["cursor-ide"];
  * flattened model-outer / harness-inner, and the first candidate that is installed,
  * authenticated, and serves the model wins. Model ids are the bare ids the vendors use;
  * per-harness spellings (`openai-codex/...`, `openai/...`, `xai/...`) are resolved at
- * probe time against what the adapter advertises - never hard-coded. Ladders live in
- * config so a user can reorder or shorten them in `.backpassrc.json` without a release.
+ * probe time against what the adapter advertises - never hard-coded. A collision of the
+ * same bare id under two providers is ranked by auth class (subscription over API key;
+ * see `src/provider-auth.js`); an unrankable collision is refused, not guessed. Ladders
+ * live in config so a user can reorder or shorten them in `.backpassrc.json` without a
+ * release.
  */
 export const DEFAULT_LADDERS = {
   analysis: [

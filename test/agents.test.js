@@ -11,7 +11,7 @@ import {
 } from "../src/agents.js";
 import { AcpxError, acpxAgentName, classifyAcpxFailure, effortOptionKey, probeSession } from "../src/acpx.js";
 import { DEFAULT_LADDERS, loadConfig } from "../src/config.js";
-import { UserError, setQuiet } from "../src/logger.js";
+import { UserError, setLoggerSink, setQuiet } from "../src/logger.js";
 
 setQuiet(true);
 
@@ -655,6 +655,200 @@ test("bare model ids resolve by segment equality, never by prefix", () => {
   const ambiguous = resolveModelId("grok-4.6", ["xai/grok-4.6", "other/grok-4.6"]);
   assert.equal(ambiguous.id, null);
   assert.deepEqual(ambiguous.ambiguous, ["xai/grok-4.6", "other/grok-4.6"]);
+});
+
+test("pi openai vs openai-codex gpt-5.6-luna prefers the subscription provider", () => {
+  // Regression: with OPENAI_API_KEY set, Pi advertises the same bare id under the
+  // API-key provider and the ChatGPT-subscription provider. Refusing the collision
+  // used to skip pi as "model not advertised" and silently reroute the ladder.
+  const advertised = ["openai/gpt-5.6-luna", "openai-codex/gpt-5.6-luna"];
+  const resolved = resolveModelId("gpt-5.6-luna", advertised, {
+    providerAuthTypes: { openai: "api_key", "openai-codex": "subscription" },
+  });
+  assert.equal(resolved.id, "openai-codex/gpt-5.6-luna");
+  if (!("tieBreak" in resolved)) throw new Error("expected a tie-break");
+  assert.deepEqual(resolved.tieBreak, {
+    preferred: "openai-codex/gpt-5.6-luna",
+    over: ["openai/gpt-5.6-luna"],
+  });
+});
+
+test("each advertised-list shape ranks a subscription+API-key pair and refuses the unrankable rest", async () => {
+  /** @type {Array<{
+   *   agent: string,
+   *   bare: string,
+   *   advertised: string[],
+   *   types: Record<string, "subscription" | "api_key">,
+   *   prefer: string,
+   *   unique: string[],
+   *   uniqueId: string,
+   * }>} */
+  const shapes = [
+    {
+      agent: "pi",
+      bare: "gpt-5.6-luna",
+      advertised: ["openai/gpt-5.6-luna", "openai-codex/gpt-5.6-luna"],
+      types: { openai: "api_key", "openai-codex": "subscription" },
+      prefer: "openai-codex/gpt-5.6-luna",
+      unique: ["kimi-coding/k3", "openai-codex/gpt-5.6-luna"],
+      uniqueId: "openai-codex/gpt-5.6-luna",
+    },
+    {
+      agent: "opencode",
+      bare: "gpt-5.6-luna",
+      advertised: ["openai/gpt-5.6-luna", "anthropic/gpt-5.6-luna"],
+      types: { openai: "subscription", anthropic: "api_key" },
+      prefer: "openai/gpt-5.6-luna",
+      unique: ["opencode/free", "openai/gpt-5.6-luna", "openai/gpt-5.6-luna-fast"],
+      uniqueId: "openai/gpt-5.6-luna",
+    },
+    {
+      agent: "codex",
+      bare: "gpt-5.6-luna",
+      advertised: ["openai/gpt-5.6-luna", "azure/gpt-5.6-luna"],
+      types: { openai: "subscription", azure: "api_key" },
+      prefer: "openai/gpt-5.6-luna",
+      unique: ["gpt-5.6-luna", "gpt-5.5"],
+      uniqueId: "gpt-5.6-luna",
+    },
+    {
+      agent: "grok",
+      bare: "grok-4.6",
+      advertised: ["xai/grok-4.6", "openrouter/grok-4.6"],
+      types: { xai: "subscription", openrouter: "api_key" },
+      prefer: "xai/grok-4.6",
+      unique: ["grok-4.6", "grok-4.5"],
+      uniqueId: "grok-4.6",
+    },
+    {
+      agent: "cursor",
+      bare: "gpt-5.6-luna",
+      advertised: ["openai/gpt-5.6-luna", "azure/gpt-5.6-luna"],
+      types: { openai: "subscription", azure: "api_key" },
+      prefer: "openai/gpt-5.6-luna",
+      unique: ["gpt-5.6-luna[context=272k,reasoning=medium,fast=false]", "gpt-5.5[fast=false]"],
+      uniqueId: "gpt-5.6-luna[context=272k,reasoning=medium,fast=false]",
+    },
+  ];
+
+  for (const shape of shapes) {
+    const ranked = resolveModelId(shape.bare, shape.advertised, { providerAuthTypes: shape.types });
+    assert.equal(ranked.id, shape.prefer, `${shape.agent} subscription+api_key`);
+    const refused = resolveModelId(shape.bare, shape.advertised, { providerAuthTypes: {} });
+    assert.equal(refused.id, null, `${shape.agent} unrankable`);
+    assert.deepEqual(refused.ambiguous, shape.advertised);
+    assert.equal(resolveModelId(shape.bare, shape.unique).id, shape.uniqueId, `${shape.agent} unique`);
+  }
+
+  const claude = await probeCandidate(
+    { agent: "claude", model: "claude-sonnet-5" },
+    {
+      sessionName: "t",
+      runCapture: async () => ({ code: 0, stdout: '{"loggedIn": true}\n', stderr: "" }),
+      probeSession: async () => ({ verdict: "ok", detail: "", availableModels: ["default", "sonnet"] }),
+    },
+  );
+  assert.equal(claude.resolvedModel, "claude-sonnet-5", "claude still forwards any id");
+
+  const piProbe = await probeCandidate(
+    { agent: "pi", model: "gpt-5.6-luna" },
+    {
+      sessionName: "t",
+      probeSession: async () => ({
+        verdict: "ok",
+        detail: "",
+        availableModels: ["openai/gpt-5.6-luna", "openai-codex/gpt-5.6-luna"],
+      }),
+      providerAuthTypes: { openai: "api_key", "openai-codex": "subscription" },
+    },
+  );
+  assert.equal(piProbe.verdict, "ok");
+  assert.equal(piProbe.resolvedModel, "openai-codex/gpt-5.6-luna");
+  assert.match(piProbe.detail, /preferred subscription provider openai-codex\/gpt-5.6-luna over openai\/gpt-5.6-luna/);
+
+  const loud = await probeCandidate(
+    { agent: "pi", model: "gpt-5.6-luna" },
+    {
+      sessionName: "t",
+      probeSession: async () => ({
+        verdict: "ok",
+        detail: "",
+        availableModels: ["openai/gpt-5.6-luna", "other/gpt-5.6-luna"],
+      }),
+      providerAuthTypes: {},
+    },
+  );
+  assert.equal(loud.verdict, "model-unavailable");
+  assert.match(loud.detail, /openai\/gpt-5.6-luna/);
+  assert.match(loud.detail, /other\/gpt-5.6-luna/);
+  assert.match(loud.detail, /provider-qualified/);
+});
+
+test("a winning subscription tie-break is visible on the probe trail", async () => {
+  const lines = [];
+  setQuiet(false);
+  setLoggerSink((line) => lines.push(String(line)));
+  try {
+    const { resolver } = resolverWith({
+      "pi|gpt-5.6-luna": {
+        resolvedModel: "openai-codex/gpt-5.6-luna",
+        tieBreak: { preferred: "openai-codex/gpt-5.6-luna", over: ["openai/gpt-5.6-luna"] },
+      },
+    });
+    await resolver.resolve("analysis");
+    assert.ok(
+      lines.some((line) =>
+        /preferred subscription provider openai-codex\/gpt-5.6-luna over openai\/gpt-5.6-luna/.test(line),
+      ),
+    );
+  } finally {
+    setLoggerSink(null);
+    setQuiet(true);
+  }
+});
+
+test("opencode's native models probe ranks a subscription collision instead of skipping", async () => {
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-fake-opencode-"));
+  fs.writeFileSync(
+    path.join(bin, "opencode"),
+    `#!/bin/sh\necho 'openai/gpt-5.6-luna'\necho 'anthropic/gpt-5.6-luna'\n`,
+  );
+  fs.chmodSync(path.join(bin, "opencode"), 0o755);
+  const oldPath = process.env.PATH;
+  process.env.PATH = `${bin}${path.delimiter}${oldPath}`;
+  try {
+    const ok = await probeCandidate(
+      { agent: "opencode", model: "gpt-5.6-luna" },
+      {
+        sessionName: "t",
+        providerAuthTypes: { openai: "subscription", anthropic: "api_key" },
+        probeSession: async () => ({
+          verdict: "ok",
+          detail: "",
+          availableModels: ["openai/gpt-5.6-luna", "anthropic/gpt-5.6-luna"],
+        }),
+      },
+    );
+    assert.equal(ok.verdict, "ok");
+    assert.equal(ok.resolvedModel, "openai/gpt-5.6-luna");
+
+    const refused = await probeCandidate(
+      { agent: "opencode", model: "gpt-5.6-luna" },
+      {
+        sessionName: "t",
+        providerAuthTypes: {},
+        probeSession: async () => {
+          throw new Error("acpx probe must not run when native models are unrankably ambiguous");
+        },
+      },
+    );
+    assert.equal(refused.verdict, "model-unavailable");
+    assert.match(refused.detail, /openai\/gpt-5.6-luna/);
+    assert.match(refused.detail, /anthropic\/gpt-5.6-luna/);
+    assert.match(refused.detail, /provider-qualified/);
+  } finally {
+    process.env.PATH = oldPath;
+  }
 });
 
 test("acpx failure classification and the per-adapter tables", () => {

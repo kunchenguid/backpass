@@ -248,6 +248,16 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   A probe miss retries once with backoff (`probeAndRecord` in `src/agents.js`); a timeout,
   a bare `exit N`, or an empty advertised-model list is never written as a negative cache
   hit, so a busy harness cannot poison the next run.
+- **An ambiguous advertised model is ranked by auth class, never guessed.** Pi (and any
+  harness that lists `provider/id`) can advertise the same bare ladder id under a
+  subscription provider and an API-key provider - classic case: `openai-codex/gpt-5.6-luna`
+  vs `openai/gpt-5.6-luna` when `OPENAI_API_KEY` is set. `resolveModelId` prefers the
+  subscription-backed prefix using `src/provider-auth.js` (Pi provider definitions plus
+  `auth.json` `type`; OpenCode's own auth file, where `openai` is ChatGPT OAuth). Prefix
+  semantics are harness-specific. An unrankable collision is a loud `model-unavailable`
+  that names the ids and tells the user to pass a provider-qualified id - never a silent
+  pick, and never "model not advertised" with the ids hidden. The probe trail prints a
+  winning tie-break.
 - **The Lavish apply surface is chatty and its output is YAML-quoted.** `lavish-axi poll`
   can return feedback that is not a decision vector (a comment, a queued layout report) any
   number of times before the real one; `pollDecisions` in `src/apply/lavish.js` announces
