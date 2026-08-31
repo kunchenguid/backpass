@@ -181,11 +181,16 @@ function resolveShimPath(bin, { platform, env }) {
 /**
  * First match for `bin` on PATH, honouring PATHEXT on Windows. Shared with
  * `src/harness-invoke.js`, which needs the same resolution to build argv wrappers.
+ *
+ * A Windows PATH entry may legally carry surrounding double quotes, and an entry kept
+ * verbatim never stats: the npm shim would go undetected and the plain spawn would fail
+ * with the very ENOENT this module exists to prevent.
  */
 export function resolveOnPath(bin, { platform = process.platform, env = process.env } = {}) {
   if (path.isAbsolute(bin) && isExecutable(bin, platform)) return bin;
   const extensions = platform === "win32" ? (env.PATHEXT || ".COM;.EXE;.BAT;.CMD").split(";") : [""];
-  for (const dir of (env.PATH || "").split(path.delimiter)) {
+  for (const entry of (env.PATH || "").split(path.delimiter)) {
+    const dir = entry.replace(/^"|"$/g, "");
     if (!dir) continue;
     for (const extension of extensions) {
       const candidate = path.join(dir, platform === "win32" ? `${bin}${extension.toLowerCase()}` : bin);

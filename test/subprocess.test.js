@@ -189,6 +189,35 @@ test("a windows npm .cmd shim is launched through the command interpreter", asyn
   }
 });
 
+test("a quoted PATH entry still resolves the shim", async () => {
+  const { dir, lookupEnv } = shimFixture();
+  const other = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-win-shim-other-"));
+  const shim = path.join(dir, "acpx.cmd");
+  // Windows PATH entries may carry surrounding quotes. Kept verbatim, the entry never
+  // stats, the shim goes undetected, and the plain spawn fails with the ENOENT this
+  // whole launch policy exists to prevent. The unquoted arm is the control: a resolver
+  // that stopped resolving anything at all must not read as a pass.
+  const arms = [
+    ["unquoted", [other, dir].join(path.delimiter)],
+    ["quoted", [other, `"${dir}"`].join(path.delimiter)],
+  ];
+  try {
+    for (const [label, PATH] of arms) {
+      const calls = [];
+      await runCapture("acpx", ["--format", "quiet"], {
+        platform: "win32",
+        lookupEnv: { ...lookupEnv, PATH },
+        spawnFn: fakeSpawn(calls),
+      });
+      assert.equal(calls[0].file, lookupEnv.ComSpec, `${label}: must go through the command interpreter`);
+      assert.ok(calls[0].args[3].includes(shim), `${label}: the resolved shim leads the command line`);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(other, { recursive: true, force: true });
+  }
+});
+
 test("a binary that is genuinely missing still reaches spawn as itself", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-win-shim-empty-"));
   const calls = [];

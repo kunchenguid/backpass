@@ -5,13 +5,16 @@ import path from "node:path";
 import test from "node:test";
 
 /**
- * The Windows npm-shim refusal (issue #43) as the acpx boundary reports it.
+ * The Windows npm-shim refusal (issue #43) as each boundary that spawns a shim reports
+ * it: acpx for every model call, lavish-axi for `backpass apply`, which is reachable
+ * without any model call at all.
  *
  * A refused argument resolves as `{ code: null, spawnError }`, which every generic
- * result inspection in `src/acpx.js` would otherwise read as "no session support" or
- * "session prompt failed (exit null)" - neither names the argument, and the first sends
- * `sessionPrompt` into an exec fallback that fails identically. These drive the real
- * entry points to prove the refusal is raised, not merely constructible.
+ * result inspection would otherwise read as "no session support", "session prompt failed
+ * (exit null)" or "failed to open the apply surface" - none of which names the argument,
+ * and the first of which sends `sessionPrompt` into an exec fallback that fails
+ * identically. These drive the real entry points to prove the refusal is raised, not
+ * merely constructible.
  *
  * `--cwd` is the argument that carries a repo path onto argv (`baseArgs`), which is why
  * the fixture repo's own directory name holds the `%VAR%` sequence. The refusal fires
@@ -19,9 +22,11 @@ import test from "node:test";
  * `test/subprocess.test.js` owns the command line itself. Both stand-ins are real files,
  * so this runs on every platform rather than being skipped where it matters.
  */
-const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-acpx-refusal-"));
+const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-shim-refusal-"));
 const fakeAcpx = path.join(fixtureDir, "acpx.cmd");
 fs.writeFileSync(fakeAcpx, "@echo off\r\nexit /b 0\r\n");
+const fakeLavish = path.join(fixtureDir, "lavish-axi.cmd");
+fs.writeFileSync(fakeLavish, "@echo off\r\nexit /b 0\r\n");
 
 let fakeComSpec;
 if (process.platform === "win32") {
@@ -40,8 +45,10 @@ const refusedCwd = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-%BUILD%-"));
 const refusedInMessage = JSON.stringify(refusedCwd);
 
 process.env.BACKPASS_ACPX_BIN = fakeAcpx;
+process.env.BACKPASS_LAVISH_BIN = fakeLavish;
 
 const { AcpxError, execOneShot, openSession } = await import("../src/acpx.js");
+const { openApplySurface } = await import("../src/apply/lavish.js");
 const { UserError } = await import("../src/logger.js");
 
 async function asWindows(fn) {
@@ -94,6 +101,22 @@ test("the exec one-shot fallback names the same refusal", async () => {
         assert.ok(err instanceof UserError, `expected a UserError, got ${err.name}: ${err.message}`);
         assert.ok(err.message.includes(refusedInMessage), err.message);
         assert.equal(err.unsupported, undefined);
+        return true;
+      },
+    );
+  });
+});
+
+test("the apply surface names the refusal as its headline", async () => {
+  await asWindows(async () => {
+    // `backpass apply` needs no model call, so this is the boundary a user hits first.
+    const surface = path.join(refusedCwd, ".backpass", "apply", "apply.html");
+    await assert.rejects(
+      () => openApplySurface(surface),
+      (err) => {
+        assert.ok(err instanceof UserError, `expected a UserError, got ${err.name}: ${err.message}`);
+        assert.ok(err.message.includes(JSON.stringify(surface)), err.message);
+        assert.doesNotMatch(err.message, /failed to open the apply surface|not found on PATH/);
         return true;
       },
     );

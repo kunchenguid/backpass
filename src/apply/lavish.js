@@ -98,6 +98,9 @@ export async function openApplySurface(file) {
   // `--reopen` it exits 0 and prints the dead session's URL - which apply would then hand
   // the reviewer as if it were live. On a live or agent-ended session the flag is a no-op.
   const result = await runLavish([file, "--reopen", "--no-open"]);
+  if (result.spawnError && result.spawnError.code === "ERR_WINDOWS_SHIM_UNSAFE_ARG") {
+    throw new UserError(result.spawnError.message);
+  }
   if (result.spawnError && result.spawnError.code === "ENOENT") {
     throw new UserError(
       `${LAVISH_BIN} not found on PATH`,
