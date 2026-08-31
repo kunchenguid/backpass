@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.17](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.16...backpass-v0.1.17) (2026-08-31)
+
+
+### Bug Fixes
+
+* **skills:** parse YAML block-scalar descriptions correctly ([#94](https://github.com/kunchenguid/backpass/issues/94)) ([e957398](https://github.com/kunchenguid/backpass/commit/e957398734211ce4939a9de055862c1ce96a246b))
+
 ## [0.1.16](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.15...backpass-v0.1.16) (2026-08-31)
 
 
