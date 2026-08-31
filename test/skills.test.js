@@ -72,12 +72,12 @@ test("parseFrontmatter folds a >- block-scalar description without leaking the i
 
 test("parseFrontmatter handles > and | block-scalar indicators with all chomping suffixes", () => {
   const cases = [
-    { indicator: ">", expected: "Enter away-mode when idle." },
-    { indicator: ">-", expected: "Enter away-mode when idle." },
-    { indicator: ">+", expected: "Enter away-mode when idle." },
-    { indicator: "|", expected: "Enter away-mode\nwhen idle." },
-    { indicator: "|-", expected: "Enter away-mode\nwhen idle." },
-    { indicator: "|+", expected: "Enter away-mode\nwhen idle." },
+    { indicator: ">", expected: "Enter away-mode when idle.\nResume when the user returns.\n" },
+    { indicator: ">-", expected: "Enter away-mode when idle.\nResume when the user returns." },
+    { indicator: ">+", expected: "Enter away-mode when idle.\nResume when the user returns.\n\n\n" },
+    { indicator: "|", expected: "Enter away-mode\nwhen idle.\n\nResume when the user returns.\n" },
+    { indicator: "|-", expected: "Enter away-mode\nwhen idle.\n\nResume when the user returns." },
+    { indicator: "|+", expected: "Enter away-mode\nwhen idle.\n\nResume when the user returns.\n\n\n" },
   ];
   for (const { indicator, expected } of cases) {
     const text = [
@@ -86,6 +86,10 @@ test("parseFrontmatter handles > and | block-scalar indicators with all chomping
       `description: ${indicator}`,
       "  Enter away-mode",
       "  when idle.",
+      "",
+      "  Resume when the user returns.",
+      "",
+      "",
       "---",
       "# Away mode",
       "",

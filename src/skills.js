@@ -117,27 +117,62 @@ export function parseFrontmatter(text) {
   if (!match) return {};
   const result = {};
   let currentKey = null;
-  let blockStyle = null; // "fold" (>) | "literal" (|) | null for plain scalars
-  let blockIndent = null;
+  let block = null;
+
+  const finishBlock = () => {
+    if (!block) return;
+    const lines = block.lines;
+    let value;
+    if (block.style === "|") {
+      value = lines.length ? `${lines.join("\n")}\n` : "";
+    } else {
+      value = foldBlockLines(lines);
+    }
+    if (block.chomp === "-") value = value.replace(/\n+$/, "");
+    if (block.chomp === "") value = value.replace(/\n*$/, lines.some(Boolean) ? "\n" : "");
+    result[block.key] = value;
+    block = null;
+  };
+
   for (const line of match[1].split("\n")) {
     const kv = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
     if (kv) {
+      finishBlock();
       currentKey = kv[1];
       const rawValue = kv[2].trim();
-      const blockIndicator = /^([>|])[+-]?$/.exec(rawValue);
-      blockStyle = blockIndicator ? (blockIndicator[1] === "|" ? "literal" : "fold") : null;
-      blockIndent = null;
-      result[currentKey] = blockIndicator ? "" : rawValue.replace(/^["']|["']$/g, "");
-    } else if (currentKey && blockStyle && /^\s+\S/.test(line)) {
-      if (blockIndent === null) blockIndent = /^\s+/.exec(line)[0].length;
-      const content = line.slice(blockIndent);
-      const separator = blockStyle === "literal" ? "\n" : " ";
-      result[currentKey] = result[currentKey] ? `${result[currentKey]}${separator}${content}` : content;
-    } else if (currentKey && !blockStyle && /^\s+\S/.test(line)) {
+      const blockIndicator = /^([>|])([+-]?)$/.exec(rawValue);
+      if (blockIndicator) {
+        result[currentKey] = "";
+        block = { key: currentKey, style: blockIndicator[1], chomp: blockIndicator[2], indent: null, lines: [] };
+      } else {
+        result[currentKey] = rawValue.replace(/^["']|["']$/g, "");
+      }
+    } else if (block && /^\s*$/.test(line)) {
+      block.lines.push("");
+    } else if (block && /^\s+\S/.test(line)) {
+      if (block.indent === null) block.indent = /^\s+/.exec(line)[0].length;
+      block.lines.push(line.slice(block.indent));
+    } else if (currentKey && !block && /^\s+\S/.test(line)) {
       result[currentKey] = `${result[currentKey]} ${line.trim()}`.trim();
     }
   }
+  finishBlock();
   return result;
+}
+
+function foldBlockLines(lines) {
+  let value = "";
+  let previousContent = -1;
+  for (let i = 0; i < lines.length; i += 1) {
+    if (lines[i] === "") continue;
+    if (previousContent < 0) value += "\n".repeat(i);
+    else value += i === previousContent + 1 ? " " : "\n".repeat(i - previousContent - 1);
+    value += lines[i];
+    previousContent = i;
+  }
+  if (previousContent >= 0) value += "\n".repeat(lines.length - previousContent);
+  else value = "\n".repeat(lines.length);
+  return value;
 }
 
 export function renderSkillIndex(skills) {
