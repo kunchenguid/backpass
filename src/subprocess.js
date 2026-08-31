@@ -23,8 +23,8 @@ export function runCapture(
   return new Promise((resolve) => {
     const launch = windowsShimLaunch(bin, args, { platform, env: lookupEnv });
     if (launch.error) {
-      // Loud and named: an argument cmd.exe would expand must not reach a shim
-      // silently rewritten into several arguments.
+      // Loud and named: an argument no quoting can neutralise must not reach a shim
+      // where cmd.exe would silently rewrite it into several arguments or commands.
       resolve({ code: null, stdout: "", stderr: launch.error.message, spawnError: launch.error });
       return;
     }
@@ -108,14 +108,15 @@ export function windowsShimLaunch(bin, args, { platform = process.platform, env 
   const shim = resolveShimPath(bin, { platform, env });
   if (!shim) return { file: bin, args, verbatim: false };
 
-  const unsafe = [shim, ...args].find((value) => EXPANDABLE_PERCENT.test(String(value)));
-  if (unsafe !== undefined) {
-    /** @type {NodeJS.ErrnoException} */
+  for (const value of [shim, ...args]) {
+    const reason = unsafeShimReason(String(value));
+    if (!reason) continue;
+    /** @type {NodeJS.ErrnoException & { value?: string }} */
     const error = new Error(
-      `cannot safely pass ${JSON.stringify(String(unsafe))} to the Windows command shim for ${bin}: ` +
-        "cmd.exe expands %VAR% even inside quotes, and there is no escape for it on a command line",
+      `cannot safely pass ${JSON.stringify(String(value))} to the Windows command shim for ${bin}: ${reason}`,
     );
     error.code = "ERR_WINDOWS_SHIM_UNSAFE_ARG";
+    error.value = String(value);
     return { file: bin, args, verbatim: false, error };
   }
 
@@ -123,8 +124,29 @@ export function windowsShimLaunch(bin, args, { platform = process.platform, env 
   return { file: env.ComSpec || "cmd.exe", args: ["/d", "/s", "/c", `"${line}"`], verbatim: true };
 }
 
-/** A `%...%` pair is the only sequence cmd.exe expands that quoting cannot suppress. */
-const EXPANDABLE_PERCENT = /%[^%]*%/;
+/**
+ * Why an argument can never be made safe on a cmd.exe command line, or null when
+ * quoting is enough. Every argument backpass passes is a flag, a model id, a session
+ * name or a path, so none of these can occur legitimately and refusing costs nothing.
+ *
+ * `%NAME%` is expanded even inside quotes and has no command-line escape. A double
+ * quote cannot be escaped for both readers at once - cmd.exe counts quotes while the
+ * target's MSVCRT parser reads backslash rules - so either encoding leaves one of them
+ * mis-parsing the rest of the line. A newline ends the command line outright.
+ */
+function unsafeShimReason(value) {
+  if (EXPANDABLE_PERCENT.test(value)) {
+    return "cmd.exe expands %VAR% even inside quotes, and there is no escape for it on a command line";
+  }
+  if (value.includes('"')) {
+    return "cmd.exe counts double quotes while the target's argv parser reads backslash escapes, so no encoding satisfies both";
+  }
+  if (/[\r\n]/.test(value)) return "a carriage return or newline ends the cmd.exe command line and cannot be quoted";
+  return null;
+}
+
+/** A plausible `%VAR%` reference. A bare or doubled `%` is left alone: cmd expands neither. */
+const EXPANDABLE_PERCENT = /%[A-Za-z_]\w*%/;
 
 /**
  * Quote one argument of a cmd.exe command line.
@@ -132,17 +154,18 @@ const EXPANDABLE_PERCENT = /%[^%]*%/;
  * Two parsers see this text: cmd.exe first, then the target's own argv parser (an npm
  * shim forwards `%*` verbatim to `node.exe`). Double quotes satisfy both - they make
  * cmd treat `& | < > ^ ( ) !` as literal, and they are what MSVCRT's parser expects -
- * so the value is quoted whenever it holds any character either parser would act on.
- * Backslashes preceding a quote, and any trailing run of them, are doubled per the
- * MSVCRT rules, so a path ending in `\` cannot escape the closing quote.
+ * so the value is quoted whenever it is empty or holds whitespace or one of those
+ * operators. A trailing run of backslashes is doubled per the MSVCRT rules, so a path
+ * ending in `\` cannot escape the closing quote. An embedded quote never gets here:
+ * `unsafeShimReason` refuses it rather than pick an encoding one parser would misread.
  *
  * NOT `cmdQuote` from `harness-invoke.js`: that one doubles `%` for a batch *file*
  * body, which on a command *line* is not an escape - it arrives literally, turning
  * `100%done` into `100%%done`.
  */
 export function quoteShimArg(value) {
-  if (value.length > 0 && !/[\s"&|<>^()!]/.test(value)) return value;
-  return `"${value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\*)$/, "$1$1")}"`;
+  if (value.length > 0 && !/[\s&|<>^()!]/.test(value)) return value;
+  return `"${value.replace(/(\\*)$/, "$1$1")}"`;
 }
 
 /**

@@ -72,6 +72,26 @@ function notFoundError(result) {
 }
 
 /**
+ * A Windows command-shim refusal (`src/subprocess.js`) as its own user-facing error.
+ *
+ * It must not travel as a generic non-zero exit: `classifyAcpxFailure` cannot see it,
+ * so `openSession` would report "no session support" and every later candidate would
+ * fail on the very same argument. Widening the classifier is wrong for the same
+ * reason - `unreachable` would silently drop the harness instead of naming the value.
+ *
+ * @returns {UserError | null}
+ */
+export function shimRefusalError(result) {
+  const spawnError = result?.spawnError;
+  if (spawnError?.code !== "ERR_WINDOWS_SHIM_UNSAFE_ARG") return null;
+  const value = spawnError.value === undefined ? "" : JSON.stringify(String(spawnError.value));
+  return new UserError(
+    `backpass refused to pass ${value} to ${ACPX_BIN} through the Windows command interpreter`,
+    spawnError.message,
+  );
+}
+
+/**
  * Availability verdicts for a failed acpx call. Only a *classifiable* failure is a
  * reason to drop a candidate and fall through to the next one; anything else (a
  * timeout on a long prompt, garbage output) stays a plain error so a run never
@@ -237,6 +257,8 @@ export async function acpxVersion({ timeoutMs = 10_000 } = {}) {
 export async function probeSession({ agent, sessionName, cwd = undefined, timeoutMs = 20_000 }) {
   const acpxAgent = acpxAgentName(agent);
   const created = await run([acpxAgent, "sessions", "new", "--name", sessionName], { timeoutMs, cwd });
+  const refusal = shimRefusalError(created);
+  if (refusal) throw refusal;
   if (created.spawnError?.code === "ENOENT") throw notFoundError(created);
   if (created.timedOut) {
     return {
@@ -311,6 +333,8 @@ export async function execOneShot({
       );
     }
     const result = await run(args, { timeoutMs: (timeoutSeconds + 30) * 1000, cwd, env: invocation.env });
+    const refusal = shimRefusalError(result);
+    if (refusal) throw refusal;
     if (result.spawnError && result.spawnError.code === "ENOENT") throw notFoundError(result);
     if (result.timedOut) {
       throw new AcpxError(`acpx ${agent} exec timed out after ${timeoutSeconds}s`, result);
@@ -368,6 +392,11 @@ export async function openSession({ agent, model = null, effort = null, sessionN
     ],
     runOpts,
   );
+  const refusal = shimRefusalError(created);
+  if (refusal) {
+    invocation.dispose();
+    throw refusal;
+  }
   if (created.spawnError && created.spawnError.code === "ENOENT") {
     invocation.dispose();
     throw notFoundError(created);

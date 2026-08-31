@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import { classifyAcpxFailure, shimRefusalError } from "../src/acpx.js";
 import { quoteShimArg, runCapture } from "../src/subprocess.js";
 
 test(
@@ -235,24 +236,77 @@ test("shim arguments are quoted for both cmd.exe and the target's argv parser", 
   }
   // A trailing backslash must not escape the closing quote: MSVCRT doubles the run.
   assert.equal(quoteShimArg("C:\\dir with spaces\\"), '"C:\\dir with spaces\\\\"');
-  assert.equal(quoteShimArg('has"quote'), '"has\\"quote"');
   assert.equal(quoteShimArg(""), '""');
 });
 
-test("an argument cmd.exe would expand is refused by name, not passed on", async () => {
+test("an argument no quoting can neutralise is refused by name, not passed on", async () => {
+  const { dir, lookupEnv } = shimFixture();
+  // Quoting suppresses none of these: cmd.exe expands %VAR% inside quotes, the two
+  // parsers disagree on how a quote is escaped, and a newline ends the command line.
+  // Passing any of them on would silently become several arguments, or commands.
+  const refused = [
+    ["--cwd", "%USERPROFILE%\\repo"],
+    ['a"&whoami&"b'],
+    ["a\nwhoami"],
+    ["a\rwhoami"],
+  ];
+  try {
+    for (const args of refused) {
+      const calls = [];
+      const result = await runCapture("acpx", args, {
+        platform: "win32",
+        lookupEnv,
+        spawnFn: fakeSpawn(calls),
+      });
+      assert.equal(calls.length, 0, `${JSON.stringify(args)} must not reach spawn`);
+      assert.equal(result.spawnError.code, "ERR_WINDOWS_SHIM_UNSAFE_ARG");
+      assert.equal(result.spawnError.value, args[args.length - 1]);
+      assert.ok(result.stderr.includes(JSON.stringify(args[args.length - 1])), result.stderr);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a percent that is not a variable reference still runs", async () => {
   const { dir, lookupEnv } = shimFixture();
   const calls = [];
   try {
-    const result = await runCapture("acpx", ["--cwd", "%USERPROFILE%\\repo"], {
+    // cmd.exe expands neither a lone `%` nor `%%` on a command line, so refusing them
+    // would turn a working Windows run into a hard failure over a legal path.
+    await runCapture("acpx", ["--cwd", "C:\\dev\\50%-off\\repo%%x", "--model", "100%done"], {
       platform: "win32",
       lookupEnv,
       spawnFn: fakeSpawn(calls),
     });
-    // Quoting cannot suppress %VAR% on a command line, and expansion would silently
-    // become several arguments. Fail loud and named instead.
-    assert.equal(calls.length, 0);
-    assert.equal(result.spawnError.code, "ERR_WINDOWS_SHIM_UNSAFE_ARG");
-    assert.match(result.stderr, /%VAR%/);
+    assert.equal(calls.length, 1);
+    assert.ok(calls[0].args[3].includes("C:\\dev\\50%-off\\repo%%x"), calls[0].args[3]);
+    assert.ok(calls[0].args[3].includes("100%done"), calls[0].args[3]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a shim refusal reaches acpx as its own named error, not as missing session support", async () => {
+  const { dir, lookupEnv } = shimFixture();
+  const calls = [];
+  try {
+    // The failure the acpx boundary actually receives, produced by the real refusal.
+    const failure = await runCapture("acpx", ["--cwd", "%USERPROFILE%\\repo"], {
+      platform: "win32",
+      lookupEnv,
+      spawnFn: fakeSpawn(calls),
+    });
+    const err = shimRefusalError(failure);
+    assert.equal(err.name, "UserError");
+    assert.ok(err.message.includes("%USERPROFILE%"), err.message);
+    // Not a session-support verdict and not an availability verdict: falling through to
+    // the next harness would fail on the very same argument.
+    assert.equal(err.unsupported, undefined);
+    assert.equal(classifyAcpxFailure(failure), null);
+
+    assert.equal(shimRefusalError({ code: 1, stderr: "boom" }), null);
+    assert.equal(shimRefusalError({ code: null, spawnError: Object.assign(new Error("x"), { code: "ENOENT" }) }), null);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
