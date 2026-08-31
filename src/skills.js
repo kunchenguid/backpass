@@ -111,7 +111,7 @@ export function skillDescriptionTokens(skills) {
   return (skills || []).reduce((sum, s) => sum + (s.descriptionTokens ?? estimateTokens(s.description || "")), 0);
 }
 
-/** Minimal YAML frontmatter reader: only `key: value` and folded multi-line values. */
+/** Minimal YAML frontmatter reader for plain values and `>` / `|` multi-line values. */
 export function parseFrontmatter(text) {
   const match = /^---\n([\s\S]*?)\n---/.exec(text);
   if (!match) return {};
