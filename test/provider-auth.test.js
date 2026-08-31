@@ -150,10 +150,7 @@ test("provider auth state changes with credential files and environment keys", (
   fs.writeFileSync(authFile, JSON.stringify({ openai: { type: "api_key", key: "second" } }));
   const changedFile = providerAuthState("pi", { authFile, env: { OPENAI_API_KEY: "env-first" } });
   assert.notEqual(changedFile, first);
-  assert.notEqual(
-    providerAuthState("pi", { authFile, env: { OPENAI_API_KEY: "env-second" } }),
-    changedFile,
-  );
+  assert.notEqual(providerAuthState("pi", { authFile, env: { OPENAI_API_KEY: "env-second" } }), changedFile);
 });
 
 test("codex, claude, grok, and cursor expose no auth-class map", () => {

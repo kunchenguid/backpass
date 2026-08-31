@@ -56,6 +56,7 @@ function scriptedProbe(verdicts) {
  * @param {Record<string, any>} verdicts
  * @param {{ config?: any, state?: ReturnType<typeof memoryState>, now?: () => number,
  *   bypassCache?: boolean, acpxVersion?: () => Promise<string | null>,
+ *   providerAuthState?: (agent: string) => string,
  *   sleep?: (ms: number) => Promise<void> }} [options]
  */
 function resolverWith(
@@ -171,9 +172,7 @@ test("the real ladder keeps Pi when its ambiguous model has a subscription winne
           verdict: "ok",
           detail: "",
           availableModels:
-            candidate.agent === "pi"
-              ? ["openai/gpt-5.6-luna", "openai-codex/gpt-5.6-luna"]
-              : ["gpt-5.6-luna"],
+            candidate.agent === "pi" ? ["openai/gpt-5.6-luna", "openai-codex/gpt-5.6-luna"] : ["gpt-5.6-luna"],
         }),
       });
     },

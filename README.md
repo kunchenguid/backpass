@@ -485,10 +485,11 @@ wins:
 Each candidate is checked with a ~1.5s zero-token acpx probe (claude via `claude auth status`,
 because its adapter accepts sessions while logged out). A potentially transient busy-harness
 miss retries once and is not cached; durable verdicts are cached in
-`.backpass/agent-probe-cache.json` for 12h (30min for negatives) and re-probed with `--force`.
-The probe is a filter, not a promise: if the chosen harness answers `AUTH_REQUIRED` or rejects
-the model mid-run, backpass falls through to the next candidate and says so. When a whole
-ladder is exhausted the error lists every candidate with what to run to fix it.
+`.backpass/agent-probe-cache.json` for 12h (30min for negatives). Pi and OpenCode entries
+are re-probed when their credential or auth-file state changes; `--force` re-probes every
+entry. The probe is a filter, not a promise: if the chosen harness answers `AUTH_REQUIRED`
+or rejects the model mid-run, backpass falls through to the next candidate and says so.
+When a whole ladder is exhausted the error lists every candidate with what to run to fix it.
 
 Bare model ids are resolved against what each adapter advertises (`openai-codex/gpt-5.6-luna`
 on pi, `openai/gpt-5.6-luna` on opencode, `gpt-5.6-luna` on codex), so nothing is hardcoded
@@ -498,8 +499,10 @@ harness's provider definitions and auth file (see `src/provider-auth.js`). An un
 collision is refused with the colliding ids named; it is never an arbitrary pick. Ladders
 are ordinary config - reorder or shorten them under `"ladders"`.
 
-Pinning an agent skips its ladder entirely. If that harness fails, backpass reports an
-actionable error and keeps the pin rather than falling through or printing a raw stack:
+Pinning an agent skips its candidate ladder. A bare pinned model id is still resolved
+against that harness's advertised models, including the same collision handling above.
+If the pinned harness cannot resolve or serve it, backpass reports an actionable error and
+keeps the pin rather than falling through or printing a raw stack:
 
 ```sh
 backpass \

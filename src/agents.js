@@ -1,12 +1,7 @@
 import { UserError, color, info, warn } from "./logger.js";
 import { DEFAULT_EFFORT, LEGACY_DEFAULT_AGENTS } from "./config.js";
 import { AcpxError, acpxVersion, classifyAcpxFailure, probeSession } from "./acpx.js";
-import {
-  ambiguousModelDetail,
-  providerAuthState,
-  rankCollidingIds,
-  readProviderAuthTypes,
-} from "./provider-auth.js";
+import { ambiguousModelDetail, providerAuthState, rankCollidingIds, readProviderAuthTypes } from "./provider-auth.js";
 import { runCapture } from "./subprocess.js";
 
 /**
@@ -32,7 +27,8 @@ import { runCapture } from "./subprocess.js";
  * on a large profile, so `opencode models` answers first and the ACP probe is capped.
  *
  * Verdicts are cached in `.backpass/agent-probe-cache.json` (12h for ok, 30min for
- * negatives, invalidated on an acpx version change) and memoized for the run.
+ * negatives) and memoized for the run. An acpx version change invalidates every entry;
+ * Pi and OpenCode entries are also keyed to credential environment and auth-file state.
  *
  * A busy harness (another backpass run, a wedged ACP session) looks like a probe
  * timeout, a bare `exit 1`, or an empty advertised-model list. Those retry once with
@@ -229,8 +225,9 @@ export async function probeCandidate(candidate, options = {}) {
 }
 
 /**
- * A cache entry is fresh when it is within its TTL and was recorded against the same
- * acpx version. Negatives expire fast: "I just logged in" is the common repair.
+ * A cache entry is fresh when it is within its TTL. The caller separately checks the
+ * acpx version and, where provider resolution depends on it, auth state. Negatives expire
+ * fast: "I just logged in" is the common repair.
  */
 export function isProbeEntryFresh(entry, { now = Date.now() } = {}) {
   if (!entry || !entry.checkedAt) return false;
@@ -469,9 +466,7 @@ export class AgentResolver {
     const key = candidateKey({ agent: pick.agent, model: pick.ladderModel });
     if (this.memo.get(key)?.verdict === "ok") {
       // First worker to see the failure records it; the rest just re-resolve.
-      const authState = PROVIDER_AUTH_SENSITIVE_AGENTS.has(pick.agent)
-        ? this.providerAuthState(pick.agent)
-        : null;
+      const authState = PROVIDER_AUTH_SENSITIVE_AGENTS.has(pick.agent) ? this.providerAuthState(pick.agent) : null;
       const entry = {
         verdict,
         detail,

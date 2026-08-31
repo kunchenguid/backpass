@@ -244,7 +244,8 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   acpx (sessions succeed while logged out), so every real call runs under
   `AgentResolver.withFallthrough`, which demotes a candidate on a classifiable failure
   (`classifyAcpxFailure`). Effortful calls go through `sessionPrompt` so the overlay in
-  `src/harness-invoke.js` can apply. Verdicts cache in `.backpass/agent-probe-cache.json`.
+  `src/harness-invoke.js` can apply. Verdicts cache in `.backpass/agent-probe-cache.json`;
+  Pi and OpenCode entries carry `providerAuthState`, so credential changes invalidate them.
   A probe miss retries once with backoff (`probeAndRecord` in `src/agents.js`); a timeout,
   a bare `exit N`, or an empty advertised-model list is never written as a negative cache
   hit, so a busy harness cannot poison the next run.

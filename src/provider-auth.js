@@ -142,8 +142,7 @@ export function providerAuthState(agent, options = {}) {
   const credentialEnv = Object.entries(env)
     .filter(
       ([name, value]) =>
-        typeof value === "string" &&
-        /(?:^|_)(?:API_KEY|ACCESS_TOKEN|AUTH_TOKEN|SECRET_ACCESS_KEY)$/.test(name),
+        typeof value === "string" && /(?:^|_)(?:API_KEY|ACCESS_TOKEN|AUTH_TOKEN|SECRET_ACCESS_KEY)$/.test(name),
     )
     .sort(([left], [right]) => left.localeCompare(right));
   for (const [name, value] of credentialEnv) hash.update(`\0${name}\0${value}`);
