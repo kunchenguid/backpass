@@ -1,7 +1,12 @@
 import { UserError, color, info, warn } from "./logger.js";
 import { DEFAULT_EFFORT, LEGACY_DEFAULT_AGENTS } from "./config.js";
 import { AcpxError, acpxVersion, classifyAcpxFailure, probeSession } from "./acpx.js";
-import { ambiguousModelDetail, rankCollidingIds, readProviderAuthTypes } from "./provider-auth.js";
+import {
+  ambiguousModelDetail,
+  providerAuthState,
+  rankCollidingIds,
+  readProviderAuthTypes,
+} from "./provider-auth.js";
 import { runCapture } from "./subprocess.js";
 
 /**
@@ -277,7 +282,8 @@ export class AgentResolver {
    * @param {object} config
    * @param {{ state?: { readProbeCache: Function, writeProbeCache: Function }, cwd?: string,
    *   bypassCache?: boolean, probeCandidate?: Function, acpxVersion?: Function, now?: () => number,
-   *   sleep?: (ms: number) => Promise<void>, probeRetryBackoffMs?: number }} [deps]
+   *   providerAuthState?: typeof providerAuthState, sleep?: (ms: number) => Promise<void>,
+   *   probeRetryBackoffMs?: number }} [deps]
    */
   constructor(config, deps = {}) {
     this.config = config;
@@ -286,6 +292,7 @@ export class AgentResolver {
     this.bypassCache = Boolean(deps.bypassCache);
     this.probeCandidate = deps.probeCandidate || probeCandidate;
     this.acpxVersion = deps.acpxVersion || acpxVersion;
+    this.providerAuthState = deps.providerAuthState || providerAuthState;
     this.now = deps.now || (() => Date.now());
     this.sleep = deps.sleep || defaultSleep;
     this.probeRetryBackoffMs = deps.probeRetryBackoffMs ?? PROBE_RETRY_BACKOFF_MS;
@@ -325,8 +332,11 @@ export class AgentResolver {
   async probeAndRecord(candidate, key) {
     const cache = await this.loadCache();
     const cached = cache.entries[key];
-    const providerAuthSensitive = PROVIDER_AUTH_SENSITIVE_AGENTS.has(candidate.agent);
-    if (!this.bypassCache && !providerAuthSensitive && isProbeEntryFresh(cached, { now: this.now() })) {
+    const authState = PROVIDER_AUTH_SENSITIVE_AGENTS.has(candidate.agent)
+      ? this.providerAuthState(candidate.agent)
+      : null;
+    const authStateMatches = authState === null || cached?.authState === authState;
+    if (!this.bypassCache && authStateMatches && isProbeEntryFresh(cached, { now: this.now() })) {
       this.memo.set(key, { ...cached, cached: true });
       return this.memo.get(key);
     }
@@ -349,6 +359,7 @@ export class AgentResolver {
       detail: result.detail || "",
       resolvedModel: result.resolvedModel || null,
       checkedAt: new Date(this.now()).toISOString(),
+      ...(authState === null ? {} : { authState }),
       ...(result.tieBreak ? { tieBreak: result.tieBreak } : {}),
     };
     this.memo.set(key, entry);

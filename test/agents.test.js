@@ -610,7 +610,7 @@ test("probe verdicts are cached with TTLs and invalidated on an acpx version cha
   );
 });
 
-test("provider-auth-sensitive harnesses re-probe instead of serving stale resolutions", async () => {
+test("provider-auth-sensitive cache entries are reused only while auth state matches", async () => {
   const now = Date.parse("2026-08-22T00:00:00Z");
   const state = memoryState({
     version: 1,
@@ -621,16 +621,24 @@ test("provider-auth-sensitive harnesses re-probe instead of serving stale resolu
         detail: "",
         resolvedModel: "openai/gpt-5.6-luna",
         checkedAt: new Date(now).toISOString(),
+        authState: "auth-a",
       },
     },
   });
-  const { resolver, calls } = resolverWith(
+  const unchanged = resolverWith(
     { "pi|gpt-5.6-luna": { resolvedModel: "openai-codex/gpt-5.6-luna" } },
-    { state, now: () => now + 60_000 },
+    { state, now: () => now + 60_000, providerAuthState: () => "auth-a" },
   );
-  const pick = await resolver.resolve("analysis");
-  assert.equal(pick.model, "openai-codex/gpt-5.6-luna");
-  assert.deepEqual(calls, ["pi|gpt-5.6-luna"]);
+  assert.equal((await unchanged.resolver.resolve("analysis")).model, "openai/gpt-5.6-luna");
+  assert.deepEqual(unchanged.calls, []);
+
+  const changed = resolverWith(
+    { "pi|gpt-5.6-luna": { resolvedModel: "openai-codex/gpt-5.6-luna" } },
+    { state, now: () => now + 60_000, providerAuthState: () => "auth-b" },
+  );
+  assert.equal((await changed.resolver.resolve("analysis")).model, "openai-codex/gpt-5.6-luna");
+  assert.deepEqual(changed.calls, ["pi|gpt-5.6-luna"]);
+  assert.equal(state.cache.entries["pi|gpt-5.6-luna"].authState, "auth-b");
 });
 
 test("a transient probe timeout retries once and does not poison the cache", async () => {

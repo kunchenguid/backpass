@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -117,6 +118,36 @@ export function opencodeAuthFilePath({ env = process.env, homedir = os.homedir()
   const xdg = env.XDG_DATA_HOME;
   const base = typeof xdg === "string" && xdg.trim() ? xdg.trim() : path.join(homedir, ".local", "share");
   return path.join(base, "opencode", "auth.json");
+}
+
+export function providerAuthState(agent, options = {}) {
+  const { env = process.env, homedir = os.homedir() } = options;
+  const file =
+    options.authFile === undefined
+      ? agent === "pi"
+        ? piAuthFilePath({ env, homedir })
+        : agent === "opencode"
+          ? opencodeAuthFilePath({ env, homedir })
+          : null
+      : options.authFile;
+  const hash = crypto.createHash("sha256");
+  hash.update(`${agent}\0${file || ""}\0`);
+  if (file) {
+    try {
+      hash.update(fs.readFileSync(file));
+    } catch {
+      hash.update("missing");
+    }
+  }
+  const credentialEnv = Object.entries(env)
+    .filter(
+      ([name, value]) =>
+        typeof value === "string" &&
+        /(?:^|_)(?:API_KEY|ACCESS_TOKEN|AUTH_TOKEN|SECRET_ACCESS_KEY)$/.test(name),
+    )
+    .sort(([left], [right]) => left.localeCompare(right));
+  for (const [name, value] of credentialEnv) hash.update(`\0${name}\0${value}`);
+  return hash.digest("hex");
 }
 
 /**

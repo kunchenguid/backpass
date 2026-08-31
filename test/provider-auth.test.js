@@ -11,6 +11,7 @@ import {
   opencodeAuthFilePath,
   parseAuthFileTypes,
   piAuthFilePath,
+  providerAuthState,
   providerOf,
   rankCollidingIds,
   readProviderAuthTypes,
@@ -137,6 +138,22 @@ test("opencode auth types come from its auth.json, not Pi's openai=api_key defin
   assert.equal(types.anthropic, "api_key");
   const ranked = rankCollidingIds(["openai/gpt-5.6-luna", "anthropic/gpt-5.6-luna"], types);
   assert.equal(ranked.id, "openai/gpt-5.6-luna");
+});
+
+test("provider auth state changes with credential files and environment keys", () => {
+  const dir = tmpDir();
+  const authFile = path.join(dir, "auth.json");
+  fs.writeFileSync(authFile, JSON.stringify({ openai: { type: "api_key", key: "first" } }));
+  const first = providerAuthState("pi", { authFile, env: { OPENAI_API_KEY: "env-first" } });
+  assert.equal(first, providerAuthState("pi", { authFile, env: { OPENAI_API_KEY: "env-first" } }));
+
+  fs.writeFileSync(authFile, JSON.stringify({ openai: { type: "api_key", key: "second" } }));
+  const changedFile = providerAuthState("pi", { authFile, env: { OPENAI_API_KEY: "env-first" } });
+  assert.notEqual(changedFile, first);
+  assert.notEqual(
+    providerAuthState("pi", { authFile, env: { OPENAI_API_KEY: "env-second" } }),
+    changedFile,
+  );
 });
 
 test("codex, claude, grok, and cursor expose no auth-class map", () => {
