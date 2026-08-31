@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.16](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.15...backpass-v0.1.16) (2026-08-31)
+
+
+### Bug Fixes
+
+* resolve ambiguous model ids by provider auth type ([#90](https://github.com/kunchenguid/backpass/issues/90)) ([698d57f](https://github.com/kunchenguid/backpass/commit/698d57f79c471d86ab1cb3c44a36408daaeecb72))
+* select OpenCode variants via session-local ACP effort ([#73](https://github.com/kunchenguid/backpass/issues/73)) ([80b6834](https://github.com/kunchenguid/backpass/commit/80b683400a107d4e2dee88b5bfcaec410690a391))
+* **subprocess:** launch windows npm shims through the command interpreter ([#93](https://github.com/kunchenguid/backpass/issues/93)) ([9ea9da2](https://github.com/kunchenguid/backpass/commit/9ea9da2c606288e2e98afe88d249f12c96d3583c))
+
 ## [0.1.15](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.14...backpass-v0.1.15) (2026-08-30)
 
 
