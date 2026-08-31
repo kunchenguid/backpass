@@ -1,0 +1,15 @@
+Analysis prompt skill index (loaded from real SKILL.md files):
+- fold-clip (.agents/skills/fold-clip/SKILL.md) :: Use this skill for firstmate release operations.
+- fold-keep (.agents/skills/fold-keep/SKILL.md) :: Use this skill for firstmate release operations.
+- fold-strip (.agents/skills/fold-strip/SKILL.md) :: Use this skill for firstmate release operations.
+- literal-clip (.agents/skills/literal-clip/SKILL.md) :: Use this skill for firstmate
+release operations.
+- literal-keep (.agents/skills/literal-keep/SKILL.md) :: Use this skill for firstmate
+release operations.
+- literal-strip (.agents/skills/literal-strip/SKILL.md) :: Use this skill for firstmate
+release operations.
+
+Marker leak check: PASS - no block indicators leaked
+
+Rendered synthesis prompt policy:
+10. Do not assert or dramatize an agent's motives or intent beyond what the evidence supports.
