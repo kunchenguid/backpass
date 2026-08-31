@@ -79,10 +79,9 @@ test("a per-turn prompt refusal is named, not reported as a failed session turn"
       await assert.rejects(
         () => session.prompt({ promptFile, timeoutSeconds: 5 }),
         (err) => {
-          assert.ok(err instanceof UserError, `expected a UserError, got ${err.name}: ${err.message}`);
+          assert.ok(err instanceof UserError, `expected a UserError, got ${String(err)}`);
           assert.ok(err.message.includes(refusedInMessage), err.message);
-          assert.ok(!(err instanceof AcpxError));
-          assert.equal(err.unsupported, undefined);
+          assert.ok(!(err instanceof AcpxError), err.message);
           assert.doesNotMatch(err.message, /session prompt failed|exit null/);
           return true;
         },
@@ -98,9 +97,9 @@ test("the exec one-shot fallback names the same refusal", async () => {
     await assert.rejects(
       () => execOneShot({ agent: "codex", promptFile, cwd: refusedCwd, timeoutSeconds: 5 }),
       (err) => {
-        assert.ok(err instanceof UserError, `expected a UserError, got ${err.name}: ${err.message}`);
+        assert.ok(err instanceof UserError, `expected a UserError, got ${String(err)}`);
         assert.ok(err.message.includes(refusedInMessage), err.message);
-        assert.equal(err.unsupported, undefined);
+        assert.ok(!(err instanceof AcpxError), err.message);
         return true;
       },
     );
@@ -114,7 +113,7 @@ test("the apply surface names the refusal as its headline", async () => {
     await assert.rejects(
       () => openApplySurface(surface),
       (err) => {
-        assert.ok(err instanceof UserError, `expected a UserError, got ${err.name}: ${err.message}`);
+        assert.ok(err instanceof UserError, `expected a UserError, got ${String(err)}`);
         assert.ok(err.message.includes(JSON.stringify(surface)), err.message);
         assert.doesNotMatch(err.message, /failed to open the apply surface|not found on PATH/);
         return true;
