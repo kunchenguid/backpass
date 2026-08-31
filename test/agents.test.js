@@ -340,11 +340,13 @@ test("non-claude candidates resolve the bare id against the advertised list", as
 });
 
 test("AUTH_REQUIRED mid-run falls through to the next candidate", async () => {
-  const { resolver, calls, state } = resolverWith({
+  const authState = () => "auth-a";
+  const verdicts = {
     "pi|gpt-5.6-luna": { resolvedModel: "openai-codex/gpt-5.6-luna" },
     "opencode|gpt-5.6-luna": "model-unavailable",
     "codex|gpt-5.6-luna": { resolvedModel: "gpt-5.6-luna" },
-  });
+  };
+  const { resolver, calls, state } = resolverWith(verdicts, { providerAuthState: authState });
 
   const attempts = [];
   const result = await resolver.withFallthrough("analysis", async (pick) => {
@@ -357,7 +359,12 @@ test("AUTH_REQUIRED mid-run falls through to the next candidate", async () => {
   assert.deepEqual(attempts, ["pi/openai-codex/gpt-5.6-luna", "codex/gpt-5.6-luna"]);
   assert.deepEqual(calls, ["pi|gpt-5.6-luna", "opencode|gpt-5.6-luna", "codex|gpt-5.6-luna"]);
   assert.equal(state.cache.entries["pi|gpt-5.6-luna"].verdict, "unauthenticated", "the failure is remembered");
+  assert.equal(state.cache.entries["pi|gpt-5.6-luna"].authState, "auth-a");
   assert.equal((await resolver.resolve("analysis")).agent, "codex", "later calls in the run stay on the fallback");
+
+  const replay = resolverWith(verdicts, { state, providerAuthState: authState });
+  assert.equal((await replay.resolver.resolve("analysis")).agent, "codex");
+  assert.deepEqual(replay.calls, [], "the demotion remains cached while auth state is unchanged");
 });
 
 test("parallel workers failing on the same candidate fall through once, together", async () => {

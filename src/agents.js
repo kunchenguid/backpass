@@ -469,7 +469,16 @@ export class AgentResolver {
     const key = candidateKey({ agent: pick.agent, model: pick.ladderModel });
     if (this.memo.get(key)?.verdict === "ok") {
       // First worker to see the failure records it; the rest just re-resolve.
-      const entry = { verdict, detail, resolvedModel: null, checkedAt: new Date(this.now()).toISOString() };
+      const authState = PROVIDER_AUTH_SENSITIVE_AGENTS.has(pick.agent)
+        ? this.providerAuthState(pick.agent)
+        : null;
+      const entry = {
+        verdict,
+        detail,
+        resolvedModel: null,
+        checkedAt: new Date(this.now()).toISOString(),
+        ...(authState === null ? {} : { authState }),
+      };
       this.memo.set(key, entry);
       const cache = await this.loadCache();
       cache.entries[key] = entry;
