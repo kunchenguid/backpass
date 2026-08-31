@@ -326,8 +326,8 @@ test("a refusal is not an availability verdict: it must not demote the harness",
       spawnFn: fakeSpawn(calls),
     });
     // Classifying it would silently drop the candidate, and the next harness would
-    // fail on the very same argument. `test/acpx-shim-refusal.test.js` covers how the
-    // acpx boundary does surface it.
+    // fail on the very same argument. `test/shim-refusal.test.js` covers how each spawn
+    // boundary does surface it.
     assert.equal(classifyAcpxFailure(failure), null);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

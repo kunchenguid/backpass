@@ -230,6 +230,16 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   (`src/prompts.js`) and discovery drops transcripts whose first user message begins with
   it (`src/discovery/self.js`) before sampling. Keep the sentinel on every model-facing
   prompt; the triviality filter is not a substitute.
+- **A Windows shim refusal must be raised by name, before any generic handling.** On
+  Windows every spawn of an npm `.cmd` goes through `windowsShimLaunch` (`src/subprocess.js`),
+  which refuses an argument no quoting can neutralise (`%VAR%`, a double quote, a newline)
+  rather than passing it to cmd.exe. That refusal arrives as a result with `code: null` and
+  `spawnError.code === "ERR_WINDOWS_SHIM_UNSAFE_ARG"`, so any boundary that inspects the
+  result generically first degrades it into "no session support", "exit null" or "failed to
+  open the apply surface" - none of which names the refused value. Two rounds of this change
+  were spent chasing that degradation at two separate boundaries. Today `run` in `src/acpx.js`
+  is the single funnel for every model call and `openApplySurface` in `src/apply/lavish.js`
+  covers apply; a new spawn boundary must raise it the same way.
 - **acpx is alpha.** All model invocation is isolated behind `src/acpx.js` so an upstream
   CLI change has one blast radius. v1 uses plain `exec` and named sessions only; acpx flows
   are deferred until they are stable upstream. The one sanctioned exception is the
