@@ -471,6 +471,11 @@ export async function openSession({ agent, model = null, effort = null, sessionN
       "--prompt-retries",
       String(promptRetries),
       ...acpxAgentArgs,
+      // `--agent <command>` has no `-s` of its own (acpx 0.13.1/0.13.2: `unknown
+      // option '-s'`, exit 2). `-s`/`--file` live on `prompt`. Built-in agents still
+      // accept the implicit form (`acpx codex -s ... --file ...`); `acpx codex prompt
+      // --help` documents the subcommand too, but changing that path is unnecessary.
+      ...(invocation.acpxAgentCommand ? ["prompt"] : []),
       "-s",
       sessionName,
       "--file",

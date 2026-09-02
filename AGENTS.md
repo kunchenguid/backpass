@@ -248,6 +248,9 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   CLI change has one blast radius. v1 uses plain `exec` and named sessions only; acpx flows
   are deferred until they are stable upstream. The one sanctioned exception is the
   per-harness native status table in `src/agents.js` (`claude auth status`, `opencode models`).
+  Grok overlays ride acpx `--agent`; that hatch has no `-s` of its own (acpx 0.13.x:
+  `unknown option '-s'`), so `openSession`'s `prompt()` sends the `prompt` subcommand
+  before `-s` when `acpxAgentCommand` is set. Built-in agents keep the implicit form.
 - **Model and effort overrides are invocation-scoped.** Never ACP `set model` / Pi
   `set thought_level` (those rewrite `~/.pi/agent/settings.json`) and never edit-then-restore
   harness defaults. `src/harness-invoke.js` owns the harness overlay mechanisms and

@@ -771,6 +771,48 @@ test("a write-access Codex session rejects malformed CODEX_CONFIG before invokin
   assert.deepEqual(acpxCalls(), []);
 });
 
+test("a grok session prompt sends the prompt subcommand before -s", async () => {
+  resetLogsAndSettings();
+  const session = await openSession({
+    agent: "grok",
+    model: "grok-4.6",
+    effort: "high",
+    sessionName: "bp-grok-prompt",
+    cwd: workDir,
+  });
+  await session.prompt({ promptFile, timeoutSeconds: 5 });
+  await session.close();
+
+  const prompted = acpxCalls().find((c) => c.argv.includes("--file") && !c.argv.includes("exec"));
+  assert.ok(prompted, "expected a session prompt invocation");
+  const agentAt = prompted.argv.indexOf("--agent");
+  const promptAt = prompted.argv.indexOf("prompt");
+  const sessionAt = prompted.argv.indexOf("-s");
+  assert.ok(agentAt >= 0, "grok overlays use acpx --agent");
+  assert.ok(promptAt > agentAt, "prompt must follow --agent");
+  assert.equal(prompted.argv[sessionAt + 1], "bp-grok-prompt");
+  assert.ok(promptAt < sessionAt, "acpx --agent rejects -s unless it follows the prompt subcommand");
+});
+
+test("a built-in session prompt keeps the implicit form without a prompt subcommand", async () => {
+  resetLogsAndSettings();
+  const session = await openSession({
+    agent: "codex",
+    model: "gpt-5.6-sol",
+    sessionName: "bp-codex-prompt",
+    cwd: workDir,
+  });
+  await session.prompt({ promptFile, timeoutSeconds: 5 });
+  await session.close();
+
+  const prompted = acpxCalls().find((c) => c.argv.includes("--file") && !c.argv.includes("exec"));
+  assert.ok(prompted, "expected a session prompt invocation");
+  assert.ok(prompted.argv.includes("codex"));
+  assert.ok(!prompted.argv.includes("--agent"));
+  assert.ok(!prompted.argv.includes("prompt"));
+  assert.equal(prompted.argv[prompted.argv.indexOf("-s") + 1], "bp-codex-prompt");
+});
+
 test("a write-access Grok session launches with native file-write permission flags", async () => {
   resetLogsAndSettings();
   const session = await openSession({
