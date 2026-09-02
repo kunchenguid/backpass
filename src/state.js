@@ -3,7 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 
 import { STATE_DIRNAME } from "./config.js";
-import { warn } from "./logger.js";
+import { UserError, warn } from "./logger.js";
 import { ensureLocalExclude } from "./repo.js";
 import { transcriptIdentity } from "./transcript.js";
 
@@ -52,12 +52,20 @@ export class State {
    * state is created 0700 and is never git-excluded (it does not live in a checkout).
    */
   ensure() {
-    fs.mkdirSync(this.root, { recursive: true });
+    fs.mkdirSync(this.root, { recursive: true, ...(this.dirMode ? { mode: this.dirMode } : {}) });
     if (this.dirMode) {
       try {
         fs.chmodSync(this.root, this.dirMode);
-      } catch {
-        // A filesystem that ignores mode still has the directory; keep going.
+      } catch (err) {
+        throw new UserError(
+          `could not secure state directory ${this.root} as mode ${this.dirMode.toString(8)}: ${err.message}`,
+        );
+      }
+      const actualMode = fs.statSync(this.root).mode & 0o777;
+      if (actualMode !== this.dirMode) {
+        throw new UserError(
+          `could not secure state directory ${this.root} as mode ${this.dirMode.toString(8)} (got ${actualMode.toString(8)})`,
+        );
       }
     }
     fs.mkdirSync(this.evidenceDir, { recursive: true });

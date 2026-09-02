@@ -119,6 +119,7 @@ function listRemoteUrls(root) {
     return [];
   }
 
+  names.sort((a, b) => (a === "origin" ? -1 : b === "origin" ? 1 : a.localeCompare(b)));
   const urls = new Set();
   for (const name of names) {
     for (const args of [
@@ -142,7 +143,7 @@ function listRemotes(root) {
 }
 
 export function gitProjectIdentity(root) {
-  const remote = listRemotes(root).sort()[0];
+  const remote = listRemotes(root)[0];
   if (remote) return remote;
 
   try {

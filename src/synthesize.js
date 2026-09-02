@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { extractJson, openSession, usageRecord } from "./acpx.js";
+import { userClaudeSkillsDir } from "./config.js";
 import { renderEvidenceForPrompt } from "./fold.js";
 import { renderInstructionIndex } from "./memory.js";
 import { renderPrompt, render, loadPrompt } from "./prompts.js";
@@ -153,10 +154,13 @@ function assertRepoUntouched(repo, before, workspaceRoot) {
 function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts, scope = null }) {
   const state = config.state;
   const rejections = state.readRejections();
-  const overflow = resolveOverflowTarget(repo.root, config.skillsDir);
+  const userScope = scope?.kind === "user";
+  const overflow = resolveOverflowTarget(repo.root, config.skillsDir, {
+    claudeSkillsDir: userScope ? userClaudeSkillsDir() : undefined,
+  });
   for (const w of overflow.warnings) warn(w);
-  const skillDirs = resolveProjectSkillDirs(repo.root, overflow.dir, config.skillsDirs || []);
-  const skillFiles = loadProjectSkills(repo.root, overflow.dir, config.skillsDirs || []);
+  const skillDirs = resolveProjectSkillDirs(repo.root, overflow.dir, config.skillsDirs || [], { exact: userScope });
+  const skillFiles = loadProjectSkills(repo.root, overflow.dir, config.skillsDirs || [], { exact: userScope });
   const descriptionTokens = skillDescriptionTokens(skillFiles);
   const maxEdits = effectiveMaxEdits(memoryFile, config, descriptionTokens);
 

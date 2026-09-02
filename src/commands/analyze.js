@@ -1,6 +1,7 @@
 import path from "node:path";
 
 import { analyzeTranscripts } from "../analyze.js";
+import { userClaudeSkillsDir } from "../config.js";
 import { UserError, color, info, json, out, warn } from "../logger.js";
 import { memorySurfaceHash, resolveMemoryFiles } from "../memory.js";
 import { loadProjectSkills, resolveOverflowTarget, skillDescriptionTokens } from "../skills.js";
@@ -52,8 +53,11 @@ export function primaryMemoryFile(repo, config, scope = null) {
     );
   }
   // Overflow-layout warnings are the synthesis stage's to print; this resolution is read-only.
-  const overflow = resolveOverflowTarget(repo.root, config.skillsDir);
-  const skills = loadProjectSkills(repo.root, overflow.dir, config.skillsDirs || []);
+  const userScope = scope?.kind === "user";
+  const overflow = resolveOverflowTarget(repo.root, config.skillsDir, {
+    claudeSkillsDir: userScope ? userClaudeSkillsDir() : undefined,
+  });
+  const skills = loadProjectSkills(repo.root, overflow.dir, config.skillsDirs || [], { exact: userScope });
   return {
     file: resolved.primary,
     all: resolved.all,

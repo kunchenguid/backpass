@@ -65,14 +65,22 @@ export function loadSkills(repoRoot, skillsDir) {
 }
 
 /**
- * Every project-level skill root a supported harness can load. The overflow target is
- * included even when custom-configured, and roots resolving to the same directory (the
- * normal `.claude/skills` symlink) are counted only once.
+ * Resolve supported skill roots without double-counting directories reached by symlink.
+ * Project scope includes the conventional roots; exact mode uses only the configured
+ * harness roots and overflow target.
  */
-export function resolveProjectSkillDirs(repoRoot, overflowDir = CANONICAL_SKILLS_DIR, extraDirs = []) {
+export function resolveProjectSkillDirs(
+  repoRoot,
+  overflowDir = CANONICAL_SKILLS_DIR,
+  extraDirs = [],
+  { exact = false } = {},
+) {
   const dirs = [];
   const seen = new Set();
-  for (const dir of [overflowDir, CANONICAL_SKILLS_DIR, CLAUDE_SKILLS_LINK, ...extraDirs]) {
+  const candidates = exact
+    ? [overflowDir, ...extraDirs]
+    : [overflowDir, CANONICAL_SKILLS_DIR, CLAUDE_SKILLS_LINK, ...extraDirs];
+  for (const dir of candidates) {
     if (!dir) continue;
     const absolute = path.isAbsolute(dir) ? dir : path.join(repoRoot, dir);
     const exists = fs.existsSync(absolute);
@@ -93,8 +101,8 @@ export function resolveProjectSkillDirs(repoRoot, overflowDir = CANONICAL_SKILLS
 }
 
 /** Load generated and human-authored project skills across every supported root. */
-export function loadProjectSkills(repoRoot, overflowDir = CANONICAL_SKILLS_DIR, extraDirs = []) {
-  return resolveProjectSkillDirs(repoRoot, overflowDir, extraDirs)
+export function loadProjectSkills(repoRoot, overflowDir = CANONICAL_SKILLS_DIR, extraDirs = [], options = {}) {
+  return resolveProjectSkillDirs(repoRoot, overflowDir, extraDirs, options)
     .flatMap((dir) => loadSkills(repoRoot, dir))
     .sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path));
 }
@@ -267,10 +275,17 @@ export const CLAUDE_SKILLS_LINK_TARGET = path.posix.join("..", CANONICAL_SKILLS_
  * created at write time (`ensureSkillsLayout`), which keeps every pre-apply stage
  * side-effect free.
  */
-export function resolveOverflowTarget(repoRoot, skillsDir = CANONICAL_SKILLS_DIR) {
+export function resolveOverflowTarget(
+  repoRoot,
+  skillsDir = CANONICAL_SKILLS_DIR,
+  { claudeSkillsDir = CLAUDE_SKILLS_LINK } = {},
+) {
   const warnings = [];
-  const claude = inspectClaudeSkillsLink(repoRoot);
-  if (claude.state === "dir") warnings.push(claudeSkillsDirWarning());
+  const canonical = path.join(repoRoot, CANONICAL_SKILLS_DIR);
+  const claudeLink = path.isAbsolute(claudeSkillsDir) ? claudeSkillsDir : path.join(repoRoot, claudeSkillsDir);
+  const target = path.relative(path.dirname(claudeLink), canonical) || ".";
+  const claude = inspectClaudeSkillsLink(repoRoot, claudeSkillsDir);
+  if (claude.state === "dir") warnings.push(claudeSkillsDirWarning(claudeSkillsDir, target));
 
   const explicit = skillsDir && skillsDir !== CANONICAL_SKILLS_DIR && skillsDir !== CLAUDE_SKILLS_LINK;
   const resolvedSkillsDir = path.isAbsolute(skillsDir) ? skillsDir : path.join(repoRoot, skillsDir);

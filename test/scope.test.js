@@ -77,16 +77,19 @@ test("user association stamps a live git toplevel as the project key", () => {
   assert.equal(result.projectRoot, root);
 });
 
-test("user association groups worktrees by normalized remote identity", () => {
+test("user association groups worktrees and deleted sessions by the origin remote", () => {
   const root = initRepo("worktree");
   const sibling = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-scope-worktree-parent-")), "sibling");
+  git(["remote", "add", "upstream", "https://github.com/aaa/upstream.git"], root);
   git(["remote", "add", "origin", "git@github.com:acme/example.git"], root);
   git(["worktree", "add", "-q", "-b", "sibling", sibling], root);
 
   const first = associateUser({ cwd: root });
   const second = associateUser({ cwd: sibling });
+  const deleted = associateUser({ cwd: "/deleted/example", remotes: ["git@github.com:acme/example.git"] });
   assert.equal(first.project, "github.com/acme/example");
   assert.equal(second.project, first.project);
+  assert.equal(deleted.project, first.project);
   assert.notEqual(first.projectRoot, second.projectRoot);
 });
 

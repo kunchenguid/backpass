@@ -24,6 +24,17 @@ async function withXdg(home, fn) {
   }
 }
 
+test("user state creation tightens an existing directory to mode 0700", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-user-state-mode-"));
+  const stateDir = path.join(home, ".config", "backpass", "user");
+  fs.mkdirSync(stateDir, { recursive: true });
+  fs.chmodSync(stateDir, 0o777);
+
+  new State(home, { stateDir, mode: 0o700, exclude: false }).ensure();
+
+  assert.equal(fs.statSync(stateDir).mode & 0o777, 0o700);
+});
+
 test("apply refuses a user-level memory file that is a symlink to a read-only path", () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-uapply-home-"));
   const source = path.join(home, "dotfiles", "AGENTS.md");

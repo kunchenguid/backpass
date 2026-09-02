@@ -73,7 +73,7 @@ export function associateUser(descriptor, { strict = false } = {}) {
     };
   }
 
-  const remote = (descriptor.remotes || []).map(normalizeRemote).filter(Boolean).sort()[0];
+  const remote = (descriptor.remotes || []).map(normalizeRemote).find(Boolean);
   if (remote) {
     return {
       tier: 2,

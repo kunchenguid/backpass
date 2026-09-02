@@ -143,6 +143,24 @@ test("resolveOverflowTarget prefers .agents/skills and never auto-picks bare ski
   assert.equal(resolveOverflowTarget(bare, "nope/skills").dir, CANONICAL_SKILLS_DIR);
 });
 
+test("user skill discovery uses only configured harness roots", () => {
+  const root = tmpRepo();
+  const relocated = path.join(root, "claude-config", "skills");
+  const stale = path.join(root, CLAUDE_SKILLS_LINK, "stale", "SKILL.md");
+  const active = path.join(relocated, "active", "SKILL.md");
+  fs.mkdirSync(path.dirname(stale), { recursive: true });
+  fs.mkdirSync(path.dirname(active), { recursive: true });
+  fs.writeFileSync(stale, "---\nname: stale\ndescription: stale trigger\n---\n\nbody\n");
+  fs.writeFileSync(active, "---\nname: active\ndescription: active trigger\n---\n\nbody\n");
+
+  assert.deepEqual(
+    loadProjectSkills(root, CANONICAL_SKILLS_DIR, [CANONICAL_SKILLS_DIR, relocated], { exact: true }).map(
+      (skill) => skill.name,
+    ),
+    ["active"],
+  );
+});
+
 test("project skill discovery includes separate canonical and Claude roots without double-counting symlinks", () => {
   const root = tmpRepo();
   const canonical = path.join(root, CANONICAL_SKILLS_DIR, "generated", "SKILL.md");
@@ -247,32 +265,44 @@ test("applyDecisions writes accepted extractions through the skills layout and s
   assert.ok(fs.existsSync(path.join(root, CLAUDE_SKILLS_LINK, "release-signing", "SKILL.md")));
 });
 
-test("user apply links relocated Claude skills to the canonical directory", () => {
+test("user apply links relocated Claude skills without relying on directory order", () => {
   const root = tmpRepo();
-  const relocated = path.join(root, "claude-config", "skills");
-  fs.writeFileSync(path.join(root, "AGENTS.md"), "# Memory\n\n- Sign releases with the key.\n");
-  const edit = {
-    id: "e1",
-    kind: "extract",
-    file: "AGENTS.md",
-    find: "- Sign releases with the key.",
-    replace: "- Release signing: see the release-signing skill.",
-    skill: SKILL,
-  };
-  const results = applyDecisions({
-    proposal: { scope: "user", memoryFile: { path: "AGENTS.md" }, edits: [edit] },
-    decisions: { e1: "accepted" },
-    repo: { root },
-    state: { readRejections: () => [], writeRejections: () => {} },
-    config: {
-      budgetTokens: 5000,
-      skillsDirs: [CANONICAL_SKILLS_DIR, relocated, path.join(root, ".codex", "skills")],
-    },
-  });
+  const claudeRoot = path.join(root, "claude-config");
+  const relocated = path.join(claudeRoot, "skills");
+  const previous = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = claudeRoot;
+  try {
+    fs.writeFileSync(path.join(root, "AGENTS.md"), "# Memory\n\n- Sign releases with the key.\n");
+    const edit = {
+      id: "e1",
+      kind: "extract",
+      file: "AGENTS.md",
+      find: "- Sign releases with the key.",
+      replace: "- Release signing: see the release-signing skill.",
+      skill: SKILL,
+    };
+    const skillsDirs = [path.join(root, "custom-skills"), path.join(root, ".codex", "skills"), CANONICAL_SKILLS_DIR];
+    const results = applyDecisions({
+      proposal: {
+        scope: "user",
+        memoryFile: { path: "AGENTS.md" },
+        edits: [edit],
+        config: { skillsDirs },
+      },
+      decisions: { e1: "accepted" },
+      repo: { root },
+      state: { readRejections: () => [], writeRejections: () => {} },
+      config: { budgetTokens: 5000, skillsDirs },
+    });
 
-  assert.equal(results.failed.length, 0);
-  assert.ok(fs.lstatSync(relocated).isSymbolicLink());
-  assert.equal(fs.realpathSync(relocated), fs.realpathSync(path.join(root, CANONICAL_SKILLS_DIR)));
-  assert.ok(fs.existsSync(path.join(relocated, "release-signing", "SKILL.md")));
-  assert.equal(fs.existsSync(path.join(root, CLAUDE_SKILLS_LINK)), false);
+    assert.equal(results.failed.length, 0);
+    assert.ok(fs.lstatSync(relocated).isSymbolicLink());
+    assert.equal(fs.realpathSync(relocated), fs.realpathSync(path.join(root, CANONICAL_SKILLS_DIR)));
+    assert.ok(fs.existsSync(path.join(relocated, "release-signing", "SKILL.md")));
+    assert.equal(fs.existsSync(path.join(root, CLAUDE_SKILLS_LINK)), false);
+    assert.equal(fs.existsSync(path.join(root, ".codex", "skills")), false);
+  } finally {
+    if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = previous;
+  }
 });

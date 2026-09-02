@@ -106,12 +106,16 @@ export const DEFAULT_CONFIG = {
 export const USER_MEMORY_FILES = [".agents/AGENTS.md", ".claude/CLAUDE.md", ".codex/AGENTS.md"];
 export const USER_SKILLS_DIRS = [".agents/skills", ".claude/skills", ".codex/skills"];
 
+export function userClaudeSkillsDir() {
+  return path.join(process.env.CLAUDE_CONFIG_DIR || ".claude", "skills");
+}
+
 function userHarnessPaths() {
   const claudeRoot = process.env.CLAUDE_CONFIG_DIR || ".claude";
   const codexRoot = process.env.CODEX_HOME || ".codex";
   return {
     memoryFiles: [".agents/AGENTS.md", path.join(claudeRoot, "CLAUDE.md"), path.join(codexRoot, "AGENTS.md")],
-    skillsDirs: [".agents/skills", path.join(claudeRoot, "skills"), path.join(codexRoot, "skills")],
+    skillsDirs: [".agents/skills", userClaudeSkillsDir(), path.join(codexRoot, "skills")],
   };
 }
 

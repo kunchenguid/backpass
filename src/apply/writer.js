@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 
 import { applyEdit, filesOfEdit, sliceEditForFile } from "../proposal.js";
 import { memoryTextHash, resolveMemoryPath } from "../memory.js";
+import { userClaudeSkillsDir } from "../config.js";
 import { budgetGateKind, budgetStatus, estimateTokens, formatTokens } from "../tokens.js";
 import { recordRejection } from "../state.js";
 import {
@@ -282,15 +283,16 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
 
   // The always-loaded skill layer as it exists on disk right now - the budget below
   // covers the whole surface, not the memory file alone.
+  const userScope = proposal.scope === "user";
+  const claudeSkillsLink = userScope ? userClaudeSkillsDir() : CLAUDE_SKILLS_LINK;
   const skillsDir = resolveOverflowTarget(
     repo.root,
     proposal.config?.skillsDir || config.skillsDir || CANONICAL_SKILLS_DIR,
+    { claudeSkillsDir: claudeSkillsLink },
   ).dir;
   const configuredSkillDirs =
     proposal.config?.skillsDirs || proposal.config?.skillDirs || config.skillsDirs || [];
-  const claudeSkillsLink =
-    proposal.scope === "user" ? configuredSkillDirs[1] || CLAUDE_SKILLS_LINK : CLAUDE_SKILLS_LINK;
-  const skillsNow = loadProjectSkills(repo.root, skillsDir, configuredSkillDirs);
+  const skillsNow = loadProjectSkills(repo.root, skillsDir, configuredSkillDirs, { exact: userScope });
   const descriptionTokensNow = skillDescriptionTokens(skillsNow);
 
   // Freshness for every non-memory file a decision targets, the same contract the

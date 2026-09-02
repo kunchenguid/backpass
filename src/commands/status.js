@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { userClaudeSkillsDir } from "../config.js";
 import { color, json, out } from "../logger.js";
 import { resolveMemoryFiles } from "../memory.js";
 import {
@@ -28,9 +29,12 @@ export async function cmdStatus(ctx) {
   const summary = state.readSummary();
   const proposal = state.readProposal();
   const rejections = state.readRejections();
-  const overflow = resolveOverflowTarget(repo.root, config.skillsDir);
-  const skillDirs = resolveProjectSkillDirs(repo.root, overflow.dir, config.skillsDirs || []);
-  const skills = loadProjectSkills(repo.root, overflow.dir, config.skillsDirs || []);
+  const userScope = scope?.kind === "user";
+  const overflow = resolveOverflowTarget(repo.root, config.skillsDir, {
+    claudeSkillsDir: userScope ? userClaudeSkillsDir() : undefined,
+  });
+  const skillDirs = resolveProjectSkillDirs(repo.root, overflow.dir, config.skillsDirs || [], { exact: userScope });
+  const skills = loadProjectSkills(repo.root, overflow.dir, config.skillsDirs || [], { exact: userScope });
   const descriptionTokens = skillDescriptionTokens(skills);
 
   const duplicates = files
