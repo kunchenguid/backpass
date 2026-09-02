@@ -371,7 +371,7 @@ export async function execOneShot({
  */
 function harnessWritableRoots(agent) {
   const home = os.homedir();
-  const roots = [os.tmpdir()];
+  const roots = [];
   if (agent === "claude") {
     roots.push(path.join(process.env.CLAUDE_CONFIG_DIR || path.join(home, ".claude"), "projects"));
   } else if (agent === "codex") {

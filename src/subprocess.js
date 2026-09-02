@@ -109,7 +109,13 @@ export function readOnlyLaunch(
   { platform = process.platform, env = process.env, writableRoots = [] } = {},
 ) {
   const unique = [...new Set(roots.map((root) => path.resolve(root)))];
-  const writable = [...new Set(writableRoots.map((root) => path.resolve(root)))];
+  const writable = [...new Set(writableRoots.map((root) => path.resolve(root)))].filter(
+    (candidate) =>
+      !unique.some((readOnly) => {
+        const relative = path.relative(candidate, readOnly);
+        return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+      }),
+  );
   if (!unique.length) return launch;
   if (platform === "darwin") {
     const profile = `(version 1)(allow default)${unique

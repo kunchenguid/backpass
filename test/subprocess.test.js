@@ -6,7 +6,22 @@ import path from "node:path";
 import test from "node:test";
 
 import { classifyAcpxFailure } from "../src/acpx.js";
-import { quoteShimArg, runCapture } from "../src/subprocess.js";
+import { quoteShimArg, readOnlyLaunch, runCapture } from "../src/subprocess.js";
+
+test("read-only launch never grants a writable ancestor of a grounding root", () => {
+  const launch = readOnlyLaunch(
+    { file: "tool", args: [], verbatim: false },
+    ["/sandbox/tmp/project"],
+    {
+      platform: "darwin",
+      writableRoots: ["/sandbox/tmp", "/sandbox/tmp/project/workspace", "/sandbox/state"],
+    },
+  );
+  const profile = launch.args[1];
+  assert.doesNotMatch(profile, /allow file-write\* \(subpath "\/sandbox\/tmp"\)/);
+  assert.match(profile, /allow file-write\* \(subpath "\/sandbox\/tmp\/project\/workspace"\)/);
+  assert.match(profile, /allow file-write\* \(subpath "\/sandbox\/state"\)/);
+});
 
 test(
   "a timed leader close still kills a descendant that ignores termination",
