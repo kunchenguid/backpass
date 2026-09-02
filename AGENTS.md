@@ -38,8 +38,8 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
 ## Sharp edges
 
 - **User-scope runs are a separate triple.** `--scope user` trains the first existing
-  of `~/.agents/AGENTS.md`, `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md` from every session
-  on the machine. State is `~/.config/backpass/user/` (0700, honours `XDG_CONFIG_HOME`),
+  of `~/.agents/AGENTS.md`, `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md` from Claude and
+  Codex sessions across projects. State is `~/.config/backpass/user/` (0700, honours `XDG_CONFIG_HOME`),
   never `<repo>/.backpass/`. Association, filters, and the synthetic homedir repo live
   in `src/scope.js`. `minGapProjects` defaults to 1 (the gate exists; cross-project
   corroboration is not required). A project-scoped run never writes a user-level file.

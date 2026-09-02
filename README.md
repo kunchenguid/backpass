@@ -77,9 +77,9 @@ backpass apply     # review each edit, accept or reject, then write
 ### User-level memory
 
 A run is one scope. The default is the checkout you are in. `backpass --scope user`
-trains the always-loaded user file and user-level skills from every agent session on
-the machine, and writes only those files. A project-scoped run never writes a
-user-level file.
+trains the always-loaded user file and user-level skills from Claude Code and Codex
+sessions across projects, and writes only those files. A project-scoped run never
+writes a user-level file.
 
 Canonical user memory is the first of these that exists: `~/.agents/AGENTS.md`,
 then `~/.claude/CLAUDE.md` (a pointer to AGENTS.md is valid), then `~/.codex/AGENTS.md`.
@@ -87,8 +87,8 @@ User-level skill extractions follow the project layout: `.agents/skills`, with a
 warning if `~/.claude/skills` is a real directory rather than the usual symlink.
 
 State lives in `~/.config/backpass/user/` (mode 0700; honours `XDG_CONFIG_HOME`),
-isolated from every project's `.backpass/`. Evidence quotes from every project on
-the machine land in that one directory.
+isolated from every project's `.backpass/`. User-scope evidence, ledgers, proposals,
+and apply surfaces stay in that one directory.
 
 Harness load paths, verified for v1:
 
@@ -484,7 +484,7 @@ pointer-aware:
 | `backpass propose` | aggregate gradients + gradient descent: the tier-2 pass from cached evidence             |
 | `backpass apply`   | review and write the accepted edits                                                      |
 | `backpass status`  | cache state, failed transcripts, budget bars, and cross-surface overlaps                 |
-| `backpass init`    | write `.backpassrc.json`, exclude `.backpass/` locally                                   |
+| `backpass init`    | initialize the selected scope's config and state                                         |
 
 Run `backpass --help` for the full flag list.
 
@@ -588,6 +588,29 @@ CLI flags on top:
   "jobs": 4
 }
 ```
+
+That example is the project scope. User scope ignores `.backpassrc.json` and instead
+layers the `"user"` block in `~/.config/backpass/config.json` over its defaults. Its
+scope-specific settings are `memoryFiles`, `skillsDir`, `skillsDirs`,
+`minGapProjects` (default `1`), and these discovery controls:
+
+```json
+{
+  "user": {
+    "discovery": {
+      "harnesses": ["claude", "codex"],
+      "includeProjects": [],
+      "excludeProjects": [],
+      "maxTranscriptsPerProject": null
+    }
+  }
+}
+```
+
+`includeProjects` and `excludeProjects` are globs matched against each project key and
+session cwd. `--project <glob>` adds command-line include globs. A non-null
+`maxTranscriptsPerProject` applies a sticky, recency-weighted per-project cap before
+`maxTranscripts` applies to the whole run.
 
 ### State
 

@@ -129,7 +129,10 @@ test("split external memory hunks retain their staged path", () => {
 
   const hunks = measureWorkspace(workspace).changes.filter((change) => change.kind === "hunk");
   assert.equal(hunks.length, 2);
-  assert.equal(hunks.every((hunk) => hunk.workspaceFile === workspace.memoryWorkspacePath), true);
+  assert.equal(
+    hunks.every((hunk) => hunk.workspaceFile === workspace.memoryWorkspacePath),
+    true,
+  );
 });
 
 test("only the skill layouts a harness loads count as created skills; anything else is stray", () => {

@@ -274,9 +274,7 @@ export function measureWorkspace(workspace) {
   const knownStaged = new Set(stagedPaths.values());
   for (const staged of [...present].sort()) {
     if (knownStaged.has(staged)) continue;
-    const mapping = skillMappings.find(
-      ({ staged: dir }) => staged === dir || staged.startsWith(`${dir}/`),
-    );
+    const mapping = skillMappings.find(({ staged: dir }) => staged === dir || staged.startsWith(`${dir}/`));
     if (!mapping) {
       stray.push(staged);
       continue;
@@ -332,8 +330,7 @@ export function measureWorkspace(workspace) {
             ...sub,
           })),
         );
-      }
-      else measured.push(change);
+      } else measured.push(change);
     }
     changes.splice(0, changes.length, ...measured);
   }

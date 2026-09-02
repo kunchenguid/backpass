@@ -168,9 +168,7 @@ function setup(
   }
   const config = loadConfig(
     repo.root,
-    externalSkillsDir
-      ? { ...overrides, skillsDir: externalSkillsDir, skillsDirs: [externalSkillsDir] }
-      : overrides,
+    externalSkillsDir ? { ...overrides, skillsDir: externalSkillsDir, skillsDirs: [externalSkillsDir] } : overrides,
   );
   config.state = new State(repo.root).ensure();
   config.agents = agents;

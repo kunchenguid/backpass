@@ -72,7 +72,8 @@ export class AcpxError extends Error {
  * candidate would fail on the very same argument.
  *
  * @param {string[]} args
- * @param {{ timeoutMs?: number, cwd?: string, input?: string, env?: NodeJS.ProcessEnv, readOnlyRoots?: string[] }} [options]
+ * @param {{ timeoutMs?: number, cwd?: string, input?: string, env?: NodeJS.ProcessEnv,
+ *   readOnlyRoots?: string[], writableRoots?: string[] }} [options]
  */
 async function run(args, options = {}) {
   const result = await runCapture(ACPX_BIN, args, options);
@@ -363,11 +364,6 @@ export async function execOneShot({
  * Resolves to the handle, or throws an `AcpxError` (`unsupported: true` when the adapter
  * has no session support; `sessionPrompt` only falls back when it can preserve the requested overlays).
  *
- * @returns {Promise<{ notes: string[],
- *   prompt: (options: { promptFile: string, timeoutSeconds?: number, promptRetries?: number,
- *     approveReads?: boolean, approveAll?: boolean, suppressReads?: boolean }) =>
- *     Promise<{ text: string, usage: Record<string, number> | null, raw: string, notes: string[] }>,
- *   close: () => Promise<void> }>}
  */
 function harnessWritableRoots(agent) {
   const home = os.homedir();
@@ -388,6 +384,13 @@ function harnessWritableRoots(agent) {
   return roots.filter((root) => fs.existsSync(root));
 }
 
+/**
+ * @returns {Promise<{ notes: string[],
+ *   prompt: (options: { promptFile: string, timeoutSeconds?: number, promptRetries?: number,
+ *     approveReads?: boolean, approveAll?: boolean, suppressReads?: boolean }) =>
+ *     Promise<{ text: string, usage: Record<string, number> | null, raw: string, notes: string[] }>,
+ *   close: () => Promise<void> }>}
+ */
 export async function openSession({
   agent,
   model = null,

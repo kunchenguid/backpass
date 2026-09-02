@@ -168,8 +168,9 @@ export function readOnlyLaunch(
       };
     }
   }
-  const error = new Error(`read-only grounding is unavailable on ${platform}`);
-  error.code = "ERR_READ_ONLY_ROOTS_UNAVAILABLE";
+  const error = Object.assign(new Error(`read-only grounding is unavailable on ${platform}`), {
+    code: "ERR_READ_ONLY_ROOTS_UNAVAILABLE",
+  });
   return { ...launch, error };
 }
 

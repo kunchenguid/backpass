@@ -305,8 +305,8 @@ export function resolveMemoryPath(repoRoot, configuredPath, { allowExternal = fa
   if (!allowExternal) {
     let existing = absolute;
     while (!fs.existsSync(existing) && path.dirname(existing) !== existing) existing = path.dirname(existing);
-    let realRoot = root;
-    let realExisting = existing;
+    let realRoot;
+    let realExisting;
     try {
       realRoot = fs.realpathSync(root);
       realExisting = fs.realpathSync(existing);

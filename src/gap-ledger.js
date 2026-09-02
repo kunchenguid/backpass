@@ -157,7 +157,9 @@ export function recordGapObservations(ledger, evidenceRecords, options = {}) {
         gap.coveredBySkill || priors.find((observation) => observation.coveredBySkill)?.coveredBySkill;
       const phrasings = [
         ...new Set([
-          ...priors.flatMap((observation) => observation.phrasings || [observation.proposedInstruction].filter(Boolean)),
+          ...priors.flatMap(
+            (observation) => observation.phrasings || [observation.proposedInstruction].filter(Boolean),
+          ),
           gap.proposedInstruction,
         ]),
       ];

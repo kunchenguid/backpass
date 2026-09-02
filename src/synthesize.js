@@ -449,7 +449,8 @@ export async function synthesizeProposal({
   const repoRoot = groundingRoot(repo, liveGroundingRoots, scope, groundingAvailable);
   let workspace = prepareWorkspace({ state, repo, memoryFile, skillsDir: overflow.dir, skillDirs });
   const stagedSkillsDir =
-    workspace.skillMappings.find((mapping) => mapping.logical === overflow.dir)?.staged || workspacePathFor(overflow.dir);
+    workspace.skillMappings.find((mapping) => mapping.logical === overflow.dir)?.staged ||
+    workspacePathFor(overflow.dir);
   const stagedSkillFiles = skillFiles.map((skill) => ({
     ...skill,
     path: workspace.stagedPaths.get(skill.path) || workspacePathFor(skill.path),

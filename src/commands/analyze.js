@@ -40,7 +40,10 @@ export function primaryMemoryFile(repo, config, scope = null) {
     );
   }
   for (const other of resolved.separate) {
-    const relativeImport = path.relative(path.dirname(other.absolute), resolved.primary.absolute).split(path.sep).join("/");
+    const relativeImport = path
+      .relative(path.dirname(other.absolute), resolved.primary.absolute)
+      .split(path.sep)
+      .join("/");
     const pointerImport = relativeImport;
     warn(
       `${other.path} is a separate memory file and will NOT be updated - only ${resolved.primary.path} is optimized. ` +

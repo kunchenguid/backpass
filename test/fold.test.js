@@ -662,7 +662,10 @@ test("project-covered sightings do not control eligible cluster metadata", () =>
   assert.equal(summary.gaps[0].orchestrationSightings, 0);
   assert.equal(summary.gaps[0].majorityOrchestration, false);
   assert.equal(summary.gaps[0].recurrenceRisk, "medium");
-  assert.deepEqual(summary.gaps[0].quotes.map((quote) => quote.text), ["eligible one", "eligible two"]);
+  assert.deepEqual(
+    summary.gaps[0].quotes.map((quote) => quote.text),
+    ["eligible one", "eligible two"],
+  );
   assert.equal(summary.gaps[0].failedTriggerSkill, undefined);
 });
 

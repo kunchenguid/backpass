@@ -112,7 +112,10 @@ test("only CLAUDE.md can cover a secondary memory file by import", () => {
   fs.writeFileSync(path.join(repo.root, ".codex/AGENTS.md"), `@${path.join(repo.root, ".claude/CLAUDE.md")}\n`);
   const resolved = resolveMemoryFiles(repo.root, [".claude/CLAUDE.md", ".codex/AGENTS.md"]);
   assert.equal(resolved.pointers.length, 0);
-  assert.deepEqual(resolved.separate.map((file) => file.path), [".codex/AGENTS.md"]);
+  assert.deepEqual(
+    resolved.separate.map((file) => file.path),
+    [".codex/AGENTS.md"],
+  );
 });
 
 test("CLAUDE.md as a pointer resolves AGENTS.md silently and only AGENTS.md is written", () => {

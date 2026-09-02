@@ -12,7 +12,7 @@ import { gitToplevel, normalizeRemote } from "./repo.js";
  *
  * Project scope is today's behaviour: git checkout, `<repo>/.backpass/`, sessions
  * associated with this repo. User scope trains the always-loaded user file and
- * user-level skills from every session on the machine, with state isolated under
+ * user-level skills from Claude and Codex sessions across projects, with state isolated under
  * `~/.config/backpass/user/` (0700). A run is exactly one scope, chosen by `--scope`.
  */
 
@@ -153,11 +153,7 @@ function resolveProjectScope(repo, config) {
   };
 }
 
-function resolveUserScope(
-  cwd,
-  config,
-  { strict = false, home = os.homedir(), associateUserFn = associateUser } = {},
-) {
+function resolveUserScope(cwd, config, { strict = false, home = os.homedir(), associateUserFn = associateUser } = {}) {
   const root = home;
   const memoryFiles = (config.memoryFiles || []).map((file) => pathInRoot(file, root, home));
   const overflowDir = pathInRoot(config.skillsDir || ".agents/skills", root, home);
@@ -196,7 +192,7 @@ function resolveUserScope(
  * @param {{ scope?: string, strict?: boolean }} flags
  * @param {object} config
  * @param {object | null} [repo] required for project scope
- * @param {{ home?: string }} [options]
+ * @param {{ home?: string, associateUserFn?: (descriptor: any, options?: { strict?: boolean }) => any }} [options]
  */
 export function resolveScope(cwd, flags, config, repo = null, options = {}) {
   const kind = parseScopeKind(flags?.scope);
