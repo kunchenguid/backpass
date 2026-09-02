@@ -410,7 +410,7 @@ test("mergeGapEntries preserves absorbed citations for duplicate sessions", () =
   assert.equal(summary.gaps[0].sessions, 1);
   assert.equal(summary.gaps[0].projectCoveredSessions, 1);
   assert.equal(summary.gaps[0].failedTriggerSkill, "db-schema");
-  assert.equal(summary.gaps[0].failedTriggerSessions, 2);
+  assert.equal(summary.gaps[0].failedTriggerSessions, 1);
 });
 
 test("merged gap identities remain durable as the canonical phrasing changes", () => {

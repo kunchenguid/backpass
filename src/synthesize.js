@@ -17,6 +17,7 @@ import { isSuppressedByRejection } from "./state.js";
 import { emitProgress } from "./progress.js";
 import { measureWorkspace, prepareWorkspace, repoFingerprint, workspacePathFor } from "./workspace.js";
 import { UserError, color, info, warn } from "./logger.js";
+import { supportsReadOnlyLaunch } from "./subprocess.js";
 
 /**
  * Stage 3 of the pipeline (design section 3): high-reasoning synthesis that turns folded
@@ -203,11 +204,24 @@ function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts, scop
  */
 function groundingRoots(transcripts, scope) {
   if (scope?.kind !== "user") return [];
-  return [...new Set((transcripts || []).map((t) => t.projectRoot).filter(Boolean))].slice(0, 8);
+  const roots = [];
+  for (const transcript of transcripts || []) {
+    const candidate = transcript.projectRoot || transcript.cwd;
+    if (!candidate || !fs.existsSync(candidate)) continue;
+    let root;
+    try {
+      root = fs.realpathSync(candidate);
+    } catch {
+      continue;
+    }
+    if (fs.statSync(root).isDirectory() && !roots.includes(root)) roots.push(root);
+  }
+  return roots;
 }
 
-function groundingRoot(repo, roots, scope) {
+function groundingRoot(repo, roots, scope, available = true) {
   if (scope?.kind !== "user") return repo.root;
+  if (!available) return "(live project paths withheld: read-only containment unavailable)";
   return roots.length ? roots.join("\n") : "(no live project checkouts in this sample)";
 }
 
@@ -429,8 +443,10 @@ export async function synthesizeProposal({
     scope,
   });
 
-  const readOnlyGroundingRoots = groundingRoots(transcripts, scope);
-  const repoRoot = groundingRoot(repo, readOnlyGroundingRoots, scope);
+  const liveGroundingRoots = groundingRoots(transcripts, scope);
+  const groundingAvailable = !liveGroundingRoots.length || supportsReadOnlyLaunch();
+  const readOnlyGroundingRoots = groundingAvailable ? liveGroundingRoots : [];
+  const repoRoot = groundingRoot(repo, liveGroundingRoots, scope, groundingAvailable);
   let workspace = prepareWorkspace({ state, repo, memoryFile, skillsDir: overflow.dir, skillDirs });
   const stagedSkillsDir =
     workspace.skillMappings.find((mapping) => mapping.logical === overflow.dir)?.staged || workspacePathFor(overflow.dir);

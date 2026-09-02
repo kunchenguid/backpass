@@ -195,18 +195,19 @@ export function foldEvidence(
     .sort((a, b) => b.negative - a.negative || b.sessions - a.sessions || a.instruction.localeCompare(b.instruction));
 
   const decided = gapClusters.map((cluster) => {
-    const vote = clusterDomainVote(cluster.items);
+    const eligibleItems = cluster.items.filter((item) => !item.projectCovered);
+    const vote = clusterDomainVote(eligibleItems);
     return {
       proposedInstruction: cluster.proposedInstruction,
       sessions: cluster.sessions.size,
       projects: cluster.projects.size,
       projectCoveredSessions: cluster.projectCoveredSessions.size,
-      recurrenceRisk: highestRisk(cluster.items),
-      quotes: cluster.items.slice(0, 6).map((i) => ({ text: i.quote, effect: i.mistake, source: i.source })),
+      recurrenceRisk: highestRisk(eligibleItems),
+      quotes: eligibleItems.slice(0, 6).map((i) => ({ text: i.quote, effect: i.mistake, source: i.source })),
       orchestrationSightings: vote.orchestrationSightings,
       mixed: vote.mixed,
       majorityOrchestration: vote.majorityOrchestration,
-      ...failedTriggerOf(cluster.items, minGapEvidence),
+      ...failedTriggerOf(eligibleItems, minGapEvidence),
       ...projectSpecificNote(cluster, minGapProjects),
     };
   });
@@ -357,9 +358,13 @@ function isProjectCoveredSighting(obs) {
     if (!fs.existsSync(root)) return false;
     const resolved = resolveMemoryFiles(root, loadConfig(root).memoryFiles);
     if (!resolved.primary) return false;
-    return instructionUnits(resolved.primary).some((unit) =>
-      phrasings.some((phrasing) => similarity(unit.text, phrasing) >= GAP_COVERED_THRESHOLD),
-    );
+    return resolved.all
+      .filter((file) => !resolved.pointers.includes(file))
+      .some((file) =>
+        instructionUnits(file).some((unit) =>
+          phrasings.some((phrasing) => similarity(unit.text, phrasing) >= GAP_COVERED_THRESHOLD),
+        ),
+      );
   } catch {
     return false;
   }

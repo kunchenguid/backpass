@@ -234,7 +234,13 @@ test("user-scope defaults honor relocated Claude and Codex homes", () => {
       path.join(home, "claude-work", "CLAUDE.md"),
       path.join(home, "codex-work", "AGENTS.md"),
     ]);
+    assert.deepEqual(config.skillsDirs, [
+      ".agents/skills",
+      path.join(home, "claude-work", "skills"),
+      path.join(home, "codex-work", "skills"),
+    ]);
     assert.deepEqual(initialUserConfig().memoryFiles, config.memoryFiles);
+    assert.deepEqual(initialUserConfig().skillsDirs, config.skillsDirs);
   } finally {
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete process.env[key];

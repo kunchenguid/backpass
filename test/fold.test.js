@@ -627,12 +627,55 @@ test("duplicate sightings from a covered session do not count toward gap session
   assert.equal(eligible.gaps[0].projects, 1);
 });
 
+test("project-covered sightings do not control eligible cluster metadata", () => {
+  const coveredRoot = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-fold-covered-votes-"));
+  const phrasing = "Always pin deployment artifact digests.";
+  fs.writeFileSync(path.join(coveredRoot, "AGENTS.md"), `# T\n\n- ${phrasing}\n`);
+  const records = [
+    record("p1", {
+      transcript: { id: "p1", harness: "claude", project: "/repos/one", projectRoot: null },
+      gaps: [{ proposedInstruction: phrasing, quote: "eligible one", recurrenceRisk: "medium" }],
+    }),
+    record("p2", {
+      transcript: { id: "p2", harness: "claude", project: "/repos/two", projectRoot: null },
+      gaps: [{ proposedInstruction: phrasing, quote: "eligible two", recurrenceRisk: "medium" }],
+    }),
+    ...["c1", "c2", "c3"].map((id) =>
+      record(id, {
+        transcript: { id, harness: "claude", project: coveredRoot, projectRoot: coveredRoot },
+        gaps: [
+          {
+            proposedInstruction: phrasing,
+            quote: `covered ${id}`,
+            recurrenceRisk: "high",
+            domain: "orchestration",
+            coveredBySkill: "deploy",
+          },
+        ],
+      }),
+    ),
+  ];
+  const summary = foldEvidence(records, { minGapEvidence: 2, checkProjectCoverage: true });
+  assert.equal(summary.gaps.length, 1);
+  assert.equal(summary.gaps[0].sessions, 2);
+  assert.equal(summary.gaps[0].projectCoveredSessions, 3);
+  assert.equal(summary.gaps[0].orchestrationSightings, 0);
+  assert.equal(summary.gaps[0].majorityOrchestration, false);
+  assert.equal(summary.gaps[0].recurrenceRisk, "medium");
+  assert.deepEqual(summary.gaps[0].quotes.map((quote) => quote.text), ["eligible one", "eligible two"]);
+  assert.equal(summary.gaps[0].failedTriggerSkill, undefined);
+});
+
 test("project coverage honors the project's configured memory file", () => {
   const coveredRoot = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-fold-custom-memory-"));
   const phrasing = "Always read the deployment guide before releasing.";
   fs.mkdirSync(path.join(coveredRoot, "docs"), { recursive: true });
+  fs.writeFileSync(path.join(coveredRoot, "AGENTS.md"), "# T\n\n- Keep releases reproducible.\n");
   fs.writeFileSync(path.join(coveredRoot, "docs/AI.md"), `# T\n\n- ${phrasing}\n`);
-  fs.writeFileSync(path.join(coveredRoot, ".backpassrc.json"), JSON.stringify({ memoryFiles: ["docs/AI.md"] }));
+  fs.writeFileSync(
+    path.join(coveredRoot, ".backpassrc.json"),
+    JSON.stringify({ memoryFiles: ["AGENTS.md", "docs/AI.md"] }),
+  );
   const summary = foldEvidence(
     [
       record("s1", {

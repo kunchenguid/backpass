@@ -111,7 +111,7 @@ function userHarnessPaths() {
   const codexRoot = process.env.CODEX_HOME || ".codex";
   return {
     memoryFiles: [".agents/AGENTS.md", path.join(claudeRoot, "CLAUDE.md"), path.join(codexRoot, "AGENTS.md")],
-    skillDirs: [".agents/skills", path.join(claudeRoot, "skills"), path.join(codexRoot, "skills")],
+    skillsDirs: [".agents/skills", path.join(claudeRoot, "skills"), path.join(codexRoot, "skills")],
   };
 }
 
@@ -362,11 +362,11 @@ export function initialConfig() {
 
 /** The `user` block written by `backpass init --scope user`. */
 export function initialUserConfig() {
-  const { memoryFiles, skillDirs } = userHarnessPaths();
+  const { memoryFiles, skillsDirs } = userHarnessPaths();
   return {
     memoryFiles,
     skillsDir: USER_CONFIG_DEFAULTS.skillsDir,
-    skillsDirs: skillDirs,
+    skillsDirs,
     budgetTokens: DEFAULT_CONFIG.budgetTokens,
     minGapEvidence: DEFAULT_CONFIG.minGapEvidence,
     minGapProjects: USER_CONFIG_DEFAULTS.minGapProjects,

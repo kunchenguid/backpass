@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -103,13 +103,35 @@ export function runCapture(
   });
 }
 
+export function supportsReadOnlyLaunch({ platform = process.platform, env = process.env } = {}) {
+  if (platform === "darwin") return fs.existsSync("/usr/bin/sandbox-exec");
+  if (platform === "linux") {
+    const bwrap = resolveOnPath("bwrap", { platform, env });
+    if (!bwrap) return false;
+    const probe = spawnSync(bwrap, ["--ro-bind", "/", "/", "--", process.execPath, "-e", ""], {
+      env,
+      stdio: "ignore",
+      timeout: 5000,
+    });
+    return probe.status === 0;
+  }
+  return false;
+}
+
 export function readOnlyLaunch(
   launch,
   roots,
   { platform = process.platform, env = process.env, writableRoots = [] } = {},
 ) {
-  const unique = [...new Set(roots.map((root) => path.resolve(root)))];
-  const writable = [...new Set(writableRoots.map((root) => path.resolve(root)))].filter(
+  const canonical = (root) => {
+    try {
+      return fs.realpathSync(root);
+    } catch {
+      return path.resolve(root);
+    }
+  };
+  const unique = [...new Set(roots.map(canonical))];
+  const writable = [...new Set(writableRoots.map(canonical))].filter(
     (candidate) =>
       !unique.some((readOnly) => {
         const relative = path.relative(candidate, readOnly);
@@ -117,7 +139,7 @@ export function readOnlyLaunch(
       }),
   );
   if (!unique.length) return launch;
-  if (platform === "darwin") {
+  if (platform === "darwin" && supportsReadOnlyLaunch({ platform, env })) {
     const profile = `(version 1)(allow default)${unique
       .map((root) => `(deny file-write* (subpath ${JSON.stringify(root)}))`)
       .join("")}${writable.map((root) => `(allow file-write* (subpath ${JSON.stringify(root)}))`).join("")}`;
