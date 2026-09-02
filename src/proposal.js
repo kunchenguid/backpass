@@ -112,8 +112,10 @@ function normalizeEdit(raw, index) {
     rationale: String(raw?.rationale || "").trim(),
     instructions: Array.isArray(raw?.instructions) ? raw.instructions.map(String) : [],
     evidence: normalizeEvidence(raw?.evidence),
-    transcripts: Number.isFinite(raw?.transcripts) ? Number(raw.transcripts) : countSources(raw?.evidence),
-    projects: Number.isFinite(raw?.projects) ? Number(raw.projects) : undefined,
+    // Corroboration is measured from the edit's own quotes, never taken from the model's
+    // own count: a dry run produced edits declaring 11 and 20 sessions over quotes drawn
+    // from 3 and 2. Same rule as every other number here - see AGENTS.md.
+    transcripts: countSources(raw?.evidence),
   };
 }
 
@@ -295,12 +297,17 @@ export function renderChangesForPrompt(measured, memoryFile) {
  */
 function countedEvidenceProjects(edit, summary) {
   const quoted = new Set(edit.evidence.map((item) => `${item.source || ""}\n${item.text || ""}`));
-  return Math.max(
-    0,
-    ...(summary?.gaps || [])
-      .filter((gap) => gap.quotes?.some((quote) => quoted.has(`${quote.source || ""}\n${quote.text || ""}`)))
-      .map((gap) => gap.projects || 0),
-  );
+  const byGap = (summary?.gaps || [])
+    .filter((gap) => gap.quotes?.some((quote) => quoted.has(`${quote.source || ""}\n${quote.text || ""}`)))
+    .map((gap) => gap.projects || 0);
+  // Gap clusters carry their own project count, but an edit that rewrites or reinforces
+  // an existing instruction quotes instruction-row evidence, which carries none. The fold
+  // hands over the session -> project map behind those rows, so the edit's own quote
+  // sources answer for themselves. A run whose evidence predates the map (or a
+  // project-scoped one, which has no projects) still has the gap count.
+  const sourceProjects = summary?.sourceProjects || {};
+  const byQuoteSource = new Set(edit.evidence.map((item) => sourceProjects[item.source]).filter(Boolean));
+  return Math.max(0, byQuoteSource.size, ...byGap);
 }
 
 export function buildProposal(rawResult, context) {
@@ -512,20 +519,29 @@ export function buildProposal(rawResult, context) {
       }
     }
 
-    // An addition is measured, not declared: text that only goes in is a new instruction.
+    // Corroboration is measured, not declared, and it covers the whole always-loaded
+    // surface: adding, rewriting and removing text all clear the same session floor.
+    // Asking instead whether a rewrite "really" adds an instruction means classifying
+    // text - a question about meaning that a line diff cannot answer, which is why every
+    // lexical proxy for it (net growth, word coverage, bigram overlap) had a mirror-image
+    // failure. Counting the distinct sessions behind an edit's own quotes asks nothing of
+    // the text, so there is no shape to game. Extract and move keep every line on the
+    // always-loaded surface, so they stay exempt; a removal keeps the harm floor below on
+    // top of this one.
     const onlyAdds = hunks.every((h) => h.removed === 0);
+    const changed = onlyAdds ? "adds a new instruction" : `changes ${files[0] ?? memoryFile.path}`;
     const projectGate = scope?.kind === "user" && config.minGapProjects != null;
-    const evidenceProjects = onlyAdds && projectGate ? countedEvidenceProjects(edit, summary) : null;
-    if (!preservesAlwaysLoaded(edit.kind) && onlyAdds && edit.transcripts < config.minGapEvidence) {
+    const evidenceProjects = projectGate ? countedEvidenceProjects(edit, summary) : null;
+    if (!preservesAlwaysLoaded(edit.kind) && edit.transcripts < config.minGapEvidence) {
       violations.push(
-        `edit ${edit.id} ("${edit.title}") adds a new instruction backed by ${edit.transcripts} session(s); ` +
+        `edit ${edit.id} ("${edit.title}") ${changed} backed by ${edit.transcripts} session(s); ` +
           `${config.minGapEvidence} are required`,
       );
       continue;
     }
-    if (!preservesAlwaysLoaded(edit.kind) && onlyAdds && projectGate && evidenceProjects < config.minGapProjects) {
+    if (!preservesAlwaysLoaded(edit.kind) && projectGate && evidenceProjects < config.minGapProjects) {
       violations.push(
-        `edit ${edit.id} ("${edit.title}") adds a new instruction backed by evidence from ${evidenceProjects} project(s); ` +
+        `edit ${edit.id} ("${edit.title}") ${changed} backed by evidence from ${evidenceProjects} project(s); ` +
           `${config.minGapProjects} are required`,
       );
       continue;

@@ -34,7 +34,13 @@ const MEMORY_TEXT = [
   "",
 ].join("\n");
 
-const QUOTE = [{ polarity: "negative", text: "it used a bare #2731 reference", source: "claude · abc · turn 3" }];
+// Two sources, because every edit that changes the always-loaded surface now clears the
+// session floor. Tests whose subject is that floor pass their own evidence.
+const QUOTE = [
+  { polarity: "negative", text: "it used a bare #2731 reference", source: "claude · abc · turn 3" },
+  { polarity: "negative", text: "the PR was named without a link", source: "codex · def · turn 8" },
+];
+const ONE_SESSION = [QUOTE[0]];
 
 function config(overrides = {}) {
   return {
@@ -88,7 +94,6 @@ const claim = (changes, extra = {}) => ({
   kind: "rewrite",
   title: "t",
   evidence: QUOTE,
-  transcripts: 3,
   ...extra,
 });
 
@@ -242,22 +247,14 @@ test("folded domain votes separate synthesis evidence from report-only diagnosti
     );
   const propose = (summary, minGapEvidence) => {
     const displayed = summary.gaps[0] || summary.reportOnlyGaps[0];
-    const evidence = displayed.quotes.slice(0, 1).map((quote) => ({
+    const evidence = displayed.quotes.slice(0, minGapEvidence).map((quote) => ({
       polarity: "negative",
       text: quote.text,
       source: quote.source,
     }));
     return gate({
       edit: memoryEdit((text) => `${text}- ${phrasing}\n`),
-      annotation: {
-        edits: [
-          claim(["H1"], {
-            kind: "add",
-            evidence,
-            transcripts: Math.max(displayed.sessions, minGapEvidence),
-          }),
-        ],
-      },
+      annotation: { edits: [claim(["H1"], { kind: "add", evidence })] },
       config: config({ minGapEvidence }),
       context: { summary },
     });
@@ -296,11 +293,223 @@ test("a new instruction backed by too few sessions is rejected, whatever kind th
   for (const kind of ["add", "rewrite"]) {
     const { proposal, violations } = gate({
       edit: insert,
-      annotation: { edits: [claim(["H1"], { kind, title: "new rule from one session", transcripts: 1 })] },
+      annotation: { edits: [claim(["H1"], { kind, title: "new rule from one session", evidence: ONE_SESSION })] },
     });
     assert.equal(proposal.edits.length, 0, `${kind}: measured as an addition`);
     assert.ok(violations.some((v) => /backed by 1 session/.test(v)));
   }
+});
+
+// The always-loaded session floor. Its whole point is that it asks nothing of the text:
+// a rewrite is not classified as "really an addition" or "really a tightening" - the
+// only question is how many distinct sessions the edit's own quotes come from. The
+// shapes below are the ones that broke every lexical proxy tried before it.
+const REWRITE_SHAPES = {
+  "append a sentence": (t) =>
+    t.replace(
+      "- Whenever a PR is mentioned, include its URL.",
+      "- Whenever a PR is mentioned, include its URL. Check for and replace every bare number.",
+    ),
+  "append four tokens": (t) => t.replace("- Prefer small commits.", "- Prefer small commits. Same for PRs."),
+  "pure tightening, shared words": (t) =>
+    t.replace("- Use Node 18 via nvm before running any script.", "- Use Node 18 with nvm."),
+  "paraphrase tightening, few shared words": (t) =>
+    t.replace("- Use Node 18 via nvm before running any script.", "- Run every script under nvm's Node 18."),
+  negation: (t) => t.replace("- Prefer small commits.", "- Never prefer small commits."),
+  "version bump": (t) => t.replace("Node 18", "Node 22"),
+  "unrelated net-negative substitution": (t) =>
+    t.replace("- Use Node 18 via nvm before running any script.", "- Route SSH through the bastion."),
+  "split one rule into two bullets": (t) =>
+    t.replace(
+      "- Use Node 18 via nvm before running any script.",
+      "- Use Node 18 via nvm.\n- Do it before running any script.",
+    ),
+  "reword and extend": (t) =>
+    t.replace("- Prefer small commits.", "- Keep commits small and focused, and squash fixups before review."),
+  "append plus an innocent word fix in the same line": (t) =>
+    t.replace(
+      "- Whenever a PR is mentioned, include its URL.",
+      "- Whenever a PR is mentioned, include its full URL. Check for and replace every bare number.",
+    ),
+};
+
+test("a single-session rewrite is refused whatever shape it takes, and the model's own session count is ignored", () => {
+  for (const [name, rewrite] of Object.entries(REWRITE_SHAPES)) {
+    const { proposal, violations } = gate({
+      edit: memoryEdit(rewrite),
+      annotation: {
+        edits: [
+          // 20 declared sessions over one quoted source: the declared number is not read.
+          claim(["H1"], { kind: "rewrite", title: name, evidence: ONE_SESSION, transcripts: 20 }),
+        ],
+      },
+    });
+    assert.equal(proposal.edits.length, 0, `${name} was accepted on one session`);
+    assert.ok(
+      violations.some((v) => /changes AGENTS\.md backed by 1 session\(s\); 2 are required/.test(v)),
+      `${name}: ${violations.join("\n")}`,
+    );
+  }
+});
+
+test("a rewrite spread over two hunks cannot pay for itself with one session", () => {
+  const { proposal, violations } = gate({
+    edit: memoryEdit((t) =>
+      t
+        .replace("- Use Node 18 via nvm before running any script.", "- Use Node 18 with nvm.")
+        .replace(
+          "- Whenever a PR is mentioned, include its URL.",
+          "- Whenever a PR is mentioned, include its URL. Always.",
+        ),
+    ),
+    annotation: { edits: [claim(["H1", "H2"], { kind: "rewrite", title: "two hunks", evidence: ONE_SESSION })] },
+  });
+  assert.equal(proposal.edits.length, 0);
+  assert.ok(
+    violations.some((v) => /backed by 1 session/.test(v)),
+    violations.join("\n"),
+  );
+});
+
+test("two quoted sessions carry a rewrite of any shape, including a pure tightening", () => {
+  for (const [name, rewrite] of Object.entries(REWRITE_SHAPES)) {
+    const { proposal, violations } = gate({
+      edit: memoryEdit(rewrite),
+      // `claim` quotes two sources; `transcripts` is deliberately absent from the annotation.
+      annotation: { edits: [claim(["H1"], { kind: "rewrite", title: name })] },
+    });
+    assert.deepEqual(violations, [], `${name}: ${violations.join("\n")}`);
+    assert.equal(proposal.edits.length, 1, name);
+    assert.equal(proposal.edits[0].transcripts, 2, `${name}: the count is measured from the quotes`);
+  }
+});
+
+test("the dry run's three appends still pass on their real quote-source counts", () => {
+  // e1 to e3 of the user-scope dry run: 1-removed/1-added appends backed by 3, 2 and 2
+  // distinct sources, over models that declared 11, 20 and 2.
+  const source = (n) => ({ polarity: "negative", text: `quote ${n}`, source: `claude · s${n} · 2026-08-0${n}` });
+  const appends = [
+    {
+      name: "e1 em dash",
+      sources: 3,
+      declared: 11,
+      edit: (t) =>
+        t.replace(
+          "include its URL.",
+          "include its URL. Before sending prose, check for and replace every bare reference.",
+        ),
+    },
+    {
+      name: "e2 repro before fix",
+      sources: 2,
+      declared: 20,
+      edit: (t) =>
+        t.replace(
+          "- Prefer small commits.",
+          "- Prefer small commits. Reproduce before implementing the fix, then repeat the same check after.",
+        ),
+    },
+    {
+      name: "e3 lint warnings",
+      sources: 2,
+      declared: 2,
+      edit: (t) =>
+        t.replace(
+          "before running any script.",
+          "before running any script. Treat warnings as issues rather than dismissing them.",
+        ),
+    },
+  ];
+  for (const append of appends) {
+    const evidence = Array.from({ length: append.sources }, (_, i) => source(i + 1));
+    const { proposal, violations } = gate({
+      edit: memoryEdit(append.edit),
+      annotation: {
+        edits: [claim(["H1"], { kind: "rewrite", title: append.name, evidence, transcripts: append.declared })],
+      },
+    });
+    assert.deepEqual(violations, [], `${append.name}: ${violations.join("\n")}`);
+    assert.equal(proposal.edits[0].transcripts, append.sources, append.name);
+  }
+});
+
+test("extract and move stay exempt from the session floor: they keep every always-loaded line", () => {
+  const extracted = "- Use Node 18 via nvm before running any script.";
+  const extract = gate({
+    edit: (root) => {
+      writeIn(root, "AGENTS.md", (t) => t.replace(`${extracted}\n`, ""));
+      writeIn(
+        root,
+        ".agents/skills/setup/SKILL.md",
+        `---\nname: setup\ndescription: setting up the toolchain\n---\n\n${extracted}\n`,
+      );
+    },
+    annotation: { edits: [claim(["H1", "H2"], { kind: "extract", title: "extract setup", evidence: ONE_SESSION })] },
+  });
+  assert.deepEqual(extract.violations, [], extract.violations.join("\n"));
+
+  const moved = gate({
+    text: `${MEMORY_TEXT}\n## Later\n\n- Keep this nearby.\n`,
+    edit: memoryEdit((t) =>
+      t.replace(`${extracted}\n`, "").replace("- Keep this nearby.", `${extracted}\n- Keep this nearby.`),
+    ),
+    annotation: { edits: [claim(["H1", "H2"], { kind: "move", title: "reposition setup", evidence: ONE_SESSION })] },
+  });
+  assert.deepEqual(moved.violations, [], moved.violations.join("\n"));
+});
+
+test("the user-scope project floor counts instruction evidence, not only gap quotes", () => {
+  // A rewrite reinforcing an existing instruction quotes instruction-row evidence, which
+  // carries no project of its own. The fold hands the gate the session -> project map so
+  // those quotes still answer the "how many projects" question.
+  const record = (id, project) => ({
+    status: "ok",
+    transcript: { id, harness: "claude", project, startedAt: Date.parse("2026-08-01T00:00:00Z") },
+    positive: [],
+    negative: [
+      { instruction: "AG-001", quote: `quote from ${id}`, effect: "the URL was omitted", class: "non-compliance" },
+    ],
+    gaps: [],
+  });
+  const foldFor = (projects) =>
+    foldEvidence(
+      projects.map((project, i) => record(`s${i + 1}`, project)),
+      { minGapEvidence: 2 },
+    );
+
+  const rewrite = memoryEdit((t) => t.replace("include its URL.", "include its full https:// URL."));
+  const proposeWith = (summary, minGapProjects) => {
+    const evidence = summary.instructions[0].quotes.map((quote) => ({
+      polarity: "negative",
+      text: quote.text,
+      source: quote.source,
+    }));
+    return gate({
+      edit: rewrite,
+      annotation: { edits: [claim(["H1"], { kind: "rewrite", title: "spell out the URL", evidence })] },
+      config: config({ minGapProjects }),
+      context: { summary, scope: { kind: "user" } },
+    });
+  };
+
+  const oneProject = proposeWith(foldFor(["repo-a", "repo-a"]), 2);
+  assert.ok(
+    oneProject.violations.some((v) => /evidence from 1 project\(s\); 2 are required/.test(v)),
+    oneProject.violations.join("\n"),
+  );
+
+  const twoProjects = proposeWith(foldFor(["repo-a", "repo-b"]), 2);
+  assert.deepEqual(twoProjects.violations, [], twoProjects.violations.join("\n"));
+  assert.equal(twoProjects.proposal.edits[0].projects, 2);
+
+  // Same evidence in a project-scoped run: no project gate at all.
+  const projectScope = gate({
+    edit: rewrite,
+    annotation: { edits: [claim(["H1"], { kind: "rewrite", title: "spell out the URL" })] },
+    config: config({ minGapProjects: 2 }),
+    context: { summary: foldFor(["repo-a", "repo-a"]), scope: { kind: "project" } },
+  });
+  assert.deepEqual(projectScope.violations, [], projectScope.violations.join("\n"));
 });
 
 test("an edit with no verbatim quote is rejected", () => {
@@ -662,7 +871,9 @@ test("an extract cannot bypass addition evidence without removing memory text", 
   const unsupported = gate({
     files,
     edit: addOnly,
-    annotation: { edits: [claim(["H1", "H2"], { kind: "extract", title: "add setup guidance", transcripts: 1 })] },
+    annotation: {
+      edits: [claim(["H1", "H2"], { kind: "extract", title: "add setup guidance", evidence: ONE_SESSION })],
+    },
   });
   assert.ok(
     unsupported.violations.some((violation) => /adds a new instruction backed by 1 session/.test(violation)),
@@ -682,7 +893,7 @@ test("an extract cannot bypass addition evidence without removing memory text", 
 
 test("addition project counts come from folded gap evidence", () => {
   const edit = memoryEdit((text) => `${text}- Include the full pull request URL.\n`);
-  const annotation = { edits: [claim(["H1"], { kind: "add", projects: 99 })] };
+  const annotation = { edits: [claim(["H1"], { kind: "add" })] };
   const summary = (projects) => ({
     analyzedSessions: 3,
     totals: { positive: 0, negative: 0, gapClusters: 1 },
@@ -893,7 +1104,18 @@ test("a previously rejected edit is suppressed until new evidence arrives", () =
 
   const revived = gate({
     edit,
-    annotation: { edits: [claim(["H1"], { kind: "remove", title: "drop the stale Node pin", transcripts: 9 })] },
+    annotation: {
+      edits: [
+        claim(["H1"], {
+          kind: "remove",
+          title: "drop the stale Node pin",
+          evidence: [
+            ...QUOTE,
+            { polarity: "negative", text: "a third session hit the same pin", source: "pi · ghi · turn 2" },
+          ],
+        }),
+      ],
+    },
     context: { rejections, isSuppressed: isSuppressedByRejection },
   });
   assert.equal(revived.proposal.edits.length, 1, "materially new evidence revives the edit");

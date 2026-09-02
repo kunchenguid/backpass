@@ -87,6 +87,10 @@ Canonical user memory is the first existing file in this order: `~/.agents/AGENT
 follow the project layout at `~/.agents/skills`, with a warning if Claude's active
 `skills` path is a real directory rather than the usual symlink.
 
+In user scope every edit also clears `minGapProjects` (default `1`): the distinct
+projects behind its own quotes, counted from the gap clusters it cites and from the
+session-to-project map behind the instruction evidence rows.
+
 State lives in `$XDG_CONFIG_HOME/backpass/user/` (default
 `~/.config/backpass/user/`) with mode 0700, isolated from every project's
 `.backpass/`. User-scope evidence, ledgers, proposals, and apply surfaces stay in
@@ -311,8 +315,12 @@ Then mechanical gates run, and they are not negotiable:
   An explicit `--max-edits` or config value always pins it.
 - every measured change belongs to exactly one annotated edit - an unexplained change
   is a violation, so is an edit that names no change
-- new instructions need evidence from `minGapEvidence` distinct sessions (an edit that
-  only adds text is a new instruction, whatever the model calls it)
+- every edit that changes the always-loaded surface - adding, rewriting or removing text -
+  needs quotes from `minGapEvidence` distinct sessions. The count is measured from the
+  edit's own quote sources; a session count the model reports is ignored. Rewrites are not
+  classified by shape: a one-session tightening is refused along with a one-session
+  append, because deciding which is which is a question about meaning that a line diff
+  cannot answer. `extract` and `move` are exempt - they keep every always-loaded line.
 - removing a memory-file instruction outright needs harm-class negatives from
   `minGapEvidence` distinct sessions - non-compliance never counts, because a rule that
   was skipped needs reinforcement, not deletion. A pure deletion in a skill file is also

@@ -73,8 +73,12 @@ signal.
 1. **At most {{MAX_EDITS}} edits.** This is the learning rate. An edit is one change a
    human can decide on; pick the highest-signal ones. A small correct step beats a large
    speculative one.
-2. **New instructions need evidence from at least {{MIN_GAP_EVIDENCE}} distinct
-   sessions.** One bad session never rewrites the weights.
+2. **Every change to this always-loaded file needs evidence from at least
+   {{MIN_GAP_EVIDENCE}} distinct sessions** - adding text, rewriting text and removing
+   text alike, whatever the shape of the change. One bad session never rewrites the
+   weights. Extracting text into a skill and moving text within the file are exempt:
+   they keep every line. If only one session supports a wording change, leave the
+   wording alone.
 3. **Removing an instruction outright needs harm evidence from at least
    {{MIN_GAP_EVIDENCE}} distinct sessions** (`harm-sessions` in the evidence rows).
    Only `harm` negatives - following the instruction caused damage - argue against an

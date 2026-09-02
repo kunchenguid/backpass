@@ -147,6 +147,18 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   pure deletion inside a skill file is refused outright - skill content is rewritten or
   extracted, never dropped. Non-compliance never satisfies the floor; the >= 20%-relevance
   placement table stays prompt guidance by the captain's explicit decision - do not harden it.
+- **One session floor covers the whole always-loaded surface.** Every edit whose kind is
+  not `extract` or `move` must quote `minGapEvidence` distinct sessions - add, rewrite and
+  remove alike. `buildProposal` counts them from the edit's own `evidence` sources
+  (`countSources` in `src/proposal.js`); the model's `transcripts` field is not read at all.
+  There is deliberately NO shape predicate separating an additive rewrite from a tightening:
+  https://github.com/kunchenguid/backpass/pull/79 spent 20 commits proving every lexical
+  proxy for it (net token growth, word coverage, bigram overlap) has a mirror-image
+  failure, so a one-session tightening is refused too - the captain's accepted cost. Never
+  reintroduce a text classifier here. In user scope the same edits also clear
+  `minGapProjects`, counted by `countedEvidenceProjects` from cited gap clusters and from
+  `summary.sourceProjects`, the fold's source -> project map that lets instruction-row
+  evidence (which carries no project of its own) answer for a rewrite.
 - **Negative evidence has a sign the pipeline must not lose.** Analysis classifies every
   negative (`harm` / `non-compliance` / `irrelevant`, `sanitizeEvidence` drops other
   values) and `renderEvidenceForPrompt` renders the class AND the `effect` text with each
@@ -165,8 +177,9 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   unsplit. The instruction index and fold use those parts so evidence cannot smear across a
   blob, and synthesis is told to restructure repeated non-compliance into list items rather
   than bold-label it. See `src/memory.js` and `renderEvidenceForPrompt` in `src/fold.js`.
-- **Never trust model-reported numbers.** Token deltas and budget projections are measured
-  in `src/proposal.js` from the actual text; the synthesis model's own figures are ignored.
+- **Never trust model-reported numbers.** Token deltas, budget projections and an edit's
+  session count are measured in `src/proposal.js` from the actual text and quotes; the
+  synthesis model's own figures are ignored.
   Usage accounting comes from acpx's `[acpx] tokens:` stderr line, which acpx prints
   when the ACP adapter returns usage (codex, claude do; pi-acp does not), with one
   harness-store fallback: pi's per-turn usage is read back from its own session file,

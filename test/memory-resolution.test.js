@@ -61,8 +61,10 @@ function applyOneEdit(repo, config) {
           changes: ["H1"],
           kind: "rewrite",
           title: "tighten",
-          evidence: [{ polarity: "negative", text: "skipped tests", source: "claude · s1 · turn 2" }],
-          transcripts: 2,
+          evidence: [
+            { polarity: "negative", text: "skipped tests", source: "claude · s1 · turn 2" },
+            { polarity: "negative", text: "pushed without running tests", source: "codex · s2 · turn 5" },
+          ],
         },
       ],
     },

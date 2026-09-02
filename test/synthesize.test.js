@@ -108,19 +108,24 @@ const QUOTE = {
   text: "the agent re-read the adapter fixture instead",
   source: "claude · s1 · turn 4",
 };
+// Every edit to the always-loaded surface clears the session floor, so the fixtures
+// quote two sessions; the count is measured from these, not declared.
+const QUOTE2 = {
+  polarity: "negative",
+  text: "and here it re-read the same fixture a second time",
+  source: "codex · s2 · turn 9",
+};
 const removal = (changes) => ({
   changes,
   kind: "remove",
   title: "drop two sharp edges nobody hits",
-  evidence: [QUOTE],
-  transcripts: 3,
+  evidence: [QUOTE, QUOTE2],
 });
 const tighten = (changes) => ({
   changes,
   kind: "rewrite",
   title: "sharpen the brevity rule",
-  evidence: [QUOTE],
-  transcripts: 2,
+  evidence: [QUOTE, QUOTE2],
 });
 
 function summaryFor(sessions = 3) {
@@ -494,8 +499,12 @@ test("an oversized non-compliance blob synthesizes as a list-item restructure, n
                     text: "skipped the second sentence of the blob entirely here",
                     source: "claude · s1 · turn 4",
                   },
+                  {
+                    polarity: "negative",
+                    text: "the same blob's second sentence was skipped again",
+                    source: "codex · s2 · turn 9",
+                  },
                 ],
-                transcripts: 2,
                 instructions: ["AG-001.2"],
               },
             ],
