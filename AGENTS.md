@@ -7,8 +7,7 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
 ## Orientation
 
 - `VISION.md` is the acceptance policy: what a change must be true to, and its closing
-  accept/resist tests. `VISION-ANSWERS.md` records the hypotheticals the author ruled on and
-  why, so a change that argues one of those calls should go the other way starts there.
+  accept/resist tests. It is self-sufficient; run that test against `VISION.md` alone.
 - `README.md` documents the user-facing surface; `src/cli.js` is the authoritative flag list.
 - The pipeline is one stage per module, in order: `src/discovery/` -> `src/sample.js` (cap) -> `src/distill.js` ->
   `src/analyze.js` -> `src/consolidate.js` (gap-identity merge, inside `foldForRun`) -> `src/fold.js` ->

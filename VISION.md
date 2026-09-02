@@ -1,9 +1,11 @@
 # Vision
 
-`backpass` exists so that a repository's agent memory file improves from what actually happened in its agent sessions, instead of from whatever a human happened to remember.
-It serves the developer who owns that file, whether it is `AGENTS.md` or the `CLAUDE.md` Claude Code reads in its place, and it turns transcripts already sitting on their disk into a small set of reviewable edits.
-By default the project file is the one it trains. A person's user-level surface (`~/.claude/CLAUDE.md`, user-level skills) is a target only when they name it as the scope of a run.
-It owns exactly one thing: the backward pass from session transcripts to a proposed change in the memory surface - the memory file and the project's skills.
+`backpass` exists so that an agent memory surface improves from what actually happened in its agent sessions, instead of from whatever a human happened to remember.
+It serves the developer who owns that surface, whether it is a project's `AGENTS.md`, the `CLAUDE.md` Claude Code reads in its place, or user-level memory, and it turns transcripts already sitting on their disk into a small set of reviewable edits.
+By default the project file is the one it trains, because learned knowledge belongs with the repo it was learned in, and a write into a person's user-level file from a project run would pollute every project at once.
+A person's user-level surface (`~/.claude/CLAUDE.md`, user-level skills) is a target only when they name it as the scope of a run: that is still the human choosing which weights to train, and it is the only way a person who keeps their instructions at user level has a file to improve.
+Project-scoped and user-scoped evidence stay isolated, so one run cannot launder the other's corroboration.
+It owns exactly one thing: the backward pass from session transcripts to a proposed change in the named memory surface - the memory file and the skills loaded with it.
 
 ## Evidence is the only currency
 
@@ -11,11 +13,13 @@ Every claim a model makes carries a verbatim quote copied from the trace, and a 
 A signal extracted mechanically, with no judgment applied to it, is noise until a quote anchors it to a real moment, so there is no quoteless path into the file.
 A visible violation outranks any number of "it went fine" observations, because negative evidence is what proves the file was steering anything at all.
 A new instruction needs corroboration from at least two distinct sessions, and one session never counts twice however often it is re-analyzed.
+The bar is sessions, not repositories: a gap does not also have to appear in more than one project.
 Removing an instruction takes the same corroboration adding one does, and only harm from following it counts, because a rule that was merely skipped argues for reinforcement rather than deletion.
 Corroboration accumulates across runs in a ledger rather than resetting each run, so a gap seen today and again next week still graduates.
 Whether two sightings are one gap is judged from their evidence rather than scored by word overlap, because models paraphrase and a paraphrase must never hide recurrence.
-A mistake that belongs to the task harness around a session is counted and set aside, never written into the project's file.
-An uncorroborated gap never becomes a proposal, though counting one is fair where that helps a person understand a run.
+A mistake that belongs to the task harness around a session is counted and set aside, never written into the named memory surface.
+An uncorroborated gap never becomes a proposal, because a list of singletons becomes a to-do that reintroduces one-session rewrites by hand.
+Counting one is fair where that helps a person understand a run, because without a count they cannot tell a healthy file from a broken adapter.
 One bad session never rewrites the weights, because a single session can go wrong for reasons that have nothing to do with the file.
 
 ## The human owns the weights
@@ -23,8 +27,8 @@ One bad session never rewrites the weights, because a single session can go wron
 Every stage is read-only analysis and one module does all the writing, which is what makes a run safe to interrupt at any point.
 By default every edit is reviewed on its own, with its diff and the quotes behind it, and accepted or rejected one at a time.
 A rejection is remembered and never re-proposed until materially new evidence arrives, so review effort is not spent twice on the same answer.
-Nothing reaches the memory file except through that gate, including the first proposal in a repo that had no memory file.
-Creating a starter file where none existed is the one write that is not an edit, and it only ever creates, never overwrites.
+Nothing reaches the memory file except through that gate, including the first proposal in a repo that had no memory file, because a model-authored instruction landing unreviewed is the class of write everything else refuses.
+Creating a fixed, non-model-authored starter where no file existed is the one write that is not an edit, and it only ever creates, never overwrites: there is nothing to protect yet, and no learned instruction bypasses review.
 A user may opt in to something looser for their own repo, because choosing how their own weights get updated is the human in control, but that is an explicit choice and never a default.
 
 ## Nothing the model says is taken on faith
@@ -52,9 +56,9 @@ Growth of the memory file is never reported as progress.
 
 Transcripts are read from local harness stores, never uploaded, and they leave the machine only into an agent the user already authenticated.
 `backpass` holds no API key of its own, so it can never become a bill or a service the user did not ask for.
-One machine is the default, not the limit: pooling corroboration across a person's machines, or across a team, is a change of scale and not a change of kind.
+One machine is the default, not the limit: pooling corroboration across a person's machines, or across a team, is a change of scale and not a change of kind, because two independent observers hitting one gap is the strongest evidence there is.
 What may be shared is the derived evidence, carried by infrastructure the user already owns, never a transcript and never through anything `backpass` runs.
-Redaction is a coarse net and says so, so a stricter check may warn or be offered but never blocks a run by default on a guess.
+Redaction is a coarse net and says so, so a stricter check may warn or be offered but never blocks a run by default on a guess: a default refusal on unclassified high-entropy strings would reject most real sessions, and the predictable response is turning redaction off.
 All model invocation stays behind one module, so an upstream change has exactly one blast radius.
 A harness qualifies when it records real session transcripts, because a store holding only a model's summary of a session is not evidence.
 Supporting one means a pinned fixture and a fail-soft adapter, not a row in the README, and a missing or drifted store warns and is skipped while the run continues.
@@ -66,7 +70,7 @@ When coverage and accuracy are in tension, accuracy wins.
 
 A parseable proposal with gate violations is saved with its provenance before the exact breaches are re-prompted; any terminal failure is named, and the run never silently truncates to fit.
 A missing capability is named along with the command that would fix it, and `n/a` is not an acceptable thing to print at a person.
-A gap in capability is fixed or reported, never papered over with a weaker path that quietly produces worse results.
+A gap in capability is fixed or reported, never papered over with a weaker path that quietly produces worse results, because a quieter degraded path hides the gap instead of closing it.
 A drifted store must never look identical to a repo with no history.
 A run that proposes nothing explains why.
 A bug is fixed at its root and verified against the real shape that produced it, not patched where it happened to be noticed.
@@ -75,14 +79,14 @@ A test earns its place by failing when the behavior it names is removed, so a te
 ## Scope
 
 `backpass` is not a code reviewer, not a CI system, not a linter, not a harness, and not a model provider.
-It never writes a user-level file from a project-scoped run.
+It never writes a user-level file from a project-scoped run, because that would promote a cross-repo gap into a file that loads everywhere without the person naming that file as the target.
 It does not rewrite a memory file and will not offer to, because a rewrite cannot be accepted edit by edit and leaves nothing for a rejection to remember.
 Vocabulary is deliberate: the user reads the training loop, while subcommands and internals keep their short names.
 The repo holds itself to its own standard, including excluding its own sessions from the corpus it analyzes.
 
 A change aligns when it makes the evidence behind a proposal stronger, cheaper to verify, or harder to fabricate.
 A change aligns when it lets a person say no faster, or say no once and have it remembered.
-A change should be resisted when it widens what writes, lowers the two-session bar, or makes anything but per-edit review the default.
+A change should be resisted when it widens what writes without an explicit choice of scope, lowers the two-session bar, or makes anything but per-edit review the default.
 A change should be resisted when it makes the memory file easier to grow than to shrink.
 A change should be resisted when it requires `backpass` to hold a key, a server, or a copy of someone else's transcripts.
 A change should be resisted when it buys coverage with accuracy, or trades a real fix for a quieter degraded path.
