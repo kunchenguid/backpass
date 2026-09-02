@@ -28,7 +28,7 @@ Every stage is read-only analysis and one module does all the writing, which is 
 By default every edit is reviewed on its own, with its diff and the quotes behind it, and accepted or rejected one at a time.
 A rejection is remembered and never re-proposed until materially new evidence arrives, so review effort is not spent twice on the same answer.
 Nothing reaches the memory file except through that gate, including the first proposal in a repo that had no memory file, because a model-authored instruction landing unreviewed is the class of write everything else refuses.
-Creating a starter file where none existed is the one write that is not an edit, and it only ever creates, never overwrites: there is nothing to protect yet, and creating empty files is not an instruction.
+Creating a fixed, non-model-authored starter where no file existed is the one write that is not an edit, and it only ever creates, never overwrites: there is nothing to protect yet, and no learned instruction bypasses review.
 A user may opt in to something looser for their own repo, because choosing how their own weights get updated is the human in control, but that is an explicit choice and never a default.
 
 ## Nothing the model says is taken on faith
