@@ -153,13 +153,25 @@ function resolveProjectScope(repo, config) {
   };
 }
 
-function resolveUserScope(cwd, config, { strict = false, home = os.homedir() } = {}) {
+function resolveUserScope(
+  cwd,
+  config,
+  { strict = false, home = os.homedir(), associateUserFn = associateUser } = {},
+) {
   const root = home;
   const memoryFiles = (config.memoryFiles || []).map((file) => pathInRoot(file, root, home));
   const overflowDir = pathInRoot(config.skillsDir || ".agents/skills", root, home);
   const skillDirs = (config.skillsDirs || []).map((dir) => pathInRoot(dir, root, home));
   const repo = syntheticUserRepo(root);
   const stateDir = userStateDir();
+  const associationCache = new Map();
+  const associate = (descriptor) => {
+    const key = JSON.stringify([descriptor?.cwd || null, descriptor?.remotes || []]);
+    if (!associationCache.has(key)) {
+      associationCache.set(key, associateUserFn(descriptor, { strict }));
+    }
+    return associationCache.get(key);
+  };
   return {
     kind: "user",
     repo,
@@ -170,7 +182,7 @@ function resolveUserScope(cwd, config, { strict = false, home = os.homedir() } =
     memoryFiles,
     skillDirs,
     overflowDir,
-    associate: (descriptor) => associateUser(descriptor, { strict }),
+    associate,
     cwdNote: gitToplevel(cwd)
       ? "user scope: this checkout is not a write target; edits go to the user-level memory file and skills"
       : null,
@@ -190,7 +202,11 @@ export function resolveScope(cwd, flags, config, repo = null, options = {}) {
   const kind = parseScopeKind(flags?.scope);
   if (kind === "user") {
     const home = options.home || os.homedir();
-    return resolveUserScope(cwd, config, { strict: Boolean(flags?.strict), home });
+    return resolveUserScope(cwd, config, {
+      strict: Boolean(flags?.strict),
+      home,
+      associateUserFn: options.associateUserFn,
+    });
   }
   if (!repo) {
     throw new UserError("backpass runs per-repo; cd into a repo and retry", "or pass --scope user");

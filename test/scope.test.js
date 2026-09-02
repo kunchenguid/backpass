@@ -39,7 +39,12 @@ test("resolveScope user uses homedir weights and isolated config state", () => {
   process.env.XDG_CONFIG_HOME = path.join(home, ".config");
   try {
     const config = loadConfig(null, {}, { kind: "user" });
-    const scope = resolveScope(home, { scope: "user" }, config, null, { home });
+    let associationCalls = 0;
+    const associateUserFn = (descriptor) => {
+      associationCalls += 1;
+      return { tier: 2, project: descriptor.remotes?.[0] || descriptor.cwd };
+    };
+    const scope = resolveScope(home, { scope: "user" }, config, null, { home, associateUserFn });
     assert.equal(scope.kind, "user");
     assert.equal(scope.root, home);
     assert.equal(scope.name, "user");
@@ -49,6 +54,13 @@ test("resolveScope user uses homedir weights and isolated config state", () => {
     assert.equal(scope.overflowDir, ".agents/skills");
     assert.deepEqual(scope.skillDirs, [".agents/skills", ".claude/skills", ".codex/skills"]);
     assert.equal(config.minGapProjects, 1);
+
+    const descriptor = { cwd: "/repos/alpha", remotes: ["https://example.com/alpha.git"] };
+    assert.equal(scope.associate(descriptor).project, descriptor.remotes[0]);
+    assert.equal(scope.associate({ ...descriptor, remotes: [...descriptor.remotes] }).project, descriptor.remotes[0]);
+    assert.equal(associationCalls, 1);
+    scope.associate({ ...descriptor, remotes: ["https://example.com/fork.git"] });
+    assert.equal(associationCalls, 2);
   } finally {
     if (prevXdg === undefined) delete process.env.XDG_CONFIG_HOME;
     else process.env.XDG_CONFIG_HOME = prevXdg;
