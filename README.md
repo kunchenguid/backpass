@@ -74,6 +74,39 @@ backpass           # collect samples → calculate loss → aggregate gradients 
 backpass apply     # review each edit, accept or reject, then write
 ```
 
+### User-level memory
+
+A run is one scope. The default is the checkout you are in. `backpass --scope user`
+trains the always-loaded user file and user-level skills from every agent session on
+the machine, and writes only those files. A project-scoped run never writes a
+user-level file.
+
+Canonical user memory is the first of these that exists: `~/.agents/AGENTS.md`,
+then `~/.claude/CLAUDE.md` (a pointer to AGENTS.md is valid), then `~/.codex/AGENTS.md`.
+User-level skill extractions follow the project layout: `.agents/skills`, with a
+warning if `~/.claude/skills` is a real directory rather than the usual symlink.
+
+State lives in `~/.config/backpass/user/` (mode 0700; honours `XDG_CONFIG_HOME`),
+isolated from every project's `.backpass/`. Evidence quotes from every project on
+the machine land in that one directory.
+
+Harness load paths, verified for v1:
+
+- **Claude Code** loads `~/.claude/CLAUDE.md` (`CLAUDE_CONFIG_DIR` relocates the config
+  dir) and inlines `@` imports, including `~/` and absolute paths. A CLAUDE.md that is
+  only `@AGENTS.md` (or `@~/...`) is a valid pointer.
+- **Codex** loads `~/.codex/AGENTS.md` (`CODEX_HOME` relocates Codex home). It follows
+  the AGENTS.md convention; `@` import is not assumed.
+
+A target that is a symlink into a read-only store (dotfiles, nix) is refused with
+`<path> is a symlink to <real>, which is not writable; edit the source that generates it`.
+
+```sh
+backpass init --scope user
+backpass --scope user
+backpass apply --scope user
+```
+
 ## How It Works
 
 ### 1. Collect samples - which sessions belong to this repo
@@ -558,8 +591,9 @@ CLI flags on top:
 
 ### State
 
-Everything mutable lives in `.backpass/`, kept out of git via the repo's local exclude
-(`.git/info/exclude`, written by `backpass init`) rather than the tracked `.gitignore`:
+Project-scoped mutable state lives in `.backpass/`, kept out of git via the repo's local
+exclude (`.git/info/exclude`, written by `backpass init`) rather than the tracked
+`.gitignore`:
 
 ```
 .backpass/
@@ -575,6 +609,9 @@ Everything mutable lives in `.backpass/`, kept out of git via the repo's local e
   apply/apply.html       the rendered review surface
 ```
 
+User-scope state is the same files under `~/.config/backpass/user/` (0700). It is never
+mixed with a checkout's `.backpass/`.
+
 ## Limitations
 
 - **Causal attribution is genuinely hard.** A model can confabulate influence. The
@@ -584,7 +621,8 @@ Everything mutable lives in `.backpass/`, kept out of git via the repo's local e
   pinned by a golden fixture and fails soft.
 - **Cursor IDE is deferred to v1.1.** Its composer→workspace link is version-dependent;
   `--include-cursor-ide` enables a best-effort pass, but it is not a v1 guarantee.
-- Global memory (`~/.claude/CLAUDE.md`) is treated as context, never an edit target.
+- A project-scoped run never writes a user-level file. User-level edits are
+  `--scope user` only (see [User-level memory](#user-level-memory)).
 - Paths are verified on macOS and Linux.
 
 ## Development

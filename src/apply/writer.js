@@ -24,6 +24,38 @@ import {
  * are part of the count, the bare file when there are none - a number shown to a person
  * must describe the thing it measures.
  */
+function resolveTarget(root, relative) {
+  if (!relative) return relative;
+  return path.isAbsolute(relative) ? relative : path.join(root, relative);
+}
+
+/** Named refusal when a user-level target is a symlink into a read-only store. */
+export function readOnlySymlinkMessage(absolute, realPath) {
+  return `${absolute} is a symlink to ${realPath}, which is not writable; edit the source that generates it`;
+}
+
+function refuseReadOnlySymlink(absolute) {
+  let lstat;
+  try {
+    lstat = fs.lstatSync(absolute);
+  } catch {
+    return null;
+  }
+  if (!lstat.isSymbolicLink()) return null;
+  let real;
+  try {
+    real = fs.realpathSync(absolute);
+  } catch {
+    return null;
+  }
+  try {
+    fs.accessSync(real, fs.constants.W_OK);
+    return null;
+  } catch {
+    return readOnlySymlinkMessage(absolute, real);
+  }
+}
+
 function surfaceLabel(memoryPath, descriptionTokens) {
   return descriptionTokens ? `the always-loaded surface (${memoryPath} + skill descriptions)` : memoryPath;
 }
@@ -86,7 +118,11 @@ function memoryFileSnapshot(proposal, repo) {
   const relative = proposal.memoryFile?.path;
   if (!relative) return { text: null };
 
-  const absolute = path.join(repo.root, relative);
+  const absolute = resolveTarget(repo.root, relative);
+  const blocked = refuseReadOnlySymlink(absolute);
+  if (blocked) {
+    return { text: null, failure: { file: relative, error: blocked } };
+  }
   if (!fs.existsSync(absolute)) {
     if (!expected) return { text: null };
     return {
@@ -232,7 +268,7 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     repo.root,
     proposal.config?.skillsDir || config.skillsDir || CANONICAL_SKILLS_DIR,
   ).dir;
-  const skillsNow = loadProjectSkills(repo.root, skillsDir);
+  const skillsNow = loadProjectSkills(repo.root, skillsDir, config.skillsDirs || proposal.config?.skillDirs || []);
   const descriptionTokensNow = skillDescriptionTokens(skillsNow);
 
   // Freshness for every non-memory file a decision targets, the same contract the
@@ -247,7 +283,12 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
       checkedTargets.add(relative);
       const expected = expectedTargetHashes.get(relative);
       if (!expected) continue;
-      const absolute = path.join(repo.root, relative);
+      const absolute = resolveTarget(repo.root, relative);
+      const blocked = refuseReadOnlySymlink(absolute);
+      if (blocked) {
+        results.failed.push({ file: relative, error: blocked });
+        continue;
+      }
       if (!fs.existsSync(absolute)) {
         results.failed.push({ file: relative, error: "file does not exist" });
         continue;
@@ -281,9 +322,14 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
   const landed = new Set();
 
   for (const [relative, edits] of byFile) {
-    const absolute = path.join(repo.root, relative);
+    const absolute = resolveTarget(repo.root, relative);
     if (!fs.existsSync(absolute)) {
       results.failed.push({ file: relative, error: "file does not exist" });
+      continue;
+    }
+    const blocked = refuseReadOnlySymlink(absolute);
+    if (blocked) {
+      results.failed.push({ file: relative, error: blocked });
       continue;
     }
 
@@ -351,7 +397,7 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
   for (const edit of accepted) {
     if (edit.kind !== "extract" || !landed.has(edit.id)) continue;
     for (const skill of editSkills(edit)) {
-      const absolute = path.join(repo.root, skill.path);
+      const absolute = resolveTarget(repo.root, skill.path);
       if (skillPaths.has(skill.path) || fs.existsSync(absolute)) {
         results.failed.push({
           file: skill.path,
@@ -395,8 +441,8 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     ({ skill }) => skill.path === CANONICAL_SKILLS_DIR || skill.path.startsWith(`${CANONICAL_SKILLS_DIR}/`),
   );
   const createdDirectoryCandidates = absentParentDirectories(repo.root, [
-    ...plannedSkills.map(({ skill }) => path.join(repo.root, skill.path)),
-    ...(canonical ? [path.join(repo.root, CLAUDE_SKILLS_LINK)] : []),
+    ...plannedSkills.map(({ skill }) => resolveTarget(repo.root, skill.path)),
+    ...(canonical ? [resolveTarget(repo.root, CLAUDE_SKILLS_LINK)] : []),
   ]);
   const skillFailures = [];
   const ownedSkillPaths = [];
@@ -487,9 +533,10 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     try {
       if (!dryRun) commit = atomicReplace(resolved, text);
     } catch (err) {
+      const blocked = refuseReadOnlySymlink(item.absolute);
       results.failed.push({
         file: relative,
-        error: `${relative} could not be written: ${err.message}`,
+        error: blocked || `${relative} could not be written: ${err.message}`,
       });
       rollbackCommitted();
       rollbackSkills();

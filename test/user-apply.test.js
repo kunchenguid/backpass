@@ -1,0 +1,96 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import { applyDecisions, readOnlySymlinkMessage } from "../src/apply/writer.js";
+import { cmdApply } from "../src/commands/apply.js";
+import { cmdInit } from "../src/commands/init.js";
+import { loadConfig } from "../src/config.js";
+import { UserError } from "../src/logger.js";
+import { memoryTextHash } from "../src/memory.js";
+import { resolveScope } from "../src/scope.js";
+import { State } from "../src/state.js";
+
+async function withXdg(home, fn) {
+  const prev = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = path.join(home, ".config");
+  try {
+    return await fn();
+  } finally {
+    if (prev === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = prev;
+  }
+}
+
+test("apply refuses a user-level memory file that is a symlink to a read-only path", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-uapply-home-"));
+  const source = path.join(home, "dotfiles", "AGENTS.md");
+  const link = path.join(home, ".agents", "AGENTS.md");
+  const text = "# User memory\n\n- Keep secrets out of prompts.\n";
+  fs.mkdirSync(path.dirname(source), { recursive: true });
+  fs.mkdirSync(path.dirname(link), { recursive: true });
+  fs.writeFileSync(source, text);
+  fs.chmodSync(source, 0o444);
+  fs.symlinkSync(source, link);
+
+  const state = new State(home, {
+    stateDir: path.join(home, ".config", "backpass", "user"),
+    mode: 0o700,
+    exclude: false,
+  }).ensure();
+  const results = applyDecisions({
+    proposal: {
+      memoryFile: { path: ".agents/AGENTS.md", hash: memoryTextHash(text), tokens: 20 },
+      edits: [{ id: "e1", kind: "rewrite", file: ".agents/AGENTS.md" }],
+      config: { budgetTokens: 5000, skillsDir: ".agents/skills" },
+    },
+    decisions: { e1: "accepted" },
+    repo: { root: home, name: "user" },
+    state,
+    config: { budgetTokens: 5000, skillsDir: ".agents/skills" },
+  });
+
+  assert.equal(results.written.length, 0);
+  assert.equal(results.rejectionsRecorded, false);
+  assert.equal(results.failed[0].error, readOnlySymlinkMessage(link, fs.realpathSync(source)));
+  assert.match(results.failed[0].error, /is a symlink to .+ which is not writable; edit the source that generates it/);
+  assert.equal(fs.readFileSync(source, "utf8"), text);
+  assert.equal(fs.readlinkSync(link), source);
+});
+
+test("apply refuses a proposal from the other scope", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-uapply-scope-"));
+  const state = {
+    readProposal: () => ({ scope: "user", edits: [{ id: "e1" }] }),
+  };
+  await assert.rejects(
+    () => cmdApply({ repo: { root: home, name: "demo" }, scope: { kind: "project" }, config: { state }, flags: {} }),
+    (err) => {
+      assert.ok(err instanceof UserError);
+      assert.match(err.message, /this proposal is user scope; run `backpass apply --scope user`/);
+      return true;
+    },
+  );
+});
+
+test("init --scope user writes the user block and a 0700 state directory", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-uinit-"));
+  await withXdg(home, async () => {
+    const config = loadConfig(null, {}, { kind: "user" });
+    const scope = resolveScope(home, { scope: "user" }, config, null, { home });
+    config.state = new State(scope.root, {
+      stateDir: scope.stateDir,
+      mode: 0o700,
+      exclude: false,
+    }).ensure();
+    await cmdInit({ repo: scope.repo, scope, config, flags: {} });
+    const target = path.join(home, ".config", "backpass", "config.json");
+    const parsed = JSON.parse(fs.readFileSync(target, "utf8"));
+    assert.equal(parsed.user.minGapProjects, 1);
+    assert.deepEqual(parsed.user.memoryFiles[0], ".agents/AGENTS.md");
+    assert.equal(fs.statSync(scope.stateDir).mode & 0o777, 0o700);
+    assert.equal(config.state.exclude.status, "skipped");
+  });
+});

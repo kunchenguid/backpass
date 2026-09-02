@@ -170,6 +170,8 @@ export function recordGapObservations(ledger, evidenceRecords, options = {}) {
         // this mistake. Absent when no skill covers it (including all pre-existing
         // observations), and absence never counts as a citation.
         ...(coveredBySkill ? { coveredBySkill } : {}),
+        ...(transcript.project ? { project: transcript.project } : {}),
+        ...(transcript.projectRoot ? { projectRoot: transcript.projectRoot } : {}),
       };
       recorded += 1;
     }
@@ -255,6 +257,8 @@ export function ledgerGapObservations(ledger, memoryPath, skills = null) {
         ...(obs.coveredBySkill && (!skillNames || skillNames.has(obs.coveredBySkill))
           ? { coveredBySkill: obs.coveredBySkill }
           : {}),
+        ...(obs.project ? { project: obs.project } : {}),
+        ...(obs.projectRoot ? { projectRoot: obs.projectRoot } : {}),
       });
     }
   }

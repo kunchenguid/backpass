@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { CONFIG_FILENAME, loadConfig, parseSince, sinceCutoff } from "../src/config.js";
+import { CONFIG_FILENAME, loadConfig, parseScopeKind, parseSince, sinceCutoff } from "../src/config.js";
 import { evidenceKey, isEvidenceFresh, safeFileName, State } from "../src/state.js";
 import { UserError } from "../src/logger.js";
 
@@ -184,4 +184,26 @@ test("an interrupted legacy evidence migration remains stale under the current a
 test("transcript ids are turned into safe filenames", () => {
   assert.equal(safeFileName("claude-abc/../../etc/passwd"), "claude-abc_.._.._etc_passwd");
   assert.equal(safeFileName("opencode:ses_25de1e"), "opencode_ses_25de1e");
+});
+
+test("user-scope config ignores a checkout .backpassrc.json and defaults minGapProjects to 1", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-user-cfg-"));
+  const repo = tempRepo({ budgetTokens: 1111, minGapProjects: 9 });
+  const prev = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = path.join(home, ".config");
+  try {
+    const user = loadConfig(repo, {}, { kind: "user" });
+    assert.equal(user.budgetTokens, 5000);
+    assert.equal(user.minGapProjects, 1);
+    assert.deepEqual(user.memoryFiles[0], ".agents/AGENTS.md");
+    const project = loadConfig(repo);
+    assert.equal(project.budgetTokens, 1111);
+    assert.equal(project.minGapProjects, 9);
+    assert.throws(() => loadConfig(tempRepo({ minGapProjects: 0 })), UserError);
+    assert.throws(() => parseScopeKind("global"), UserError);
+    assert.equal(parseScopeKind(""), "project");
+  } finally {
+    if (prev === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = prev;
+  }
 });

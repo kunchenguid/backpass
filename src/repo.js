@@ -36,6 +36,20 @@ export function normalizeRemote(remote) {
   return s.toLowerCase() || null;
 }
 
+/**
+ * Live git toplevel for a cwd, or null when the path is missing or not a checkout.
+ * User-scope association uses this as the project key when the worktree still exists.
+ */
+export function gitToplevel(cwd) {
+  if (!cwd) return null;
+  try {
+    if (!fs.existsSync(cwd)) return null;
+    return realpathOrSelf(git(["rev-parse", "--show-toplevel"], cwd));
+  } catch {
+    return null;
+  }
+}
+
 /** Worktree paths for the repo, realpath-normalized (design section 2.1, tier 1). */
 function listWorktrees(root) {
   let raw;

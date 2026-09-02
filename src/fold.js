@@ -1,6 +1,8 @@
+import fs from "node:fs";
+
 import { classifyInteraction, INTERACTIVE, NON_INTERACTIVE } from "./interaction.js";
-import { findInstructionUnit, instructionUnits, similarity } from "./memory.js";
-import { GAP_SIMILARITY_THRESHOLD, gapSource } from "./gap-ledger.js";
+import { findInstructionUnit, instructionUnits, resolveMemoryFiles, similarity } from "./memory.js";
+import { GAP_COVERED_THRESHOLD, GAP_SIMILARITY_THRESHOLD, gapSource } from "./gap-ledger.js";
 import { crossSurfaceDuplicates } from "./overlap.js";
 
 /**
@@ -36,16 +38,28 @@ import { crossSurfaceDuplicates } from "./overlap.js";
 
 /**
  * @param {object[]} evidenceRecords
- * @param {{ minGapEvidence?: number, memoryFile?: object|null, gapObservations?: object[]|null, skills?: object[] }} [options]
+ * @param {{ minGapEvidence?: number, minGapProjects?: number, checkProjectCoverage?: boolean, memoryFile?: object|null, gapObservations?: object[]|null, skills?: object[] }} [options]
  */
 export function foldEvidence(
   evidenceRecords,
-  { minGapEvidence = 2, memoryFile = null, gapObservations = null, skills = [] } = {},
+  {
+    minGapEvidence = 2,
+    minGapProjects = 0,
+    checkProjectCoverage = false,
+    memoryFile = null,
+    gapObservations = null,
+    skills = [],
+  } = {},
 ) {
   const usable = evidenceRecords.filter((e) => e && e.status === "ok");
   const analyzedSessions = usable.length;
   const analyzedByInteraction = { [INTERACTIVE]: 0, [NON_INTERACTIVE]: 0 };
-  for (const record of usable) analyzedByInteraction[classifyInteraction(record.transcript)] += 1;
+  const analyzedByProject = new Map();
+  for (const record of usable) {
+    analyzedByInteraction[classifyInteraction(record.transcript)] += 1;
+    const projectKey = record.transcript?.project;
+    if (projectKey) analyzedByProject.set(projectKey, (analyzedByProject.get(projectKey) || 0) + 1);
+  }
 
   const instructions = new Map();
   let positiveCount = 0;
@@ -60,6 +74,7 @@ export function foldEvidence(
         negative: 0,
         sessions: new Set(),
         sessionsByInteraction: { [INTERACTIVE]: new Set(), [NON_INTERACTIVE]: new Set() },
+        sessionsByProject: new Map(),
         harmSessions: new Set(),
         nonComplianceSessions: new Set(),
         quotes: [],
@@ -81,6 +96,11 @@ export function foldEvidence(
         const category = classifyInteraction(record.transcript);
         entry.sessions.add(sessionIdentity);
         entry.sessionsByInteraction[category].add(sessionIdentity);
+        const projectKey = record.transcript.project;
+        if (projectKey) {
+          if (!entry.sessionsByProject.has(projectKey)) entry.sessionsByProject.set(projectKey, new Set());
+          entry.sessionsByProject.get(projectKey).add(sessionIdentity);
+        }
         // `class` is what a negative means (harm vs non-compliance vs irrelevant);
         // `harmSessions` is what the removal-evidence floor counts. A record from
         // before the class existed carries none and never counts as harm.
@@ -110,6 +130,8 @@ export function foldEvidence(
         source,
         sessionId: record.transcript.identity || record.transcript.id,
         domain: gap.domain === "orchestration" ? "orchestration" : "project",
+        project: record.transcript.project || null,
+        projectRoot: record.transcript.projectRoot || null,
         ...(gap.coveredBySkill ? { coveredBySkill: gap.coveredBySkill } : {}),
       });
     }
@@ -123,7 +145,7 @@ export function foldEvidence(
   const allObservations = gapObservations ?? recordObservations;
   const orchestrationGapSightings = allObservations.filter((obs) => obs?.domain === "orchestration").length;
 
-  const gapClusters = clusterGapObservations(allObservations);
+  const gapClusters = clusterGapObservations(allObservations, { checkProjectCoverage });
 
   // Instructions that exist in the file but drew no evidence at all are the strongest
   // removal / extraction candidates, so they must appear in the summary too.
@@ -156,6 +178,9 @@ export function foldEvidence(
             ? entry.sessionsByInteraction[NON_INTERACTIVE].size / analyzedByInteraction[NON_INTERACTIVE]
             : 0,
         },
+        ...(analyzedByProject.size
+          ? { relevanceByProject: relevanceByProject(entry.sessionsByProject, analyzedByProject) }
+          : {}),
         tokens: unit?.tokens ?? null,
         section: unit?.section ?? null,
         known: Boolean(unit),
@@ -173,24 +198,30 @@ export function foldEvidence(
     return {
       proposedInstruction: cluster.proposedInstruction,
       sessions: cluster.sessions.size,
+      projects: cluster.projects.size,
+      projectCoveredSessions: cluster.projectCoveredSessions.size,
       recurrenceRisk: highestRisk(cluster.items),
       quotes: cluster.items.slice(0, 6).map((i) => ({ text: i.quote, effect: i.mistake, source: i.source })),
       orchestrationSightings: vote.orchestrationSightings,
       mixed: vote.mixed,
       majorityOrchestration: vote.majorityOrchestration,
       ...failedTriggerOf(cluster.items, minGapEvidence),
+      ...projectSpecificNote(cluster, minGapProjects),
     };
   });
 
   const proposalClusters = decided.filter((cluster) => !cluster.majorityOrchestration);
+  // Default 1 means the gate exists but does not require a second project.
+  const clearsProjectGate = (cluster) => minGapProjects < 2 || cluster.projects >= minGapProjects;
   const gaps = proposalClusters
-    .filter((cluster) => cluster.sessions >= minGapEvidence)
+    .filter((cluster) => cluster.sessions >= minGapEvidence && clearsProjectGate(cluster))
     .sort((a, b) => b.sessions - a.sessions);
   const reportOnlyGaps = decided
     .filter((cluster) =>
       cluster.mixed
-        ? cluster.majorityOrchestration || cluster.sessions < minGapEvidence
-        : cluster.majorityOrchestration && cluster.sessions >= minGapEvidence,
+        ? cluster.majorityOrchestration || cluster.sessions < minGapEvidence || !clearsProjectGate(cluster)
+        : (cluster.majorityOrchestration && cluster.sessions >= minGapEvidence) ||
+          (cluster.sessions >= minGapEvidence && !clearsProjectGate(cluster) && !cluster.majorityOrchestration),
     )
     .sort((a, b) => b.sessions - a.sessions);
 
@@ -261,11 +292,14 @@ function oversizedRestructureTargets(memoryFile, nonComplianceSessions, minGapEv
 /**
  * Greedy similarity clustering over gap observations. A cluster counts each session once
  * no matter how many observations it contributed (re-analysis, duplicate reports).
+ * A user-scope sighting the session's own project memory already covers is recorded but
+ * does not count toward `sessions` or `projects`.
  */
-export function clusterGapObservations(observations) {
+export function clusterGapObservations(observations, { checkProjectCoverage = false } = {}) {
   const clusters = [];
   for (const obs of observations) {
     if (!obs || !obs.proposedInstruction) continue;
+    const projectCovered = Boolean(checkProjectCoverage && isProjectCoveredSighting(obs));
     const cluster = clusters.find(
       (c) => similarity(c.proposedInstruction, obs.proposedInstruction) >= GAP_SIMILARITY_THRESHOLD,
     );
@@ -276,33 +310,82 @@ export function clusterGapObservations(observations) {
       source: obs.source,
       sessionId: obs.sessionId,
       domain: observationDomain(obs),
+      project: obs.project || null,
+      projectCovered,
       coveredBySkills: new Set(obs.coveredBySkill ? [obs.coveredBySkill] : []),
     };
     if (cluster) {
       const sessionItem = cluster.items.find((candidate) => candidate.sessionId === obs.sessionId);
       if (sessionItem) {
         if (obs.coveredBySkill) sessionItem.coveredBySkills.add(obs.coveredBySkill);
-        // One session, one vote: a project classification from the same session
-        // keeps the cluster eligible rather than letting a later orchestration
-        // label silently win.
         if (observationDomain(obs) !== "orchestration") sessionItem.domain = "project";
+        if (projectCovered) sessionItem.projectCovered = true;
       } else {
         cluster.items.push(item);
       }
-      cluster.sessions.add(obs.sessionId);
-      // Keep the shortest phrasing: it generalizes best.
+      if (projectCovered) cluster.projectCoveredSessions.add(obs.sessionId);
+      else {
+        cluster.sessions.add(obs.sessionId);
+        if (obs.project) cluster.projects.add(obs.project);
+      }
       if (obs.proposedInstruction.length < cluster.proposedInstruction.length) {
         cluster.proposedInstruction = obs.proposedInstruction;
       }
     } else {
       clusters.push({
         proposedInstruction: obs.proposedInstruction,
-        sessions: new Set([obs.sessionId]),
+        sessions: projectCovered ? new Set() : new Set([obs.sessionId]),
+        projects: projectCovered || !obs.project ? new Set() : new Set([obs.project]),
+        projectCoveredSessions: projectCovered ? new Set([obs.sessionId]) : new Set(),
         items: [item],
       });
     }
   }
   return clusters;
+}
+
+function isProjectCoveredSighting(obs) {
+  const root = obs.projectRoot;
+  if (!root || !obs.proposedInstruction) return false;
+  try {
+    if (!fs.existsSync(root)) return false;
+    const resolved = resolveMemoryFiles(root, ["AGENTS.md", "CLAUDE.md"]);
+    if (!resolved.primary) return false;
+    return instructionUnits(resolved.primary).some(
+      (unit) => similarity(unit.text, obs.proposedInstruction) >= GAP_COVERED_THRESHOLD,
+    );
+  } catch {
+    return false;
+  }
+}
+
+function projectSpecificNote(cluster, minGapProjects) {
+  if (minGapProjects < 2 || cluster.projects.size >= minGapProjects || cluster.sessions.size < 1) return {};
+  const only = [...cluster.projects][0];
+  return {
+    reportOnlyReason: only
+      ? `project-specific: seen in ${only} only; run \`backpass\` there`
+      : "project-specific: below minGapProjects",
+  };
+}
+
+function relevanceByProject(sessionsByProject, analyzedByProject, topK = 5) {
+  const rows = [...sessionsByProject.entries()]
+    .map(([project, sessions]) => ({
+      project,
+      relevance: analyzedByProject.get(project) ? sessions.size / analyzedByProject.get(project) : 0,
+      sessions: sessions.size,
+    }))
+    .sort((a, b) => b.sessions - a.sessions || a.project.localeCompare(b.project));
+  const top = rows.slice(0, topK);
+  const rest = rows.slice(topK);
+  const out = Object.fromEntries(top.map((row) => [row.project, row.relevance]));
+  if (rest.length) {
+    const sessions = rest.reduce((n, row) => n + row.sessions, 0);
+    const analyzed = rest.reduce((n, row) => n + (analyzedByProject.get(row.project) || 0), 0);
+    out.other = analyzed ? sessions / analyzed : 0;
+  }
+  return out;
 }
 
 function observationDomain(obs) {

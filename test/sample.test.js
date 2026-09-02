@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { capTranscripts, recencyWeight, sampleTranscripts, sampleUnit } from "../src/sample.js";
+import { capPerProject, capTranscripts, recencyWeight, sampleTranscripts, sampleUnit } from "../src/sample.js";
 import { CONFIG_FILENAME, loadConfig, parseMaxTranscripts } from "../src/config.js";
 import { transcriptIdentity } from "../src/transcript.js";
 import { UserError, setLoggerSink } from "../src/logger.js";
@@ -360,4 +360,28 @@ test("maxTranscripts is configurable and 0 / all disable the cap", () => {
   assert.deepEqual(lines, [], "no sampling line when the cap is disabled");
   const seven = loadConfig(tempDir(), { maxTranscripts: 7, seed: 1 });
   captureInfo(() => assert.equal(capTranscripts(big, seven, { now: NOW }).transcripts.length, 7));
+});
+
+test("capPerProject keeps at most N transcripts from each project before the global cap", () => {
+  const set = [
+    ...transcripts(6, 10).map((t, i) => ({ ...t, id: `a${i}`, project: "alpha" })),
+    ...transcripts(6, 10).map((t, i) => ({ ...t, id: `b${i}`, project: "beta" })),
+  ];
+  const limited = capPerProject(set, 2, { seed: 1, now: NOW });
+  assert.equal(limited.length, 4);
+  const counts = { alpha: 0, beta: 0 };
+  for (const transcript of limited) counts[transcript.project] += 1;
+  assert.equal(counts.alpha, 2);
+  assert.equal(counts.beta, 2);
+
+  const config = loadConfig(tempDir(), {
+    maxTranscripts: 100,
+    seed: 1,
+    discovery: { maxTranscriptsPerProject: 2 },
+  });
+  let result = { transcripts: [] };
+  captureInfo(() => {
+    result = capTranscripts({ transcripts: set, perHarness: {} }, config, { now: NOW });
+  });
+  assert.equal(result.transcripts.length, 4);
 });

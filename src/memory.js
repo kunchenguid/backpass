@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import { sha256 } from "./state.js";
@@ -294,7 +295,11 @@ export function memoryTextHash(text) {
 }
 
 export function readMemoryFile(repoRoot, relativePath) {
-  const absolute = path.join(repoRoot, relativePath);
+  const expanded =
+    relativePath === "~" || relativePath.startsWith("~/")
+      ? path.join(os.homedir(), relativePath.slice(relativePath === "~" ? 1 : 2))
+      : relativePath;
+  const absolute = path.isAbsolute(expanded) ? expanded : path.join(repoRoot, expanded);
   if (!fs.existsSync(absolute)) return null;
   const text = fs.readFileSync(absolute, "utf8");
   return {
@@ -423,15 +428,28 @@ export function reanchor(reference, file, threshold = 0.6) {
  * A file is a pointer to `target` when, ignoring blank lines and HTML comments, its
  * only content is the import line (`@AGENTS.md` or `@./AGENTS.md`).
  */
-export function isPointerTo(text, target) {
+export function isPointerTo(text, target, options = {}) {
   const lines = text
     .replace(/<!--[\s\S]*?-->/g, "")
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
   if (lines.length !== 1) return false;
-  const ref = lines[0].replace(/^@\.\//, "@");
-  return ref === `@${target}`;
+  const imported = lines[0].replace(/^@\.\//, "@");
+  if (!imported.startsWith("@")) return false;
+  if (imported === `@${target}`) return true;
+
+  const spec = imported.slice(1);
+  const home = options.home || os.homedir();
+  const fromDir = options.fromDir || options.root || "";
+  const expand = (p) => {
+    if (p === "~") return home;
+    if (p.startsWith("~/")) return path.join(home, p.slice(2));
+    return p;
+  };
+  const resolvedSpec = path.isAbsolute(expand(spec)) ? expand(spec) : path.resolve(fromDir || ".", spec);
+  const resolvedTarget = path.isAbsolute(expand(target)) ? expand(target) : path.resolve(fromDir || ".", target);
+  return resolvedSpec === resolvedTarget;
 }
 
 /**
@@ -449,7 +467,9 @@ export function resolveMemoryFiles(repoRoot, memoryFiles) {
   const files = loadMemoryFiles(repoRoot, memoryFiles);
   if (!files.length) return { primary: null, all: files, pointers: [], separate: [], hash: null };
   const [primary, ...others] = files;
-  const pointers = others.filter((f) => isPointerTo(f.text, primary.path));
+  const pointers = others.filter((f) =>
+    isPointerTo(f.text, primary.path, { fromDir: path.dirname(primary.absolute || path.join(repoRoot, primary.path)) }),
+  );
   const separate = others.filter((f) => !pointers.includes(f));
   return { primary, all: files, pointers, separate, hash: memorySetHash(files) };
 }

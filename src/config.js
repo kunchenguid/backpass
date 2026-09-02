@@ -93,9 +93,45 @@ export const DEFAULT_CONFIG = {
   theme: "auto",
 };
 
-function userConfigPath() {
+/**
+ * User-scope defaults, layered on `DEFAULT_CONFIG` when `--scope user`.
+ *
+ * Canonical user memory is the first existing file in this list (captain, issue #97):
+ * `~/.agents/AGENTS.md` first (AGENTS.md is the cross-harness file), then Claude Code's
+ * `~/.claude/CLAUDE.md` (allowed as a pointer), then Codex `~/.codex/AGENTS.md`.
+ * `minGapProjects` defaults to 1: the gate exists and is configurable, but cross-project
+ * corroboration is not required. Discovery still enumerates every configured harness;
+ * user-level edit targets in v1 are Claude Code and Codex (plus the shared `.agents` layout).
+ */
+export const USER_MEMORY_FILES = [".agents/AGENTS.md", ".claude/CLAUDE.md", ".codex/AGENTS.md"];
+export const USER_SKILLS_DIRS = [".agents/skills", ".claude/skills", ".codex/skills"];
+
+export const USER_CONFIG_DEFAULTS = {
+  memoryFiles: USER_MEMORY_FILES,
+  skillsDir: ".agents/skills",
+  skillsDirs: USER_SKILLS_DIRS,
+  minGapProjects: 1,
+  discovery: {
+    includeProjects: [],
+    excludeProjects: [],
+    maxTranscriptsPerProject: null,
+  },
+};
+
+export function parseScopeKind(value) {
+  if (value === undefined || value === null || value === "") return "project";
+  if (value === "project" || value === "user") return value;
+  throw new UserError(`--scope must be "project" or "user" (got "${value}")`);
+}
+
+export function userConfigPath() {
   const base = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
   return path.join(base, "backpass", "config.json");
+}
+
+/** Isolated user-scope state: `~/.config/backpass/user/` (honours `XDG_CONFIG_HOME`). */
+export function userStateDir() {
+  return path.join(path.dirname(userConfigPath()), "user");
 }
 
 function readJsonIfPresent(file) {
@@ -162,7 +198,7 @@ export function sinceCutoff(since, now = Date.now()) {
   return window === null ? null : now - window;
 }
 
-function validate(config) {
+function validate(config, { kind = "project" } = {}) {
   if (!Array.isArray(config.memoryFiles) || config.memoryFiles.length === 0) {
     throw new UserError("config.memoryFiles must be a non-empty array");
   }
@@ -174,6 +210,38 @@ function validate(config) {
   }
   if (!Number.isInteger(config.minGapEvidence) || config.minGapEvidence < 1) {
     throw new UserError("config.minGapEvidence must be an integer >= 1");
+  }
+  if (kind === "user" || config.minGapProjects !== undefined) {
+    const minGapProjects = config.minGapProjects ?? 1;
+    if (!Number.isInteger(minGapProjects) || minGapProjects < 1) {
+      throw new UserError("config.minGapProjects must be an integer >= 1");
+    }
+    config.minGapProjects = minGapProjects;
+  }
+  if (config.skillsDirs !== undefined) {
+    if (!Array.isArray(config.skillsDirs) || config.skillsDirs.some((d) => typeof d !== "string")) {
+      throw new UserError("config.skillsDirs must be an array of paths");
+    }
+  }
+  const includeProjects = config.discovery.includeProjects;
+  const excludeProjects = config.discovery.excludeProjects;
+  if (
+    includeProjects !== undefined &&
+    (!Array.isArray(includeProjects) || includeProjects.some((g) => typeof g !== "string"))
+  ) {
+    throw new UserError("config.discovery.includeProjects must be an array of globs");
+  }
+  if (
+    excludeProjects !== undefined &&
+    (!Array.isArray(excludeProjects) || excludeProjects.some((g) => typeof g !== "string"))
+  ) {
+    throw new UserError("config.discovery.excludeProjects must be an array of globs");
+  }
+  const maxPerProject = config.discovery.maxTranscriptsPerProject;
+  if (maxPerProject != null) {
+    if (!Number.isInteger(maxPerProject) || maxPerProject < 1) {
+      throw new UserError("config.discovery.maxTranscriptsPerProject must be a positive integer or null");
+    }
   }
   config.maxTranscripts = parseMaxTranscripts(config.maxTranscripts, "config.maxTranscripts");
   try {
@@ -225,20 +293,39 @@ function validate(config) {
 }
 
 /**
- * Layered config: defaults < ~/.config/backpass/config.json < <repo>/.backpassrc.json < CLI flags.
+ * Layered config.
+ *
+ * Project: defaults < ~/.config/backpass/config.json (minus its `user` block) <
+ *   <repo>/.backpassrc.json < CLI flags.
+ * User: defaults < user-scope defaults < ~/.config/backpass/config.json `user` block <
+ *   CLI flags. `.backpassrc.json` is never read.
  */
-export function loadConfig(repoRoot, overrides = {}) {
-  const merged = [
-    readJsonIfPresent(userConfigPath()),
-    readJsonIfPresent(path.join(repoRoot, CONFIG_FILENAME)),
-    overrides,
-  ].reduce((acc, layer) => (layer ? deepMerge(acc, layer) : acc), DEFAULT_CONFIG);
+export function loadConfig(repoRoot, overrides = {}, { kind = "project" } = {}) {
+  const scopeKind = parseScopeKind(kind);
+  let merged;
+  if (scopeKind === "user") {
+    const globalFile = readJsonIfPresent(userConfigPath());
+    const userBlock = isPlainObject(globalFile?.user) ? globalFile.user : {};
+    merged = [DEFAULT_CONFIG, USER_CONFIG_DEFAULTS, userBlock, overrides].reduce(
+      (acc, layer) => (layer ? deepMerge(acc, layer) : acc),
+      {},
+    );
+  } else {
+    const globalFile = readJsonIfPresent(userConfigPath());
+    const projectGlobal = globalFile ? { ...globalFile } : null;
+    if (projectGlobal) delete projectGlobal.user;
+    merged = [
+      projectGlobal,
+      repoRoot ? readJsonIfPresent(path.join(repoRoot, CONFIG_FILENAME)) : null,
+      overrides,
+    ].reduce((acc, layer) => (layer ? deepMerge(acc, layer) : acc), DEFAULT_CONFIG);
+  }
 
   const config = structuredClone(merged);
   if (config.discovery.includeCursorIde && !config.discovery.harnesses.includes("cursor-ide")) {
     config.discovery.harnesses = [...config.discovery.harnesses, "cursor-ide"];
   }
-  return validate(config);
+  return validate(config, { kind: scopeKind });
 }
 
 export function repoConfigPath(repoRoot) {
@@ -259,5 +346,24 @@ export function initialConfig() {
     synthesis: { agent: null, model: null, effort: null },
     discovery: { harnesses: ALL_HARNESSES, since: "30d", worktreeGlobs: [], minUserTurns: 2 },
     jobs: DEFAULT_CONFIG.jobs,
+  };
+}
+
+/** The `user` block written by `backpass init --scope user`. */
+export function initialUserConfig() {
+  return {
+    memoryFiles: USER_MEMORY_FILES,
+    skillsDir: USER_CONFIG_DEFAULTS.skillsDir,
+    skillsDirs: USER_SKILLS_DIRS,
+    budgetTokens: DEFAULT_CONFIG.budgetTokens,
+    minGapEvidence: DEFAULT_CONFIG.minGapEvidence,
+    minGapProjects: USER_CONFIG_DEFAULTS.minGapProjects,
+    discovery: {
+      harnesses: ALL_HARNESSES,
+      since: "30d",
+      includeProjects: [],
+      excludeProjects: [],
+      maxTranscriptsPerProject: null,
+    },
   };
 }

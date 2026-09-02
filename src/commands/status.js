@@ -29,8 +29,8 @@ export async function cmdStatus(ctx) {
   const proposal = state.readProposal();
   const rejections = state.readRejections();
   const overflow = resolveOverflowTarget(repo.root, config.skillsDir);
-  const skillDirs = resolveProjectSkillDirs(repo.root, overflow.dir);
-  const skills = loadProjectSkills(repo.root, overflow.dir);
+  const skillDirs = resolveProjectSkillDirs(repo.root, overflow.dir, config.skillsDirs || []);
+  const skills = loadProjectSkills(repo.root, overflow.dir, config.skillsDirs || []);
   const descriptionTokens = skillDescriptionTokens(skills);
 
   const duplicates = files
@@ -66,7 +66,7 @@ export async function cmdStatus(ctx) {
     return 0;
   }
 
-  out(`${color.bold(repo.name)} ${color.dim(repo.root)}`);
+  out(`${color.bold(ctx.scope?.kind === "user" ? "user scope" : repo.name)} ${color.dim(repo.root)}`);
   out("");
 
   out(color.dim("BUDGET (always-loaded)"));

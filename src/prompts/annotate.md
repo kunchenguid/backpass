@@ -19,7 +19,8 @@ Return ONE JSON object and nothing else. No prose, no markdown fence.
       "rationale": "why the evidence supports this",
       "instructions": ["AG-017"],
       "evidence": [{"polarity": "negative", "text": "the verbatim quote", "source": "claude · abc123 · turn 12"}],
-      "transcripts": 3
+      "transcripts": 3,
+      "projects": 1
     }
   ],
   "verdicts": [
@@ -39,7 +40,8 @@ Hard rules - a violation fails the whole proposal:
 3. **Every edit carries at least one verbatim quote in `evidence`**, with its source.
 4. **New instructions need evidence from at least {{MIN_GAP_EVIDENCE}} distinct
    sessions.** `transcripts` is how many distinct sessions back the edit; an edit that
-   only adds text is a new instruction whatever its `kind` says.
+   only adds text is a new instruction whatever its `kind` says. `projects` is how many
+   distinct projects those sessions came from (user scope); omit it in a project-scoped run.
 5. **Removing an instruction outright needs harm evidence from at least
    {{MIN_GAP_EVIDENCE}} distinct sessions** (`harm-sessions` in the evidence). Only
    `harm` negatives argue against an instruction; `non-compliance` never justifies a

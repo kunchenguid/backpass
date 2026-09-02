@@ -116,6 +116,7 @@ async function analyzeOne({
   memoryFile,
   config,
   repo,
+  modelCwd = null,
   slot = 0,
   openGapIndex = "(none yet)",
   skillIndex = "(this repo has no skills)",
@@ -171,7 +172,7 @@ async function analyzeOne({
       agent: pick.agent,
       model: pick.model,
       promptFile,
-      cwd: repo.root,
+      cwd: modelCwd || repo.root,
       timeoutSeconds: config.timeoutSeconds,
       promptRetries: config.promptRetries,
     };
@@ -226,6 +227,7 @@ export async function analyzeTranscripts({
   skills = [],
   config,
   repo,
+  modelCwd = null,
   memoryHash,
   force = false,
 }) {
@@ -315,6 +317,9 @@ export async function analyzeTranscripts({
         startedAt: transcript.startedAt,
         association: transcript.association,
         interaction: classifyInteraction(transcript),
+        cwd: transcript.cwd || null,
+        project: transcript.project || null,
+        projectRoot: transcript.projectRoot || null,
       },
       memoryHash,
       memoryPath: memoryFile.path,
@@ -331,7 +336,16 @@ export async function analyzeTranscripts({
     });
 
     try {
-      const result = await analyzeOne({ transcript, memoryFile, config, repo, slot, openGapIndex, skillIndex });
+      const result = await analyzeOne({
+        transcript,
+        memoryFile,
+        config,
+        repo,
+        modelCwd,
+        slot,
+        openGapIndex,
+        skillIndex,
+      });
       if (result.status === "skipped") {
         summary.skipped += 1;
         state.writeEvidence(transcript, { ...base, status: "skipped", reason: result.reason });

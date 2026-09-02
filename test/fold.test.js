@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import { foldEvidence, renderEvidenceForPrompt, renderEvidenceReport } from "../src/fold.js";
 import { parseMemoryUnits } from "../src/memory.js";
@@ -531,4 +534,106 @@ test("an oversized high-non-compliance paragraph attributes per sentence and inv
   assert.match(rendered, /- AG-001 is \d+ tokens as one paragraph \(attribution: \[AG-001\.1\]/);
   assert.doesNotMatch(rendered, /\[AG-001\](?!\.)/);
   assert.doesNotMatch(rendered, /\[AG-001\] \+0 -0/);
+});
+
+test("minGapProjects 2 keeps a single-project cluster report-only", () => {
+  const phrasing = "Always vendor the lockfile.";
+  const summary = foldEvidence(
+    [
+      record("s1", {
+        transcript: { id: "s1", harness: "claude", project: "/repos/alpha" },
+        gaps: [{ proposedInstruction: phrasing, quote: "q", recurrenceRisk: "high" }],
+      }),
+      record("s2", {
+        transcript: { id: "s2", harness: "claude", project: "/repos/alpha" },
+        gaps: [{ proposedInstruction: phrasing, quote: "q2", recurrenceRisk: "high" }],
+      }),
+    ],
+    { minGapEvidence: 2, minGapProjects: 2 },
+  );
+  assert.equal(summary.gaps.length, 0);
+  assert.equal(summary.reportOnlyGaps.length, 1);
+  assert.equal(summary.reportOnlyGaps[0].sessions, 2);
+  assert.equal(summary.reportOnlyGaps[0].projects, 1);
+  assert.match(summary.reportOnlyGaps[0].reportOnlyReason, /project-specific/);
+});
+
+test("minGapProjects 2 admits a cluster seen in two projects", () => {
+  const phrasing = "Always vendor the lockfile.";
+  const summary = foldEvidence(
+    [
+      record("s1", {
+        transcript: { id: "s1", harness: "claude", project: "/repos/alpha" },
+        gaps: [{ proposedInstruction: phrasing, quote: "q", recurrenceRisk: "high" }],
+      }),
+      record("s2", {
+        transcript: { id: "s2", harness: "claude", project: "/repos/beta" },
+        gaps: [{ proposedInstruction: phrasing, quote: "q2", recurrenceRisk: "high" }],
+      }),
+    ],
+    { minGapEvidence: 2, minGapProjects: 2 },
+  );
+  assert.equal(summary.gaps.length, 1);
+  assert.equal(summary.gaps[0].projects, 2);
+  assert.equal(summary.reportOnlyGaps.length, 0);
+});
+
+test("the default minGapProjects of 1 does not require a second project", () => {
+  const phrasing = "Always vendor the lockfile.";
+  const summary = foldEvidence(
+    [
+      record("s1", {
+        transcript: { id: "s1", harness: "claude", project: "/repos/alpha" },
+        gaps: [{ proposedInstruction: phrasing, quote: "q", recurrenceRisk: "high" }],
+      }),
+      record("s2", {
+        transcript: { id: "s2", harness: "claude", project: "/repos/alpha" },
+        gaps: [{ proposedInstruction: phrasing, quote: "q2", recurrenceRisk: "high" }],
+      }),
+    ],
+    { minGapEvidence: 2, minGapProjects: 1 },
+  );
+  assert.equal(summary.gaps.length, 1);
+  assert.equal(summary.gaps[0].projects, 1);
+});
+
+test("a project-covered sighting does not count toward gap sessions", () => {
+  const coveredRoot = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-fold-covered-"));
+  const phrasing = "Always pin the Node version with nvm.";
+  fs.writeFileSync(path.join(coveredRoot, "AGENTS.md"), `# T\n\n- ${phrasing}\n`);
+  const summary = foldEvidence(
+    [
+      record("s1", {
+        transcript: { id: "s1", harness: "claude", project: coveredRoot, projectRoot: coveredRoot },
+        gaps: [{ proposedInstruction: phrasing, quote: "q", recurrenceRisk: "high" }],
+      }),
+      record("s2", {
+        transcript: { id: "s2", harness: "claude", project: "/repos/other", projectRoot: null },
+        gaps: [{ proposedInstruction: phrasing, quote: "q2", recurrenceRisk: "high" }],
+      }),
+    ],
+    { minGapEvidence: 2, checkProjectCoverage: true },
+  );
+  assert.equal(summary.gaps.length, 0);
+  assert.equal(summary.totals.droppedGapSingletons, 1);
+  const cluster = [...summary.gaps, ...summary.reportOnlyGaps];
+  assert.equal(cluster.length, 0);
+  // Re-fold at minGapEvidence 1 so the uncovered session is eligible, and the covered one is not.
+  const uncovered = foldEvidence(
+    [
+      record("s1", {
+        transcript: { id: "s1", harness: "claude", project: coveredRoot, projectRoot: coveredRoot },
+        gaps: [{ proposedInstruction: phrasing, quote: "q", recurrenceRisk: "high" }],
+      }),
+      record("s2", {
+        transcript: { id: "s2", harness: "claude", project: "/repos/other", projectRoot: null },
+        gaps: [{ proposedInstruction: phrasing, quote: "q2", recurrenceRisk: "high" }],
+      }),
+    ],
+    { minGapEvidence: 1, checkProjectCoverage: true },
+  );
+  assert.equal(uncovered.gaps.length, 1);
+  assert.equal(uncovered.gaps[0].sessions, 1);
+  assert.equal(uncovered.gaps[0].projectCoveredSessions, 1);
+  assert.equal(uncovered.gaps[0].projects, 1);
 });

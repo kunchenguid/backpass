@@ -113,6 +113,7 @@ function normalizeEdit(raw, index) {
     instructions: Array.isArray(raw?.instructions) ? raw.instructions.map(String) : [],
     evidence: normalizeEvidence(raw?.evidence),
     transcripts: Number.isFinite(raw?.transcripts) ? Number(raw.transcripts) : countSources(raw?.evidence),
+    projects: Number.isFinite(raw?.projects) ? Number(raw.projects) : undefined,
   };
 }
 
@@ -303,6 +304,7 @@ export function buildProposal(rawResult, context) {
     rejections = { entries: {} },
     isSuppressed = () => false,
     skillFiles = [],
+    scope = null,
   } = context;
 
   const violations = [];
@@ -569,6 +571,7 @@ export function buildProposal(rawResult, context) {
       instructions: edit.instructions,
       evidence: edit.evidence,
       transcripts: edit.transcripts,
+      ...(edit.projects != null ? { projects: edit.projects } : {}),
       skills: created.map((c) => c.skill),
       hunks: hunks.map((h) => ({
         id: h.id,
@@ -582,6 +585,9 @@ export function buildProposal(rawResult, context) {
         lines: h.lines,
       })),
       targetsMemoryFile: file === memoryFile.path,
+      applicable: true,
+      deltaTokens: 0,
+      descriptionDelta: 0,
     };
 
     if (isSuppressed(proposed, rejections)) {
@@ -690,6 +696,7 @@ export function buildProposal(rawResult, context) {
     tool: "backpass",
     generatedAt: new Date().toISOString(),
     repo: { name: repo.name, root: repo.root },
+    scope: scope?.kind || "project",
     memoryFile: { path: memoryFile.path, hash: memoryFile.hash, tokens: memoryFile.tokens },
     targetFiles,
     budget,
@@ -697,6 +704,7 @@ export function buildProposal(rawResult, context) {
       budgetTokens: config.budgetTokens,
       maxEditsPerRun: maxEdits,
       minGapEvidence: config.minGapEvidence,
+      ...(config.minGapProjects != null ? { minGapProjects: config.minGapProjects } : {}),
       skillsDir: config.skillsDir,
       skillDirs: config.skillDirs,
       analysis: config.analysis,

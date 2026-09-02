@@ -149,13 +149,13 @@ function assertRepoUntouched(repo, before, workspaceRoot) {
  * Everything the edit and annotation turns need: prompt values, the `buildProposal`
  * context, and the overflow target.
  */
-function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts }) {
+function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts, scope = null }) {
   const state = config.state;
   const rejections = state.readRejections();
   const overflow = resolveOverflowTarget(repo.root, config.skillsDir);
   for (const w of overflow.warnings) warn(w);
-  const skillDirs = resolveProjectSkillDirs(repo.root, overflow.dir);
-  const skillFiles = loadProjectSkills(repo.root, overflow.dir);
+  const skillDirs = resolveProjectSkillDirs(repo.root, overflow.dir, config.skillsDirs || []);
+  const skillFiles = loadProjectSkills(repo.root, overflow.dir, config.skillsDirs || []);
   const descriptionTokens = skillDescriptionTokens(skillFiles);
   const maxEdits = effectiveMaxEdits(memoryFile, config, descriptionTokens);
 
@@ -170,6 +170,7 @@ function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts }) {
     memoryFile,
     config: { ...config, skillsDir: overflow.dir, skillDirs },
     repo,
+    scope,
     summary,
     harnessCounts,
     rejections,
@@ -200,11 +201,17 @@ function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts }) {
  * fresh session used after an empty reply would otherwise be asked to quote evidence it
  * has never been shown.
  */
-function prefaceFor({ memoryFile, summary, config, repo, workspaceRoot, descriptionTokens = 0 }) {
+function groundingRoot(repo, transcripts, scope) {
+  if (scope?.kind !== "user") return repo.root;
+  const roots = [...new Set((transcripts || []).map((t) => t.projectRoot).filter(Boolean))].slice(0, 8);
+  return roots.length ? roots.join("\n") : "(no live project checkouts in this sample)";
+}
+
+function prefaceFor({ memoryFile, summary, config, repo, workspaceRoot, descriptionTokens = 0, grounding = null }) {
   return render(loadPrompt("annotate-preface"), {
     MEMORY_PATH: memoryFile.path,
     REPO_NAME: repo.name,
-    REPO_ROOT: repo.root,
+    REPO_ROOT: grounding || repo.root,
     WORKSPACE_ROOT: workspaceRoot,
     CURRENT_TOKENS: String(memoryFile.tokens + descriptionTokens),
     BUDGET_STATE: budgetState(memoryFile, config, descriptionTokens),
@@ -387,7 +394,15 @@ async function annotateLoop({
   });
 }
 
-export async function synthesizeProposal({ memoryFile, summary, config, repo, transcripts, runNote = "" }) {
+export async function synthesizeProposal({
+  memoryFile,
+  summary,
+  config,
+  repo,
+  transcripts,
+  runNote = "",
+  scope = null,
+}) {
   config.state.clearProposal();
   const harnessCounts = harnessCountsOf(transcripts);
   const {
@@ -407,12 +422,15 @@ export async function synthesizeProposal({ memoryFile, summary, config, repo, tr
     config,
     repo,
     harnessCounts,
+    scope,
   });
+
+  const repoRoot = groundingRoot(repo, transcripts, scope);
 
   const editValues = {
     ...common,
     REPO_NAME: repo.name,
-    REPO_ROOT: repo.root,
+    REPO_ROOT: repoRoot,
     TRANSCRIPT_COUNT: String(summary.analyzedSessions),
     RUN_NOTE: runNote,
     HARNESS_SUMMARY:
@@ -541,7 +559,15 @@ export async function synthesizeProposal({ memoryFile, summary, config, repo, tr
       overflow,
       progress,
       renderPreface: () =>
-        prefaceFor({ memoryFile, summary, config, repo, workspaceRoot: workspace.root, descriptionTokens }),
+        prefaceFor({
+          memoryFile,
+          summary,
+          config,
+          repo,
+          workspaceRoot: workspace.root,
+          descriptionTokens,
+          grounding: repoRoot,
+        }),
     });
   } finally {
     await holder.session.close();

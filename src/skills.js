@@ -23,7 +23,7 @@ export const BROAD_RELEVANCE_THRESHOLD = 0.2;
 
 /** Read the existing skills so synthesis can tune a description instead of duplicating it. */
 export function loadSkills(repoRoot, skillsDir) {
-  const root = path.join(repoRoot, skillsDir);
+  const root = path.isAbsolute(skillsDir) ? skillsDir : path.join(repoRoot, skillsDir);
   if (!fs.existsSync(root)) return [];
 
   const skills = [];
@@ -66,10 +66,10 @@ export function loadSkills(repoRoot, skillsDir) {
  * included even when custom-configured, and roots resolving to the same directory (the
  * normal `.claude/skills` symlink) are counted only once.
  */
-export function resolveProjectSkillDirs(repoRoot, overflowDir = CANONICAL_SKILLS_DIR) {
+export function resolveProjectSkillDirs(repoRoot, overflowDir = CANONICAL_SKILLS_DIR, extraDirs = []) {
   const dirs = [];
   const seen = new Set();
-  for (const dir of [overflowDir, CANONICAL_SKILLS_DIR, CLAUDE_SKILLS_LINK]) {
+  for (const dir of [overflowDir, CANONICAL_SKILLS_DIR, CLAUDE_SKILLS_LINK, ...extraDirs]) {
     if (!dir) continue;
     const absolute = path.join(repoRoot, dir);
     const exists = fs.existsSync(absolute);
@@ -90,8 +90,8 @@ export function resolveProjectSkillDirs(repoRoot, overflowDir = CANONICAL_SKILLS
 }
 
 /** Load generated and human-authored project skills across every supported root. */
-export function loadProjectSkills(repoRoot, overflowDir = CANONICAL_SKILLS_DIR) {
-  return resolveProjectSkillDirs(repoRoot, overflowDir)
+export function loadProjectSkills(repoRoot, overflowDir = CANONICAL_SKILLS_DIR, extraDirs = []) {
+  return resolveProjectSkillDirs(repoRoot, overflowDir, extraDirs)
     .flatMap((dir) => loadSkills(repoRoot, dir))
     .sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path));
 }

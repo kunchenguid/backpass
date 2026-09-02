@@ -5,9 +5,9 @@ import { attachSiblingClones } from "../repo.js";
 
 /** Shared by every command that needs the transcript set. */
 export async function discoverForRun(ctx) {
-  const { repo, config, strict } = ctx;
-  attachSiblingClones(repo, config.discovery.cloneRoots);
-  const result = await discoverTranscripts({ repo, config, strict });
+  const { repo, scope, config, strict } = ctx;
+  if (scope?.kind !== "user") attachSiblingClones(repo, config.discovery.cloneRoots);
+  const result = await discoverTranscripts({ repo, scope, config, strict });
   if (ctx.limit && result.transcripts.length > ctx.limit) {
     result.truncated = result.transcripts.length - ctx.limit;
     result.transcripts = result.transcripts.slice(0, ctx.limit);
@@ -28,11 +28,21 @@ export async function cmdScan(ctx) {
   const mix = corpusMix(transcripts);
 
   if (ctx.flags.json) {
-    json({ repo: ctx.repo.name, perHarness, mix, transcripts });
+    json({
+      repo: ctx.repo.name,
+      ...(ctx.scope ? { scope: ctx.scope.kind } : {}),
+      perHarness,
+      mix,
+      transcripts,
+    });
     return 0;
   }
 
-  out(`${ctx.repo.name} · ${ctx.repo.worktrees.length} worktree(s) · since ${ctx.config.discovery.since}`);
+  if (ctx.scope?.kind === "user") {
+    out(`user scope · since ${ctx.config.discovery.since}`);
+  } else {
+    out(`${ctx.repo.name} · ${ctx.repo.worktrees.length} worktree(s) · since ${ctx.config.discovery.since}`);
+  }
   out("");
 
   const rows = [["HARNESS", "SCANNED", "MATCHED", "SELF", "CACHED", "NOTE"]];
@@ -53,28 +63,56 @@ export async function cmdScan(ctx) {
 
   const byTier = { 1: 0, 1.5: 0, 2: 0, 3: 0 };
   for (const t of transcripts) byTier[t.association.tier] += 1;
-  out(
-    `${transcripts.length} transcript(s) associated with this repo · ` +
-      `tier1 ${byTier[1]} (exact) · tier1.5 ${byTier[1.5]} (sibling clone) · ` +
-      `tier2 ${byTier[2]} (remote) · tier3 ${byTier[3]} (best-effort) · ` +
-      formatCorpusMix(mix),
-  );
+  if (ctx.scope?.kind === "user") {
+    const byProject = new Map();
+    for (const t of transcripts) {
+      const key = t.project || t.cwd || "(unknown)";
+      byProject.set(key, (byProject.get(key) || 0) + 1);
+    }
+    out(
+      `${transcripts.length} transcript(s) across ${byProject.size} project(s) · ` +
+        `tier1 ${byTier[1]} (git) · tier2 ${byTier[2]} (remote) · tier3 ${byTier[3]} (cwd) · ` +
+        formatCorpusMix(mix),
+    );
+  } else {
+    out(
+      `${transcripts.length} transcript(s) associated with this repo · ` +
+        `tier1 ${byTier[1]} (exact) · tier1.5 ${byTier[1.5]} (sibling clone) · ` +
+        `tier2 ${byTier[2]} (remote) · tier3 ${byTier[3]} (best-effort) · ` +
+        formatCorpusMix(mix),
+    );
+  }
   if (byTier[3] && !ctx.strict) out(color.dim("  re-run with --strict to exclude the best-effort tier"));
   if (truncated) out(color.dim(`  --limit ${ctx.limit} is hiding ${truncated} more transcript(s)`));
   out("");
 
   const preview = transcripts.slice(0, 25);
-  const detail = [["HARNESS", "SESSION", "KIND", "WHEN", "SIZE", "TIER", "HOW"]];
+  const detail =
+    ctx.scope?.kind === "user"
+      ? [["HARNESS", "SESSION", "KIND", "WHEN", "SIZE", "TIER", "PROJECT"]]
+      : [["HARNESS", "SESSION", "KIND", "WHEN", "SIZE", "TIER", "HOW"]];
   for (const t of preview) {
-    detail.push([
-      t.harness,
-      t.nativeId.slice(0, 12),
-      t.interaction,
-      ago(t.mtimeMs),
-      t.bytes ? `${Math.round(t.bytes / 1024)}KB` : "-",
-      `t${t.association.tier}`,
-      t.association.reason,
-    ]);
+    detail.push(
+      ctx.scope?.kind === "user"
+        ? [
+            t.harness,
+            t.nativeId.slice(0, 12),
+            t.interaction,
+            ago(t.mtimeMs),
+            t.bytes ? `${Math.round(t.bytes / 1024)}KB` : "-",
+            `t${t.association.tier}`,
+            String(t.project || t.cwd || "-").slice(0, 48),
+          ]
+        : [
+            t.harness,
+            t.nativeId.slice(0, 12),
+            t.interaction,
+            ago(t.mtimeMs),
+            t.bytes ? `${Math.round(t.bytes / 1024)}KB` : "-",
+            `t${t.association.tier}`,
+            t.association.reason,
+          ],
+    );
   }
   out(table(detail));
   if (transcripts.length > preview.length) {
