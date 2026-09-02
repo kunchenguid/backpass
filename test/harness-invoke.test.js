@@ -200,6 +200,13 @@ if (argv.includes("exec")) {
   process.exit(0);
 }
 if (argv.includes("--file")) {
+  const agentAt = argv.indexOf("--agent");
+  const sessionAt = argv.indexOf("-s");
+  const promptAt = argv.indexOf("prompt");
+  if (agentAt >= 0 && sessionAt >= 0 && (promptAt < 0 || promptAt > sessionAt)) {
+    process.stderr.write("USAGE error: unknown option '-s'\\n");
+    process.exit(2);
+  }
   process.stdout.write('{"edits":[],"notes":[]}\\n');
   process.exit(0);
 }
