@@ -107,6 +107,31 @@ test("external user memory and skills use workspace-relative staging paths", () 
   );
 });
 
+test("split external memory hunks retain their staged path", () => {
+  const repo = makeRepo({});
+  const external = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-external-split-"));
+  const memoryPath = path.join(external, "CLAUDE.md");
+  const skillsDir = path.join(external, "skills");
+  fs.writeFileSync(memoryPath, "# M\n\n- carry\n- delete\n- keep\n");
+  const workspace = prepareWorkspace({
+    state: new State(repo.root).ensure(),
+    repo,
+    memoryFile: readMemoryFile(repo.root, memoryPath, { allowExternal: true }),
+    skillsDir,
+    skillDirs: [skillsDir],
+  });
+  writeIn(workspace.root, workspace.memoryWorkspacePath, (text) => text.replace("- carry\n- delete\n", ""));
+  writeIn(
+    path.join(workspace.root, workspacePathFor(skillsDir)),
+    "carry/SKILL.md",
+    "---\nname: carry\ndescription: Load for carry rules.\n---\n\n- carry\n",
+  );
+
+  const hunks = measureWorkspace(workspace).changes.filter((change) => change.kind === "hunk");
+  assert.equal(hunks.length, 2);
+  assert.equal(hunks.every((hunk) => hunk.workspaceFile === workspace.memoryWorkspacePath), true);
+});
+
 test("only the skill layouts a harness loads count as created skills; anything else is stray", () => {
   assert.equal(isSkillFilePath(".agents/skills/db/SKILL.md", ".agents/skills"), true);
   assert.equal(isSkillFilePath(".agents/skills/db.md", ".agents/skills"), true);

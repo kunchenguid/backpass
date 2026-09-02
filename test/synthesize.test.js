@@ -80,6 +80,7 @@ const { foldEvidence } = await import("../src/fold.js");
 const { ProposalViolation } = await import("../src/proposal.js");
 const { State } = await import("../src/state.js");
 const { UserError, setLoggerSink } = await import("../src/logger.js");
+const { workspacePathFor } = await import("../src/workspace.js");
 const { makeRepo } = await import("./helpers/staging.js");
 
 setLoggerSink(() => {});
@@ -142,10 +143,34 @@ const agents = { resolve: async () => pick, withFallthrough: async (_role, fn) =
 
 function setup(
   script,
-  { text = AGENTS, overrides = {}, summary = summaryFor(), scope = null, transcripts = null, externalMemory = false } = {},
+  {
+    text = AGENTS,
+    overrides = {},
+    summary = summaryFor(),
+    scope = null,
+    transcripts = null,
+    externalMemory = false,
+    externalSkills = false,
+    groundInRepo = false,
+  } = {},
 ) {
   const repo = makeRepo(externalMemory ? {} : { "AGENTS.md": text });
-  const config = loadConfig(repo.root, overrides);
+  const externalSkillsDir = externalSkills
+    ? path.join(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-external-skills-")), "skills")
+    : null;
+  if (externalSkillsDir) {
+    fs.mkdirSync(path.join(externalSkillsDir, "db"), { recursive: true });
+    fs.writeFileSync(
+      path.join(externalSkillsDir, "db/SKILL.md"),
+      "---\nname: db\ndescription: Load for database work.\n---\n\n- Keep transactions short.\n",
+    );
+  }
+  const config = loadConfig(
+    repo.root,
+    externalSkillsDir
+      ? { ...overrides, skillsDir: externalSkillsDir, skillsDirs: [externalSkillsDir] }
+      : overrides,
+  );
   config.state = new State(repo.root).ensure();
   config.agents = agents;
   const log = path.join(fakeDir, `log-${Date.now()}-${Math.random().toString(16).slice(2)}.jsonl`);
@@ -165,7 +190,7 @@ function setup(
       summary,
       config,
       repo,
-      transcripts: transcripts || [{ harness: "claude" }],
+      transcripts: transcripts || [{ harness: "claude", ...(groundInRepo ? { projectRoot: repo.root } : {}) }],
       scope,
     });
   const calls = () =>
@@ -175,7 +200,7 @@ function setup(
       .split("\n")
       .filter(Boolean)
       .map((l) => JSON.parse(l));
-  return { repo, config, memoryFile, run, calls };
+  return { repo, config, memoryFile, externalSkillsDir, run, calls };
 }
 
 test("synthesis edits the staging copy natively; measured hunks anchor to the raw file and nothing touches the repo until apply", async () => {
@@ -399,6 +424,17 @@ test("user synthesis makes grounding project roots read-only", async () => {
   assert.equal(fs.readFileSync(path.join(grounding.root, ".git/config"), "utf8"), "[core]\n");
 });
 
+test("a home-rooted grounding project leaves the synthesis workspace writable", async () => {
+  const setupResult = setup(
+    { edit: {}, annotations: [{ reply: { edits: [] } }] },
+    { scope: { kind: "user" }, groundInRepo: true },
+  );
+  process.env.FAKE_ACPX_STATE = path.join(setupResult.repo.root, ".backpass/synthesis/fake-state.json");
+  const { proposal, violations } = await setupResult.run();
+  assert.deepEqual(violations, []);
+  assert.equal(proposal.edits.length, 0);
+});
+
 test("user synthesis can propose against relocated external memory", async () => {
   const { run, memoryFile } = setup(
     { edit: {}, annotations: [{ reply: { edits: [] } }] },
@@ -408,6 +444,18 @@ test("user synthesis can propose against relocated external memory", async () =>
   assert.deepEqual(violations, []);
   assert.equal(proposal.memoryFile.path, memoryFile.path);
   assert.equal(proposal.edits.length, 0);
+});
+
+test("relocated skill prompts use their actual staged paths", async () => {
+  const setupResult = setup(
+    { edit: {}, annotations: [{ reply: { edits: [] } }] },
+    { scope: { kind: "user" }, externalSkills: true },
+  );
+  await setupResult.run();
+  const prompt = fs.readFileSync(path.join(setupResult.config.state.root, "prompts/synthesis-edit.md"), "utf8");
+  const stagedDir = workspacePathFor(setupResult.externalSkillsDir);
+  assert.ok(prompt.includes(stagedDir));
+  assert.ok(prompt.includes(`${stagedDir}/db/SKILL.md`));
 });
 
 test("an agent that changes nothing yields an empty proposal, never an invented edit", async () => {

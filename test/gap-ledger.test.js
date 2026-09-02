@@ -390,14 +390,25 @@ test("mergeGapEntries preserves absorbed citations for duplicate sessions", () =
     { id: targetId, text: "Check the database contract before changing queries.", sessions: ["s1", "s2"] },
     { id: absorbedId, text: "Read schema docs before SQL edits.", sessions: ["s1", "s2"] },
   );
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-merged-project-"));
+  fs.writeFileSync(path.join(projectRoot, "AGENTS.md"), "# T\n\n- Read schema docs before SQL edits.\n");
   ledger.entries[absorbedId].sessions.s1.coveredBySkill = "db-schema";
+  ledger.entries[absorbedId].sessions.s1.project = projectRoot;
+  ledger.entries[absorbedId].sessions.s1.projectRoot = projectRoot;
   ledger.entries[absorbedId].sessions.s2.coveredBySkill = "db-schema";
 
   mergeGapEntries(ledger, [[targetId, absorbedId]]);
   const observations = ledgerGapObservations(ledger, MEMORY_PATH, [{ name: "db-schema" }]);
-  const summary = foldEvidence([], { gapObservations: observations, minGapEvidence: 2 });
+  const summary = foldEvidence([], {
+    gapObservations: observations,
+    minGapEvidence: 1,
+    checkProjectCoverage: true,
+  });
 
   assert.equal(observations.length, 2, "each session remains one observation");
+  assert.equal(observations.find((observation) => observation.sessionId === "s1").projectRoot, projectRoot);
+  assert.equal(summary.gaps[0].sessions, 1);
+  assert.equal(summary.gaps[0].projectCoveredSessions, 1);
   assert.equal(summary.gaps[0].failedTriggerSkill, "db-schema");
   assert.equal(summary.gaps[0].failedTriggerSessions, 2);
 });

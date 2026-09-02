@@ -19,7 +19,7 @@ import path from "node:path";
  * @param {string} bin
  * @param {string[]} args
  * @param {{ timeoutMs?: number, cwd?: string, input?: string, env?: NodeJS.ProcessEnv,
- *   platform?: NodeJS.Platform, lookupEnv?: NodeJS.ProcessEnv, readOnlyRoots?: string[],
+ *   platform?: NodeJS.Platform, lookupEnv?: NodeJS.ProcessEnv, readOnlyRoots?: string[], writableRoots?: string[],
  *   spawnFn?: (file: string, args: string[], options: object) => any }} [options]
  * @returns {Promise<{ code: number | null, stdout: string, stderr: string, timedOut?: boolean, spawnError?: ShimError }>}
  */
@@ -34,13 +34,14 @@ export function runCapture(
     platform = process.platform,
     lookupEnv = process.env,
     readOnlyRoots = [],
+    writableRoots = [],
     spawnFn = spawn,
   } = {},
 ) {
   return new Promise((resolve) => {
     let launch = windowsShimLaunch(bin, args, { platform, env: lookupEnv });
     if (!launch.error && readOnlyRoots.length) {
-      launch = readOnlyLaunch(launch, readOnlyRoots, { platform, env: lookupEnv });
+      launch = readOnlyLaunch(launch, readOnlyRoots, { platform, env: lookupEnv, writableRoots });
     }
     if (launch.error) {
       // Loud and named: an argument no quoting can neutralise must not reach a shim
@@ -102,13 +103,18 @@ export function runCapture(
   });
 }
 
-export function readOnlyLaunch(launch, roots, { platform = process.platform, env = process.env } = {}) {
+export function readOnlyLaunch(
+  launch,
+  roots,
+  { platform = process.platform, env = process.env, writableRoots = [] } = {},
+) {
   const unique = [...new Set(roots.map((root) => path.resolve(root)))];
+  const writable = [...new Set(writableRoots.map((root) => path.resolve(root)))];
   if (!unique.length) return launch;
   if (platform === "darwin") {
     const profile = `(version 1)(allow default)${unique
       .map((root) => `(deny file-write* (subpath ${JSON.stringify(root)}))`)
-      .join("")}`;
+      .join("")}${writable.map((root) => `(allow file-write* (subpath ${JSON.stringify(root)}))`).join("")}`;
     return {
       file: "/usr/bin/sandbox-exec",
       args: ["-p", profile, launch.file, ...launch.args],
@@ -120,7 +126,16 @@ export function readOnlyLaunch(launch, roots, { platform = process.platform, env
     if (bwrap) {
       return {
         file: bwrap,
-        args: ["--bind", "/", "/", ...unique.flatMap((root) => ["--ro-bind", root, root]), "--", launch.file, ...launch.args],
+        args: [
+          "--bind",
+          "/",
+          "/",
+          ...unique.flatMap((root) => ["--ro-bind", root, root]),
+          ...writable.flatMap((root) => ["--bind", root, root]),
+          "--",
+          launch.file,
+          ...launch.args,
+        ],
         verbatim: false,
       };
     }

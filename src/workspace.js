@@ -323,7 +323,16 @@ export function measureWorkspace(workspace) {
         continue;
       }
       const subHunks = splitRemovalHunk(change, { oldText, oldLines, recovered });
-      if (subHunks) measured.push(...subHunks.map((sub) => ({ kind: "hunk", file: memoryPath, ...sub })));
+      if (subHunks) {
+        measured.push(
+          ...subHunks.map((sub) => ({
+            kind: "hunk",
+            file: memoryPath,
+            workspaceFile: change.workspaceFile,
+            ...sub,
+          })),
+        );
+      }
       else measured.push(change);
     }
     changes.splice(0, changes.length, ...measured);

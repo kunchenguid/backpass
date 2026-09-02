@@ -1,5 +1,6 @@
 import fs from "node:fs";
 
+import { loadConfig } from "./config.js";
 import { classifyInteraction, INTERACTIVE, NON_INTERACTIVE } from "./interaction.js";
 import { findInstructionUnit, instructionUnits, resolveMemoryFiles, similarity } from "./memory.js";
 import { GAP_COVERED_THRESHOLD, GAP_SIMILARITY_THRESHOLD, gapSource } from "./gap-ledger.js";
@@ -354,7 +355,7 @@ function isProjectCoveredSighting(obs) {
   if (!root || !phrasings.some(Boolean)) return false;
   try {
     if (!fs.existsSync(root)) return false;
-    const resolved = resolveMemoryFiles(root, ["AGENTS.md", "CLAUDE.md"]);
+    const resolved = resolveMemoryFiles(root, loadConfig(root).memoryFiles);
     if (!resolved.primary) return false;
     return instructionUnits(resolved.primary).some((unit) =>
       phrasings.some((phrasing) => similarity(unit.text, phrasing) >= GAP_COVERED_THRESHOLD),

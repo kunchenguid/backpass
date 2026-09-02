@@ -323,6 +323,8 @@ export function mergeGapEntries(ledger, groups) {
           if (earlier) prior.firstObservedAt = obs.firstObservedAt || obs.observedAt;
           if (prior.domain === "orchestration" && obs.domain !== "orchestration") prior.domain = "project";
           if (!prior.coveredBySkill && obs.coveredBySkill) prior.coveredBySkill = obs.coveredBySkill;
+          if (!prior.project && obs.project) prior.project = obs.project;
+          if (!prior.projectRoot && obs.projectRoot) prior.projectRoot = obs.projectRoot;
           prior.phrasings = [
             ...new Set([
               ...(prior.phrasings || [target.proposedInstruction]),

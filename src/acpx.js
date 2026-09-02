@@ -1,4 +1,6 @@
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import { UserError, warn } from "./logger.js";
 import { runCapture } from "./subprocess.js";
@@ -367,6 +369,25 @@ export async function execOneShot({
  *     Promise<{ text: string, usage: Record<string, number> | null, raw: string, notes: string[] }>,
  *   close: () => Promise<void> }>}
  */
+function harnessWritableRoots(agent) {
+  const home = os.homedir();
+  const roots = [os.tmpdir()];
+  if (agent === "claude") {
+    roots.push(path.join(process.env.CLAUDE_CONFIG_DIR || path.join(home, ".claude"), "projects"));
+  } else if (agent === "codex") {
+    roots.push(path.join(process.env.CODEX_HOME || path.join(home, ".codex"), "sessions"));
+  } else if (agent === "pi") {
+    roots.push(path.join(process.env.PI_CODING_AGENT_DIR || path.join(home, ".pi", "agent"), "sessions"));
+  } else if (agent === "opencode") {
+    roots.push(path.join(process.env.XDG_DATA_HOME || path.join(home, ".local", "share"), "opencode"));
+    roots.push(path.join(process.env.XDG_STATE_HOME || path.join(home, ".local", "state"), "opencode"));
+    roots.push(path.join(process.env.XDG_CACHE_HOME || path.join(home, ".cache"), "opencode"));
+  } else if (agent === "grok") {
+    roots.push(path.join(home, ".grok"));
+  }
+  return roots.filter((root) => fs.existsSync(root));
+}
+
 export async function openSession({
   agent,
   model = null,
@@ -377,9 +398,10 @@ export async function openSession({
   readOnlyRoots = [],
 }) {
   const invocation = prepareHarnessInvocation({ agent, model, effort, writeAccess });
+  const writableRoots = readOnlyRoots.length ? [cwd, ...harnessWritableRoots(agent)] : [];
   const notes = [...invocation.notes];
   const acpxAgentArgs = invocationAgentArgs(invocation, agent);
-  const runOpts = { timeoutMs: 60_000, cwd, env: invocation.env, readOnlyRoots };
+  const runOpts = { timeoutMs: 60_000, cwd, env: invocation.env, readOnlyRoots, writableRoots };
   /** @type {Awaited<ReturnType<typeof run>>} */
   let created;
   try {
@@ -431,6 +453,7 @@ export async function openSession({
         cwd,
         env: invocation.env,
         readOnlyRoots,
+        writableRoots,
       });
       if (result.code !== 0) warn(`could not close acpx session ${sessionName}`);
     } finally {
@@ -493,6 +516,7 @@ export async function openSession({
       cwd,
       env: invocation.env,
       readOnlyRoots,
+      writableRoots,
     });
     if (result.timedOut) throw new AcpxError(`acpx ${agent} session prompt timed out after ${timeoutSeconds}s`, result);
     if (result.code !== 0) throw new AcpxError(`acpx ${agent} session prompt failed (exit ${result.code})`, result);

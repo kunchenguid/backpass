@@ -431,6 +431,13 @@ export async function synthesizeProposal({
 
   const readOnlyGroundingRoots = groundingRoots(transcripts, scope);
   const repoRoot = groundingRoot(repo, readOnlyGroundingRoots, scope);
+  let workspace = prepareWorkspace({ state, repo, memoryFile, skillsDir: overflow.dir, skillDirs });
+  const stagedSkillsDir =
+    workspace.skillMappings.find((mapping) => mapping.logical === overflow.dir)?.staged || workspacePathFor(overflow.dir);
+  const stagedSkillFiles = skillFiles.map((skill) => ({
+    ...skill,
+    path: workspace.stagedPaths.get(skill.path) || workspacePathFor(skill.path),
+  }));
 
   const editValues = {
     ...common,
@@ -446,8 +453,8 @@ export async function synthesizeProposal({
     BUDGET_TOKENS: String(config.budgetTokens),
     BUDGET_STATE: budgetState(memoryFile, config, descriptionTokens),
     INSTRUCTION_INDEX: renderInstructionIndex(memoryFile),
-    SKILLS_DIR: overflow.dir,
-    SKILL_INDEX: renderSkillIndex(skillFiles.map((skill) => ({ ...skill, path: workspacePathFor(skill.path) }))),
+    SKILLS_DIR: stagedSkillsDir,
+    SKILL_INDEX: renderSkillIndex(stagedSkillFiles),
     EVIDENCE: renderEvidenceForPrompt(summary),
     REJECTIONS: renderRejections(rejections),
   };
@@ -502,8 +509,6 @@ export async function synthesizeProposal({
       return this.session.prompt(args);
     },
   };
-  /** @type {ReturnType<typeof prepareWorkspace>} */
-  let workspace = null;
   const editResult = await config.agents.withFallthrough("synthesis", async (current) => {
     ranWith = current.agent;
     holder.ranWith = current.agent;

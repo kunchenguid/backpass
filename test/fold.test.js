@@ -627,6 +627,29 @@ test("duplicate sightings from a covered session do not count toward gap session
   assert.equal(eligible.gaps[0].projects, 1);
 });
 
+test("project coverage honors the project's configured memory file", () => {
+  const coveredRoot = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-fold-custom-memory-"));
+  const phrasing = "Always read the deployment guide before releasing.";
+  fs.mkdirSync(path.join(coveredRoot, "docs"), { recursive: true });
+  fs.writeFileSync(path.join(coveredRoot, "docs/AI.md"), `# T\n\n- ${phrasing}\n`);
+  fs.writeFileSync(path.join(coveredRoot, ".backpassrc.json"), JSON.stringify({ memoryFiles: ["docs/AI.md"] }));
+  const summary = foldEvidence(
+    [
+      record("s1", {
+        transcript: { id: "s1", harness: "claude", project: coveredRoot, projectRoot: coveredRoot },
+        gaps: [{ proposedInstruction: phrasing, quote: "q", recurrenceRisk: "high" }],
+      }),
+      record("s2", {
+        transcript: { id: "s2", harness: "claude", project: "/repos/other", projectRoot: null },
+        gaps: [{ proposedInstruction: phrasing, quote: "q2", recurrenceRisk: "high" }],
+      }),
+    ],
+    { minGapEvidence: 2, checkProjectCoverage: true },
+  );
+  assert.equal(summary.gaps.length, 0);
+  assert.equal(summary.totals.droppedGapSingletons, 1);
+});
+
 test("a project-covered sighting does not count toward gap sessions", () => {
   const coveredRoot = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-fold-covered-"));
   const phrasing = "Always pin the Node version with nvm.";
