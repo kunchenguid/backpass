@@ -246,3 +246,33 @@ test("applyDecisions writes accepted extractions through the skills layout and s
   ]);
   assert.ok(fs.existsSync(path.join(root, CLAUDE_SKILLS_LINK, "release-signing", "SKILL.md")));
 });
+
+test("user apply links relocated Claude skills to the canonical directory", () => {
+  const root = tmpRepo();
+  const relocated = path.join(root, "claude-config", "skills");
+  fs.writeFileSync(path.join(root, "AGENTS.md"), "# Memory\n\n- Sign releases with the key.\n");
+  const edit = {
+    id: "e1",
+    kind: "extract",
+    file: "AGENTS.md",
+    find: "- Sign releases with the key.",
+    replace: "- Release signing: see the release-signing skill.",
+    skill: SKILL,
+  };
+  const results = applyDecisions({
+    proposal: { scope: "user", memoryFile: { path: "AGENTS.md" }, edits: [edit] },
+    decisions: { e1: "accepted" },
+    repo: { root },
+    state: { readRejections: () => [], writeRejections: () => {} },
+    config: {
+      budgetTokens: 5000,
+      skillsDirs: [CANONICAL_SKILLS_DIR, relocated, path.join(root, ".codex", "skills")],
+    },
+  });
+
+  assert.equal(results.failed.length, 0);
+  assert.ok(fs.lstatSync(relocated).isSymbolicLink());
+  assert.equal(fs.realpathSync(relocated), fs.realpathSync(path.join(root, CANONICAL_SKILLS_DIR)));
+  assert.ok(fs.existsSync(path.join(relocated, "release-signing", "SKILL.md")));
+  assert.equal(fs.existsSync(path.join(root, CLAUDE_SKILLS_LINK)), false);
+});

@@ -280,18 +280,19 @@ export function resolveOverflowTarget(repoRoot, skillsDir = CANONICAL_SKILLS_DIR
   return { kind: "skills", dir: CANONICAL_SKILLS_DIR, warnings };
 }
 
-function claudeSkillsDirWarning() {
+function claudeSkillsDirWarning(claudeSkillsDir = CLAUDE_SKILLS_LINK, target = CLAUDE_SKILLS_LINK_TARGET) {
   return (
-    `${CLAUDE_SKILLS_LINK} is a real directory, not a symlink to ${CLAUDE_SKILLS_LINK_TARGET}; ` +
+    `${claudeSkillsDir} is a real directory, not a symlink to ${target}; ` +
     `left untouched. Claude will not see skills written to ${CANONICAL_SKILLS_DIR} until you ` +
-    `merge it in and replace it with the symlink (ln -s ${CLAUDE_SKILLS_LINK_TARGET} ${CLAUDE_SKILLS_LINK}).`
+    `merge it in and replace it with the symlink (ln -s ${target} ${claudeSkillsDir}).`
   );
 }
 
-function inspectClaudeSkillsLink(repoRoot) {
+function inspectClaudeSkillsLink(repoRoot, claudeSkillsDir = CLAUDE_SKILLS_LINK) {
+  const link = path.isAbsolute(claudeSkillsDir) ? claudeSkillsDir : path.join(repoRoot, claudeSkillsDir);
   let stat;
   try {
-    stat = fs.lstatSync(path.join(repoRoot, CLAUDE_SKILLS_LINK));
+    stat = fs.lstatSync(link);
   } catch {
     return { state: "missing" };
   }
@@ -410,7 +411,7 @@ export function removeOwnedSkillPaths(paths) {
  * `.claude/skills` is never clobbered: a symlink (to anywhere) is left as is, and a real
  * directory is reported so the user can merge it by hand.
  */
-export function ensureSkillsLayout(repoRoot) {
+export function ensureSkillsLayout(repoRoot, claudeSkillsDir = CLAUDE_SKILLS_LINK) {
   const created = [];
   const warnings = [];
   const canonical = path.join(repoRoot, CANONICAL_SKILLS_DIR);
@@ -419,14 +420,15 @@ export function ensureSkillsLayout(repoRoot) {
     created.push(CANONICAL_SKILLS_DIR);
   }
 
-  const claude = inspectClaudeSkillsLink(repoRoot);
+  const link = path.isAbsolute(claudeSkillsDir) ? claudeSkillsDir : path.join(repoRoot, claudeSkillsDir);
+  const target = path.relative(path.dirname(link), canonical) || ".";
+  const claude = inspectClaudeSkillsLink(repoRoot, claudeSkillsDir);
   if (claude.state === "missing") {
-    const link = path.join(repoRoot, CLAUDE_SKILLS_LINK);
     fs.mkdirSync(path.dirname(link), { recursive: true });
-    fs.symlinkSync(CLAUDE_SKILLS_LINK_TARGET, link, "dir");
-    created.push(`${CLAUDE_SKILLS_LINK} -> ${CLAUDE_SKILLS_LINK_TARGET}`);
+    fs.symlinkSync(target, link, "dir");
+    created.push(`${claudeSkillsDir} -> ${target}`);
   } else if (claude.state === "dir") {
-    warnings.push(claudeSkillsDirWarning());
+    warnings.push(claudeSkillsDirWarning(claudeSkillsDir, target));
   }
   return { created, warnings };
 }

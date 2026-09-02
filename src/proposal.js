@@ -729,7 +729,7 @@ export function buildProposal(rawResult, context) {
       minGapEvidence: config.minGapEvidence,
       ...(config.minGapProjects != null ? { minGapProjects: config.minGapProjects } : {}),
       skillsDir: config.skillsDir,
-      skillDirs: config.skillDirs,
+      skillsDirs: config.skillsDirs,
       analysis: config.analysis,
       synthesis: config.synthesis,
     },

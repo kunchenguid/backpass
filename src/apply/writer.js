@@ -286,7 +286,11 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     repo.root,
     proposal.config?.skillsDir || config.skillsDir || CANONICAL_SKILLS_DIR,
   ).dir;
-  const skillsNow = loadProjectSkills(repo.root, skillsDir, config.skillsDirs || proposal.config?.skillDirs || []);
+  const configuredSkillDirs =
+    proposal.config?.skillsDirs || proposal.config?.skillDirs || config.skillsDirs || [];
+  const claudeSkillsLink =
+    proposal.scope === "user" ? configuredSkillDirs[1] || CLAUDE_SKILLS_LINK : CLAUDE_SKILLS_LINK;
+  const skillsNow = loadProjectSkills(repo.root, skillsDir, configuredSkillDirs);
   const descriptionTokensNow = skillDescriptionTokens(skillsNow);
 
   // Freshness for every non-memory file a decision targets, the same contract the
@@ -460,7 +464,7 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
   );
   const createdDirectoryCandidates = absentParentDirectories(repo.root, [
     ...plannedSkills.map(({ skill }) => resolveTarget(repo.root, skill.path)),
-    ...(canonical ? [resolveTarget(repo.root, CLAUDE_SKILLS_LINK)] : []),
+    ...(canonical ? [resolveTarget(repo.root, claudeSkillsLink)] : []),
   ]);
   const skillFailures = [];
   const ownedSkillPaths = [];
@@ -578,12 +582,12 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
 
   if (!dryRun && canonical) {
     try {
-      const layout = ensureSkillsLayout(repo.root);
+      const layout = ensureSkillsLayout(repo.root, claudeSkillsLink);
       const result = results.skills.find(({ path: skillPath }) => skillPath === canonical.skill.path);
       result.created = [...new Set([...result.created, ...layout.created])];
       for (const w of layout.warnings) if (!results.warnings.includes(w)) results.warnings.push(w);
     } catch (err) {
-      results.failed.push({ file: CLAUDE_SKILLS_LINK, edit: canonical.edit.id, error: err.message });
+      results.failed.push({ file: claudeSkillsLink, edit: canonical.edit.id, error: err.message });
       rollbackCommitted();
       rollbackSkills();
       return results;
