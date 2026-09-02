@@ -2,7 +2,7 @@
 
 `backpass` exists so that a repository's agent memory file improves from what actually happened in its agent sessions, instead of from whatever a human happened to remember.
 It serves the developer who owns that file, whether it is `AGENTS.md` or the `CLAUDE.md` Claude Code reads in its place, and it turns transcripts already sitting on their disk into a small set of reviewable edits.
-The project file is the one it trains; a person's own `~/.claude/CLAUDE.md` is handwritten preference, and anything learned belongs in project memory instead.
+By default the project file is the one it trains. A person's user-level surface (`~/.claude/CLAUDE.md`, user-level skills) is a target only when they name it as the scope of a run.
 It owns exactly one thing: the backward pass from session transcripts to a proposed change in the memory surface - the memory file and the project's skills.
 
 ## Evidence is the only currency
@@ -75,7 +75,7 @@ A test earns its place by failing when the behavior it names is removed, so a te
 ## Scope
 
 `backpass` is not a code reviewer, not a CI system, not a linter, not a harness, and not a model provider.
-It does not train a person's own `~/.claude/CLAUDE.md`, which is handwritten preference and not a target to write.
+It never writes a user-level file from a project-scoped run.
 It does not rewrite a memory file and will not offer to, because a rewrite cannot be accepted edit by edit and leaves nothing for a rejection to remember.
 Vocabulary is deliberate: the user reads the training loop, while subcommands and internals keep their short names.
 The repo holds itself to its own standard, including excluding its own sessions from the corpus it analyzes.

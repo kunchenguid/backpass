@@ -6,6 +6,7 @@ Keep this file next to the vision: it is the record of why the vision says what 
 
 Board: `/vision` review, 12 hypotheticals, from-scratch draft r1 (2026-08-23).
 Evidence base: the 20 merged pull requests authored by the repo owner in `kunchenguid/backpass` (#1 through #26), the open issues #23, #24 and #25, community pull request #21, and the module header comments those changes left behind.
+Later ruling: H-13, issue #97 (2026-09-02), supersedes H-8 for an explicit `--scope user` run only.
 
 ## H-1 - Pool the gap ledger across a team
 
@@ -115,7 +116,7 @@ Evidence base: the 20 merged pull requests authored by the repo owner in `kunche
 
 **Author's reasoning.** for now, my philosophy is that global memory should be handwritten by the user and only contains their preferences. all the learned knowledge is better put into project-level memory
 
-**Folded in as.** The opener now carries the positive half of your reasoning: "a person's own ~/.claude/CLAUDE.md is handwritten preference, and anything learned belongs in project memory instead." The Scope non-goal was tightened to match.
+**Folded in as.** The opener then carried the positive half of your reasoning: "a person's own ~/.claude/CLAUDE.md is handwritten preference, and anything learned belongs in project memory instead." The Scope non-goal was tightened to match. Superseded in part by H-13 (2026-09-02): those two sentences now describe the default project-scoped run; an explicit `--scope user` run is in vision. H-8 itself stays off-mission: a project-scoped run still must not write a user-level file.
 
 ## H-9 - Make --strict the default
 
@@ -172,3 +173,28 @@ Evidence base: the 20 merged pull requests authored by the repo owner in `kunche
 **Author's reasoning.** covering more harnesses is in vision, as long as it doesn't risk existing ones
 
 **Folded in as.** New line with your constraint attached: "More harnesses is always welcome, provided a new one cannot destabilise the ones already working", kept next to the pinned-fixture and fail-soft requirement.
+
+## H-13 - A user-level scope for a user whose weights live at `~/.claude`
+
+**Proposal.** Issue #97 proposes a second run scope, `--scope user`, that trains the user's always-loaded instruction file and user-level skills from every session on the machine. A project-scoped run never writes those files. This is not H-8: H-8 asked a project run to promote a cross-repo gap into `~/.claude/CLAUDE.md`; this asks the user to name the user surface as the target.
+
+**Principle tested.** "It does not train a person's own `~/.claude/CLAUDE.md`." / H-8 off-mission.
+
+**Why it was not obvious.** For: a user who keeps all skills and instructions at user level has no project file for a project run to train, and a user-level skill's description is a trigger condition, not handwritten preference. Against: H-8's reasoning that a global file has no repo to scope evidence to and one wrong instruction pollutes every project at once.
+
+**Verdict.** In vision (explicit `--scope user` only; H-8 remains off-mission for a project-scoped write)
+
+**Author's reasoning.** (verbatim from the 2026-09-02 comment on issue #97)
+
+for open questions -
+
+1. yes amend vision
+2. as proposed
+3. default 1. i don't think we need cross-project evidence as a requirement
+4. project scoped and user scoped data should be isolated as much as possible
+5. i like the one under ~/.config
+6. follow what project scope does
+7. follow what project scope does
+8. you figure it out. in general we should consider AGENTS.md canonical - many harnesses support that already. CLAUDE.md can contain a pointer to it
+
+**Folded in as.** The opener's "a person's own `~/.claude/CLAUDE.md` is handwritten preference, and anything learned belongs in project memory instead" becomes "By default the project file is the one it trains. A person's user-level surface (`~/.claude/CLAUDE.md`, user-level skills) is a target only when they name it as the scope of a run." The Scope non-goal changes from "It does not train a person's own `~/.claude/CLAUDE.md`" to "It never writes a user-level file from a project-scoped run." Section 8's "and a rule reaches it only with evidence from more than one project" is not folded into `VISION.md`: answer 3 sets `minGapProjects` default 1, so the two-session bar remains the vision requirement and the project-count gate is a configurable setting, not a write-path. Recorded implementation answers for the follow-on cut: canonical user memory file is first-existing with divergence warnings; project-scoped and user-scoped state, evidence, ledgers, rejections, and apply surfaces stay isolated; user-scope state lives under `~/.config/backpass/` (honours `XDG_CONFIG_HOME`); pre-image backups and the extraction target follow what project scope does; treat the user-level `AGENTS.md` the harnesses load as canonical, with `CLAUDE.md` allowed as a pointer. The resist tests are unchanged: nothing here widens what writes without an explicit scope, lowers the two-session bar, or makes anything but per-edit review the default.
