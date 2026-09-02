@@ -1,0 +1,54 @@
+Phase 0 documentation validation
+Base: b7a604433d3c3bd9a4f3651f25fb9e292b2c4f8f
+Target: d642b4b2505805f0b7522d13a39e948f19abdbc2
+
+Complete target change set:
+M	VISION-ANSWERS.md
+M	VISION.md
+
+Published VISION.md amendment:
+3:`backpass` exists so that a repository's agent memory file improves from what actually happened in its agent sessions, instead of from whatever a human happened to remember.
+4:It serves the developer who owns that file, whether it is `AGENTS.md` or the `CLAUDE.md` Claude Code reads in its place, and it turns transcripts already sitting on their disk into a small set of reviewable edits.
+5:By default the project file is the one it trains. A person's user-level surface (`~/.claude/CLAUDE.md`, user-level skills) is a target only when they name it as the scope of a run.
+78:It never writes a user-level file from a project-scoped run.
+79:It does not rewrite a memory file and will not offer to, because a rewrite cannot be accepted edit by edit and leaves nothing for a rejection to remember.
+80:Vocabulary is deliberate: the user reads the training loop, while subcommands and internals keep their short names.
+81:The repo holds itself to its own standard, including excluding its own sessions from the corpus it analyzes.
+82:
+83:A change aligns when it makes the evidence behind a proposal stronger, cheaper to verify, or harder to fabricate.
+84:A change aligns when it lets a person say no faster, or say no once and have it remembered.
+85:A change should be resisted when it widens what writes, lowers the two-session bar, or makes anything but per-edit review the default.
+86:A change should be resisted when it makes the memory file easier to grow than to shrink.
+87:A change should be resisted when it requires `backpass` to hold a key, a server, or a copy of someone else's transcripts.
+88:A change should be resisted when it buys coverage with accuracy, or trades a real fix for a quieter degraded path.
+
+Published H-13 ruling and verbatim answer block:
+## H-13 - A user-level scope for a user whose weights live at `~/.claude`
+
+**Proposal.** Issue #97 proposes a second run scope, `--scope user`, that trains the user's always-loaded instruction file and user-level skills from every session on the machine. A project-scoped run never writes those files. This is not H-8: H-8 asked a project run to promote a cross-repo gap into `~/.claude/CLAUDE.md`; this asks the user to name the user surface as the target.
+
+**Principle tested.** "It does not train a person's own `~/.claude/CLAUDE.md`." / H-8 off-mission.
+
+**Why it was not obvious.** For: a user who keeps all skills and instructions at user level has no project file for a project run to train, and a user-level skill's description is a trigger condition, not handwritten preference. Against: H-8's reasoning that a global file has no repo to scope evidence to and one wrong instruction pollutes every project at once.
+
+**Verdict.** In vision (explicit `--scope user` only; H-8 remains off-mission for a project-scoped write)
+
+**Author's reasoning.** (verbatim from the 2026-09-02 comment on issue #97)
+
+for open questions -
+1. yes amend vision
+2. as proposed
+3. default 1. i don't think we need cross-project evidence as a requirement
+4. project scoped and user scoped data should be isolated as much as possible
+5. i like the one under ~/.config
+6. follow what project scope does
+7. follow what project scope does
+8. you figure it out. in general we should consider AGENTS.md canonical - many harnesses support that already. CLAUDE.md can contain a pointer to it
+
+**Folded in as.** The opener's "a person's own `~/.claude/CLAUDE.md` is handwritten preference, and anything learned belongs in project memory instead" becomes "By default the project file is the one it trains. A person's user-level surface (`~/.claude/CLAUDE.md`, user-level skills) is a target only when they name it as the scope of a run." The Scope non-goal changes from "It does not train a person's own `~/.claude/CLAUDE.md`" to "It never writes a user-level file from a project-scoped run." Section 8's "and a rule reaches it only with evidence from more than one project" is not folded into `VISION.md`: answer 3 sets `minGapProjects` default 1, so the two-session bar remains the vision requirement and the project-count gate is a configurable setting, not a write-path. Recorded implementation answers for the follow-on cut: canonical user memory file is first-existing with divergence warnings; project-scoped and user-scoped state, evidence, ledgers, rejections, and apply surfaces stay isolated; user-scope state lives under `~/.config/backpass/` (honours `XDG_CONFIG_HOME`); pre-image backups and the extraction target follow what project scope does; treat the user-level `AGENTS.md` the harnesses load as canonical, with `CLAUDE.md` allowed as a pointer. The resist tests are unchanged: nothing here widens what writes without an explicit scope, lowers the two-session bar, or makes anything but per-edit review the default.
+
+Resist-test tail unchanged from base: YES
+
+Issue #97 captain comment fetched through gh-axi:
+comments[1]{author,created,body}:
+  kunchenguid,9m ago,"for open questions -\n1. yes amend vision\n2. as proposed\n3. default 1. i don't think we need cross-project evidence as a requirement\n4. project scoped and user scoped data should be isolated as much as possible\n5. i like the one under ~/.config\n6. follow what project scope does\n7. follow what project scope does\n8. you figure it out. in general we should consider AGENTS.md canonical - many harnesses support that already. CLAUDE.md can contain a pointer to it"
