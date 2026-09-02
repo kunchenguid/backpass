@@ -134,6 +134,7 @@ export async function discoverTranscripts({
 
   if (cacheDirty) config.state.writeScanCache(cache);
 
+  scope?.normalizeProjects?.(transcripts);
   transcripts.sort((a, b) => (b.mtimeMs || 0) - (a.mtimeMs || 0));
   emitProgress("discover:done", { total: transcripts.length });
   return { transcripts, perHarness, cutoffMs };

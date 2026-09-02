@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { loadConfig } from "../src/config.js";
 import { discoverTranscripts } from "../src/discovery/index.js";
 import { SELF_SESSION_SENTINEL } from "../src/prompts.js";
+import { capTranscripts } from "../src/sample.js";
 import { resolveScope } from "../src/scope.js";
 import { State } from "../src/state.js";
 
@@ -110,6 +111,28 @@ test("user-scope discovery keeps Claude and Codex sessions from different projec
   );
   assert.equal(scope.stateDir, path.join(home, ".config", "backpass", "user"));
   assert.equal(fs.statSync(scope.stateDir).mode & 0o777, 0o700);
+});
+
+test("user-scope discovery gives live and deleted registered worktrees one project identity", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-udisc-worktrees-"));
+  const root = initRepo("worktrees");
+  const sibling = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-udisc-parent-")), "deleted");
+  git(["remote", "add", "origin", "https://github.com/acme/shared.git"], root);
+  git(["worktree", "add", "-q", "-b", "deleted", sibling], root);
+
+  writeFixture(path.join(home, ".claude", "projects", "a-deleted", "deleted.jsonl"), "claude-session.jsonl", sibling);
+  writeFixture(path.join(home, ".claude", "projects", "z-live", "live.jsonl"), "claude-session.jsonl", root, {
+    "11111111-2222-3333-4444-555555555555": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+  });
+  fs.rmSync(sibling, { recursive: true, force: true });
+
+  const { result, config } = await userDiscovery(home, { discovery: { maxTranscriptsPerProject: 1 } });
+  assert.equal(result.transcripts.length, 2);
+  assert.deepEqual(
+    new Set(result.transcripts.map((transcript) => transcript.project)),
+    new Set(["github.com/acme/shared"]),
+  );
+  assert.equal(capTranscripts(result, config).transcripts.length, 1);
 });
 
 test("user-scope discovery drops self-sessions by sentinel and by cwd under the user state dir", async () => {

@@ -51,7 +51,7 @@ export function gitToplevel(cwd) {
 }
 
 /** Worktree paths for the repo, realpath-normalized (design section 2.1, tier 1). */
-function listWorktrees(root) {
+export function listWorktrees(root) {
   let raw;
   try {
     raw = git(["worktree", "list", "--porcelain"], root);

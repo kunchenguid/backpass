@@ -5,7 +5,7 @@ import path from "node:path";
 import { parseScopeKind, userStateDir } from "./config.js";
 import { associate as associateProject, globToRegExp } from "./discovery/association.js";
 import { UserError, info } from "./logger.js";
-import { gitProjectIdentity, gitToplevel, normalizeRemote } from "./repo.js";
+import { gitProjectIdentity, gitToplevel, listWorktrees, normalizeRemote } from "./repo.js";
 
 /**
  * A run scope is the triple (weights surface, session corpus, state directory).
@@ -44,10 +44,19 @@ export function resolveInRoot(root, p) {
 }
 
 function realpathOrResolve(p) {
+  const absolute = path.resolve(p);
+  let existing = absolute;
+  const tail = [];
+  while (!fs.existsSync(existing)) {
+    const parent = path.dirname(existing);
+    if (parent === existing) return absolute;
+    tail.unshift(path.basename(existing));
+    existing = parent;
+  }
   try {
-    return fs.realpathSync(p);
+    return path.join(fs.realpathSync(existing), ...tail);
   } catch {
-    return path.resolve(p);
+    return absolute;
   }
 }
 
@@ -161,12 +170,37 @@ function resolveUserScope(cwd, config, { strict = false, home = os.homedir(), as
   const repo = syntheticUserRepo(root);
   const stateDir = userStateDir();
   const associationCache = new Map();
+  const knownWorktrees = new Map();
+  const indexedRoots = new Set();
   const associate = (descriptor) => {
     const key = JSON.stringify([descriptor?.cwd || null, descriptor?.remotes || []]);
     if (!associationCache.has(key)) {
-      associationCache.set(key, associateUserFn(descriptor, { strict }));
+      const association = associateUserFn(descriptor, { strict });
+      associationCache.set(key, association);
+      if (association?.tier === 1 && association.projectRoot && !indexedRoots.has(association.projectRoot)) {
+        indexedRoots.add(association.projectRoot);
+        for (const worktree of listWorktrees(association.projectRoot)) {
+          knownWorktrees.set(realpathOrResolve(worktree), association.project);
+        }
+      }
     }
     return associationCache.get(key);
+  };
+  const normalizeProjects = (transcripts) => {
+    for (const transcript of transcripts) {
+      if (transcript.association?.tier !== 3 || !transcript.cwd) continue;
+      const cwdPath = realpathOrResolve(transcript.cwd);
+      const match = [...knownWorktrees.entries()]
+        .filter(([worktree]) => cwdPath === worktree || cwdPath.startsWith(`${worktree}${path.sep}`))
+        .sort(([a], [b]) => b.length - a.length)[0];
+      if (!match) continue;
+      const [worktree, project] = match;
+      transcript.project = project;
+      transcript.association.project = project;
+      transcript.association.confidence = "git";
+      transcript.association.reason = `cwd is in registered worktree ${worktree}`;
+    }
+    return transcripts;
   };
   return {
     kind: "user",
@@ -179,6 +213,7 @@ function resolveUserScope(cwd, config, { strict = false, home = os.homedir(), as
     skillDirs,
     overflowDir,
     associate,
+    normalizeProjects,
     cwdNote: gitToplevel(cwd)
       ? "user scope: this checkout is not a write target; edits go to the user-level memory file and skills"
       : null,
