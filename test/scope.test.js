@@ -95,10 +95,7 @@ test("user association groups worktrees and deleted sessions by the origin remot
 
 test("user association groups local worktrees by their shared git directory", () => {
   const root = initRepo("local-worktree");
-  const sibling = path.join(
-    fs.mkdtempSync(path.join(os.tmpdir(), "backpass-scope-local-worktree-parent-")),
-    "sibling",
-  );
+  const sibling = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-scope-local-worktree-parent-")), "sibling");
   git(["worktree", "add", "-q", "-b", "local-sibling", sibling], root);
 
   const first = associateUser({ cwd: root });

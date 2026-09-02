@@ -40,7 +40,7 @@ async function initUser(config, flags) {
   try {
     fs.chmodSync(stateDir, 0o700);
   } catch {
-    // mode is best-effort; the directory exists either way
+    // State.ensure already enforced 0700 before this command; this repeat is best-effort.
   }
   info(`${color.green("·")} user state ${stateDir} (0700)`);
   out("");

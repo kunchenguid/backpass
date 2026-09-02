@@ -81,22 +81,25 @@ trains the always-loaded user file and user-level skills from Claude Code and Co
 sessions across projects, and writes only those files. A project-scoped run never
 writes a user-level file.
 
-Canonical user memory is the first of these that exists: `~/.agents/AGENTS.md`,
-then `~/.claude/CLAUDE.md` (a pointer to AGENTS.md is valid), then `~/.codex/AGENTS.md`.
-User-level skill extractions follow the project layout: `.agents/skills`, with a
-warning if `~/.claude/skills` is a real directory rather than the usual symlink.
+Canonical user memory is the first existing file in this order: `~/.agents/AGENTS.md`,
+`$CLAUDE_CONFIG_DIR/CLAUDE.md` (default `~/.claude/CLAUDE.md`), and
+`$CODEX_HOME/AGENTS.md` (default `~/.codex/AGENTS.md`). User-level skill extractions
+follow the project layout at `~/.agents/skills`, with a warning if Claude's active
+`skills` path is a real directory rather than the usual symlink.
 
-State lives in `~/.config/backpass/user/` (mode 0700; honours `XDG_CONFIG_HOME`),
-isolated from every project's `.backpass/`. User-scope evidence, ledgers, proposals,
-and apply surfaces stay in that one directory.
+State lives in `$XDG_CONFIG_HOME/backpass/user/` (default
+`~/.config/backpass/user/`) with mode 0700, isolated from every project's
+`.backpass/`. User-scope evidence, ledgers, proposals, and apply surfaces stay in
+that one directory.
 
 Harness load paths, verified for v1:
 
-- **Claude Code** loads `~/.claude/CLAUDE.md` (`CLAUDE_CONFIG_DIR` relocates the config
-  dir) and inlines `@` imports, including `~/` and absolute paths. A CLAUDE.md that is
-  only `@AGENTS.md` (or `@~/...`) is a valid pointer.
-- **Codex** loads `~/.codex/AGENTS.md` (`CODEX_HOME` relocates Codex home). It follows
-  the AGENTS.md convention; `@` import is not assumed.
+- **Claude Code** loads `CLAUDE.md` from `CLAUDE_CONFIG_DIR` (default `~/.claude`)
+  and inlines `@` imports, including `~/` and absolute paths. A CLAUDE.md containing
+  only an import that resolves to the canonical user memory is a valid pointer, such
+  as `@~/.agents/AGENTS.md` with the default paths.
+- **Codex** loads `AGENTS.md` from `CODEX_HOME` (default `~/.codex`). It follows the
+  AGENTS.md convention; `@` import is not assumed.
 
 A target that is a symlink into a read-only store (dotfiles, nix) is refused with
 `<path> is a symlink to <real>, which is not writable; edit the source that generates it`.
@@ -590,9 +593,10 @@ CLI flags on top:
 ```
 
 That example is the project scope. User scope ignores `.backpassrc.json` and instead
-layers the `"user"` block in `~/.config/backpass/config.json` over its defaults. Its
-scope-specific settings are `memoryFiles`, `skillsDir`, `skillsDirs`,
-`minGapProjects` (default `1`), and these discovery controls:
+layers the `"user"` block in `$XDG_CONFIG_HOME/backpass/config.json` (default
+`~/.config/backpass/config.json`) over its defaults. The user block can override the
+regular settings; its path and user-only settings include `memoryFiles`, `skillsDir`,
+`skillsDirs`, `minGapProjects` (default `1`), and these discovery controls:
 
 ```json
 {
@@ -608,8 +612,9 @@ scope-specific settings are `memoryFiles`, `skillsDir`, `skillsDirs`,
 ```
 
 `includeProjects` and `excludeProjects` are globs matched against each project key and
-session cwd. `--project <glob>` adds command-line include globs. A non-null
-`maxTranscriptsPerProject` applies a sticky, recency-weighted per-project cap before
+session cwd. Repeated `--project <glob>` flags set the include globs for that
+invocation. A non-null `maxTranscriptsPerProject` applies a sticky,
+recency-weighted per-project cap before
 `maxTranscripts` applies to the whole run.
 
 ### State
@@ -632,8 +637,8 @@ exclude (`.git/info/exclude`, written by `backpass init`) rather than the tracke
   apply/apply.html       the rendered review surface
 ```
 
-User-scope state is the same files under `~/.config/backpass/user/` (0700). It is never
-mixed with a checkout's `.backpass/`.
+For the user-scope state location and isolation contract, see
+[User-level memory](#user-level-memory).
 
 ## Limitations
 

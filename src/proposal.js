@@ -523,12 +523,7 @@ export function buildProposal(rawResult, context) {
       );
       continue;
     }
-    if (
-      !preservesAlwaysLoaded(edit.kind) &&
-      onlyAdds &&
-      projectGate &&
-      evidenceProjects < config.minGapProjects
-    ) {
+    if (!preservesAlwaysLoaded(edit.kind) && onlyAdds && projectGate && evidenceProjects < config.minGapProjects) {
       violations.push(
         `edit ${edit.id} ("${edit.title}") adds a new instruction backed by evidence from ${evidenceProjects} project(s); ` +
           `${config.minGapProjects} are required`,

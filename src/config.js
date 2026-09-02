@@ -98,7 +98,8 @@ export const DEFAULT_CONFIG = {
  *
  * Canonical user memory is the first existing file in this list (captain, issue #97):
  * `~/.agents/AGENTS.md` first (AGENTS.md is the cross-harness file), then Claude Code's
- * `~/.claude/CLAUDE.md` (allowed as a pointer), then Codex `~/.codex/AGENTS.md`.
+ * configured `CLAUDE.md` (allowed as a pointer), then Codex's configured `AGENTS.md`.
+ * `CLAUDE_CONFIG_DIR` and `CODEX_HOME` relocate the latter two defaults.
  * `minGapProjects` defaults to 1: the gate exists and is configurable, but cross-project
  * corroboration is not required. Phase 1 discovery and user-level edit targets cover
  * Claude Code and Codex (plus the shared `.agents` layout).

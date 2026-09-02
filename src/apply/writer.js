@@ -291,8 +291,7 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     proposal.config?.skillsDir || config.skillsDir || CANONICAL_SKILLS_DIR,
     { claudeSkillsDir: claudeSkillsLink },
   ).dir;
-  const configuredSkillDirs =
-    proposal.config?.skillsDirs || proposal.config?.skillDirs || config.skillsDirs || [];
+  const configuredSkillDirs = proposal.config?.skillsDirs || proposal.config?.skillDirs || config.skillsDirs || [];
   const skillsNow = loadProjectSkills(repo.root, skillsDir, configuredSkillDirs, { exact: userScope });
   const descriptionTokensNow = skillDescriptionTokens(skillsNow);
 
