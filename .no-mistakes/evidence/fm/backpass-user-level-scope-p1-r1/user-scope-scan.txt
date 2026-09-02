@@ -1,0 +1,17 @@
+COMMAND: backpass scan --scope user --since all --harness claude,codex
+
+user scope: this checkout is not a write target; edits go to the user-level memory file and skills
+user scope · since all
+
+HARNESS  SCANNED  MATCHED  SELF  CACHED  NOTE
+claude   1        1        0     0
+codex    1        1        0     0
+
+2 transcript(s) across 2 project(s) · tier1 2 (git) · tier2 0 (remote) · tier3 0 (cwd) · interactive 0 · non-interactive 2
+
+HARNESS  SESSION       KIND             WHEN   SIZE  TIER  PROJECT
+codex    aaaa-bbbb     non-interactive  today  2KB   t1    /Users/kunchen/.no-mistakes/worktrees/26c81f7411
+claude   11111111-222  non-interactive  today  2KB   t1    /Users/kunchen/.no-mistakes/worktrees/26c81f7411
+
+STATE DIRECTORY MODE: 700 /Users/kunchen/.no-mistakes/worktrees/26c81f74111f/01M1GP6BEEPGHNQ6Y3EEG6GAC9/.test-user-scope-e2e/home/xdg/backpass/user
+PROJECT .backpass DIRECTORIES CREATED: none
