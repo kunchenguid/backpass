@@ -3,6 +3,7 @@ import path from "node:path";
 import os from "node:os";
 
 import { UserError, warn } from "./logger.js";
+import { normalizeSkillsDir } from "./skills.js";
 
 export const CONFIG_FILENAME = ".backpassrc.json";
 export const STATE_DIRNAME = ".backpass";
@@ -235,6 +236,7 @@ export function loadConfig(repoRoot, overrides = {}) {
   ].reduce((acc, layer) => (layer ? deepMerge(acc, layer) : acc), DEFAULT_CONFIG);
 
   const config = structuredClone(merged);
+  config.skillsDir = normalizeSkillsDir(config.skillsDir);
   if (config.discovery.includeCursorIde && !config.discovery.harnesses.includes("cursor-ide")) {
     config.discovery.harnesses = [...config.discovery.harnesses, "cursor-ide"];
   }

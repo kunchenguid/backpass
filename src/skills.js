@@ -253,6 +253,12 @@ export const CANONICAL_SKILLS_DIR = ".agents/skills";
 export const CLAUDE_SKILLS_LINK = ".claude/skills";
 export const CLAUDE_SKILLS_LINK_TARGET = path.posix.join("..", CANONICAL_SKILLS_DIR);
 
+export function normalizeSkillsDir(skillsDir) {
+  return String(skillsDir ?? "")
+    .replaceAll("\\", "/")
+    .replace(/\/+$/, "");
+}
+
 /**
  * Pick the directory skill extractions target.
  *
@@ -265,15 +271,14 @@ export const CLAUDE_SKILLS_LINK_TARGET = path.posix.join("..", CANONICAL_SKILLS_
  * side-effect free.
  */
 export function resolveOverflowTarget(repoRoot, skillsDir = CANONICAL_SKILLS_DIR) {
+  const configuredDir = normalizeSkillsDir(skillsDir);
   const warnings = [];
   const claude = inspectClaudeSkillsLink(repoRoot);
-  if (claude.state === "dir") warnings.push(claudeSkillsDirWarning());
 
-  const explicit = skillsDir && skillsDir !== CANONICAL_SKILLS_DIR && skillsDir !== CLAUDE_SKILLS_LINK;
-  if (explicit && fs.existsSync(path.join(repoRoot, skillsDir))) {
-    return { kind: "skills", dir: skillsDir, warnings };
-  }
-  return { kind: "skills", dir: CANONICAL_SKILLS_DIR, warnings };
+  const explicit = configuredDir && configuredDir !== CANONICAL_SKILLS_DIR;
+  const dir = explicit && fs.existsSync(path.join(repoRoot, configuredDir)) ? configuredDir : CANONICAL_SKILLS_DIR;
+  if (claude.state === "dir" && dir === CANONICAL_SKILLS_DIR) warnings.push(claudeSkillsDirWarning());
+  return { kind: "skills", dir, warnings };
 }
 
 function claudeSkillsDirWarning() {

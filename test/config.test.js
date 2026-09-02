@@ -66,6 +66,11 @@ test("repo config overrides defaults, and CLI flags override both", () => {
   assert.equal(withFlags.analysis.model, "gpt-5.2");
 });
 
+test("skillsDir is normalized when the configuration loads", () => {
+  const config = loadConfig(tempRepo({ skillsDir: ".claude\\skills\\" }));
+  assert.equal(config.skillsDir, ".claude/skills");
+});
+
 test("--include-cursor-ide is the only way the deferred store is scanned", () => {
   const config = loadConfig(tempRepo(), { discovery: { includeCursorIde: true } });
   assert.ok(config.discovery.harnesses.includes("cursor-ide"));

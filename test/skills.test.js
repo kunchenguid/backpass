@@ -126,7 +126,7 @@ test("writeSkill lands in .agents/skills and links .claude/skills to it", () => 
   assert.deepEqual(again.created, []);
 });
 
-test("resolveOverflowTarget prefers .agents/skills and never auto-picks bare skills/", () => {
+test("resolveOverflowTarget honors an existing configured directory", () => {
   const empty = tmpRepo();
   assert.deepEqual(resolveOverflowTarget(empty), { kind: "skills", dir: CANONICAL_SKILLS_DIR, warnings: [] });
   assert.equal(resolveOverflowTarget(empty, ".claude/skills").dir, CANONICAL_SKILLS_DIR);
@@ -134,13 +134,17 @@ test("resolveOverflowTarget prefers .agents/skills and never auto-picks bare ski
   const bare = tmpRepo();
   fs.mkdirSync(path.join(bare, "skills"));
   fs.mkdirSync(path.join(bare, "docs"));
-  assert.equal(resolveOverflowTarget(bare).dir, CANONICAL_SKILLS_DIR);
-  assert.equal(resolveOverflowTarget(bare, ".claude/skills").dir, CANONICAL_SKILLS_DIR);
-
-  // An explicitly configured directory that exists is the user's call.
   assert.equal(resolveOverflowTarget(bare, "skills").dir, "skills");
-  // ...but one that does not exist falls back to the canonical dir.
   assert.equal(resolveOverflowTarget(bare, "nope/skills").dir, CANONICAL_SKILLS_DIR);
+
+  fs.mkdirSync(path.join(bare, ".claude", "skills"), { recursive: true });
+  assert.deepEqual(resolveOverflowTarget(bare, ".claude/skills"), {
+    kind: "skills",
+    dir: ".claude/skills",
+    warnings: [],
+  });
+  assert.equal(resolveOverflowTarget(bare, ".claude/skills/").dir, ".claude/skills");
+  assert.equal(resolveOverflowTarget(bare, ".claude\\skills\\").dir, ".claude/skills");
 });
 
 test("project skill discovery includes separate canonical and Claude roots without double-counting symlinks", () => {

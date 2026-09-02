@@ -12,7 +12,7 @@ import {
   prepareWorkspace,
   repoFingerprint,
 } from "../src/workspace.js";
-import { makeRepo, writeIn } from "./helpers/staging.js";
+import { makeRepo, stageAndMeasure, writeIn } from "./helpers/staging.js";
 
 const AGENTS = "# M\n\n- one\n- two\n";
 const SKILL = "---\nname: db\ndescription: Load before touching the database.\n---\n\n## Body\n";
@@ -82,6 +82,18 @@ test("only the skill layouts a harness loads count as created skills; anything e
   assert.equal(isSkillFilePath(".agents/skills/db/reference.md", ".agents/skills"), false);
   assert.equal(isSkillFilePath(".agents/skills/a/b/SKILL.md", ".agents/skills"), false);
   assert.equal(isSkillFilePath("skills/db/SKILL.md", ".agents/skills"), false);
+  assert.equal(isSkillFilePath(".claude/skills/db/SKILL.md", ".claude/skills/"), true);
+  assert.equal(isSkillFilePath(".claude/skills/db/SKILL.md", ".claude\\skills\\"), true);
+
+  const staged = stageAndMeasure({
+    repo: makeRepo({ "AGENTS.md": AGENTS, ".claude/skills/existing/SKILL.md": SKILL }),
+    skillsDir: ".claude/skills",
+    edit: (root) => writeIn(root, ".claude/skills/new/SKILL.md", SKILL.replace("db", "new")),
+  });
+  assert.deepEqual(
+    staged.measured.changes.map((change) => [change.kind, change.file]),
+    [["created", ".claude/skills/new/SKILL.md"]],
+  );
 
   assert.deepEqual(parseSkillFile("x/SKILL.md", SKILL), {
     name: "db",

@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { anchoredHunks, countOccurrences, span } from "./diff.js";
 import { parseMemoryUnits } from "./memory.js";
-import { parseFrontmatter, skillBody } from "./skills.js";
+import { normalizeSkillsDir, parseFrontmatter, skillBody } from "./skills.js";
 import { sha256 } from "./state.js";
 
 /**
@@ -76,7 +76,7 @@ function walkFiles(dir, prefix = "") {
 export function isSkillFilePath(relative, skillsDir) {
   const dirs = Array.isArray(skillsDir) ? skillsDir : [skillsDir];
   return dirs.some((dir) => {
-    const prefix = `${dir}/`;
+    const prefix = `${normalizeSkillsDir(dir)}/`;
     if (!relative.startsWith(prefix)) return false;
     const inside = relative.slice(prefix.length);
     const parts = inside.split("/");
