@@ -19,17 +19,29 @@ import path from "node:path";
  * @param {string} bin
  * @param {string[]} args
  * @param {{ timeoutMs?: number, cwd?: string, input?: string, env?: NodeJS.ProcessEnv,
- *   platform?: NodeJS.Platform, lookupEnv?: NodeJS.ProcessEnv,
+ *   platform?: NodeJS.Platform, lookupEnv?: NodeJS.ProcessEnv, readOnlyRoots?: string[],
  *   spawnFn?: (file: string, args: string[], options: object) => any }} [options]
  * @returns {Promise<{ code: number | null, stdout: string, stderr: string, timedOut?: boolean, spawnError?: ShimError }>}
  */
 export function runCapture(
   bin,
   args,
-  { timeoutMs, cwd, input, env, platform = process.platform, lookupEnv = process.env, spawnFn = spawn } = {},
+  {
+    timeoutMs,
+    cwd,
+    input,
+    env,
+    platform = process.platform,
+    lookupEnv = process.env,
+    readOnlyRoots = [],
+    spawnFn = spawn,
+  } = {},
 ) {
   return new Promise((resolve) => {
-    const launch = windowsShimLaunch(bin, args, { platform, env: lookupEnv });
+    let launch = windowsShimLaunch(bin, args, { platform, env: lookupEnv });
+    if (!launch.error && readOnlyRoots.length) {
+      launch = readOnlyLaunch(launch, readOnlyRoots, { platform, env: lookupEnv });
+    }
     if (launch.error) {
       // Loud and named: an argument no quoting can neutralise must not reach a shim
       // where cmd.exe would silently rewrite it into several arguments or commands.
@@ -88,6 +100,34 @@ export function runCapture(
     if (input !== undefined) child.stdin.end(input);
     else child.stdin.end();
   });
+}
+
+export function readOnlyLaunch(launch, roots, { platform = process.platform, env = process.env } = {}) {
+  const unique = [...new Set(roots.map((root) => path.resolve(root)))];
+  if (!unique.length) return launch;
+  if (platform === "darwin") {
+    const profile = `(version 1)(allow default)${unique
+      .map((root) => `(deny file-write* (subpath ${JSON.stringify(root)}))`)
+      .join("")}`;
+    return {
+      file: "/usr/bin/sandbox-exec",
+      args: ["-p", profile, launch.file, ...launch.args],
+      verbatim: false,
+    };
+  }
+  if (platform === "linux") {
+    const bwrap = resolveOnPath("bwrap", { platform, env });
+    if (bwrap) {
+      return {
+        file: bwrap,
+        args: ["--bind", "/", "/", ...unique.flatMap((root) => ["--ro-bind", root, root]), "--", launch.file, ...launch.args],
+        verbatim: false,
+      };
+    }
+  }
+  const error = new Error(`read-only grounding is unavailable on ${platform}`);
+  error.code = "ERR_READ_ONLY_ROOTS_UNAVAILABLE";
+  return { ...launch, error };
 }
 
 /**

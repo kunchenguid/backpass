@@ -273,7 +273,8 @@ export function resolveOverflowTarget(repoRoot, skillsDir = CANONICAL_SKILLS_DIR
   if (claude.state === "dir") warnings.push(claudeSkillsDirWarning());
 
   const explicit = skillsDir && skillsDir !== CANONICAL_SKILLS_DIR && skillsDir !== CLAUDE_SKILLS_LINK;
-  if (explicit && fs.existsSync(path.join(repoRoot, skillsDir))) {
+  const resolvedSkillsDir = path.isAbsolute(skillsDir) ? skillsDir : path.join(repoRoot, skillsDir);
+  if (explicit && fs.existsSync(resolvedSkillsDir)) {
     return { kind: "skills", dir: skillsDir, warnings };
   }
   return { kind: "skills", dir: CANONICAL_SKILLS_DIR, warnings };
@@ -435,7 +436,7 @@ export function writeSkill(repoRoot, skill, { exclusive = false, ensureLayout = 
   const inCanonical = skill.path === CANONICAL_SKILLS_DIR || skill.path.startsWith(`${CANONICAL_SKILLS_DIR}/`);
   const layout = inCanonical && ensureLayout ? ensureSkillsLayout(repoRoot) : { created: [], warnings: [] };
   const canonicalWasMissing = inCanonical && !fs.existsSync(path.join(repoRoot, CANONICAL_SKILLS_DIR));
-  const target = path.join(repoRoot, skill.path);
+  const target = path.isAbsolute(skill.path) ? skill.path : path.join(repoRoot, skill.path);
   fs.mkdirSync(path.dirname(target), { recursive: true });
   if (!ensureLayout && canonicalWasMissing) layout.created.push(CANONICAL_SKILLS_DIR);
   const text = renderSkillFile(skill);

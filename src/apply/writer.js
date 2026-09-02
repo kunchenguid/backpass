@@ -206,7 +206,11 @@ function commitStillCurrent(commit) {
 function absentParentDirectories(root, files) {
   const directories = new Set();
   for (const file of files) {
-    for (let current = path.dirname(file); current !== root; current = path.dirname(current)) {
+    for (
+      let current = path.dirname(file);
+      current !== root && path.dirname(current) !== current;
+      current = path.dirname(current)
+    ) {
       if (!fs.existsSync(current)) directories.add(current);
     }
   }

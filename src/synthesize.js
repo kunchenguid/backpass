@@ -15,7 +15,7 @@ import {
 } from "./skills.js";
 import { isSuppressedByRejection } from "./state.js";
 import { emitProgress } from "./progress.js";
-import { measureWorkspace, prepareWorkspace, repoFingerprint, treeFingerprint } from "./workspace.js";
+import { measureWorkspace, prepareWorkspace, repoFingerprint, workspacePathFor } from "./workspace.js";
 import { UserError, color, info, warn } from "./logger.js";
 
 /**
@@ -135,13 +135,11 @@ function harnessCountsOf(transcripts) {
 
 /** The repo must be exactly as fingerprinted; the staging copy is the only place to write. */
 function assertRepoUntouched(repo, before, workspaceRoot) {
-  const after = repoFingerprint(repo, Object.keys(before.repo));
-  const moved = Object.keys(before.repo).filter((file) => before.repo[file] !== after[file]);
-  const groundingChanged = before.grounding !== treeFingerprint(before.groundingRoots);
-  if (!moved.length && !groundingChanged) return;
-  const changed = [...moved, ...(groundingChanged ? before.groundingRoots : [])];
+  const after = repoFingerprint(repo, Object.keys(before));
+  const moved = Object.keys(before).filter((file) => before[file] !== after[file]);
+  if (!moved.length) return;
   throw new UserError(
-    `synthesis changed ${changed.join(", ")} in the repository directly instead of the staging copy ` +
+    `synthesis changed ${moved.join(", ")} in the repository directly instead of the staging copy ` +
       `(${workspaceRoot}); nothing was proposed`,
     `inspect the change with \`git diff\`, restore the file, and re-run - a harness that edits outside its cwd cannot be trusted with the synthesis role`,
   );
@@ -162,7 +160,7 @@ function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts, scop
   const maxEdits = effectiveMaxEdits(memoryFile, config, descriptionTokens);
 
   const common = {
-    MEMORY_PATH: memoryFile.path,
+    MEMORY_PATH: workspacePathFor(memoryFile.path),
     BUDGET_RULE: budgetRule(memoryFile, config, maxEdits, descriptionTokens),
     MAX_EDITS: String(maxEdits),
     MIN_GAP_EVIDENCE: String(config.minGapEvidence),
@@ -215,7 +213,7 @@ function groundingRoot(repo, roots, scope) {
 
 function prefaceFor({ memoryFile, summary, config, repo, workspaceRoot, descriptionTokens = 0, grounding = null }) {
   return render(loadPrompt("annotate-preface"), {
-    MEMORY_PATH: memoryFile.path,
+    MEMORY_PATH: workspacePathFor(memoryFile.path),
     REPO_NAME: repo.name,
     REPO_ROOT: grounding || repo.root,
     WORKSPACE_ROOT: workspaceRoot,
@@ -449,7 +447,7 @@ export async function synthesizeProposal({
     BUDGET_STATE: budgetState(memoryFile, config, descriptionTokens),
     INSTRUCTION_INDEX: renderInstructionIndex(memoryFile),
     SKILLS_DIR: overflow.dir,
-    SKILL_INDEX: renderSkillIndex(skillFiles),
+    SKILL_INDEX: renderSkillIndex(skillFiles.map((skill) => ({ ...skill, path: workspacePathFor(skill.path) }))),
     EVIDENCE: renderEvidenceForPrompt(summary),
     REJECTIONS: renderRejections(rejections),
   };
@@ -457,11 +455,7 @@ export async function synthesizeProposal({
   const editPromptFile = path.join(promptDir, "synthesis-edit.md");
   fs.writeFileSync(editPromptFile, renderPrompt("synthesis", editValues));
 
-  const fingerprint = {
-    repo: repoFingerprint(repo, [memoryFile.path, ...skillFiles.map((s) => s.path)]),
-    groundingRoots: readOnlyGroundingRoots,
-    grounding: treeFingerprint(readOnlyGroundingRoots),
-  };
+  const fingerprint = repoFingerprint(repo, [memoryFile.path, ...skillFiles.map((s) => s.path)]);
   const sessionName = `backpass-synth-${process.pid}`;
   const timeoutSeconds = Math.max(config.timeoutSeconds, 900);
   const usage = [];
@@ -524,6 +518,7 @@ export async function synthesizeProposal({
       sessionName,
       cwd: workspace.root,
       writeAccess: true,
+      readOnlyRoots: readOnlyGroundingRoots,
     });
     try {
       return await holder.session.prompt({
@@ -550,6 +545,7 @@ export async function synthesizeProposal({
       sessionName: `${sessionName}-r${(serial += 1)}`,
       cwd: workspace.root,
       writeAccess: true,
+      readOnlyRoots: readOnlyGroundingRoots,
     });
 
   try {

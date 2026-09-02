@@ -70,11 +70,14 @@ export class AcpxError extends Error {
  * candidate would fail on the very same argument.
  *
  * @param {string[]} args
- * @param {{ timeoutMs?: number, cwd?: string, input?: string, env?: NodeJS.ProcessEnv }} [options]
+ * @param {{ timeoutMs?: number, cwd?: string, input?: string, env?: NodeJS.ProcessEnv, readOnlyRoots?: string[] }} [options]
  */
 async function run(args, options = {}) {
   const result = await runCapture(ACPX_BIN, args, options);
   const spawnError = result.spawnError;
+  if (spawnError?.code === "ERR_READ_ONLY_ROOTS_UNAVAILABLE") {
+    throw new UserError(spawnError.message, "run synthesis on macOS or Linux with bubblewrap installed");
+  }
   if (spawnError?.code === "ERR_WINDOWS_SHIM_UNSAFE_ARG") {
     const value = spawnError.value === undefined ? "" : JSON.stringify(String(spawnError.value));
     throw new UserError(
@@ -364,11 +367,19 @@ export async function execOneShot({
  *     Promise<{ text: string, usage: Record<string, number> | null, raw: string, notes: string[] }>,
  *   close: () => Promise<void> }>}
  */
-export async function openSession({ agent, model = null, effort = null, sessionName, cwd, writeAccess = false }) {
+export async function openSession({
+  agent,
+  model = null,
+  effort = null,
+  sessionName,
+  cwd,
+  writeAccess = false,
+  readOnlyRoots = [],
+}) {
   const invocation = prepareHarnessInvocation({ agent, model, effort, writeAccess });
   const notes = [...invocation.notes];
   const acpxAgentArgs = invocationAgentArgs(invocation, agent);
-  const runOpts = { timeoutMs: 60_000, cwd, env: invocation.env };
+  const runOpts = { timeoutMs: 60_000, cwd, env: invocation.env, readOnlyRoots };
   /** @type {Awaited<ReturnType<typeof run>>} */
   let created;
   try {
@@ -419,6 +430,7 @@ export async function openSession({ agent, model = null, effort = null, sessionN
         timeoutMs: 30_000,
         cwd,
         env: invocation.env,
+        readOnlyRoots,
       });
       if (result.code !== 0) warn(`could not close acpx session ${sessionName}`);
     } finally {
@@ -476,7 +488,12 @@ export async function openSession({ agent, model = null, effort = null, sessionN
       "--file",
       promptFile,
     ];
-    const result = await run(args, { timeoutMs: (timeoutSeconds + 30) * 1000, cwd, env: invocation.env });
+    const result = await run(args, {
+      timeoutMs: (timeoutSeconds + 30) * 1000,
+      cwd,
+      env: invocation.env,
+      readOnlyRoots,
+    });
     if (result.timedOut) throw new AcpxError(`acpx ${agent} session prompt timed out after ${timeoutSeconds}s`, result);
     if (result.code !== 0) throw new AcpxError(`acpx ${agent} session prompt failed (exit ${result.code})`, result);
 

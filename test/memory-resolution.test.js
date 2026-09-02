@@ -107,6 +107,14 @@ test("a relative pointer resolves from the importing file's directory", () => {
   assert.equal(absolute.separate.length, 0);
 });
 
+test("only CLAUDE.md can cover a secondary memory file by import", () => {
+  const repo = repoWith({ ".claude/CLAUDE.md": AGENTS, ".codex/AGENTS.md": "@placeholder\n" });
+  fs.writeFileSync(path.join(repo.root, ".codex/AGENTS.md"), `@${path.join(repo.root, ".claude/CLAUDE.md")}\n`);
+  const resolved = resolveMemoryFiles(repo.root, [".claude/CLAUDE.md", ".codex/AGENTS.md"]);
+  assert.equal(resolved.pointers.length, 0);
+  assert.deepEqual(resolved.separate.map((file) => file.path), [".codex/AGENTS.md"]);
+});
+
 test("CLAUDE.md as a pointer resolves AGENTS.md silently and only AGENTS.md is written", () => {
   const repo = repoWith({ "AGENTS.md": AGENTS, "CLAUDE.md": renderPointer("AGENTS.md") });
   const config = loadConfig(repo.root);

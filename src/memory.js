@@ -491,8 +491,10 @@ export function resolveMemoryFiles(repoRoot, memoryFiles, options = {}) {
   const files = loadMemoryFiles(repoRoot, memoryFiles, options);
   if (!files.length) return { primary: null, all: files, pointers: [], separate: [], hash: null };
   const [primary, ...others] = files;
-  const pointers = others.filter((f) =>
-    isPointerTo(f.text, primary.absolute, { fromDir: path.dirname(f.absolute) }),
+  const pointers = others.filter(
+    (f) =>
+      path.basename(f.absolute).toLowerCase() === "claude.md" &&
+      isPointerTo(f.text, primary.absolute, { fromDir: path.dirname(f.absolute) }),
   );
   const separate = others.filter((f) => !pointers.includes(f));
   return { primary, all: files, pointers, separate, hash: memorySetHash(files) };

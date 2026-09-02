@@ -272,7 +272,7 @@ export function renderChangesForPrompt(measured, memoryFile) {
   };
   return measured.changes
     .map((change) => {
-      const head = `[${describeChange(change)}${unitsAt(change)}]`;
+      const head = `[${describeChange({ ...change, file: change.workspaceFile || change.file })}${unitsAt(change)}]`;
       if (change.kind === "deleted") return head;
       if (change.kind === "created") {
         return `${head}\n${renderHunkLines(

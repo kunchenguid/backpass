@@ -140,8 +140,11 @@ function summaryFor(sessions = 3) {
 const pick = { agent: "claude", model: "claude-opus-5", effort: "high", pinned: true };
 const agents = { resolve: async () => pick, withFallthrough: async (_role, fn) => fn(pick) };
 
-function setup(script, { text = AGENTS, overrides = {}, summary = summaryFor(), scope = null, transcripts = null } = {}) {
-  const repo = makeRepo({ "AGENTS.md": text });
+function setup(
+  script,
+  { text = AGENTS, overrides = {}, summary = summaryFor(), scope = null, transcripts = null, externalMemory = false } = {},
+) {
+  const repo = makeRepo(externalMemory ? {} : { "AGENTS.md": text });
   const config = loadConfig(repo.root, overrides);
   config.state = new State(repo.root).ensure();
   config.agents = agents;
@@ -151,7 +154,11 @@ function setup(script, { text = AGENTS, overrides = {}, summary = summaryFor(), 
   process.env.FAKE_ACPX_SCRIPT = path.join(repo.root, "fake-script.json");
   process.env.FAKE_ACPX_STATE = path.join(repo.root, "fake-state.json");
   fs.writeFileSync(process.env.FAKE_ACPX_SCRIPT, JSON.stringify(script));
-  const memoryFile = readMemoryFile(repo.root, "AGENTS.md");
+  const memoryPath = externalMemory
+    ? path.join(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-external-synth-")), "CLAUDE.md")
+    : "AGENTS.md";
+  if (externalMemory) fs.writeFileSync(memoryPath, text);
+  const memoryFile = readMemoryFile(repo.root, memoryPath, { allowExternal: externalMemory });
   const run = () =>
     synthesizeProposal({
       memoryFile,
@@ -371,8 +378,8 @@ test("a harness that writes to the repository instead of the staging copy is ref
   });
 });
 
-test("user synthesis refuses changes to grounding project roots", async () => {
-  const grounding = makeRepo({ "README.md": "# Grounding\n" });
+test("user synthesis makes grounding project roots read-only", async () => {
+  const grounding = makeRepo({ ".git/config": "[core]\n", "README.md": "# Grounding\n" });
   const setupResult = setup(
     { edit: {}, annotations: [{ reply: { edits: [] } }] },
     {
@@ -383,16 +390,24 @@ test("user synthesis refuses changes to grounding project roots", async () => {
   fs.writeFileSync(
     process.env.FAKE_ACPX_SCRIPT,
     JSON.stringify({
-      edit: { [path.join(grounding.root, "README.md")]: "# Changed\n" },
+      edit: { [path.join(grounding.root, ".git/config")]: "[changed]\n" },
       annotations: [{ reply: { edits: [] } }],
     }),
   );
 
-  await assert.rejects(setupResult.run(), (err) => {
-    assert.ok(err instanceof UserError);
-    assert.match(err.message, new RegExp(grounding.root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-    return true;
-  });
+  await assert.rejects(setupResult.run());
+  assert.equal(fs.readFileSync(path.join(grounding.root, ".git/config"), "utf8"), "[core]\n");
+});
+
+test("user synthesis can propose against relocated external memory", async () => {
+  const { run, memoryFile } = setup(
+    { edit: {}, annotations: [{ reply: { edits: [] } }] },
+    { scope: { kind: "user" }, externalMemory: true },
+  );
+  const { proposal, violations } = await run();
+  assert.deepEqual(violations, []);
+  assert.equal(proposal.memoryFile.path, memoryFile.path);
+  assert.equal(proposal.edits.length, 0);
 });
 
 test("an agent that changes nothing yields an empty proposal, never an invented edit", async () => {

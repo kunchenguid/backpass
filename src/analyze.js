@@ -301,7 +301,14 @@ export async function analyzeTranscripts({
   // the skill index, so a mistake an existing skill's content covers is reported as a
   // failed trigger (`coveredBySkill`) instead of a brand-new gap.
   const openGapIndex = renderOpenGapIndex(state.readGapLedger(), memoryFile.path);
-  const skillIndex = renderSkillIndexForAnalysis(skills);
+  const skillIndex = renderSkillIndexForAnalysis(
+    modelCwd && path.resolve(modelCwd) !== path.resolve(repo.root)
+      ? skills.map((skill) => ({
+          ...skill,
+          path: path.isAbsolute(skill.path) ? skill.path : path.join(repo.root, skill.path),
+        }))
+      : skills,
+  );
 
   let done = 0;
   const evidenceTotals = { positive: 0, negative: 0, gaps: 0 };
