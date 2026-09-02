@@ -187,6 +187,7 @@ Later ruling: H-13, issue #97 (2026-09-02), supersedes H-8 for an explicit `--sc
 **Author's reasoning.** (verbatim from the 2026-09-02 comment on issue #97)
 
 for open questions -
+
 1. yes amend vision
 2. as proposed
 3. default 1. i don't think we need cross-project evidence as a requirement
