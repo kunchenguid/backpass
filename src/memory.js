@@ -437,7 +437,6 @@ export function isPointerTo(text, target, options = {}) {
   if (lines.length !== 1) return false;
   const imported = lines[0].replace(/^@\.\//, "@");
   if (!imported.startsWith("@")) return false;
-  if (imported === `@${target}`) return true;
 
   const spec = imported.slice(1);
   const home = options.home || os.homedir();
@@ -468,7 +467,7 @@ export function resolveMemoryFiles(repoRoot, memoryFiles) {
   if (!files.length) return { primary: null, all: files, pointers: [], separate: [], hash: null };
   const [primary, ...others] = files;
   const pointers = others.filter((f) =>
-    isPointerTo(f.text, primary.path, { fromDir: path.dirname(primary.absolute || path.join(repoRoot, primary.path)) }),
+    isPointerTo(f.text, primary.absolute, { fromDir: path.dirname(f.absolute) }),
   );
   const separate = others.filter((f) => !pointers.includes(f));
   return { primary, all: files, pointers, separate, hash: memorySetHash(files) };

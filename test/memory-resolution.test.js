@@ -83,6 +83,22 @@ test("isPointerTo accepts the @AGENTS.md import forms and nothing else", () => {
   assert.equal(isPointerTo("", "AGENTS.md"), false);
 });
 
+test("a relative pointer resolves from the importing file's directory", () => {
+  const repo = repoWith({
+    ".agents/AGENTS.md": AGENTS,
+    ".claude/CLAUDE.md": renderPointer("AGENTS.md"),
+  });
+
+  const relative = resolveMemoryFiles(repo.root, [".agents/AGENTS.md", ".claude/CLAUDE.md"]);
+  assert.equal(relative.pointers.length, 0);
+  assert.equal(relative.separate.length, 1);
+
+  fs.writeFileSync(path.join(repo.root, ".claude/CLAUDE.md"), `@${path.join(repo.root, ".agents/AGENTS.md")}\n`);
+  const absolute = resolveMemoryFiles(repo.root, [".agents/AGENTS.md", ".claude/CLAUDE.md"]);
+  assert.equal(absolute.pointers.length, 1);
+  assert.equal(absolute.separate.length, 0);
+});
+
 test("CLAUDE.md as a pointer resolves AGENTS.md silently and only AGENTS.md is written", () => {
   const repo = repoWith({ "AGENTS.md": AGENTS, "CLAUDE.md": renderPointer("AGENTS.md") });
   const config = loadConfig(repo.root);
