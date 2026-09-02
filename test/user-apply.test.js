@@ -71,6 +71,44 @@ test("apply refuses a user-level memory file that is a symlink to a read-only pa
   assert.equal(fs.readlinkSync(link), source);
 });
 
+test("apply names a symlink whose writable file is in a read-only store", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-uapply-store-"));
+  const store = path.join(home, "readonly-store");
+  const source = path.join(store, "AGENTS.md");
+  const link = path.join(home, ".agents", "AGENTS.md");
+  const text = "# User memory\n\n- Keep secrets out of prompts.\n";
+  fs.mkdirSync(store, { recursive: true });
+  fs.mkdirSync(path.dirname(link), { recursive: true });
+  fs.writeFileSync(source, text, { mode: 0o644 });
+  fs.symlinkSync(source, link);
+  fs.chmodSync(store, 0o555);
+
+  try {
+    const state = new State(home, {
+      stateDir: path.join(home, ".config", "backpass", "user"),
+      mode: 0o700,
+      exclude: false,
+    }).ensure();
+    const results = applyDecisions({
+      proposal: {
+        memoryFile: { path: ".agents/AGENTS.md", hash: memoryTextHash(text), tokens: 20 },
+        edits: [{ id: "e1", kind: "rewrite", file: ".agents/AGENTS.md" }],
+        config: { budgetTokens: 5000, skillsDir: ".agents/skills" },
+      },
+      decisions: { e1: "accepted" },
+      repo: { root: home, name: "user" },
+      state,
+      config: { budgetTokens: 5000, skillsDir: ".agents/skills" },
+    });
+
+    assert.equal(results.written.length, 0);
+    assert.equal(results.failed[0].error, readOnlySymlinkMessage(link, fs.realpathSync(source)));
+    assert.equal(fs.readFileSync(source, "utf8"), text);
+  } finally {
+    fs.chmodSync(store, 0o755);
+  }
+});
+
 test("project apply refuses an external memory target", () => {
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-project-apply-"));
   const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-external-apply-"));

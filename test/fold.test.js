@@ -558,6 +558,28 @@ test("minGapProjects 2 keeps a single-project cluster report-only", () => {
   assert.match(summary.reportOnlyGaps[0].reportOnlyReason, /project-specific/);
 });
 
+test("report-only gaps name the actual number of observed projects", () => {
+  const phrasing = "Always vendor the lockfile.";
+  const summary = foldEvidence(
+    [
+      record("s1", {
+        transcript: { id: "s1", harness: "claude", project: "/repos/alpha" },
+        gaps: [{ proposedInstruction: phrasing, quote: "q", recurrenceRisk: "high" }],
+      }),
+      record("s2", {
+        transcript: { id: "s2", harness: "claude", project: "/repos/beta" },
+        gaps: [{ proposedInstruction: phrasing, quote: "q2", recurrenceRisk: "high" }],
+      }),
+    ],
+    { minGapEvidence: 2, minGapProjects: 3 },
+  );
+
+  assert.equal(summary.reportOnlyGaps.length, 1);
+  assert.equal(summary.reportOnlyGaps[0].projects, 2);
+  assert.match(summary.reportOnlyGaps[0].reportOnlyReason, /seen in 2 projects; minGapProjects is 3/);
+  assert.doesNotMatch(summary.reportOnlyGaps[0].reportOnlyReason, /only/);
+});
+
 test("minGapProjects 2 admits a cluster seen in two projects", () => {
   const phrasing = "Always vendor the lockfile.";
   const summary = foldEvidence(

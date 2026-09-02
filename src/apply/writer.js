@@ -51,6 +51,7 @@ function refuseReadOnlySymlink(absolute) {
   }
   try {
     fs.accessSync(real, fs.constants.W_OK);
+    fs.accessSync(path.dirname(real), fs.constants.W_OK | fs.constants.X_OK);
     return null;
   } catch {
     return readOnlySymlinkMessage(absolute, real);

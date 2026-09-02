@@ -372,10 +372,15 @@ function isProjectCoveredSighting(obs) {
 
 function projectSpecificNote(cluster, minGapProjects) {
   if (minGapProjects < 2 || cluster.projects.size >= minGapProjects || cluster.sessions.size < 1) return {};
-  const only = [...cluster.projects][0];
+  const projects = [...cluster.projects];
+  if (projects.length === 1) {
+    return {
+      reportOnlyReason: `project-specific: seen in ${projects[0]} only; run \`backpass\` there`,
+    };
+  }
   return {
-    reportOnlyReason: only
-      ? `project-specific: seen in ${only} only; run \`backpass\` there`
+    reportOnlyReason: projects.length
+      ? `project-specific: seen in ${projects.length} projects; minGapProjects is ${minGapProjects}`
       : "project-specific: below minGapProjects",
   };
 }
