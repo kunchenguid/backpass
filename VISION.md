@@ -1,7 +1,7 @@
 # Vision
 
-`backpass` exists so that a repository's agent memory file improves from what actually happened in its agent sessions, instead of from whatever a human happened to remember.
-It serves the developer who owns that file, whether it is `AGENTS.md` or the `CLAUDE.md` Claude Code reads in its place, and it turns transcripts already sitting on their disk into a small set of reviewable edits.
+`backpass` exists so that an agent memory surface improves from what actually happened in its agent sessions, instead of from whatever a human happened to remember.
+It serves the developer who owns that surface, whether it is a project's `AGENTS.md`, the `CLAUDE.md` Claude Code reads in its place, or user-level memory, and it turns transcripts already sitting on their disk into a small set of reviewable edits.
 By default the project file is the one it trains, because learned knowledge belongs with the repo it was learned in, and a write into a person's user-level file from a project run would pollute every project at once.
 A person's user-level surface (`~/.claude/CLAUDE.md`, user-level skills) is a target only when they name it as the scope of a run: that is still the human choosing which weights to train, and it is the only way a person who keeps their instructions at user level has a file to improve.
 Project-scoped and user-scoped evidence stay isolated, so one run cannot launder the other's corroboration.
@@ -17,7 +17,7 @@ The bar is sessions, not repositories: a gap does not also have to appear in mor
 Removing an instruction takes the same corroboration adding one does, and only harm from following it counts, because a rule that was merely skipped argues for reinforcement rather than deletion.
 Corroboration accumulates across runs in a ledger rather than resetting each run, so a gap seen today and again next week still graduates.
 Whether two sightings are one gap is judged from their evidence rather than scored by word overlap, because models paraphrase and a paraphrase must never hide recurrence.
-A mistake that belongs to the task harness around a session is counted and set aside, never written into the project's file.
+A mistake that belongs to the task harness around a session is counted and set aside, never written into the named memory surface.
 An uncorroborated gap never becomes a proposal, because a list of singletons becomes a to-do that reintroduces one-session rewrites by hand.
 Counting one is fair where that helps a person understand a run, because without a count they cannot tell a healthy file from a broken adapter.
 One bad session never rewrites the weights, because a single session can go wrong for reasons that have nothing to do with the file.
@@ -86,7 +86,7 @@ The repo holds itself to its own standard, including excluding its own sessions 
 
 A change aligns when it makes the evidence behind a proposal stronger, cheaper to verify, or harder to fabricate.
 A change aligns when it lets a person say no faster, or say no once and have it remembered.
-A change should be resisted when it widens what writes, lowers the two-session bar, or makes anything but per-edit review the default.
+A change should be resisted when it widens what writes without an explicit choice of scope, lowers the two-session bar, or makes anything but per-edit review the default.
 A change should be resisted when it makes the memory file easier to grow than to shrink.
 A change should be resisted when it requires `backpass` to hold a key, a server, or a copy of someone else's transcripts.
 A change should be resisted when it buys coverage with accuracy, or trades a real fix for a quieter degraded path.
