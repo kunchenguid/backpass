@@ -366,11 +366,8 @@ export function initialConfig() {
 
 /** The `user` block written by `backpass init --scope user`. */
 export function initialUserConfig() {
-  const { memoryFiles, skillsDirs } = userHarnessPaths();
   return {
-    memoryFiles,
     skillsDir: USER_CONFIG_DEFAULTS.skillsDir,
-    skillsDirs,
     budgetTokens: DEFAULT_CONFIG.budgetTokens,
     minGapEvidence: DEFAULT_CONFIG.minGapEvidence,
     minGapProjects: USER_CONFIG_DEFAULTS.minGapProjects,

@@ -239,8 +239,15 @@ test("user-scope defaults honor relocated Claude and Codex homes", () => {
       path.join(home, "claude-work", "skills"),
       path.join(home, "codex-work", "skills"),
     ]);
-    assert.deepEqual(initialUserConfig().memoryFiles, config.memoryFiles);
-    assert.deepEqual(initialUserConfig().skillsDirs, config.skillsDirs);
+    const initialized = initialUserConfig();
+    assert.equal("memoryFiles" in initialized, false);
+    assert.equal("skillsDirs" in initialized, false);
+    const configPath = path.join(home, ".config", "backpass", "config.json");
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, JSON.stringify({ user: initialized }));
+    const reloaded = loadConfig(null, {}, { kind: "user" });
+    assert.deepEqual(reloaded.memoryFiles, config.memoryFiles);
+    assert.deepEqual(reloaded.skillsDirs, config.skillsDirs);
   } finally {
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete process.env[key];

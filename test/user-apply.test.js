@@ -162,7 +162,8 @@ test("init --scope user writes the user block and a 0700 state directory", async
     const target = path.join(home, ".config", "backpass", "config.json");
     const parsed = JSON.parse(fs.readFileSync(target, "utf8"));
     assert.equal(parsed.user.minGapProjects, 1);
-    assert.deepEqual(parsed.user.memoryFiles[0], ".agents/AGENTS.md");
+    assert.equal("memoryFiles" in parsed.user, false);
+    assert.equal("skillsDirs" in parsed.user, false);
     assert.equal(fs.statSync(scope.stateDir).mode & 0o777, 0o700);
     assert.equal(config.state.exclude.status, "skipped");
   });

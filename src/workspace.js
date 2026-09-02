@@ -99,10 +99,12 @@ function walkFiles(dir, prefix = "") {
 export function isSkillFilePath(relative, skillsDir) {
   const dirs = Array.isArray(skillsDir) ? skillsDir : [skillsDir];
   return dirs.some((dir) => {
-    const prefix = `${dir}/`;
-    if (!relative.startsWith(prefix)) return false;
-    const inside = relative.slice(prefix.length);
-    const parts = inside.split("/");
+    if (!relative || !dir) return false;
+    const windows = relative.includes("\\") || dir.includes("\\") || path.win32.isAbsolute(relative);
+    const paths = windows ? path.win32 : path;
+    const inside = paths.relative(dir, relative);
+    if (!inside || inside === ".." || inside.startsWith(`..${paths.sep}`) || paths.isAbsolute(inside)) return false;
+    const parts = inside.split(paths.sep);
     if (parts.length === 1) return parts[0].endsWith(".md");
     return parts.length === 2 && parts[1] === "SKILL.md";
   });

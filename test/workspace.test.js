@@ -141,6 +141,9 @@ test("only the skill layouts a harness loads count as created skills; anything e
   assert.equal(isSkillFilePath(".agents/skills/db/reference.md", ".agents/skills"), false);
   assert.equal(isSkillFilePath(".agents/skills/a/b/SKILL.md", ".agents/skills"), false);
   assert.equal(isSkillFilePath("skills/db/SKILL.md", ".agents/skills"), false);
+  assert.equal(isSkillFilePath("C:\\cfg\\skills\\db\\SKILL.md", "C:\\cfg\\skills"), true);
+  assert.equal(isSkillFilePath("C:\\cfg\\skills\\db.md", "C:\\cfg\\skills"), true);
+  assert.equal(isSkillFilePath("C:\\cfg\\other\\db\\SKILL.md", "C:\\cfg\\skills"), false);
 
   assert.deepEqual(parseSkillFile("x/SKILL.md", SKILL), {
     name: "db",

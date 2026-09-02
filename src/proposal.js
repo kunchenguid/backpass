@@ -514,7 +514,8 @@ export function buildProposal(rawResult, context) {
 
     // An addition is measured, not declared: text that only goes in is a new instruction.
     const onlyAdds = hunks.every((h) => h.removed === 0);
-    const evidenceProjects = onlyAdds && config.minGapProjects != null ? countedEvidenceProjects(edit, summary) : null;
+    const projectGate = scope?.kind === "user" && config.minGapProjects != null;
+    const evidenceProjects = onlyAdds && projectGate ? countedEvidenceProjects(edit, summary) : null;
     if (!preservesAlwaysLoaded(edit.kind) && onlyAdds && edit.transcripts < config.minGapEvidence) {
       violations.push(
         `edit ${edit.id} ("${edit.title}") adds a new instruction backed by ${edit.transcripts} session(s); ` +
@@ -525,7 +526,7 @@ export function buildProposal(rawResult, context) {
     if (
       !preservesAlwaysLoaded(edit.kind) &&
       onlyAdds &&
-      config.minGapProjects != null &&
+      projectGate &&
       evidenceProjects < config.minGapProjects
     ) {
       violations.push(

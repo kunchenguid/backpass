@@ -713,6 +713,15 @@ test("addition project counts come from folded gap evidence", () => {
   });
   assert.deepEqual(twoProjects.violations, []);
   assert.equal(twoProjects.proposal.edits[0].projects, 2);
+
+  const projectScope = gate({
+    edit,
+    annotation,
+    config: config({ minGapProjects: 2 }),
+    context: { summary: summary(1), scope: { kind: "project" } },
+  });
+  assert.deepEqual(projectScope.violations, []);
+  assert.equal(projectScope.proposal.edits[0].projects, undefined);
 });
 
 test("a move repositions verbatim memory-file text without the harm floor", () => {
