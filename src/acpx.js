@@ -1,6 +1,4 @@
 import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
 import { UserError, warn } from "./logger.js";
 import { runCapture } from "./subprocess.js";
@@ -72,15 +70,11 @@ export class AcpxError extends Error {
  * candidate would fail on the very same argument.
  *
  * @param {string[]} args
- * @param {{ timeoutMs?: number, cwd?: string, input?: string, env?: NodeJS.ProcessEnv,
- *   readOnlyRoots?: string[], writableRoots?: string[] }} [options]
+ * @param {{ timeoutMs?: number, cwd?: string, input?: string, env?: NodeJS.ProcessEnv }} [options]
  */
 async function run(args, options = {}) {
   const result = await runCapture(ACPX_BIN, args, options);
   const spawnError = result.spawnError;
-  if (spawnError?.code === "ERR_READ_ONLY_ROOTS_UNAVAILABLE") {
-    throw new UserError(spawnError.message, "run synthesis on macOS or Linux with bubblewrap installed");
-  }
   if (spawnError?.code === "ERR_WINDOWS_SHIM_UNSAFE_ARG") {
     const value = spawnError.value === undefined ? "" : JSON.stringify(String(spawnError.value));
     throw new UserError(
@@ -364,47 +358,17 @@ export async function execOneShot({
  * Resolves to the handle, or throws an `AcpxError` (`unsupported: true` when the adapter
  * has no session support; `sessionPrompt` only falls back when it can preserve the requested overlays).
  *
- */
-function harnessWritableRoots(agent) {
-  const home = os.homedir();
-  const roots = [];
-  if (agent === "claude") {
-    roots.push(path.join(process.env.CLAUDE_CONFIG_DIR || path.join(home, ".claude"), "projects"));
-  } else if (agent === "codex") {
-    roots.push(path.join(process.env.CODEX_HOME || path.join(home, ".codex"), "sessions"));
-  } else if (agent === "pi") {
-    roots.push(path.join(process.env.PI_CODING_AGENT_DIR || path.join(home, ".pi", "agent"), "sessions"));
-  } else if (agent === "opencode") {
-    roots.push(path.join(process.env.XDG_DATA_HOME || path.join(home, ".local", "share"), "opencode"));
-    roots.push(path.join(process.env.XDG_STATE_HOME || path.join(home, ".local", "state"), "opencode"));
-    roots.push(path.join(process.env.XDG_CACHE_HOME || path.join(home, ".cache"), "opencode"));
-  } else if (agent === "grok") {
-    roots.push(path.join(home, ".grok"));
-  }
-  return roots.filter((root) => fs.existsSync(root));
-}
-
-/**
  * @returns {Promise<{ notes: string[],
  *   prompt: (options: { promptFile: string, timeoutSeconds?: number, promptRetries?: number,
  *     approveReads?: boolean, approveAll?: boolean, suppressReads?: boolean }) =>
  *     Promise<{ text: string, usage: Record<string, number> | null, raw: string, notes: string[] }>,
  *   close: () => Promise<void> }>}
  */
-export async function openSession({
-  agent,
-  model = null,
-  effort = null,
-  sessionName,
-  cwd,
-  writeAccess = false,
-  readOnlyRoots = [],
-}) {
+export async function openSession({ agent, model = null, effort = null, sessionName, cwd, writeAccess = false }) {
   const invocation = prepareHarnessInvocation({ agent, model, effort, writeAccess });
-  const writableRoots = readOnlyRoots.length ? [cwd, ...harnessWritableRoots(agent)] : [];
   const notes = [...invocation.notes];
   const acpxAgentArgs = invocationAgentArgs(invocation, agent);
-  const runOpts = { timeoutMs: 60_000, cwd, env: invocation.env, readOnlyRoots, writableRoots };
+  const runOpts = { timeoutMs: 60_000, cwd, env: invocation.env };
   /** @type {Awaited<ReturnType<typeof run>>} */
   let created;
   try {
@@ -455,8 +419,6 @@ export async function openSession({
         timeoutMs: 30_000,
         cwd,
         env: invocation.env,
-        readOnlyRoots,
-        writableRoots,
       });
       if (result.code !== 0) warn(`could not close acpx session ${sessionName}`);
     } finally {
@@ -514,13 +476,7 @@ export async function openSession({
       "--file",
       promptFile,
     ];
-    const result = await run(args, {
-      timeoutMs: (timeoutSeconds + 30) * 1000,
-      cwd,
-      env: invocation.env,
-      readOnlyRoots,
-      writableRoots,
-    });
+    const result = await run(args, { timeoutMs: (timeoutSeconds + 30) * 1000, cwd, env: invocation.env });
     if (result.timedOut) throw new AcpxError(`acpx ${agent} session prompt timed out after ${timeoutSeconds}s`, result);
     if (result.code !== 0) throw new AcpxError(`acpx ${agent} session prompt failed (exit ${result.code})`, result);
 

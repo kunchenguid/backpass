@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -19,30 +19,17 @@ import path from "node:path";
  * @param {string} bin
  * @param {string[]} args
  * @param {{ timeoutMs?: number, cwd?: string, input?: string, env?: NodeJS.ProcessEnv,
- *   platform?: NodeJS.Platform, lookupEnv?: NodeJS.ProcessEnv, readOnlyRoots?: string[], writableRoots?: string[],
+ *   platform?: NodeJS.Platform, lookupEnv?: NodeJS.ProcessEnv,
  *   spawnFn?: (file: string, args: string[], options: object) => any }} [options]
  * @returns {Promise<{ code: number | null, stdout: string, stderr: string, timedOut?: boolean, spawnError?: ShimError }>}
  */
 export function runCapture(
   bin,
   args,
-  {
-    timeoutMs,
-    cwd,
-    input,
-    env,
-    platform = process.platform,
-    lookupEnv = process.env,
-    readOnlyRoots = [],
-    writableRoots = [],
-    spawnFn = spawn,
-  } = {},
+  { timeoutMs, cwd, input, env, platform = process.platform, lookupEnv = process.env, spawnFn = spawn } = {},
 ) {
   return new Promise((resolve) => {
-    let launch = windowsShimLaunch(bin, args, { platform, env: lookupEnv });
-    if (!launch.error && readOnlyRoots.length) {
-      launch = readOnlyLaunch(launch, readOnlyRoots, { platform, env: lookupEnv, writableRoots });
-    }
+    const launch = windowsShimLaunch(bin, args, { platform, env: lookupEnv });
     if (launch.error) {
       // Loud and named: an argument no quoting can neutralise must not reach a shim
       // where cmd.exe would silently rewrite it into several arguments or commands.
@@ -101,77 +88,6 @@ export function runCapture(
     if (input !== undefined) child.stdin.end(input);
     else child.stdin.end();
   });
-}
-
-export function supportsReadOnlyLaunch({ platform = process.platform, env = process.env } = {}) {
-  if (platform === "darwin") return fs.existsSync("/usr/bin/sandbox-exec");
-  if (platform === "linux") {
-    const bwrap = resolveOnPath("bwrap", { platform, env });
-    if (!bwrap) return false;
-    const probe = spawnSync(bwrap, ["--ro-bind", "/", "/", "--", process.execPath, "-e", ""], {
-      env,
-      stdio: "ignore",
-      timeout: 5000,
-    });
-    return probe.status === 0;
-  }
-  return false;
-}
-
-export function readOnlyLaunch(
-  launch,
-  roots,
-  { platform = process.platform, env = process.env, writableRoots = [] } = {},
-) {
-  const canonical = (root) => {
-    try {
-      return fs.realpathSync(root);
-    } catch {
-      return path.resolve(root);
-    }
-  };
-  const unique = [...new Set(roots.map(canonical))];
-  const writable = [...new Set(writableRoots.map(canonical))].filter(
-    (candidate) =>
-      !unique.some((readOnly) => {
-        const relative = path.relative(candidate, readOnly);
-        return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
-      }),
-  );
-  if (!unique.length) return launch;
-  if (platform === "darwin" && supportsReadOnlyLaunch({ platform, env })) {
-    const profile = `(version 1)(allow default)${unique
-      .map((root) => `(deny file-write* (subpath ${JSON.stringify(root)}))`)
-      .join("")}${writable.map((root) => `(allow file-write* (subpath ${JSON.stringify(root)}))`).join("")}`;
-    return {
-      file: "/usr/bin/sandbox-exec",
-      args: ["-p", profile, launch.file, ...launch.args],
-      verbatim: false,
-    };
-  }
-  if (platform === "linux") {
-    const bwrap = resolveOnPath("bwrap", { platform, env });
-    if (bwrap) {
-      return {
-        file: bwrap,
-        args: [
-          "--bind",
-          "/",
-          "/",
-          ...unique.flatMap((root) => ["--ro-bind", root, root]),
-          ...writable.flatMap((root) => ["--bind", root, root]),
-          "--",
-          launch.file,
-          ...launch.args,
-        ],
-        verbatim: false,
-      };
-    }
-  }
-  const error = Object.assign(new Error(`read-only grounding is unavailable on ${platform}`), {
-    code: "ERR_READ_ONLY_ROOTS_UNAVAILABLE",
-  });
-  return { ...launch, error };
 }
 
 /**

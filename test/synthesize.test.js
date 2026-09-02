@@ -81,7 +81,6 @@ const { ProposalViolation } = await import("../src/proposal.js");
 const { State } = await import("../src/state.js");
 const { UserError, setLoggerSink } = await import("../src/logger.js");
 const { workspacePathFor } = await import("../src/workspace.js");
-const { supportsReadOnlyLaunch } = await import("../src/subprocess.js");
 const { makeRepo } = await import("./helpers/staging.js");
 
 setLoggerSink(() => {});
@@ -149,10 +148,8 @@ function setup(
     overrides = {},
     summary = summaryFor(),
     scope = null,
-    transcripts = null,
     externalMemory = false,
     externalSkills = false,
-    groundInRepo = false,
   } = {},
 ) {
   const repo = makeRepo(externalMemory ? {} : { "AGENTS.md": text });
@@ -189,7 +186,7 @@ function setup(
       summary,
       config,
       repo,
-      transcripts: transcripts || [{ harness: "claude", ...(groundInRepo ? { projectRoot: repo.root } : {}) }],
+      transcripts: [{ harness: "claude" }],
       scope,
     });
   const calls = () =>
@@ -400,66 +397,6 @@ test("a harness that writes to the repository instead of the staging copy is ref
     assert.match(err.message, /synthesis changed AGENTS\.md in the repository directly/);
     return true;
   });
-});
-
-test(
-  "user synthesis makes every live grounding root read-only",
-  { skip: !supportsReadOnlyLaunch() && "read-only sandbox unavailable" },
-  async () => {
-    const projects = Array.from({ length: 9 }, () => makeRepo({ ".git/config": "[core]\n" }));
-    const tierThree = makeRepo({ ".git/config": "[core]\n" });
-    const setupResult = setup(
-      { edit: {}, annotations: [{ reply: { edits: [] } }] },
-      {
-        scope: { kind: "user" },
-        transcripts: [
-          ...projects.map((project) => ({ harness: "claude", projectRoot: project.root })),
-          { harness: "claude", cwd: tierThree.root, projectRoot: null },
-        ],
-      },
-    );
-    fs.writeFileSync(
-      process.env.FAKE_ACPX_SCRIPT,
-      JSON.stringify({
-        edit: { [path.join(tierThree.root, ".git/config")]: "[changed]\n" },
-        annotations: [{ reply: { edits: [] } }],
-      }),
-    );
-
-    await assert.rejects(setupResult.run());
-    assert.equal(fs.readFileSync(path.join(tierThree.root, ".git/config"), "utf8"), "[core]\n");
-  },
-);
-
-test(
-  "user synthesis withholds grounding paths when containment is unavailable",
-  { skip: supportsReadOnlyLaunch() && "read-only sandbox available" },
-  async () => {
-    const grounding = makeRepo({ "README.md": "# Grounding\n" });
-    const setupResult = setup(
-      { edit: {}, annotations: [{ reply: { edits: [] } }] },
-      {
-        scope: { kind: "user" },
-        transcripts: [{ harness: "claude", projectRoot: grounding.root }],
-      },
-    );
-    const { proposal } = await setupResult.run();
-    assert.equal(proposal.edits.length, 0);
-    const prompt = fs.readFileSync(path.join(setupResult.config.state.root, "prompts/synthesis-edit.md"), "utf8");
-    assert.equal(prompt.includes(grounding.root), false);
-    assert.match(prompt, /live project paths withheld/);
-  },
-);
-
-test("a home-rooted grounding project leaves the synthesis workspace writable", async () => {
-  const setupResult = setup(
-    { edit: {}, annotations: [{ reply: { edits: [] } }] },
-    { scope: { kind: "user" }, groundInRepo: true },
-  );
-  process.env.FAKE_ACPX_STATE = path.join(setupResult.repo.root, ".backpass/synthesis/fake-state.json");
-  const { proposal, violations } = await setupResult.run();
-  assert.deepEqual(violations, []);
-  assert.equal(proposal.edits.length, 0);
 });
 
 test("user synthesis can propose against relocated external memory", async () => {

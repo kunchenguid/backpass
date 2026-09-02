@@ -6,37 +6,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { classifyAcpxFailure } from "../src/acpx.js";
-import { quoteShimArg, runCapture, supportsReadOnlyLaunch } from "../src/subprocess.js";
-
-test(
-  "read-only sandbox blocks grounding writes despite a writable parent",
-  { skip: !supportsReadOnlyLaunch() && "read-only sandbox unavailable" },
-  async () => {
-    const parent = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-sandbox-parent-"));
-    const project = path.join(parent, "project");
-    const workspace = path.join(project, "workspace");
-    const protectedFile = path.join(project, ".git/config");
-    const workspaceFile = path.join(workspace, "result.txt");
-    fs.mkdirSync(path.dirname(protectedFile), { recursive: true });
-    fs.mkdirSync(workspace, { recursive: true });
-    fs.writeFileSync(protectedFile, "original");
-    const script = `
-      const fs = require("node:fs");
-      let denied = false;
-      try { fs.writeFileSync(${JSON.stringify(protectedFile)}, "changed"); } catch { denied = true; }
-      fs.writeFileSync(${JSON.stringify(workspaceFile)}, "written");
-      process.stdout.write(JSON.stringify({ denied }));
-    `;
-    const result = await runCapture(process.execPath, ["-e", script], {
-      readOnlyRoots: [project],
-      writableRoots: [parent, workspace],
-    });
-    assert.equal(result.code, 0, result.stderr);
-    assert.deepEqual(JSON.parse(result.stdout), { denied: true });
-    assert.equal(fs.readFileSync(protectedFile, "utf8"), "original");
-    assert.equal(fs.readFileSync(workspaceFile, "utf8"), "written");
-  },
-);
+import { quoteShimArg, runCapture } from "../src/subprocess.js";
 
 test(
   "a timed leader close still kills a descendant that ignores termination",

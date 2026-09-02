@@ -18,7 +18,6 @@ import { isSuppressedByRejection } from "./state.js";
 import { emitProgress } from "./progress.js";
 import { measureWorkspace, prepareWorkspace, repoFingerprint, workspacePathFor } from "./workspace.js";
 import { UserError, color, info, warn } from "./logger.js";
-import { supportsReadOnlyLaunch } from "./subprocess.js";
 
 /**
  * Stage 3 of the pipeline (design section 3): high-reasoning synthesis that turns folded
@@ -206,34 +205,11 @@ function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts, scop
  * fresh session used after an empty reply would otherwise be asked to quote evidence it
  * has never been shown.
  */
-function groundingRoots(transcripts, scope) {
-  if (scope?.kind !== "user") return [];
-  const roots = [];
-  for (const transcript of transcripts || []) {
-    const candidate = transcript.projectRoot || transcript.cwd;
-    if (!candidate || !fs.existsSync(candidate)) continue;
-    let root;
-    try {
-      root = fs.realpathSync(candidate);
-    } catch {
-      continue;
-    }
-    if (fs.statSync(root).isDirectory() && !roots.includes(root)) roots.push(root);
-  }
-  return roots;
-}
-
-function groundingRoot(repo, roots, scope, available = true) {
-  if (scope?.kind !== "user") return repo.root;
-  if (!available) return "(live project paths withheld: read-only containment unavailable)";
-  return roots.length ? roots.join("\n") : "(no live project checkouts in this sample)";
-}
-
-function prefaceFor({ memoryFile, summary, config, repo, workspaceRoot, descriptionTokens = 0, grounding = null }) {
+function prefaceFor({ memoryFile, summary, config, repo, workspaceRoot, descriptionTokens = 0 }) {
   return render(loadPrompt("annotate-preface"), {
     MEMORY_PATH: workspacePathFor(memoryFile.path),
     REPO_NAME: repo.name,
-    REPO_ROOT: grounding || repo.root,
+    REPO_ROOT: repo.root,
     WORKSPACE_ROOT: workspaceRoot,
     CURRENT_TOKENS: String(memoryFile.tokens + descriptionTokens),
     BUDGET_STATE: budgetState(memoryFile, config, descriptionTokens),
@@ -447,10 +423,6 @@ export async function synthesizeProposal({
     scope,
   });
 
-  const liveGroundingRoots = groundingRoots(transcripts, scope);
-  const groundingAvailable = !liveGroundingRoots.length || supportsReadOnlyLaunch();
-  const readOnlyGroundingRoots = groundingAvailable ? liveGroundingRoots : [];
-  const repoRoot = groundingRoot(repo, liveGroundingRoots, scope, groundingAvailable);
   let workspace = prepareWorkspace({ state, repo, memoryFile, skillsDir: overflow.dir, skillDirs });
   const stagedSkillsDir =
     workspace.skillMappings.find((mapping) => mapping.logical === overflow.dir)?.staged ||
@@ -463,7 +435,7 @@ export async function synthesizeProposal({
   const editValues = {
     ...common,
     REPO_NAME: repo.name,
-    REPO_ROOT: repoRoot,
+    REPO_ROOT: repo.root,
     TRANSCRIPT_COUNT: String(summary.analyzedSessions),
     RUN_NOTE: runNote,
     HARNESS_SUMMARY:
@@ -544,7 +516,6 @@ export async function synthesizeProposal({
       sessionName,
       cwd: workspace.root,
       writeAccess: true,
-      readOnlyRoots: readOnlyGroundingRoots,
     });
     try {
       return await holder.session.prompt({
@@ -571,7 +542,6 @@ export async function synthesizeProposal({
       sessionName: `${sessionName}-r${(serial += 1)}`,
       cwd: workspace.root,
       writeAccess: true,
-      readOnlyRoots: readOnlyGroundingRoots,
     });
 
   try {
@@ -592,15 +562,7 @@ export async function synthesizeProposal({
       overflow,
       progress,
       renderPreface: () =>
-        prefaceFor({
-          memoryFile,
-          summary,
-          config,
-          repo,
-          workspaceRoot: workspace.root,
-          descriptionTokens,
-          grounding: repoRoot,
-        }),
+        prefaceFor({ memoryFile, summary, config, repo, workspaceRoot: workspace.root, descriptionTokens }),
     });
   } finally {
     await holder.session.close();
