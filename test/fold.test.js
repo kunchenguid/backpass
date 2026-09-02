@@ -597,6 +597,36 @@ test("the default minGapProjects of 1 does not require a second project", () => 
   assert.equal(summary.gaps[0].projects, 1);
 });
 
+test("duplicate sightings from a covered session do not count toward gap sessions", () => {
+  const coveredRoot = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-fold-duplicate-covered-"));
+  const covered = "Always pin the Node version with nvm.";
+  const similarUncovered = "Pin the Node version using nvm.";
+  fs.writeFileSync(path.join(coveredRoot, "AGENTS.md"), `# T\n\n- ${covered}\n`);
+  const records = [
+    record("s1", {
+      transcript: { id: "s1", harness: "claude", project: coveredRoot, projectRoot: coveredRoot },
+      gaps: [
+        { proposedInstruction: similarUncovered, quote: "q1", recurrenceRisk: "high" },
+        { proposedInstruction: covered, quote: "q2", recurrenceRisk: "high" },
+      ],
+    }),
+    record("s2", {
+      transcript: { id: "s2", harness: "claude", project: "/repos/other", projectRoot: null },
+      gaps: [{ proposedInstruction: similarUncovered, quote: "q3", recurrenceRisk: "high" }],
+    }),
+  ];
+
+  const belowFloor = foldEvidence(records, { minGapEvidence: 2, checkProjectCoverage: true });
+  assert.equal(belowFloor.gaps.length, 0);
+  assert.equal(belowFloor.totals.droppedGapSingletons, 1);
+
+  const eligible = foldEvidence(records, { minGapEvidence: 1, checkProjectCoverage: true });
+  assert.equal(eligible.gaps.length, 1);
+  assert.equal(eligible.gaps[0].sessions, 1);
+  assert.equal(eligible.gaps[0].projectCoveredSessions, 1);
+  assert.equal(eligible.gaps[0].projects, 1);
+});
+
 test("a project-covered sighting does not count toward gap sessions", () => {
   const coveredRoot = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-fold-covered-"));
   const phrasing = "Always pin the Node version with nvm.";

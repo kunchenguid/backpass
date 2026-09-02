@@ -323,23 +323,27 @@ export function clusterGapObservations(observations, { checkProjectCoverage = fa
       } else {
         cluster.items.push(item);
       }
-      if (projectCovered) cluster.projectCoveredSessions.add(obs.sessionId);
-      else {
-        cluster.sessions.add(obs.sessionId);
-        if (obs.project) cluster.projects.add(obs.project);
-      }
       if (obs.proposedInstruction.length < cluster.proposedInstruction.length) {
         cluster.proposedInstruction = obs.proposedInstruction;
       }
     } else {
       clusters.push({
         proposedInstruction: obs.proposedInstruction,
-        sessions: projectCovered ? new Set() : new Set([obs.sessionId]),
-        projects: projectCovered || !obs.project ? new Set() : new Set([obs.project]),
-        projectCoveredSessions: projectCovered ? new Set([obs.sessionId]) : new Set(),
+        sessions: new Set(),
+        projects: new Set(),
+        projectCoveredSessions: new Set(),
         items: [item],
       });
     }
+  }
+  for (const cluster of clusters) {
+    cluster.sessions = new Set(cluster.items.filter((item) => !item.projectCovered).map((item) => item.sessionId));
+    cluster.projects = new Set(
+      cluster.items.filter((item) => !item.projectCovered && item.project).map((item) => item.project),
+    );
+    cluster.projectCoveredSessions = new Set(
+      cluster.items.filter((item) => item.projectCovered).map((item) => item.sessionId),
+    );
   }
   return clusters;
 }
