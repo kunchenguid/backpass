@@ -90,6 +90,21 @@ test("user association groups worktrees by normalized remote identity", () => {
   assert.notEqual(first.projectRoot, second.projectRoot);
 });
 
+test("user association groups local worktrees by their shared git directory", () => {
+  const root = initRepo("local-worktree");
+  const sibling = path.join(
+    fs.mkdtempSync(path.join(os.tmpdir(), "backpass-scope-local-worktree-parent-")),
+    "sibling",
+  );
+  git(["worktree", "add", "-q", "-b", "local-sibling", sibling], root);
+
+  const first = associateUser({ cwd: root });
+  const second = associateUser({ cwd: sibling });
+  assert.equal(first.project, root);
+  assert.equal(second.project, first.project);
+  assert.notEqual(first.projectRoot, second.projectRoot);
+});
+
 test("user association groups a deleted worktree by recorded remote", () => {
   const result = associateUser({
     cwd: "/vanished/worktree/demo",

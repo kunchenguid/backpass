@@ -5,7 +5,7 @@ import path from "node:path";
 import { parseScopeKind, userStateDir } from "./config.js";
 import { associate as associateProject, globToRegExp } from "./discovery/association.js";
 import { UserError, info } from "./logger.js";
-import { gitRemoteIdentity, gitToplevel, normalizeRemote } from "./repo.js";
+import { gitProjectIdentity, gitToplevel, normalizeRemote } from "./repo.js";
 
 /**
  * A run scope is the triple (weights surface, session corpus, state directory).
@@ -64,12 +64,11 @@ export function associateUser(descriptor, { strict = false } = {}) {
 
   const liveRoot = gitToplevel(cwd);
   if (liveRoot) {
-    const remote = gitRemoteIdentity(liveRoot);
     return {
       tier: 1,
       confidence: "git",
       reason: `cwd is in ${liveRoot}`,
-      project: remote || liveRoot,
+      project: gitProjectIdentity(liveRoot),
       projectRoot: liveRoot,
     };
   }

@@ -141,8 +141,17 @@ function listRemotes(root) {
   return [...new Set(listRemoteUrls(root).map(normalizeRemote).filter(Boolean))];
 }
 
-export function gitRemoteIdentity(root) {
-  return listRemotes(root).sort()[0] || null;
+export function gitProjectIdentity(root) {
+  const remote = listRemotes(root).sort()[0];
+  if (remote) return remote;
+
+  try {
+    const commonDir = git(["rev-parse", "--git-common-dir"], root);
+    const absolute = realpathOrSelf(path.isAbsolute(commonDir) ? commonDir : path.resolve(root, commonDir));
+    return path.basename(absolute) === ".git" ? path.dirname(absolute) : `git:${absolute}`;
+  } catch {
+    return realpathOrSelf(root);
+  }
 }
 
 function listCloneRemotes(root) {
