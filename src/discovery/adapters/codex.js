@@ -24,7 +24,7 @@ import {
 export const name = "codex";
 
 export function storeRoot() {
-  return home(".codex", "sessions");
+  return process.env.CODEX_HOME ? path.join(process.env.CODEX_HOME, "sessions") : home(".codex", "sessions");
 }
 
 /**

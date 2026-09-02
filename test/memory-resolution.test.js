@@ -92,6 +92,14 @@ test("a relative pointer resolves from the importing file's directory", () => {
   const relative = resolveMemoryFiles(repo.root, [".agents/AGENTS.md", ".claude/CLAUDE.md"]);
   assert.equal(relative.pointers.length, 0);
   assert.equal(relative.separate.length, 1);
+  const { warnings } = captureWarnings(() =>
+    primaryMemoryFile(
+      repo,
+      { memoryFiles: [".agents/AGENTS.md", ".claude/CLAUDE.md"], skillsDir: ".agents/skills" },
+      { kind: "user" },
+    ),
+  );
+  assert.match(warnings[0], /@\.\.\/\.agents\/AGENTS\.md/);
 
   fs.writeFileSync(path.join(repo.root, ".claude/CLAUDE.md"), `@${path.join(repo.root, ".agents/AGENTS.md")}\n`);
   const absolute = resolveMemoryFiles(repo.root, [".agents/AGENTS.md", ".claude/CLAUDE.md"]);
@@ -144,6 +152,15 @@ test("a single AGENTS.md or a single CLAUDE.md resolves as before, without warni
     assert.deepEqual(warnings, []);
     assert.equal(result.all.length, 1);
   }
+});
+
+test("project memory resolution rejects external paths while user resolution permits them", () => {
+  const repo = repoWith({ "AGENTS.md": AGENTS });
+  const external = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-external-memory-")), "AGENTS.md");
+  fs.writeFileSync(external, AGENTS);
+
+  assert.throws(() => resolveMemoryFiles(repo.root, [external]), /outside the project root/);
+  assert.equal(resolveMemoryFiles(repo.root, [external], { allowExternal: true }).primary.absolute, external);
 });
 
 test("a configured memoryFiles override still picks its own primary", () => {

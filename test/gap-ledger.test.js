@@ -156,6 +156,33 @@ function age(h, days) {
   h.state.writeGapLedger(ledger);
 }
 
+test("ledger preserves covered duplicate phrasings for each session", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-ledger-covered-"));
+  const covered = "Always pin the Node version with nvm.";
+  const uncovered = "Pin the Node version using nvm.";
+  fs.writeFileSync(path.join(root, "AGENTS.md"), `# T\n\n- ${covered}\n`);
+  const first = record("s1", [uncovered, covered]);
+  first.transcript.project = root;
+  first.transcript.projectRoot = root;
+  const second = record("s2", [uncovered]);
+  second.transcript.project = "/repos/other";
+  const ledger = { version: 1, entries: {} };
+
+  recordGapObservations(ledger, [first, second]);
+  const observations = ledgerGapObservations(ledger, MEMORY_PATH);
+  const summary = foldEvidence([], {
+    gapObservations: observations,
+    minGapEvidence: 2,
+    minGapProjects: 2,
+    checkProjectCoverage: true,
+  });
+
+  const persisted = observations.find((observation) => observation.sessionId === "s1");
+  assert.deepEqual(persisted.phrasings, [uncovered, covered]);
+  assert.equal(summary.gaps.length, 0);
+  assert.equal(summary.totals.droppedGapSingletons, 1);
+});
+
 test("a later uncited observation preserves the session's failed-trigger citation", () => {
   const phrasing = "Wrap migrations in a transaction.";
   const citedThenUncited = (id) =>

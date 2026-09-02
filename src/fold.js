@@ -350,13 +350,14 @@ export function clusterGapObservations(observations, { checkProjectCoverage = fa
 
 function isProjectCoveredSighting(obs) {
   const root = obs.projectRoot;
-  if (!root || !obs.proposedInstruction) return false;
+  const phrasings = obs.phrasings?.length ? obs.phrasings : [obs.proposedInstruction];
+  if (!root || !phrasings.some(Boolean)) return false;
   try {
     if (!fs.existsSync(root)) return false;
     const resolved = resolveMemoryFiles(root, ["AGENTS.md", "CLAUDE.md"]);
     if (!resolved.primary) return false;
-    return instructionUnits(resolved.primary).some(
-      (unit) => similarity(unit.text, obs.proposedInstruction) >= GAP_COVERED_THRESHOLD,
+    return instructionUnits(resolved.primary).some((unit) =>
+      phrasings.some((phrasing) => similarity(unit.text, phrasing) >= GAP_COVERED_THRESHOLD),
     );
   } catch {
     return false;

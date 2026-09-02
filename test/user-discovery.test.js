@@ -61,6 +61,7 @@ function userDiscovery(home, overrides = {}) {
       USERPROFILE: home,
       XDG_CONFIG_HOME: xdg,
       CLAUDE_CONFIG_DIR: undefined,
+      CODEX_HOME: undefined,
       HERMES_HOME: path.join(home, ".hermes-absent"),
     },
     async () => {

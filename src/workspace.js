@@ -290,6 +290,34 @@ function signatureOf(changes) {
   ).slice(0, 16);
 }
 
+export function treeFingerprint(roots) {
+  const entries = [];
+  const visit = (root, current = root) => {
+    let children;
+    try {
+      children = fs.readdirSync(current, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+    } catch (err) {
+      entries.push([root, path.relative(root, current), "error", err.code || err.message]);
+      return;
+    }
+    for (const child of children) {
+      if (current === root && child.name === ".git") continue;
+      const absolute = path.join(current, child.name);
+      const relative = path.relative(root, absolute);
+      if (child.isDirectory()) {
+        entries.push([root, relative, "dir"]);
+        visit(root, absolute);
+      } else if (child.isSymbolicLink()) {
+        entries.push([root, relative, "link", fs.readlinkSync(absolute)]);
+      } else if (child.isFile()) {
+        entries.push([root, relative, "file", sha256(fs.readFileSync(absolute))]);
+      }
+    }
+  };
+  for (const root of [...new Set(roots)].sort()) visit(root);
+  return sha256(JSON.stringify(entries));
+}
+
 /** The files backpass must find untouched in the repo after synthesis: a moved write is a bug, loudly. */
 export function repoFingerprint(repo, files) {
   const out = {};

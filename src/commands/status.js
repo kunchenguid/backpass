@@ -15,10 +15,10 @@ import { table } from "./scan.js";
 import { candidateKey, isProbeEntryFresh, resolvedEffort } from "../agents.js";
 
 export async function cmdStatus(ctx) {
-  const { repo, config } = ctx;
+  const { repo, config, scope } = ctx;
   const state = config.state;
 
-  const resolved = resolveMemoryFiles(repo.root, config.memoryFiles);
+  const resolved = resolveMemoryFiles(repo.root, config.memoryFiles, { allowExternal: scope?.kind === "user" });
   const files = resolved.all;
   const evidence = state.listEvidence();
   const counts = { ok: 0, failed: 0, skipped: 0 };

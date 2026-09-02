@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { sha256 } from "./state.js";
 import { estimateTokens } from "./tokens.js";
+import { UserError } from "./logger.js";
 
 /**
  * Memory files are the weights. To talk about them precisely, backpass parses each
@@ -294,12 +295,36 @@ export function memoryTextHash(text) {
   return `sha256:${sha256(text).slice(0, 16)}`;
 }
 
-export function readMemoryFile(repoRoot, relativePath) {
+export function resolveMemoryPath(repoRoot, configuredPath, { allowExternal = false } = {}) {
   const expanded =
-    relativePath === "~" || relativePath.startsWith("~/")
-      ? path.join(os.homedir(), relativePath.slice(relativePath === "~" ? 1 : 2))
-      : relativePath;
-  const absolute = path.isAbsolute(expanded) ? expanded : path.join(repoRoot, expanded);
+    configuredPath === "~" || configuredPath.startsWith("~/")
+      ? path.join(os.homedir(), configuredPath.slice(configuredPath === "~" ? 1 : 2))
+      : configuredPath;
+  const root = path.resolve(repoRoot);
+  const absolute = path.resolve(root, expanded);
+  if (!allowExternal) {
+    let existing = absolute;
+    while (!fs.existsSync(existing) && path.dirname(existing) !== existing) existing = path.dirname(existing);
+    let realRoot = root;
+    let realExisting = existing;
+    try {
+      realRoot = fs.realpathSync(root);
+      realExisting = fs.realpathSync(existing);
+    } catch {
+      realRoot = root;
+      realExisting = existing;
+    }
+    const resolved = path.resolve(realExisting, path.relative(existing, absolute));
+    const relative = path.relative(realRoot, resolved);
+    if (relative.startsWith("..") || path.isAbsolute(relative)) {
+      throw new UserError(`${configuredPath} resolves outside the project root; project scope cannot access it`);
+    }
+  }
+  return absolute;
+}
+
+export function readMemoryFile(repoRoot, relativePath, options = {}) {
+  const absolute = resolveMemoryPath(repoRoot, relativePath, options);
   if (!fs.existsSync(absolute)) return null;
   const text = fs.readFileSync(absolute, "utf8");
   return {
@@ -313,8 +338,8 @@ export function readMemoryFile(repoRoot, relativePath) {
 }
 
 /** Load every configured memory file that actually exists in the repo. */
-export function loadMemoryFiles(repoRoot, memoryFiles) {
-  return memoryFiles.map((f) => readMemoryFile(repoRoot, f)).filter(Boolean);
+export function loadMemoryFiles(repoRoot, memoryFiles, options = {}) {
+  return memoryFiles.map((f) => readMemoryFile(repoRoot, f, options)).filter(Boolean);
 }
 
 /** Combined hash across all memory files - the "weights version" evidence is keyed to. */
@@ -462,8 +487,8 @@ export function isPointerTo(text, target, options = {}) {
  * The weights hash still covers every existing file, as before, so cached evidence
  * survives this resolution unchanged.
  */
-export function resolveMemoryFiles(repoRoot, memoryFiles) {
-  const files = loadMemoryFiles(repoRoot, memoryFiles);
+export function resolveMemoryFiles(repoRoot, memoryFiles, options = {}) {
+  const files = loadMemoryFiles(repoRoot, memoryFiles, options);
   if (!files.length) return { primary: null, all: files, pointers: [], separate: [], hash: null };
   const [primary, ...others] = files;
   const pointers = others.filter((f) =>

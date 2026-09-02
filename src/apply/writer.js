@@ -3,7 +3,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 
 import { applyEdit, filesOfEdit, sliceEditForFile } from "../proposal.js";
-import { memoryTextHash } from "../memory.js";
+import { memoryTextHash, resolveMemoryPath } from "../memory.js";
 import { budgetGateKind, budgetStatus, estimateTokens, formatTokens } from "../tokens.js";
 import { recordRejection } from "../state.js";
 import {
@@ -251,6 +251,20 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     rejected: rejected.length,
     rejectionsRecorded: false,
   };
+
+  if ((proposal.scope || "project") === "project") {
+    const targets = new Set([
+      proposal.memoryFile?.path,
+      ...[...accepted, ...rejected].flatMap((edit) => filesOfEdit(edit)),
+      ...accepted.flatMap((edit) => editSkills(edit).map((skill) => skill.path)),
+    ]);
+    try {
+      for (const target of targets) if (target) resolveMemoryPath(repo.root, target);
+    } catch (err) {
+      results.failed.push({ error: err.message });
+      return results;
+    }
+  }
 
   let memoryText = null;
   if (accepted.length || rejected.length) {

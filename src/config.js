@@ -100,11 +100,20 @@ export const DEFAULT_CONFIG = {
  * `~/.agents/AGENTS.md` first (AGENTS.md is the cross-harness file), then Claude Code's
  * `~/.claude/CLAUDE.md` (allowed as a pointer), then Codex `~/.codex/AGENTS.md`.
  * `minGapProjects` defaults to 1: the gate exists and is configurable, but cross-project
- * corroboration is not required. Discovery still enumerates every configured harness;
- * user-level edit targets in v1 are Claude Code and Codex (plus the shared `.agents` layout).
+ * corroboration is not required. Phase 1 discovery and user-level edit targets cover
+ * Claude Code and Codex (plus the shared `.agents` layout).
  */
 export const USER_MEMORY_FILES = [".agents/AGENTS.md", ".claude/CLAUDE.md", ".codex/AGENTS.md"];
 export const USER_SKILLS_DIRS = [".agents/skills", ".claude/skills", ".codex/skills"];
+
+function userHarnessPaths() {
+  const claudeRoot = process.env.CLAUDE_CONFIG_DIR || ".claude";
+  const codexRoot = process.env.CODEX_HOME || ".codex";
+  return {
+    memoryFiles: [".agents/AGENTS.md", path.join(claudeRoot, "CLAUDE.md"), path.join(codexRoot, "AGENTS.md")],
+    skillDirs: [".agents/skills", path.join(claudeRoot, "skills"), path.join(codexRoot, "skills")],
+  };
+}
 
 export const USER_CONFIG_DEFAULTS = {
   memoryFiles: USER_MEMORY_FILES,
@@ -112,6 +121,7 @@ export const USER_CONFIG_DEFAULTS = {
   skillsDirs: USER_SKILLS_DIRS,
   minGapProjects: 1,
   discovery: {
+    harnesses: ["claude", "codex"],
     includeProjects: [],
     excludeProjects: [],
     maxTranscriptsPerProject: null,
@@ -306,7 +316,8 @@ export function loadConfig(repoRoot, overrides = {}, { kind = "project" } = {}) 
   if (scopeKind === "user") {
     const globalFile = readJsonIfPresent(userConfigPath());
     const userBlock = isPlainObject(globalFile?.user) ? globalFile.user : {};
-    merged = [DEFAULT_CONFIG, USER_CONFIG_DEFAULTS, userBlock, overrides].reduce(
+    const harnessPaths = userHarnessPaths();
+    merged = [DEFAULT_CONFIG, { ...USER_CONFIG_DEFAULTS, ...harnessPaths }, userBlock, overrides].reduce(
       (acc, layer) => (layer ? deepMerge(acc, layer) : acc),
       {},
     );
@@ -351,15 +362,16 @@ export function initialConfig() {
 
 /** The `user` block written by `backpass init --scope user`. */
 export function initialUserConfig() {
+  const { memoryFiles, skillDirs } = userHarnessPaths();
   return {
-    memoryFiles: USER_MEMORY_FILES,
+    memoryFiles,
     skillsDir: USER_CONFIG_DEFAULTS.skillsDir,
-    skillsDirs: USER_SKILLS_DIRS,
+    skillsDirs: skillDirs,
     budgetTokens: DEFAULT_CONFIG.budgetTokens,
     minGapEvidence: DEFAULT_CONFIG.minGapEvidence,
     minGapProjects: USER_CONFIG_DEFAULTS.minGapProjects,
     discovery: {
-      harnesses: ALL_HARNESSES,
+      harnesses: USER_CONFIG_DEFAULTS.discovery.harnesses,
       since: "30d",
       includeProjects: [],
       excludeProjects: [],

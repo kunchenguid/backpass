@@ -93,6 +93,18 @@ test("claude adapter enumerates the default store and CLAUDE_CONFIG_DIR, without
   assert.deepEqual(enumerateClaude(fakeHome, defaultRoot), ["personal.jsonl"]);
 });
 
+test("codex adapter honors CODEX_HOME", () => {
+  const previous = process.env.CODEX_HOME;
+  const relocated = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-codex-home-"));
+  process.env.CODEX_HOME = relocated;
+  try {
+    assert.equal(codex.storeRoot(), path.join(relocated, "sessions"));
+  } finally {
+    if (previous === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previous;
+  }
+});
+
 test("codex adapter reads the recorded git remote, enabling tier-2 association", () => {
   const file = path.join(FIXTURES, "codex-rollout.jsonl");
   const descriptor = codex.classify(candidateFor(file));

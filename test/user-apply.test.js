@@ -60,6 +60,30 @@ test("apply refuses a user-level memory file that is a symlink to a read-only pa
   assert.equal(fs.readlinkSync(link), source);
 });
 
+test("project apply refuses an external memory target", () => {
+  const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-project-apply-"));
+  const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-external-apply-"));
+  const external = path.join(externalRoot, "AGENTS.md");
+  const text = "# External\n";
+  fs.writeFileSync(external, text);
+  const state = new State(repoRoot).ensure();
+  const results = applyDecisions({
+    proposal: {
+      scope: "project",
+      memoryFile: { path: external, hash: memoryTextHash(text), tokens: 2 },
+      edits: [{ id: "e1", kind: "rewrite", file: external, hunks: [] }],
+      config: { budgetTokens: 5000, skillsDir: ".agents/skills" },
+    },
+    decisions: { e1: "accepted" },
+    repo: { root: repoRoot, name: "project" },
+    state,
+    config: { budgetTokens: 5000, skillsDir: ".agents/skills" },
+  });
+  assert.equal(results.written.length, 0);
+  assert.match(results.failed[0].error, /outside the project root/);
+  assert.equal(fs.readFileSync(external, "utf8"), text);
+});
+
 test("apply refuses a proposal from the other scope", async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-uapply-scope-"));
   const state = {

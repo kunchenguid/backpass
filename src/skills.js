@@ -51,7 +51,10 @@ export function loadSkills(repoRoot, skillsDir) {
     skills.push({
       name: frontmatter.name || entry.name.replace(/\.md$/, ""),
       description: frontmatter.description || "",
-      path: path.relative(repoRoot, file),
+      path: (() => {
+        const relative = path.relative(repoRoot, file);
+        return relative.startsWith("..") || path.isAbsolute(relative) ? file : relative;
+      })(),
       body: skillBody(text),
       bodyTokens: estimateTokens(text),
       descriptionTokens: estimateTokens(frontmatter.description || ""),
@@ -71,7 +74,7 @@ export function resolveProjectSkillDirs(repoRoot, overflowDir = CANONICAL_SKILLS
   const seen = new Set();
   for (const dir of [overflowDir, CANONICAL_SKILLS_DIR, CLAUDE_SKILLS_LINK, ...extraDirs]) {
     if (!dir) continue;
-    const absolute = path.join(repoRoot, dir);
+    const absolute = path.isAbsolute(dir) ? dir : path.join(repoRoot, dir);
     const exists = fs.existsSync(absolute);
     if (!exists && dir !== overflowDir) continue;
     let identity = path.resolve(absolute);

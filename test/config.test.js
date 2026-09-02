@@ -4,7 +4,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { CONFIG_FILENAME, loadConfig, parseScopeKind, parseSince, sinceCutoff } from "../src/config.js";
+import {
+  CONFIG_FILENAME,
+  initialUserConfig,
+  loadConfig,
+  parseScopeKind,
+  parseSince,
+  sinceCutoff,
+} from "../src/config.js";
 import { evidenceKey, isEvidenceFresh, safeFileName, State } from "../src/state.js";
 import { UserError } from "../src/logger.js";
 
@@ -196,6 +203,8 @@ test("user-scope config ignores a checkout .backpassrc.json and defaults minGapP
     assert.equal(user.budgetTokens, 5000);
     assert.equal(user.minGapProjects, 1);
     assert.deepEqual(user.memoryFiles[0], ".agents/AGENTS.md");
+    assert.deepEqual(user.discovery.harnesses, ["claude", "codex"]);
+    assert.deepEqual(initialUserConfig().discovery.harnesses, ["claude", "codex"]);
     const project = loadConfig(repo);
     assert.equal(project.budgetTokens, 1111);
     assert.equal(project.minGapProjects, 9);
@@ -205,5 +214,31 @@ test("user-scope config ignores a checkout .backpassrc.json and defaults minGapP
   } finally {
     if (prev === undefined) delete process.env.XDG_CONFIG_HOME;
     else process.env.XDG_CONFIG_HOME = prev;
+  }
+});
+
+test("user-scope defaults honor relocated Claude and Codex homes", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-relocated-homes-"));
+  const previous = {
+    XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
+    CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR,
+    CODEX_HOME: process.env.CODEX_HOME,
+  };
+  process.env.XDG_CONFIG_HOME = path.join(home, ".config");
+  process.env.CLAUDE_CONFIG_DIR = path.join(home, "claude-work");
+  process.env.CODEX_HOME = path.join(home, "codex-work");
+  try {
+    const config = loadConfig(null, {}, { kind: "user" });
+    assert.deepEqual(config.memoryFiles, [
+      ".agents/AGENTS.md",
+      path.join(home, "claude-work", "CLAUDE.md"),
+      path.join(home, "codex-work", "AGENTS.md"),
+    ]);
+    assert.deepEqual(initialUserConfig().memoryFiles, config.memoryFiles);
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   }
 });

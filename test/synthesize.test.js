@@ -140,7 +140,7 @@ function summaryFor(sessions = 3) {
 const pick = { agent: "claude", model: "claude-opus-5", effort: "high", pinned: true };
 const agents = { resolve: async () => pick, withFallthrough: async (_role, fn) => fn(pick) };
 
-function setup(script, { text = AGENTS, overrides = {}, summary = summaryFor() } = {}) {
+function setup(script, { text = AGENTS, overrides = {}, summary = summaryFor(), scope = null, transcripts = null } = {}) {
   const repo = makeRepo({ "AGENTS.md": text });
   const config = loadConfig(repo.root, overrides);
   config.state = new State(repo.root).ensure();
@@ -152,7 +152,15 @@ function setup(script, { text = AGENTS, overrides = {}, summary = summaryFor() }
   process.env.FAKE_ACPX_STATE = path.join(repo.root, "fake-state.json");
   fs.writeFileSync(process.env.FAKE_ACPX_SCRIPT, JSON.stringify(script));
   const memoryFile = readMemoryFile(repo.root, "AGENTS.md");
-  const run = () => synthesizeProposal({ memoryFile, summary, config, repo, transcripts: [{ harness: "claude" }] });
+  const run = () =>
+    synthesizeProposal({
+      memoryFile,
+      summary,
+      config,
+      repo,
+      transcripts: transcripts || [{ harness: "claude" }],
+      scope,
+    });
   const calls = () =>
     fs
       .readFileSync(log, "utf8")
@@ -359,6 +367,30 @@ test("a harness that writes to the repository instead of the staging copy is ref
   await assert.rejects(run(), (err) => {
     assert.ok(err instanceof UserError);
     assert.match(err.message, /synthesis changed AGENTS\.md in the repository directly/);
+    return true;
+  });
+});
+
+test("user synthesis refuses changes to grounding project roots", async () => {
+  const grounding = makeRepo({ "README.md": "# Grounding\n" });
+  const setupResult = setup(
+    { edit: {}, annotations: [{ reply: { edits: [] } }] },
+    {
+      scope: { kind: "user" },
+      transcripts: [{ harness: "claude", projectRoot: grounding.root }],
+    },
+  );
+  fs.writeFileSync(
+    process.env.FAKE_ACPX_SCRIPT,
+    JSON.stringify({
+      edit: { [path.join(grounding.root, "README.md")]: "# Changed\n" },
+      annotations: [{ reply: { edits: [] } }],
+    }),
+  );
+
+  await assert.rejects(setupResult.run(), (err) => {
+    assert.ok(err instanceof UserError);
+    assert.match(err.message, new RegExp(grounding.root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     return true;
   });
 });

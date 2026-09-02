@@ -15,7 +15,7 @@ import {
 } from "./skills.js";
 import { isSuppressedByRejection } from "./state.js";
 import { emitProgress } from "./progress.js";
-import { measureWorkspace, prepareWorkspace, repoFingerprint } from "./workspace.js";
+import { measureWorkspace, prepareWorkspace, repoFingerprint, treeFingerprint } from "./workspace.js";
 import { UserError, color, info, warn } from "./logger.js";
 
 /**
@@ -135,11 +135,13 @@ function harnessCountsOf(transcripts) {
 
 /** The repo must be exactly as fingerprinted; the staging copy is the only place to write. */
 function assertRepoUntouched(repo, before, workspaceRoot) {
-  const after = repoFingerprint(repo, Object.keys(before));
-  const moved = Object.keys(before).filter((file) => before[file] !== after[file]);
-  if (!moved.length) return;
+  const after = repoFingerprint(repo, Object.keys(before.repo));
+  const moved = Object.keys(before.repo).filter((file) => before.repo[file] !== after[file]);
+  const groundingChanged = before.grounding !== treeFingerprint(before.groundingRoots);
+  if (!moved.length && !groundingChanged) return;
+  const changed = [...moved, ...(groundingChanged ? before.groundingRoots : [])];
   throw new UserError(
-    `synthesis changed ${moved.join(", ")} in the repository directly instead of the staging copy ` +
+    `synthesis changed ${changed.join(", ")} in the repository directly instead of the staging copy ` +
       `(${workspaceRoot}); nothing was proposed`,
     `inspect the change with \`git diff\`, restore the file, and re-run - a harness that edits outside its cwd cannot be trusted with the synthesis role`,
   );
@@ -201,9 +203,13 @@ function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts, scop
  * fresh session used after an empty reply would otherwise be asked to quote evidence it
  * has never been shown.
  */
-function groundingRoot(repo, transcripts, scope) {
+function groundingRoots(transcripts, scope) {
+  if (scope?.kind !== "user") return [];
+  return [...new Set((transcripts || []).map((t) => t.projectRoot).filter(Boolean))].slice(0, 8);
+}
+
+function groundingRoot(repo, roots, scope) {
   if (scope?.kind !== "user") return repo.root;
-  const roots = [...new Set((transcripts || []).map((t) => t.projectRoot).filter(Boolean))].slice(0, 8);
   return roots.length ? roots.join("\n") : "(no live project checkouts in this sample)";
 }
 
@@ -425,7 +431,8 @@ export async function synthesizeProposal({
     scope,
   });
 
-  const repoRoot = groundingRoot(repo, transcripts, scope);
+  const readOnlyGroundingRoots = groundingRoots(transcripts, scope);
+  const repoRoot = groundingRoot(repo, readOnlyGroundingRoots, scope);
 
   const editValues = {
     ...common,
@@ -450,7 +457,11 @@ export async function synthesizeProposal({
   const editPromptFile = path.join(promptDir, "synthesis-edit.md");
   fs.writeFileSync(editPromptFile, renderPrompt("synthesis", editValues));
 
-  const fingerprint = repoFingerprint(repo, [memoryFile.path, ...skillFiles.map((s) => s.path)]);
+  const fingerprint = {
+    repo: repoFingerprint(repo, [memoryFile.path, ...skillFiles.map((s) => s.path)]),
+    groundingRoots: readOnlyGroundingRoots,
+    grounding: treeFingerprint(readOnlyGroundingRoots),
+  };
   const sessionName = `backpass-synth-${process.pid}`;
   const timeoutSeconds = Math.max(config.timeoutSeconds, 900);
   const usage = [];

@@ -293,6 +293,16 @@ export function renderChangesForPrompt(measured, memoryFile) {
  * the model's annotation. Nothing textual is taken from the model: the hunks, their
  * deltas, the projected budget, and even whether an edit is an addition are measured.
  */
+function countedEvidenceProjects(edit, summary) {
+  const quoted = new Set(edit.evidence.map((item) => `${item.source || ""}\n${item.text || ""}`));
+  return Math.max(
+    0,
+    ...(summary?.gaps || [])
+      .filter((gap) => gap.quotes?.some((quote) => quoted.has(`${quote.source || ""}\n${quote.text || ""}`)))
+      .map((gap) => gap.projects || 0),
+  );
+}
+
 export function buildProposal(rawResult, context) {
   const {
     memoryFile,
@@ -504,10 +514,23 @@ export function buildProposal(rawResult, context) {
 
     // An addition is measured, not declared: text that only goes in is a new instruction.
     const onlyAdds = hunks.every((h) => h.removed === 0);
+    const evidenceProjects = onlyAdds && config.minGapProjects != null ? countedEvidenceProjects(edit, summary) : null;
     if (!preservesAlwaysLoaded(edit.kind) && onlyAdds && edit.transcripts < config.minGapEvidence) {
       violations.push(
         `edit ${edit.id} ("${edit.title}") adds a new instruction backed by ${edit.transcripts} session(s); ` +
           `${config.minGapEvidence} are required`,
+      );
+      continue;
+    }
+    if (
+      !preservesAlwaysLoaded(edit.kind) &&
+      onlyAdds &&
+      config.minGapProjects != null &&
+      evidenceProjects < config.minGapProjects
+    ) {
+      violations.push(
+        `edit ${edit.id} ("${edit.title}") adds a new instruction backed by evidence from ${evidenceProjects} project(s); ` +
+          `${config.minGapProjects} are required`,
       );
       continue;
     }
@@ -571,7 +594,7 @@ export function buildProposal(rawResult, context) {
       instructions: edit.instructions,
       evidence: edit.evidence,
       transcripts: edit.transcripts,
-      ...(edit.projects != null ? { projects: edit.projects } : {}),
+      ...(evidenceProjects != null ? { projects: evidenceProjects } : {}),
       skills: created.map((c) => c.skill),
       hunks: hunks.map((h) => ({
         id: h.id,

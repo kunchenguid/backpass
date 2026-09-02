@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import { analyzeTranscripts } from "../analyze.js";
 import { UserError, color, info, json, out, warn } from "../logger.js";
 import { memorySurfaceHash, resolveMemoryFiles } from "../memory.js";
@@ -24,7 +26,7 @@ import { capTranscripts } from "../sample.js";
  * other command fails with a pointer to that.
  */
 export function primaryMemoryFile(repo, config, scope = null) {
-  const resolved = resolveMemoryFiles(repo.root, config.memoryFiles);
+  const resolved = resolveMemoryFiles(repo.root, config.memoryFiles, { allowExternal: scope?.kind === "user" });
   if (!resolved.primary) {
     if (scope?.kind === "user") {
       throw new UserError(
@@ -38,10 +40,12 @@ export function primaryMemoryFile(repo, config, scope = null) {
     );
   }
   for (const other of resolved.separate) {
+    const relativeImport = path.relative(path.dirname(other.absolute), resolved.primary.absolute).split(path.sep).join("/");
+    const pointerImport = relativeImport;
     warn(
       `${other.path} is a separate memory file and will NOT be updated - only ${resolved.primary.path} is optimized. ` +
         `To cover both, consolidate: move its content into ${resolved.primary.path} and make ${other.path} a pointer ` +
-        `(a single line: @${resolved.primary.path}).`,
+        `(a single line: @${pointerImport}).`,
     );
   }
   // Overflow-layout warnings are the synthesis stage's to print; this resolution is read-only.

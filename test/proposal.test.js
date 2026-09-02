@@ -680,6 +680,41 @@ test("an extract cannot bypass addition evidence without removing memory text", 
   );
 });
 
+test("addition project counts come from folded gap evidence", () => {
+  const edit = memoryEdit((text) => `${text}- Include the full pull request URL.\n`);
+  const annotation = { edits: [claim(["H1"], { kind: "add", projects: 99 })] };
+  const summary = (projects) => ({
+    analyzedSessions: 3,
+    totals: { positive: 0, negative: 0, gapClusters: 1 },
+    instructions: [],
+    gaps: [
+      {
+        proposedInstruction: "Include the full pull request URL.",
+        sessions: 3,
+        projects,
+        quotes: [{ text: QUOTE[0].text, source: QUOTE[0].source }],
+      },
+    ],
+  });
+
+  const oneProject = gate({
+    edit,
+    annotation,
+    config: config({ minGapProjects: 2 }),
+    context: { summary: summary(1), scope: { kind: "user" } },
+  });
+  assert.ok(oneProject.violations.some((violation) => /evidence from 1 project/.test(violation)));
+
+  const twoProjects = gate({
+    edit,
+    annotation,
+    config: config({ minGapProjects: 2 }),
+    context: { summary: summary(2), scope: { kind: "user" } },
+  });
+  assert.deepEqual(twoProjects.violations, []);
+  assert.equal(twoProjects.proposal.edits[0].projects, 2);
+});
+
 test("a move repositions verbatim memory-file text without the harm floor", () => {
   const text = `${MEMORY_TEXT}\n## Later\n\n- Keep this nearby.\n`;
   const node = "- Use Node 18 via nvm before running any script.";

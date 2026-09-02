@@ -34,7 +34,7 @@ export async function cmdRun(ctx) {
 
     config.state.clearProposal();
 
-    if (!resolveMemoryFiles(repo.root, config.memoryFiles).primary) {
+    if (!resolveMemoryFiles(repo.root, config.memoryFiles, { allowExternal: scope?.kind === "user" }).primary) {
       if (scope?.kind === "user") {
         throw new UserError(
           `no user memory file found (looked for ${config.memoryFiles.join(", ")})`,
