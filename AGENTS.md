@@ -175,6 +175,13 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   unsplit. The instruction index and fold use those parts so evidence cannot smear across a
   blob, and synthesis is told to restructure repeated non-compliance into list items rather
   than bold-label it. See `src/memory.js` and `renderEvidenceForPrompt` in `src/fold.js`.
+- **The apply surface's funnel band is presentation, and its counters must stay that way.**
+  `templates/apply.html` draws one band from findings to edits proposed on one scale, in two
+  lanes (an existing instruction, a missing one), each drop named in plain words. It is fed by
+  display-only counters - `reportOnlyByReason` and `instructionsWithNegatives` in the fold's
+  `totals`, `instructionsLeftAlone`/`leftAloneMaxSessions` in `buildProposal` - that no gate
+  may ever read; changing what the band shows must never change what is proposed or refused.
+  A proposal lacking them falls back to the classic stat row rather than inventing zeros.
 - **Never trust model-reported numbers.** Token deltas, budget projections and an edit's
   session count are measured in `src/proposal.js` from the actual text and quotes; the
   synthesis model's own figures are ignored.

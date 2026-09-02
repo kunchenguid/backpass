@@ -423,9 +423,11 @@ changed since the proposal measured it, exactly as it refuses a drifted memory f
 
 `backpass apply` is the only command that writes. It serves a review surface through
 [`lavish-axi`](https://github.com/kunchenguid/lavish-axi): one card per edit with the diff,
-the evidence quotes and their sources, a live budget gauge, and ACCEPT / REJECT. A compact
-gap funnel summarizes recorded gap evidence and proposal eligibility; older proposals
-without recorded funnel counts omit it.
+the evidence quotes and their sources, a live budget gauge, and ACCEPT / REJECT. Above them
+one funnel band runs from every finding the analysis recorded down to the edits proposed,
+with each row split into the two lanes a finding sorts into - one about an instruction that
+already exists, one about a missing instruction - and each drop between two rows named in
+plain words. Older proposals without the recorded funnel counts fall back to a stat row.
 
 The surface is a static template shipped in the package - the CLI injects one JSON payload,
 so it is instant, deterministic, and identical every run. Nothing there is model-generated.

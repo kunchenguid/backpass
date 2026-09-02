@@ -140,6 +140,79 @@ test("the fold records the sightings it clustered over - the gap funnel's top", 
   );
 });
 
+test("the fold counts the funnel's display splits: candidate instructions and why report-only", () => {
+  const summary = foldEvidence(
+    [
+      record("s1", {
+        positive: [{ instruction: "AG-003", quote: "followed it" }],
+        negative: [{ instruction: "AG-001", quote: "n1", class: "non-compliance" }],
+      }),
+      record("s2", {
+        negative: [
+          { instruction: "AG-001", quote: "n2", class: "non-compliance" },
+          { instruction: "AG-002", quote: "n3", class: "non-compliance" },
+        ],
+      }),
+    ],
+    {
+      memoryFile,
+      minGapEvidence: 3,
+      minGapProjects: 2,
+      gapObservations: [
+        // Eligible: three sessions, two projects, nobody blamed the tooling.
+        { proposedInstruction: "Always vendor the lockfile.", sessionId: "a", domain: "project", project: "p1" },
+        { proposedInstruction: "Always vendor the lockfile.", sessionId: "b", domain: "project", project: "p2" },
+        { proposedInstruction: "Always vendor the lockfile.", sessionId: "c", domain: "project", project: "p2" },
+        // Report only, majority orchestration: every sighting blamed the tooling.
+        {
+          proposedInstruction: "Never bypass the release gate.",
+          sessionId: "a",
+          domain: "orchestration",
+          project: "p1",
+        },
+        {
+          proposedInstruction: "Never bypass the release gate.",
+          sessionId: "b",
+          domain: "orchestration",
+          project: "p2",
+        },
+        {
+          proposedInstruction: "Never bypass the release gate.",
+          sessionId: "c",
+          domain: "orchestration",
+          project: "p2",
+        },
+        // Report only, too few projects: corroborated, but only ever in one project.
+        { proposedInstruction: "Pin the schema version.", sessionId: "a", domain: "project", project: "p1" },
+        { proposedInstruction: "Pin the schema version.", sessionId: "b", domain: "project", project: "p1" },
+        { proposedInstruction: "Pin the schema version.", sessionId: "c", domain: "project", project: "p1" },
+        // Report only, mixed and still below the floor: two sessions, one vote each way.
+        { proposedInstruction: "Rotate the deploy token.", sessionId: "a", domain: "project", project: "p1" },
+        { proposedInstruction: "Rotate the deploy token.", sessionId: "b", domain: "orchestration", project: "p2" },
+        // Dropped singleton: one session, no orchestration vote to make it mixed.
+        { proposedInstruction: "Tag the release commit.", sessionId: "c", domain: "project", project: "p3" },
+      ],
+    },
+  );
+
+  assert.equal(summary.totals.instructionsWithNegatives, 2, "AG-001 and AG-002 drew a negative; AG-003 only positives");
+  assert.equal(summary.totals.gapClusters, 1);
+  assert.equal(summary.totals.reportOnlyGapClusters, 3);
+  assert.equal(summary.totals.droppedGapSingletons, 1);
+  assert.deepEqual(summary.totals.reportOnlyByReason, {
+    majorityOrchestration: 1,
+    belowFloorMixed: 1,
+    tooFewProjects: 1,
+  });
+  assert.equal(
+    summary.totals.reportOnlyByReason.majorityOrchestration +
+      summary.totals.reportOnlyByReason.belowFloorMixed +
+      summary.totals.reportOnlyByReason.tooFewProjects,
+    summary.totals.reportOnlyGapClusters,
+    "every report-only cluster is attributed to exactly one reason",
+  );
+});
+
 test("a two-sighting cluster with one orchestration vote survives instead of dropping below the floor", () => {
   const phrasing = "Read docs/sshhip.md before changing the tunnel.";
   const summary = foldEvidence(

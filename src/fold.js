@@ -234,6 +234,16 @@ export function foldEvidence(
 
   const droppedGapSingletons = decided.filter((cluster) => cluster.sessions < minGapEvidence && !cluster.mixed).length;
 
+  // Why each report-only cluster is report-only, in the same priority the filter above
+  // uses. Display only: the apply surface names the reason on its own drop line instead
+  // of lumping three different refusals under one count. Nothing here gates anything.
+  const reportOnlyByReason = { majorityOrchestration: 0, belowFloorMixed: 0, tooFewProjects: 0 };
+  for (const cluster of reportOnlyGaps) {
+    if (cluster.majorityOrchestration) reportOnlyByReason.majorityOrchestration += 1;
+    else if (cluster.sessions < minGapEvidence) reportOnlyByReason.belowFloorMixed += 1;
+    else reportOnlyByReason.tooFewProjects += 1;
+  }
+
   return {
     version: 1,
     generatedAt: new Date().toISOString(),
@@ -248,8 +258,12 @@ export function foldEvidence(
       gapSightings: allObservations.length,
       gapClusters: gaps.length,
       reportOnlyGapClusters: reportOnlyGaps.length,
+      reportOnlyByReason,
       droppedGapSingletons,
       orchestrationGapSightings,
+      // The existing-instruction lane's candidate count: how many instructions the
+      // negatives land on. Display only; no gate reads it.
+      instructionsWithNegatives: instructionRows.filter((row) => row.negative > 0).length,
       usedRawTranscript: usedRawCount,
       crossSurfaceDuplicates: duplicates.length,
     },

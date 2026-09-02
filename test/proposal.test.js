@@ -646,8 +646,10 @@ test("the proposal carries the fold's gap-funnel counts for the apply surface", 
           gapSightings: 9,
           gapClusters: 0,
           reportOnlyGapClusters: 2,
+          reportOnlyByReason: { majorityOrchestration: 1, belowFloorMixed: 1, tooFewProjects: 0 },
           droppedGapSingletons: 3,
           orchestrationGapSightings: 6,
+          instructionsWithNegatives: 3,
         },
         instructions: Array.from({ length: 20 }, (_, i) => ({
           instruction: `AG-${String(i + 1).padStart(3, "0")}`,
@@ -659,15 +661,118 @@ test("the proposal carries the fold's gap-funnel counts for the apply surface", 
   assert.equal(funneled.proposal.stats.gapSightings, 9);
   assert.equal(funneled.proposal.stats.orchestrationGapSightings, 6);
   assert.equal(funneled.proposal.stats.reportOnlyGapClusters, 2);
+  assert.deepEqual(funneled.proposal.stats.reportOnlyByReason, {
+    majorityOrchestration: 1,
+    belowFloorMixed: 1,
+    tooFewProjects: 0,
+  });
   assert.equal(funneled.proposal.stats.droppedGapSingletons, 3);
   assert.equal(funneled.proposal.stats.gapClusters, 0);
+  assert.equal(funneled.proposal.stats.instructionsWithNegatives, 3);
 
   // A summary from before the counts existed yields null, never an invented zero.
-  const legacy = gate({ edit, annotation });
+  const legacy = gate({ edit, annotation, context: { summary: { analyzedSessions: 4, totals: {} } } });
   assert.equal(legacy.proposal.stats.gapSightings, null);
   assert.equal(legacy.proposal.stats.orchestrationGapSightings, null);
   assert.equal(legacy.proposal.stats.reportOnlyGapClusters, null);
+  assert.equal(legacy.proposal.stats.reportOnlyByReason, null);
   assert.equal(legacy.proposal.stats.droppedGapSingletons, null);
+  assert.equal(legacy.proposal.stats.instructionsWithNegatives, null);
+  assert.equal(legacy.proposal.stats.instructionsLeftAlone, null, "no instruction rows means nothing to count");
+});
+
+test("the funnel's left-alone count names the candidates no accepted edit touched", () => {
+  const edit = memoryEdit((t) => t.replace("- Use Node 18 via nvm before running any script.\n", ""));
+  const annotation = { edits: [claim(["H1"], { kind: "remove", title: "drop the stale Node pin" })] };
+  const row = (instruction, negative, nonComplianceSessions) => ({
+    instruction,
+    positive: 0,
+    negative,
+    nonComplianceSessions,
+    harmSessions: 4,
+    sessions: 4,
+    relevance: 1,
+    quotes: [],
+  });
+
+  const gated = gate({
+    edit,
+    annotation,
+    context: {
+      summary: {
+        analyzedSessions: 4,
+        totals: { positive: 3, negative: 2, gapClusters: 1 },
+        instructions: [
+          // The accepted edit claims no instruction, so every candidate is left alone.
+          row("AG-001", 3, 1),
+          row("AG-002", 1, 1),
+          // Only positives: never a candidate, so never "left alone" either.
+          { ...row("AG-003", 0, 0), positive: 5 },
+        ],
+      },
+    },
+  });
+  assert.deepEqual(gated.violations, []);
+  assert.equal(gated.proposal.stats.instructionsLeftAlone, 2);
+  assert.equal(gated.proposal.stats.leftAloneMaxSessions, 1, "both were ignored in a single session");
+
+  // An edit that names one of them removes it from the count, and the surviving
+  // candidate's session count is reported as it stands.
+  const claimed = gate({
+    edit,
+    annotation: { edits: [claim(["H1"], { kind: "remove", title: "drop it", instructions: ["AG-001"] })] },
+    context: {
+      summary: {
+        analyzedSessions: 4,
+        totals: { positive: 3, negative: 2, gapClusters: 1 },
+        instructions: [row("AG-001", 3, 1), row("AG-002", 1, 6), { ...row("AG-003", 0, 0), positive: 5 }],
+      },
+    },
+  });
+  assert.deepEqual(claimed.violations, []);
+  assert.equal(claimed.proposal.stats.instructionsLeftAlone, 1);
+  assert.equal(claimed.proposal.stats.leftAloneMaxSessions, 6);
+});
+
+test("the funnel's display counters never change which edits are proposed or refused", () => {
+  const edit = memoryEdit((t) => t.replace("- Use Node 18 via nvm before running any script.\n", ""));
+  const annotation = { edits: [claim(["H1"], { kind: "remove", title: "drop the stale Node pin" })] };
+  const instructions = Array.from({ length: 20 }, (_, i) => ({
+    instruction: `AG-${String(i + 1).padStart(3, "0")}`,
+    positive: 0,
+    negative: 4,
+    nonComplianceSessions: 4,
+    harmSessions: 4,
+    sessions: 4,
+    relevance: 1,
+    quotes: [],
+  }));
+  const totals = { positive: 3, negative: 2, gapClusters: 1, gapSightings: 9, droppedGapSingletons: 3 };
+
+  const withCounters = gate({
+    edit,
+    annotation,
+    context: {
+      summary: {
+        analyzedSessions: 4,
+        totals: {
+          ...totals,
+          instructionsWithNegatives: 20,
+          reportOnlyGapClusters: 2,
+          reportOnlyByReason: { majorityOrchestration: 2, belowFloorMixed: 0, tooFewProjects: 0 },
+        },
+        instructions,
+      },
+    },
+  });
+  const without = gate({
+    edit,
+    annotation,
+    context: { summary: { analyzedSessions: 4, totals, instructions } },
+  });
+
+  assert.deepEqual(withCounters.violations, without.violations);
+  assert.deepEqual(withCounters.proposal.edits, without.proposal.edits);
 });
 
 test("a proposal that would exceed the budget fails the gate", () => {
@@ -1765,18 +1870,25 @@ test("renderApplySurface writes one valid document through the real template", (
   assert.deepEqual(extractInjectedPayload(html), { ...payload, toolVersion: "0.1.0" });
 });
 
-test("the apply surface separates memory, description, and on-trigger deltas", () => {
+// Runs the real template's own script against a DOM stub small enough to keep the
+// assertions textual: the surface is exercised as the browser would build it, not mocked.
+function renderTemplateScript(proposal) {
   class Node {
     constructor(text = "") {
       this.textContent = text;
+      this.className = "";
       this.children = [];
       this.style = {};
+      this.attrs = {};
+      this.hidden = false;
     }
     appendChild(child) {
       this.children.push(child);
       return child;
     }
-    setAttribute() {}
+    setAttribute(name, value) {
+      this.attrs[name] = value;
+    }
     addEventListener() {}
   }
   const nodes = new Map();
@@ -1788,7 +1900,33 @@ test("the apply surface separates memory, description, and on-trigger deltas", (
       return nodes.get(id);
     },
   };
+  const repo = makeRepo();
+  const target = renderApplySurface(proposal, new State(repo.root), "0.1.0");
+  const html = fs.readFileSync(target, "utf8");
+  const window = {};
+  window.window = window;
+  for (const match of html.matchAll(/<script>([\s\S]*?)<\/script>/g)) {
+    vm.runInNewContext(match[1], { window, document });
+  }
   const textOf = (node) => node.textContent + node.children.map(textOf).join("");
+  return { nodes, textOf };
+}
+
+// The funnel band, read back the way it renders: one entry per bar or drop line.
+function funnelLines({ nodes, textOf }) {
+  return nodes.get("funnel-bars").children.map((row) => {
+    if (!row.className.startsWith("frow")) return { drop: textOf(row) };
+    const [label, track, value] = row.children;
+    return {
+      label: textOf(label),
+      value: textOf(value),
+      lanes: track.children.filter((c) => c.className === "a" || c.className === "b").map((c) => c.style.width),
+      cap: track.children.find((c) => c.className === "capline")?.style.left,
+    };
+  });
+}
+
+test("the apply surface separates memory, description, and on-trigger deltas", () => {
   const proposal = {
     generatedAt: "2026-08-01T00:00:00.000Z",
     repo: { name: "demo" },
@@ -1828,14 +1966,7 @@ test("the apply surface separates memory, description, and on-trigger deltas", (
       },
     ],
   };
-  const repo = makeRepo();
-  const target = renderApplySurface(proposal, new State(repo.root), "0.1.0");
-  const html = fs.readFileSync(target, "utf8");
-  const window = {};
-  window.window = window;
-  for (const match of html.matchAll(/<script>([\s\S]*?)<\/script>/g)) {
-    vm.runInNewContext(match[1], { window, document });
-  }
+  const { nodes, textOf } = renderTemplateScript(proposal);
 
   const cards = nodes.get("edits").children;
   assert.match(textOf(cards[0]), /Δ memory -20 tok/);
@@ -1851,6 +1982,107 @@ test("the apply surface separates memory, description, and on-trigger deltas", (
   assert.match(textOf(cards[1]), /Δ description \(always-loaded\) -2 tok/);
   assert.match(textOf(cards[1]), /file: \.agents\/skills\/db\/SKILL\.md/);
   assert.equal(nodes.get("gauge-title").textContent, "Always-loaded budget · AGENTS.md + skill descriptions");
+});
+
+test("the apply surface draws one funnel from findings to the edits it proposed", () => {
+  const rewrite = (id) => ({
+    id,
+    kind: "rewrite",
+    file: "AGENTS.md",
+    targetsMemoryFile: true,
+    hunks: [],
+    evidence: [],
+  });
+  const rendered = renderTemplateScript({
+    generatedAt: "2026-09-02T00:00:00.000Z",
+    repo: { name: "user" },
+    memoryFile: { path: ".claude/CLAUDE.md" },
+    stats: {
+      harnessCounts: {},
+      transcripts: 82,
+      positive: 70,
+      negative: 25,
+      gapSightings: 36,
+      gapClusters: 1,
+      reportOnlyGapClusters: 1,
+      reportOnlyByReason: { majorityOrchestration: 1, belowFloorMixed: 0, tooFewProjects: 0 },
+      droppedGapSingletons: 32,
+      instructionsWithNegatives: 5,
+      instructionsLeftAlone: 2,
+      leftAloneMaxSessions: 1,
+      skillExtractions: 0,
+    },
+    config: { maxEditsPerRun: 5, minGapEvidence: 2 },
+    budget: { current: 4049, projected: 4117, capTokens: 5000, descriptionTokens: 0, mode: "cap" },
+    edits: [
+      rewrite("e1"),
+      rewrite("e2"),
+      rewrite("e3"),
+      { id: "e4", kind: "add", file: "SKILL.md", targetsMemoryFile: false, hunks: [], evidence: [] },
+    ],
+  });
+
+  const lines = funnelLines(rendered);
+  assert.deepEqual(
+    lines.map((l) => l.drop ?? `${l.label} ${l.value}`),
+    [
+      "findings 131",
+      "70 dropped - the instruction was followed: nothing to fix",
+      "22 dropped - duplicates: the same instruction or the same mistake, reported more than once",
+      "candidates 39",
+      "32 dropped - seen only once: a second session has to confirm them (kept for later runs)",
+      "1 dropped - not this project's fault: the tooling that ran the session caused it",
+      "sent to synthesis 6",
+      "2 dropped - the model chose not to edit: ignored in only 1 session each",
+      "edits proposed 4 of 5",
+    ],
+    "one funnel: 131 - 70 - 22 = 39, 39 - 32 - 1 = 6, 6 - 2 = 4",
+  );
+  assert.ok(
+    !lines.some((l) => (l.drop || "").includes("too few projects")),
+    "a drop line that dropped nothing is never drawn",
+  );
+
+  // Every bar shares one scale (findings = 100%) so a lane can be followed down the
+  // band, and each bar splits into existing-instruction then missing-instruction.
+  const share = (n) => `${(n / 131) * 100}%`;
+  assert.deepEqual(
+    lines.filter((l) => l.label).map((l) => l.lanes),
+    [
+      [share(95), share(36)],
+      [share(5), share(34)],
+      [share(5), share(1)],
+      [share(3), share(1)],
+    ],
+  );
+  assert.equal(lines.at(-1).cap, share(5), "the cap tick sits on the same scale as the bar it crosses");
+
+  assert.equal(
+    rendered.textOf(rendered.nodes.get("funnel-facts")),
+    "82 transcripts · corroboration floor · 2 sessions · cap · 5 edits",
+  );
+  assert.equal(rendered.nodes.get("ctx").hidden, false, "the band frame is revealed");
+  assert.ok(!rendered.nodes.has("statrow"), "the band replaces the classic stat row rather than joining it");
+});
+
+test("a proposal saved before the funnel counts existed falls back to the classic stat row", () => {
+  const legacy = {
+    generatedAt: "2026-08-01T00:00:00.000Z",
+    repo: { name: "demo" },
+    memoryFile: { path: "AGENTS.md" },
+    // Recorded when only the gap funnel existed: no lane counts, so no band.
+    stats: { harnessCounts: {}, transcripts: 9, positive: 4, negative: 2, gapClusters: 1, skillExtractions: 0 },
+    config: { maxEditsPerRun: 5, minGapEvidence: 2 },
+    budget: { current: 10, projected: 12, capTokens: 100, descriptionTokens: 0, mode: "cap" },
+    edits: [],
+  };
+  const rendered = renderTemplateScript(legacy);
+
+  assert.ok(!rendered.nodes.has("funnel-bars"), "no band is drawn without the counts it needs");
+  assert.ok(!rendered.nodes.has("ctx"), "the band frame stays hidden as the markup shipped it");
+  assert.equal(rendered.nodes.get("statrow").hidden, false);
+  assert.equal(rendered.nodes.get("statrow").children.length, 5);
+  assert.match(rendered.textOf(rendered.nodes.get("statrow")), /positive evidence/);
 });
 
 test("terminal review labels every file in a multi-file extraction", () => {
