@@ -141,6 +141,10 @@ function listRemotes(root) {
   return [...new Set(listRemoteUrls(root).map(normalizeRemote).filter(Boolean))];
 }
 
+export function gitRemoteIdentity(root) {
+  return listRemotes(root).sort()[0] || null;
+}
+
 function listCloneRemotes(root) {
   return [
     ...new Set(
