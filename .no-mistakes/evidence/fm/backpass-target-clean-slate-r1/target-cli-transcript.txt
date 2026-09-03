@@ -1,0 +1,18 @@
+BACKPASS --TARGET END-USER CLI EVIDENCE
+
+$ backpass apply --target db
+targeting skill db (.agents/skills/db/SKILL.md); the memory file and other skills are read-only this run
+error no proposal to apply
+  run `backpass` first to produce one
+
+$ backpass apply --target CLAUDE.md
+error --target CLAUDE.md is only a pointer to AGENTS.md and cannot be trained directly
+  target AGENTS.md instead
+
+$ backpass apply --target .agents/skills/db/SKILL.md
+error --target ".agents/skills/db/SKILL.md" is not a configured memory file or a loaded skill in this repo
+  memory files: AGENTS.md, CLAUDE.md · skills: db
+
+$ backpass status --target db
+error --target does not apply to status
+  it narrows the default run, analyze, propose, and apply
