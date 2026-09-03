@@ -166,7 +166,7 @@ function assertRepoUntouched(repo, before, workspaceRoot) {
   );
 }
 
-function targetPromptValues(target, memoryPath, skillsDir) {
+function targetPromptValues(target, memoryPath, skillsDir, minGapEvidence) {
   if (target.kind === "skill") {
     const skillPath = workspacePathFor(target.path);
     return {
@@ -175,6 +175,8 @@ function targetPromptValues(target, memoryPath, skillsDir) {
         `\`./${skillPath}\` as the only writable file`,
       EDIT_DIRECTIVE: `Make your edits only in \`./${skillPath}\` with your file tools. Do not edit \`./${memoryPath}\` or create any files.`,
       SKILL_GUIDANCE: loadPrompt("synthesis-target-skill-guidance"),
+      EVIDENCE_FLOOR_RULE:
+        `2. **Every change to the target skill's description or body needs evidence from at least ${minGapEvidence} distinct sessions.** One bad session never rewrites the skill.`,
       TARGET_RULE: `0. **This run targets \`./${skillPath}\` only.** Do not edit the memory file or create or edit another skill.\n`,
       RELOCATION_RULES: "",
       EXTRACTION_RULE: "",
@@ -192,6 +194,8 @@ function targetPromptValues(target, memoryPath, skillsDir) {
       MEMORY_PATH: memoryPath,
       SKILLS_DIR: skillsDir,
     }),
+    EVIDENCE_FLOOR_RULE:
+      `2. **Every change to this always-loaded file needs evidence from at least ${minGapEvidence} distinct sessions** - adding text, rewriting text and removing text alike, whatever the shape of the change. One bad session never rewrites the weights. Extracting text into a skill and moving text within the file are exempt: they keep every line. If only one session supports a wording change, leave the wording alone.`,
     TARGET_RULE: memoryTarget
       ? `0. **This run targets \`./${memoryPath}\` only.** Existing skills are read-only, but you may extract into a new skill under \`./${skillsDir}/\`.\n`
       : "",
@@ -232,7 +236,7 @@ function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts, scop
     BUDGET_RULE: budgetRule(memoryFile, config, maxEdits, descriptionTokens, target),
     MAX_EDITS: String(maxEdits),
     MIN_GAP_EVIDENCE: String(config.minGapEvidence),
-    ...targetPromptValues(target, memoryPath, skillsDir),
+    ...targetPromptValues(target, memoryPath, skillsDir, config.minGapEvidence),
   };
 
   const context = {
@@ -528,7 +532,9 @@ export async function synthesizeProposal({
   const editPromptFile = path.join(promptDir, "synthesis-edit.md");
   fs.writeFileSync(editPromptFile, renderPrompt("synthesis", editValues));
 
-  const fingerprint = repoFingerprint(repo, [memoryFile.path, ...skillFiles.map((s) => s.path)]);
+  const fingerprint = repoFingerprint(repo, [
+    ...new Set([...(scope?.memoryFiles || config.memoryFiles || []), memoryFile.path, ...skillFiles.map((s) => s.path)]),
+  ]);
   const sessionName = `backpass-synth-${process.pid}`;
   const timeoutSeconds = Math.max(config.timeoutSeconds, 900);
   const usage = [];

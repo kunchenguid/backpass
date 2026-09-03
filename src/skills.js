@@ -54,7 +54,7 @@ export function loadSkills(repoRoot, skillsDir) {
       description: frontmatter.description || "",
       path: (() => {
         const relative = path.relative(repoRoot, file);
-        return relative.startsWith("..") || path.isAbsolute(relative) ? file : relative;
+        return relative.startsWith("..") || path.isAbsolute(relative) ? file : relative.split(path.sep).join("/");
       })(),
       body: skillBody(text),
       bodyTokens: estimateTokens(text),

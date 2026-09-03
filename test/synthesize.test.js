@@ -404,6 +404,27 @@ test("a harness that writes to the repository instead of the staging copy is ref
   });
 });
 
+test("targeted synthesis guards every configured memory file from direct writes", async () => {
+  const policy = "# Policy\n\n- Keep this file intact.\n";
+  const guarded = setup(
+    { edit: {} },
+    { scope: { kind: "project", memoryFiles: ["AGENTS.md", "POLICY.md"] } },
+  );
+  fs.writeFileSync(path.join(guarded.repo.root, "POLICY.md"), policy);
+  fs.writeFileSync(
+    process.env.FAKE_ACPX_SCRIPT,
+    JSON.stringify({
+      edit: {
+        [path.join(guarded.repo.root, "POLICY.md")]: {
+          replace: [["Keep this file intact.", "Overwrite this policy."]],
+        },
+      },
+    }),
+  );
+
+  await assert.rejects(guarded.run(), /synthesis changed POLICY\.md in the repository directly/);
+});
+
 test("user synthesis can propose against relocated external memory", async () => {
   const { run, memoryFile } = setup(
     { edit: {}, annotations: [{ reply: { edits: [] } }] },
@@ -590,6 +611,7 @@ test("a skill target stages that skill alone; a staged write to AGENTS.md is ref
   assert.doesNotMatch(prompt, /Make your edits by editing `.\/AGENTS\.md`/);
   assert.doesNotMatch(prompt, /To extract a section into a skill/);
   assert.doesNotMatch(prompt, /Where an instruction belongs/);
+  assert.match(prompt, /description or body needs evidence from at least 2 distinct sessions/);
 
   const direct = setup({ edit: {} });
   fs.mkdirSync(path.join(direct.repo.root, ".agents/skills/db"), { recursive: true });
