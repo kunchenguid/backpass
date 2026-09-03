@@ -1984,7 +1984,8 @@ function renderTemplateScript(proposal) {
 // The funnel band, read back the way it renders: one entry per bar or drop line.
 function funnelLines({ nodes, textOf }) {
   return nodes.get("funnel-bars").children.map((row) => {
-    if (!row.className.startsWith("frow")) return { drop: textOf(row) };
+    if (row.className === "fdrop") return { drop: textOf(row) };
+    if (row.className === "fconvert") return { conversion: textOf(row) };
     const [label, track, value] = row.children;
     return {
       label: textOf(label),
@@ -2091,7 +2092,7 @@ test("the apply surface draws one funnel from findings to the edits it proposed"
 
   const lines = funnelLines(rendered);
   assert.deepEqual(
-    lines.map((l) => l.drop ?? `${l.label} ${l.value}`),
+    lines.map((l) => l.drop ?? l.conversion ?? `${l.label} ${l.value}`),
     [
       "findings 133",
       "70 dropped - the instruction was followed: nothing to fix",
@@ -2102,9 +2103,10 @@ test("the apply surface draws one funnel from findings to the edits it proposed"
       "sent to synthesis 8",
       "2 dropped - no accepted edit named these candidates",
       "1 dropped - a previous review rejected the same edit",
+      "counting changes here: 5 candidates · 4 proposed edits",
       "edits proposed 4 of 5",
     ],
-    "the final step reports measured edits rather than inferring candidate attribution",
+    "the many-to-many synthesis boundary names the unit conversion instead of implying candidates equal edits",
   );
   assert.ok(
     !lines.some((l) => (l.drop || "").includes("too few projects")),
@@ -2197,6 +2199,10 @@ test("the apply surface draws one funnel from findings to the edits it proposed"
   assert.deepEqual(proposedLine.lanes, ["50%", "50%"], "the clamped bar preserves its lane split");
   assert.equal(proposedLine.overScale, "1 over scale", "the clamped bar is visibly marked");
   assert.equal(findingsLine.overScale, undefined, "an ordinary 100% bar has no over-scale marker");
+  assert.ok(
+    overScaleLines.some((line) => line.conversion === "counting changes here: 1 candidate · 2 proposed edits"),
+    "several edits from one candidate are an explicit unit conversion, not an unexplained gain",
+  );
 
   const offScaleCap = renderTemplateScript({
     ...proposal,
@@ -2215,7 +2221,36 @@ test("the apply surface draws one funnel from findings to the edits it proposed"
     },
     edits: [rewrite("e1")],
   });
-  assert.equal(funnelLines(offScaleCap).at(-1).cap, undefined, "an off-scale cap tick is hidden");
+  const offScaleLines = funnelLines(offScaleCap);
+  assert.equal(offScaleLines.at(-1).cap, undefined, "an off-scale cap tick is hidden");
+  assert.ok(
+    offScaleLines.some((line) => line.conversion === "counting changes here: 1 candidate · 1 proposed edit"),
+    "equal numbers still name the change from candidate units to edit units",
+  );
+
+  const noCandidate = renderTemplateScript({
+    ...proposal,
+    stats: {
+      ...proposal.stats,
+      positive: 0,
+      negative: 0,
+      gapSightings: 0,
+      gapClusters: 0,
+      reportOnlyGapClusters: 0,
+      reportOnlyByReason: { majorityOrchestration: 0, belowFloorMixed: 0, tooFewProjects: 0 },
+      droppedGapSingletons: 0,
+      instructionsWithNegatives: 0,
+      instructionsLeftAlone: 0,
+      instructionsSuppressed: 0,
+    },
+    edits: [rewrite("e1")],
+  });
+  assert.ok(
+    funnelLines(noCandidate).some(
+      (line) => line.conversion === "counting changes here: 0 candidates · 1 proposed edit",
+    ),
+    "an edit with no candidate attribution is visible instead of appearing as an unexplained gain",
+  );
 });
 
 test("a proposal saved before the funnel counts existed falls back to the classic stat row", () => {

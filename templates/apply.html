@@ -298,6 +298,15 @@
         font-weight: 500;
         color: var(--faint);
       }
+      .fconvert {
+        margin: 2px 58px 7px 172px;
+        padding-top: 5px;
+        border-top: 1px solid var(--line);
+        font-family: var(--mono);
+        font-size: 10px;
+        color: var(--faint);
+        text-align: right;
+      }
       .funnel-note {
         margin-top: 10px;
         padding-top: 9px;
@@ -764,6 +773,9 @@
         .fdrop {
           margin-left: 0;
         }
+        .fconvert {
+          margin-left: 0;
+        }
       }
     </style>
   </head>
@@ -894,8 +906,10 @@
         // evidence-summary.json) or read off the accepted edits - nothing is estimated,
         // and nothing drawn here decides which edits are proposed. A proposal saved
         // before these counts existed falls back to the classic stat row rather than
-        // showing zeros nobody measured. The last step deliberately changes units from
-        // candidate instructions to edits, so its counts are measured rather than reconciled.
+        // showing zeros nobody measured. Synthesis is a many-to-many boundary: an edit can
+        // address several candidates, one candidate can produce several edits, and an edit
+        // can carry no existing-instruction id. The conversion line names that unit change
+        // explicitly instead of presenting candidate and edit counts as a conserved drop.
         function funnelCounts() {
           var s = P.stats || {};
           var byReason = s.reportOnlyByReason;
@@ -985,6 +999,14 @@
           line.appendChild(document.createTextNode(" - " + text));
           host.appendChild(line);
         }
+        function funnelConversion(host, candidates, proposed) {
+          var line = el("div", "fconvert");
+          line.appendChild(document.createTextNode("counting changes here: "));
+          line.appendChild(el("b", null, fmt(candidates) + " candidate" + (candidates === 1 ? "" : "s")));
+          line.appendChild(document.createTextNode(" · "));
+          line.appendChild(el("b", null, fmt(proposed) + " proposed edit" + (proposed === 1 ? "" : "s")));
+          host.appendChild(line);
+        }
         var funnelNote = null;
         var funnel = funnelCounts();
         if (funnel) {
@@ -1030,6 +1052,11 @@
           funnelBar(bars, "sent to synthesis", funnel.sent, scale);
           funnelDrop(bars, funnel.leftAlone, "no accepted edit named these candidates");
           funnelDrop(bars, funnel.suppressed, "a previous review rejected the same edit");
+          funnelConversion(
+            bars,
+            funnel.sent[0] + funnel.sent[1] - funnel.leftAlone - funnel.suppressed,
+            funnel.proposed[0] + funnel.proposed[1],
+          );
           funnelBar(bars, "edits proposed", funnel.proposed, scale, {
             lit: true,
             small: "of " + fmt(funnel.cap),
