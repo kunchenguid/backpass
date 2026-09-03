@@ -7,12 +7,14 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { applyDecisions } from "../src/apply/writer.js";
+import { cmdApply } from "../src/commands/apply.js";
 import { primaryMemoryFile } from "../src/commands/analyze.js";
 import { loadConfig } from "../src/config.js";
 import { UserError } from "../src/logger.js";
 import { readMemoryFile } from "../src/memory.js";
 import { buildProposal, projectWithDecisions } from "../src/proposal.js";
 import { State } from "../src/state.js";
+import { resolveScope } from "../src/scope.js";
 import { resolveRunTarget } from "../src/target.js";
 import { estimateTokens } from "../src/tokens.js";
 import { prepareWorkspace, measureWorkspace, workspacePathFor } from "../src/workspace.js";
@@ -90,11 +92,36 @@ test("resolveRunTarget accepts a skill by name or SKILL.md path", () => {
   assert.equal(byDir.path, ".agents/skills/db/SKILL.md");
 });
 
-test("resolveRunTarget refuses an unknown name instead of falling back to the whole surface", () => {
+test("resolveRunTarget refuses empty and unknown names instead of widening", () => {
   const repo = repoWith({ ".agents/skills/db/SKILL.md": DB_SKILL });
   const config = cfg(repo);
+  assert.throws(() => resolveRunTarget("   ", { repo, config }), /--target cannot be empty/);
   assert.throws(() => resolveRunTarget("nope", { repo, config }), UserError);
   assert.throws(() => resolveRunTarget("nope", { repo, config }), /not a memory file or skill/);
+});
+
+test("resolveRunTarget refuses an ambiguous memory basename", () => {
+  const repo = makeRepo({
+    "docs/AGENTS.md": AGENTS,
+    "packages/a/AGENTS.md": AGENTS,
+  });
+  const config = { memoryFiles: ["docs/AGENTS.md", "packages/a/AGENTS.md"], skillsDir: ".agents/skills" };
+  assert.throws(() => resolveRunTarget("AGENTS.md", { repo, config }), /matches 2 memory files/);
+  assert.equal(resolveRunTarget("docs/AGENTS.md", { repo, config }).path, "docs/AGENTS.md");
+});
+
+test("resolveRunTarget uses scope-normalized user skill directories", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-target-user-"));
+  writeIn(home, "memory-skills/db/SKILL.md", DB_SKILL);
+  const config = {
+    memoryFiles: ["~/.agents/AGENTS.md"],
+    skillsDir: "~/memory-skills",
+    skillsDirs: ["~/memory-skills"],
+  };
+  const scope = resolveScope(home, { scope: "user" }, config, null, { home });
+  const target = resolveRunTarget("db", { repo: scope.repo, config, scope });
+  assert.equal(target.kind, "skill");
+  assert.equal(target.path, "memory-skills/db/SKILL.md");
 });
 
 test("resolveRunTarget refuses a name that matches two skills", () => {
@@ -296,6 +323,27 @@ test("a skill target ignores other writes and applies against its description-on
   assert.match(fs.readFileSync(path.join(repo.root, memoryFile.path), "utf8"), /Wrap every migration/);
 });
 
+test("apply refuses a requested target that differs from the saved proposal", async () => {
+  const repo = repoWith({ ".agents/skills/db/SKILL.md": DB_SKILL });
+  const state = new State(repo.root).ensure();
+  state.writeProposal({
+    scope: "project",
+    target: { kind: "surface" },
+    memoryFile: { path: "AGENTS.md" },
+    edits: [{ id: "e1" }],
+  });
+  await assert.rejects(
+    () =>
+      cmdApply({
+        repo,
+        scope: { kind: "project" },
+        config: { state, runTarget: { kind: "skill", path: ".agents/skills/db/SKILL.md", name: "db" } },
+        flags: { target: "db" },
+      }),
+    /proposal targets the whole surface/,
+  );
+});
+
 function initGitRepo(files) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-target-cli-"));
   for (const [name, text] of Object.entries(files)) {
@@ -324,6 +372,22 @@ test("the CLI refuses --target combined with --memory-file, and an unknown targe
   });
   assert.notEqual(combined.status, 0);
   assert.match(`${combined.stdout}${combined.stderr}`, /cannot be combined with --memory-file/);
+
+  const empty = spawnSync(process.execPath, [CLI, "status", "--target", ""], {
+    cwd: dir,
+    encoding: "utf8",
+    env,
+  });
+  assert.notEqual(empty.status, 0);
+  assert.match(`${empty.stdout}${empty.stderr}`, /--target cannot be empty/);
+
+  const emptyCombined = spawnSync(
+    process.execPath,
+    [CLI, "status", "--target", "", "--memory-file", "AGENTS.md"],
+    { cwd: dir, encoding: "utf8", env },
+  );
+  assert.notEqual(emptyCombined.status, 0);
+  assert.match(`${emptyCombined.stdout}${emptyCombined.stderr}`, /cannot be combined with --memory-file/);
 
   const missing = spawnSync(process.execPath, [CLI, "status", "--target", "no-such-skill"], {
     cwd: dir,

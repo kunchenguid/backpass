@@ -26,6 +26,17 @@ export async function cmdApply(ctx) {
   if (proposalScope !== runScope) {
     throw new UserError(`this proposal is ${proposalScope} scope; run \`backpass apply --scope ${proposalScope}\``);
   }
+  if (ctx.flags.target !== undefined) {
+    const requested = config.runTarget || { kind: "surface" };
+    const saved = proposal.target || { kind: "surface" };
+    if (requested.kind !== saved.kind || (requested.kind !== "surface" && requested.path !== saved.path)) {
+      const savedLabel = saved.kind === "surface" ? "the whole surface" : saved.path;
+      throw new UserError(
+        `this proposal targets ${savedLabel}, not ${requested.path || "the whole surface"}`,
+        "apply the proposal with its original --target, or run backpass again for the requested target",
+      );
+    }
+  }
   if (proposal.violations?.length) {
     throw new UserError(
       "the saved proposal failed its mechanical gates and was never approved for apply",

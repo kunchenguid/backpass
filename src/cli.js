@@ -264,9 +264,13 @@ export async function main(argv) {
     }
     const scope = resolveScope(process.cwd(), { ...values, scope: kind, strict: Boolean(values.strict) }, config, repo);
     printScopeNote(scope);
-    if (values.target && Array.isArray(values["memory-file"]) && values["memory-file"].length) {
+    const hasTarget = values.target !== undefined;
+    if (hasTarget && Array.isArray(values["memory-file"]) && values["memory-file"].length) {
       throw new UserError("--target cannot be combined with --memory-file", "name the one file with --target");
     }
+    config.memoryFiles = scope.memoryFiles;
+    config.skillsDir = scope.overflowDir;
+    config.skillsDirs = scope.skillDirs;
     const runTarget =
       commandName === "init"
         ? { kind: "surface" }
@@ -274,9 +278,6 @@ export async function main(argv) {
     printTargetNote(runTarget);
     config.runTarget = runTarget;
     if (runTarget.kind === "memory") config.memoryFiles = [runTarget.path];
-    else config.memoryFiles = scope.memoryFiles;
-    config.skillsDir = scope.overflowDir;
-    if (scope.skillDirs.length) config.skillsDirs = scope.skillDirs;
     config.state = new State(scope.root, {
       stateDir: scope.stateDir,
       mode: kind === "user" ? 0o700 : undefined,

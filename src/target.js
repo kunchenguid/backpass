@@ -25,13 +25,15 @@ export const SURFACE_TARGET = { kind: "surface" };
  */
 export function loadScopeSkills(repo, config, scope = null) {
   const userScope = scope?.kind === "user";
-  const overflow = resolveOverflowTarget(repo.root, config.skillsDir, {
+  const configuredSkillsDir = scope?.overflowDir ?? config.skillsDir;
+  const configuredSkillDirs = scope?.skillDirs ?? config.skillsDirs ?? [];
+  const overflow = resolveOverflowTarget(repo.root, configuredSkillsDir, {
     claudeSkillsDir: userScope ? userClaudeSkillsDir() : undefined,
   });
-  const skillDirs = resolveProjectSkillDirs(repo.root, overflow.dir, config.skillsDirs || [], {
+  const skillDirs = resolveProjectSkillDirs(repo.root, overflow.dir, configuredSkillDirs, {
     exact: userScope,
   });
-  const skills = loadProjectSkills(repo.root, overflow.dir, config.skillsDirs || [], { exact: userScope });
+  const skills = loadProjectSkills(repo.root, overflow.dir, configuredSkillDirs, { exact: userScope });
   return { overflow, skillDirs, skills };
 }
 
@@ -96,38 +98,48 @@ function looksLikeMemoryFile(spec, root, allowExternal, memoryFiles = []) {
     if (!(err instanceof UserError)) throw err;
   }
   const base = spec.split(/[/\\]/).pop();
+  const matches = [];
   for (const candidate of memoryFiles) {
     try {
       const absolute = resolveMemoryPath(root, candidate, { allowExternal });
       if (!fs.existsSync(absolute) || !fs.statSync(absolute).isFile()) continue;
       const logical = posixRel(root, absolute);
       if (candidate === spec || logical === spec || path.basename(absolute) === base) {
-        return { absolute, path: logical };
+        matches.push({ absolute, path: logical });
       }
     } catch (err) {
       if (!(err instanceof UserError)) throw err;
     }
   }
-  return null;
+  const unique = [...new Map(matches.map((match) => [match.absolute, match])).values()];
+  if (unique.length > 1) {
+    throw new UserError(
+      `--target "${spec}" matches ${unique.length} memory files (${unique.map((match) => match.path).join(", ")})`,
+      "pass the exact memory file path to disambiguate",
+    );
+  }
+  return unique[0] || null;
 }
 
 /**
  * Resolve `--target` against this scope's memory files and skills.
- * Missing or empty spec is the whole surface.
+ * A missing spec is the whole surface; an explicitly empty spec is invalid.
  *
  * @param {string | null | undefined} spec
  * @param {{ repo: { root: string }, config: object, scope?: object | null, skills?: object[], skillDirs?: string[] }} context
  */
 export function resolveRunTarget(spec, { repo, config, scope = null, skills = null, skillDirs = null }) {
-  if (spec == null || spec === "") return { ...SURFACE_TARGET };
+  if (spec == null) return { ...SURFACE_TARGET };
 
   const trimmed = String(spec).trim();
-  if (!trimmed) return { ...SURFACE_TARGET };
+  if (!trimmed) {
+    throw new UserError("--target cannot be empty", "name one memory file or skill, or omit --target");
+  }
 
   const loaded = skills && skillDirs ? { skills, skillDirs } : loadScopeSkills(repo, config, scope);
   const allowExternal = scope?.kind === "user";
   const skill = matchSkill(trimmed, loaded.skills, { root: repo.root });
-  const memory = looksLikeMemoryFile(trimmed, repo.root, allowExternal, config.memoryFiles || []);
+  const memory = looksLikeMemoryFile(trimmed, repo.root, allowExternal, scope?.memoryFiles ?? config.memoryFiles ?? []);
 
   if (skill && memory && skill.path !== memory.path) {
     throw new UserError(
@@ -176,7 +188,7 @@ function skillHint(skillPath) {
 
 export function parseTargetFlag(values) {
   const spec = values?.target;
-  if (spec == null || spec === "") return null;
+  if (spec == null) return null;
   if (Array.isArray(spec)) {
     if (spec.length > 1) {
       throw new UserError("--target names one memory file or one skill, not several", "run once per file");
