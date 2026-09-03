@@ -3,12 +3,7 @@ import fs from "node:fs";
 import { loadConfig } from "./config.js";
 import { classifyInteraction, INTERACTIVE, NON_INTERACTIVE } from "./interaction.js";
 import { findInstructionUnit, instructionUnits, resolveMemoryFiles, similarity } from "./memory.js";
-import {
-  GAP_COVERED_THRESHOLD,
-  GAP_SIMILARITY_THRESHOLD,
-  gapSource,
-  normalizeSourceLabel,
-} from "./gap-ledger.js";
+import { GAP_COVERED_THRESHOLD, GAP_SIMILARITY_THRESHOLD, gapSource, normalizeSourceLabel } from "./gap-ledger.js";
 import { crossSurfaceDuplicates } from "./overlap.js";
 
 /**

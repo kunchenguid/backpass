@@ -149,16 +149,14 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   placement table stays prompt guidance by the captain's explicit decision - do not harden it.
 - **One session floor covers the whole always-loaded surface.** Every edit whose kind is
   not `extract` or `move` must quote `minGapEvidence` distinct sessions - add, rewrite and
-  remove alike. `buildProposal` counts them from the edit's own `evidence` sources
-  (`countSources` in `src/proposal.js`); the model's `transcripts` field is not read at all.
-  There is deliberately NO shape predicate separating an additive rewrite from a tightening:
-  https://github.com/kunchenguid/backpass/pull/79 spent 20 commits proving every lexical
-  proxy for it (net token growth, word coverage, bigram overlap) has a mirror-image
-  failure, so a one-session tightening is refused too - the captain's accepted cost. Never
-  reintroduce a text classifier here. In user scope the same edits also clear
-  `minGapProjects`, counted by `countedEvidenceProjects` from cited gap clusters and from
-  `summary.sourceProjects`, the fold's source -> project map that lets instruction-row
-  evidence (which carries no project of its own) answer for a rewrite.
+  remove alike. `buildProposal` discards empty quote text, then counts canonical non-empty
+  source labels from the edit's own `evidence`; the model's `transcripts` field is not read.
+  Sourceless quotes remain visible as `unknown source` but do not count. There is no shape
+  predicate separating an additive rewrite from a tightening, so a one-session tightening
+  is refused too. Never reintroduce a lexical-overlap, token-growth, or other text classifier
+  here. In user scope the same edits also clear `minGapProjects`, counted by
+  `countedEvidenceProjects` from cited gap clusters and from `summary.sourceProjects`, the
+  fold's source -> project map that lets instruction-row evidence answer for a rewrite.
 - **Negative evidence has a sign the pipeline must not lose.** Analysis classifies every
   negative (`harm` / `non-compliance` / `irrelevant`, `sanitizeEvidence` drops other
   values) and `renderEvidenceForPrompt` renders the class AND the `effect` text with each

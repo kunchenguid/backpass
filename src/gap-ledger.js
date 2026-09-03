@@ -68,7 +68,9 @@ export function gapSource(transcript = {}) {
 }
 
 export function normalizeSourceLabel(source) {
-  return String(source || "").trim().replace(/\s+/g, " ");
+  return String(source || "")
+    .trim()
+    .replace(/\s+/g, " ");
 }
 
 function normalize(text) {
