@@ -54,8 +54,13 @@ const statePath = process.env.FAKE_ACPX_STATE;
 const state = fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath, "utf8")) : { annotate: 0, edit: 0 };
 
 function applyEdits(edits) {
+  const skillsDir = /skills directory at\\n\\x60\\.\\/([^\\x60]+)\\/\\x60\\./.exec(prompt)?.[1];
   for (const [file, change] of Object.entries(edits || {})) {
-    const target = path.isAbsolute(file) ? file : path.join(cwd, file);
+    if (file.startsWith("__SKILLS_DIR__/") && !skillsDir) throw new Error("fake harness: skills directory not found");
+    const resolved = file.startsWith("__SKILLS_DIR__/")
+      ? path.join(skillsDir, file.slice("__SKILLS_DIR__/".length))
+      : file;
+    const target = path.isAbsolute(resolved) ? resolved : path.join(cwd, resolved);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     if (change === null) { fs.rmSync(target, { recursive: true, force: true }); continue; }
     if (typeof change === "string") { fs.writeFileSync(target, change); continue; }

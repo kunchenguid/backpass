@@ -139,6 +139,34 @@ const SPLIT_THE_COPY = { editFirst: { "AGENTS.md": { replace: [[POINTERS, SPLIT]
 const proposalOf = (dir) => readJson(path.join(dir, ".backpass", "proposal.json"));
 const stagedTree = (dir) => snapshotTree(path.join(dir, ".backpass", "synthesis"));
 
+test("propose stages extracts in an existing configured Claude skills directory", () => {
+  const dir = makeCliRepo({ memory: MEMORY });
+  fs.mkdirSync(path.join(dir, ".claude", "skills"), { recursive: true });
+  fs.writeFileSync(path.join(dir, ".backpassrc.json"), JSON.stringify({ skillsDir: ".claude\\skills\\" }));
+  const claudePointers = POINTERS.replaceAll(".agents/skills", ".claude/skills");
+  const run = runCli(dir, ["propose", ...PIN], {
+    script: {
+      edit: {
+        "AGENTS.md": { replace: [[BOTH_SECTIONS, claudePointers]] },
+        "__SKILLS_DIR__/release-checklist/SKILL.md": skill("release-checklist"),
+        "__SKILLS_DIR__/incident-response/SKILL.md": skill("incident-response"),
+      },
+      annotations: [{ reply: COALESCED_ANSWER }],
+    },
+  });
+
+  assert.equal(run.status, 0, `the run should succeed:\n${run.output}`);
+  const staged = stagedTree(dir);
+  assert.ok(staged[".claude/skills/release-checklist/SKILL.md"]);
+  assert.ok(staged[".claude/skills/incident-response/SKILL.md"]);
+  assert.equal(staged[".agents/skills/release-checklist/SKILL.md"], undefined);
+  assert.deepEqual(proposalOf(dir).edits[0].hunks.map((hunk) => hunk.file), ["AGENTS.md"]);
+  assert.deepEqual(
+    proposalOf(dir).edits[0].skills.map((skill) => skill.path).sort(),
+    [".claude/skills/incident-response/SKILL.md", ".claude/skills/release-checklist/SKILL.md"],
+  );
+});
+
 test("a remeasurement is not a failed annotation: it costs no attempt, and the new ids get a real one", () => {
   const dir = makeCliRepo({ memory: MEMORY });
   const run = runCli(dir, ["propose", ...PIN], {

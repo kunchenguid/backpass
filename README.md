@@ -83,8 +83,9 @@ writes a user-level file.
 Canonical user memory is the first existing file in this order: `~/.agents/AGENTS.md`,
 `$CLAUDE_CONFIG_DIR/CLAUDE.md` (default `~/.claude/CLAUDE.md`), and
 `$CODEX_HOME/AGENTS.md` (default `~/.codex/AGENTS.md`). User-level skill extractions
-follow the project layout at `~/.agents/skills`, with a warning if Claude's active
-`skills` path is a real directory rather than the usual symlink.
+default to `~/.agents/skills`, with a warning if Claude's active `skills` path is a
+real directory rather than the usual symlink. See [Configuration](#configuration) for
+using an existing harness-loaded directory instead.
 
 In user scope every `add`, `rewrite`, or `remove` edit also clears `minGapProjects`
 (default `1`): the distinct projects behind its own quotes, counted from the gap
@@ -610,6 +611,10 @@ layers the `"user"` block in `$XDG_CONFIG_HOME/backpass/config.json` (default
 `~/.config/backpass/config.json`) over its defaults. The user block can override the
 regular settings; its path and user-only settings include `memoryFiles`, `skillsDir`,
 `skillsDirs`, `minGapProjects` (default `1`), and these discovery controls:
+
+`skillsDir` defaults to `.agents/skills`. To use an existing harness-loaded directory
+instead, such as `.claude/skills`, configure that path; a missing configured directory
+falls back to the default. Backpass normalizes path separators and trailing slashes.
 
 ```json
 {

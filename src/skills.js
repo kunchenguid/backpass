@@ -275,10 +275,10 @@ export function normalizeSkillsDir(skillsDir) {
  *
  * Skills only pay off if the harness loads them, so the answer is the canonical
  * `.agents/skills` (mirrored to `.claude/skills` by symlink) unless the user explicitly
- * configured another directory that already exists. The bare `skills/` dir is an
- * installer/public convention that no harness auto-loads, so it is never auto-detected -
- * it is only honored when named in the config. Resolution is read-only; the layout is
- * created at write time (`ensureSkillsLayout`), which keeps every pre-apply stage
+ * configured an existing harness-loaded directory, including `.claude/skills`. The bare
+ * `skills/` dir is an installer/public convention that no harness auto-loads, so it is
+ * never auto-detected - it is only honored when named in the config. Resolution is
+ * read-only; the layout is created at write time (`ensureSkillsLayout`), which keeps every pre-apply stage
  * side-effect free.
  */
 export function resolveOverflowTarget(

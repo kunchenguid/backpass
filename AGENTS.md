@@ -165,10 +165,8 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   negative (`harm` / `non-compliance` / `irrelevant`, `sanitizeEvidence` drops other
   values) and `renderEvidenceForPrompt` renders the class AND the `effect` text with each
   quote. Records from before the class existed carry none, and none never counts as harm.
-- **Skills only count if a harness loads them.** Extractions target `.agents/skills` with
-  `.claude/skills -> ../.agents/skills` as a symlink (`ensureSkillsLayout` in
-  `src/skills.js`, run at write time); a bare `skills/` dir is never auto-detected and a
-  real `.claude/skills` directory is warned about, never replaced.
+- **Skill target/load-layout rules live in `src/skills.js`.** Preserve an existing configured
+  harness-loaded directory; a bare `skills/` directory is never auto-detected.
 - **Memory resolution is pointer-aware** (`resolveMemoryFiles` in `src/memory.js`): the
   first configured file is canonical, a `@AGENTS.md`-only CLAUDE.md is a pointer, and a
   second full file is warned about, never silently ignored or double-written.
