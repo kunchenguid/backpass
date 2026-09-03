@@ -352,6 +352,40 @@ test("a single-session rewrite is refused whatever shape it takes, and the model
   }
 });
 
+test("empty evidence cannot pad a single-session rewrite", () => {
+  const { proposal, violations } = gate({
+    edit: memoryEdit(REWRITE_SHAPES["append a sentence"]),
+    annotation: {
+      edits: [
+        claim(["H1"], {
+          kind: "rewrite",
+          evidence: [...ONE_SESSION, { polarity: "negative", text: "  ", source: "fake-session" }],
+        }),
+      ],
+    },
+  });
+  assert.equal(proposal.edits.length, 0);
+  assert.ok(
+    violations.some((v) => /backed by 1 session/.test(v)),
+    violations.join("\n"),
+  );
+});
+
+test("source-label whitespace cannot pad a single-session rewrite", () => {
+  const repeated = { ...ONE_SESSION[0], source: "claude  ·  abc · turn 3" };
+  const { proposal, violations } = gate({
+    edit: memoryEdit(REWRITE_SHAPES["append a sentence"]),
+    annotation: {
+      edits: [claim(["H1"], { kind: "rewrite", evidence: [...ONE_SESSION, repeated] })],
+    },
+  });
+  assert.equal(proposal.edits.length, 0);
+  assert.ok(
+    violations.some((v) => /backed by 1 session/.test(v)),
+    violations.join("\n"),
+  );
+});
+
 test("a rewrite spread over two hunks cannot pay for itself with one session", () => {
   const { proposal, violations } = gate({
     edit: memoryEdit((t) =>

@@ -104,6 +104,7 @@ export class ProposalViolation extends Error {
 function normalizeEdit(raw, index) {
   const kind = String(raw?.kind || "").toLowerCase();
   const refs = Array.isArray(raw?.changes) ? raw.changes : Array.isArray(raw?.hunks) ? raw.hunks : [];
+  const evidence = normalizeEvidence(raw?.evidence);
   return {
     id: `e${index + 1}`,
     kind,
@@ -111,11 +112,11 @@ function normalizeEdit(raw, index) {
     title: String(raw?.title || "").trim() || "(untitled edit)",
     rationale: String(raw?.rationale || "").trim(),
     instructions: Array.isArray(raw?.instructions) ? raw.instructions.map(String) : [],
-    evidence: normalizeEvidence(raw?.evidence),
+    evidence,
     // Corroboration is measured from the edit's own quotes, never taken from the model's
     // own count: a dry run produced edits declaring 11 and 20 sessions over quotes drawn
     // from 3 and 2. Same rule as every other number here - see AGENTS.md.
-    transcripts: countSources(raw?.evidence),
+    transcripts: countSources(evidence),
   };
 }
 
@@ -132,7 +133,11 @@ function normalizeEvidence(evidence) {
 
 function countSources(evidence) {
   if (!Array.isArray(evidence)) return 0;
-  return new Set(evidence.map((e) => e?.source).filter(Boolean)).size;
+  return new Set(
+    evidence
+      .map((e) => String(e?.source || "").trim().replace(/\s+/g, " "))
+      .filter(Boolean),
+  ).size;
 }
 
 /** The del-line texts of a hunk that are not carried by `lineCounts` (blank lines ignored). */
