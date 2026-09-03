@@ -265,6 +265,9 @@ export async function main(argv) {
     const scope = resolveScope(process.cwd(), { ...values, scope: kind, strict: Boolean(values.strict) }, config, repo);
     printScopeNote(scope);
     const hasTarget = values.target !== undefined;
+    if (commandName === "init" && hasTarget) {
+      throw new UserError("--target cannot be used with init", "initialize the scope first, then run with --target");
+    }
     if (hasTarget && Array.isArray(values["memory-file"]) && values["memory-file"].length) {
       throw new UserError("--target cannot be combined with --memory-file", "name the one file with --target");
     }

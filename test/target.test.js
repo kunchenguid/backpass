@@ -359,12 +359,22 @@ function initGitRepo(files) {
   return fs.realpathSync(dir);
 }
 
-test("the CLI refuses --target combined with --memory-file, and an unknown target", () => {
+test("the CLI rejects invalid target usage without widening", () => {
   const dir = initGitRepo({
     "AGENTS.md": AGENTS,
     ".agents/skills/db/SKILL.md": DB_SKILL,
   });
   const env = { ...process.env, NO_COLOR: "1", CI: "1" };
+  const initTarget = spawnSync(process.execPath, [CLI, "init", "--target", "no-such-skill"], {
+    cwd: dir,
+    encoding: "utf8",
+    env,
+  });
+  assert.notEqual(initTarget.status, 0);
+  assert.match(`${initTarget.stdout}${initTarget.stderr}`, /--target cannot be used with init/);
+  assert.equal(fs.existsSync(path.join(dir, ".backpassrc.json")), false);
+  assert.equal(fs.existsSync(path.join(dir, ".backpass")), false);
+
   const combined = spawnSync(process.execPath, [CLI, "status", "--target", "AGENTS.md", "--memory-file", "AGENTS.md"], {
     cwd: dir,
     encoding: "utf8",
