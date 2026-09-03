@@ -223,6 +223,7 @@
       }
       .frow .fb i {
         display: block;
+        flex-shrink: 0;
         height: 100%;
       }
       .frow .fb i.a {
@@ -241,6 +242,13 @@
       }
       .frow.zero .fb i {
         border-right: none;
+      }
+      .frow .fb .overscale {
+        position: absolute;
+        inset: -1px 0 -1px auto;
+        width: 9px;
+        border-right: 2px solid var(--reject);
+        background: repeating-linear-gradient(135deg, transparent 0 2px, var(--reject) 2px 3px);
       }
       /* The learning-rate cap, on the same scale as the bar it sits over. */
       .frow .fb .capline {
@@ -940,13 +948,24 @@
           var row = el("div", "frow" + (total === 0 ? " zero" : o.lit ? " lit" : ""));
           row.appendChild(el("span", "fl", label));
           var track = el("div", "fb");
+          var overScale = scale > 0 && total > scale;
+          var widths = lanes.map(function (value) {
+            return scale > 0 ? Math.max((value / (overScale ? total : scale)) * 100, value > 0 ? 0.6 : 0) : 0;
+          });
+          if (overScale && lanes[0] > 0 && lanes[1] > 0) {
+            widths[0] = Math.min(widths[0], 99.4);
+            widths[1] = 100 - widths[0];
+          }
           ["a", "b"].forEach(function (lane, i) {
             var fill = el("i", lane);
-            // A lane that counted something keeps a hairline of width so it is never
-            // invisible next to a lane that dwarfs it.
-            fill.style.width = scale > 0 ? Math.max((lanes[i] / scale) * 100, lanes[i] > 0 ? 0.6 : 0) + "%" : "0%";
+            fill.style.width = widths[i] + "%";
             track.appendChild(fill);
           });
+          if (overScale) {
+            var overflow = el("span", "overscale");
+            overflow.setAttribute("data-l", fmt(total - scale) + " over scale");
+            track.appendChild(overflow);
+          }
           if (o.cap != null && scale > 0 && o.cap <= scale) {
             var tick = el("span", "capline");
             tick.style.left = (o.cap / scale) * 100 + "%";

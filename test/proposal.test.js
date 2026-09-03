@@ -1990,6 +1990,7 @@ function funnelLines({ nodes, textOf }) {
       label: textOf(label),
       value: textOf(value),
       lanes: track.children.filter((c) => c.className === "a" || c.className === "b").map((c) => c.style.width),
+      overScale: track.children.find((c) => c.className === "overscale")?.attrs["data-l"],
       cap: track.children.find((c) => c.className === "capline")?.style.left,
     };
   });
@@ -2172,6 +2173,30 @@ test("the apply surface draws one funnel from findings to the edits it proposed"
       (line) => line.drop === "1 dropped - seen in too few projects: the same mistake has to show up in 3 projects",
     ),
   );
+
+  const overScale = renderTemplateScript({
+    ...proposal,
+    stats: {
+      ...proposal.stats,
+      positive: 0,
+      negative: 1,
+      gapSightings: 0,
+      gapClusters: 0,
+      reportOnlyGapClusters: 0,
+      reportOnlyByReason: { majorityOrchestration: 0, belowFloorMixed: 0, tooFewProjects: 0 },
+      droppedGapSingletons: 0,
+      instructionsWithNegatives: 1,
+      instructionsLeftAlone: 0,
+      instructionsSuppressed: 0,
+    },
+    edits: [rewrite("e1"), rewrite("e2", 0)],
+  });
+  const overScaleLines = funnelLines(overScale);
+  const findingsLine = overScaleLines.find((line) => line.label === "findings");
+  const proposedLine = overScaleLines.find((line) => line.label === "edits proposed");
+  assert.deepEqual(proposedLine.lanes, ["50%", "50%"], "the clamped bar preserves its lane split");
+  assert.equal(proposedLine.overScale, "1 over scale", "the clamped bar is visibly marked");
+  assert.equal(findingsLine.overScale, undefined, "an ordinary 100% bar has no over-scale marker");
 
   const offScaleCap = renderTemplateScript({
     ...proposal,
