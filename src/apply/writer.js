@@ -66,7 +66,7 @@ function descriptionTokensIn(text) {
   return estimateTokens(parseFrontmatter(text).description || "");
 }
 
-function acceptedSubsetBudgetFailure({
+function applyBudget({
   proposal,
   capTokens,
   memoryText,
@@ -75,13 +75,31 @@ function acceptedSubsetBudgetFailure({
   descriptionTokensProjected,
 }) {
   const relative = proposal.memoryFile.path;
-  if (memoryText === null) return null;
+  if (proposal.target?.kind === "skill") {
+    return {
+      budget: budgetStatus(
+        parseFrontmatter(memoryText).description || "",
+        parseFrontmatter(projectedMemoryText).description || "",
+        capTokens,
+      ),
+      label: `${relative} description`,
+    };
+  }
+  return {
+    budget: budgetStatus(memoryText, projectedMemoryText, capTokens, {
+      current: descriptionTokensNow,
+      projected: descriptionTokensProjected,
+    }),
+    label: surfaceLabel(relative, Math.max(descriptionTokensNow, descriptionTokensProjected)),
+  };
+}
 
-  const budget = budgetStatus(memoryText, projectedMemoryText, capTokens, {
-    current: descriptionTokensNow,
-    projected: descriptionTokensProjected,
-  });
-  const label = surfaceLabel(relative, Math.max(descriptionTokensNow, descriptionTokensProjected));
+function acceptedSubsetBudgetFailure(args) {
+  if (args.memoryText === null) return null;
+
+  const { budget, label } = applyBudget(args);
+  const { capTokens } = args;
+  const relative = args.proposal.memoryFile.path;
   const gate = budgetGateKind(budget);
   if (gate === "cap") {
     return {
@@ -543,12 +561,17 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
   };
   const landedDescriptionDelta = descriptionTokensProjected - descriptionTokensNow;
   const budgetTarget = memoryPlan || orderedPlanned[0];
-  const surfaceBudget = budgetTarget
-    ? budgetStatus(memoryText, memoryPlan?.text ?? memoryText, config.budgetTokens, {
-        current: descriptionTokensNow,
-        projected: descriptionTokensNow + landedDescriptionDelta,
+  const budgetResult = budgetTarget
+    ? applyBudget({
+        proposal,
+        capTokens: config.budgetTokens,
+        memoryText,
+        projectedMemoryText: memoryPlan?.text ?? memoryText,
+        descriptionTokensNow,
+        descriptionTokensProjected: descriptionTokensNow + landedDescriptionDelta,
       })
     : null;
+  const surfaceBudget = budgetResult?.budget ?? null;
   for (const item of orderedPlanned) {
     const { relative, resolved, text, applied } = item;
     const budget = item === budgetTarget ? surfaceBudget : null;
@@ -571,15 +594,7 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
   }
 
   if (surfaceBudget && !surfaceBudget.withinBudget) {
-    results.warnings.push(
-      overBudgetWarning(
-        surfaceLabel(
-          proposal.memoryFile.path,
-          Math.max(descriptionTokensNow, descriptionTokensNow + landedDescriptionDelta),
-        ),
-        surfaceBudget,
-      ),
-    );
+    results.warnings.push(overBudgetWarning(budgetResult.label, surfaceBudget));
   }
 
   if (!dryRun && canonical) {

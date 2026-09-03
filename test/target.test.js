@@ -6,6 +6,7 @@ import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
+import { applyDecisions } from "../src/apply/writer.js";
 import { primaryMemoryFile } from "../src/commands/analyze.js";
 import { loadConfig } from "../src/config.js";
 import { UserError } from "../src/logger.js";
@@ -217,7 +218,7 @@ test("buildProposal on a memory-file target refuses to recreate an existing skil
   assert.equal(proposal.target.kind, "memory");
 });
 
-test("buildProposal on a skill target ignores a write to the project memory file", () => {
+test("a skill target ignores other writes and applies against its description-only budget", () => {
   const repo = repoWith({ ".agents/skills/db/SKILL.md": DB_SKILL });
   const memoryFile = readMemoryFile(repo.root, ".agents/skills/db/SKILL.md");
   const state = new State(repo.root).ensure();
@@ -270,6 +271,17 @@ test("buildProposal on a skill target ignores a write to the project memory file
     proposal.edits.some((e) => e.file === "AGENTS.md" || (e.hunks || []).some((h) => h.file === "AGENTS.md")),
     false,
   );
+
+  const results = applyDecisions({
+    proposal,
+    decisions: { e1: "accepted" },
+    repo,
+    state,
+    config: { budgetTokens: proposal.budget.current, skillsDir: ".agents/skills" },
+  });
+  assert.deepEqual(results.failed, []);
+  assert.equal(results.written[0].budget.current, proposal.budget.current);
+  assert.match(fs.readFileSync(path.join(repo.root, memoryFile.path), "utf8"), /Wrap every migration/);
 });
 
 function initGitRepo(files) {
