@@ -26,7 +26,7 @@ function logicalSkillDir(repoRoot, skillsDir) {
   const absolute = path.isAbsolute(skillsDir) ? skillsDir : path.resolve(repoRoot, skillsDir);
   const relative = path.relative(path.resolve(repoRoot), absolute);
   if (relative === "") return ".";
-  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return skillsDir;
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return absolute;
   return relative.split(path.sep).join("/");
 }
 

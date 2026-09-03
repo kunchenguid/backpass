@@ -415,19 +415,35 @@ test("user synthesis can propose against relocated external memory", async () =>
   assert.equal(proposal.edits.length, 0);
 });
 
-test("an external skill target rule uses its actual staged path", async () => {
+test("a skill target in a relative external directory is staged and uses its actual staged path", async () => {
   const setupResult = setup(
     { edit: {}, annotations: [{ reply: { edits: [] } }] },
     { scope: { kind: "user" }, externalSkills: true },
   );
+  const relativeSkillsDir = path.relative(setupResult.repo.root, setupResult.externalSkillsDir);
+  setupResult.config.skillsDir = relativeSkillsDir;
+  setupResult.config.skillsDirs = [relativeSkillsDir];
   setupResult.config.target = {
     kind: "skill",
     path: path.join(setupResult.externalSkillsDir, "db/SKILL.md"),
     name: "db",
   };
-  await setupResult.run();
-  const prompt = fs.readFileSync(path.join(setupResult.config.state.root, "prompts/synthesis-edit.md"), "utf8");
   const stagedPath = `${workspacePathFor(setupResult.externalSkillsDir)}/db/SKILL.md`;
+  fs.writeFileSync(
+    process.env.FAKE_ACPX_SCRIPT,
+    JSON.stringify({
+      edit: { [stagedPath]: { replace: [["Load for database work.", "Load before database work or SQL changes."]] } },
+      annotations: [{ reply: { edits: [tighten(["H1"])] } }],
+    }),
+  );
+
+  const { proposal, violations } = await setupResult.run();
+  assert.deepEqual(violations, []);
+  assert.deepEqual(
+    proposal.edits.map((edit) => edit.file),
+    [path.join(setupResult.externalSkillsDir, "db/SKILL.md")],
+  );
+  const prompt = fs.readFileSync(path.join(setupResult.config.state.root, "prompts/synthesis-edit.md"), "utf8");
   assert.ok(prompt.includes(`This run targets \`./${stagedPath}\` only`));
 });
 
@@ -582,6 +598,11 @@ test("a skill target in an absolute in-repo skills directory is staged under its
   const skillsDir = path.join(targeted.repo.root, "custom-skills");
   fs.mkdirSync(path.join(skillsDir, "db"), { recursive: true });
   fs.writeFileSync(path.join(skillsDir, "db/SKILL.md"), DB_SKILL);
+  fs.mkdirSync(path.join(skillsDir, "review"), { recursive: true });
+  fs.writeFileSync(
+    path.join(skillsDir, "review/SKILL.md"),
+    "---\nname: review\ndescription: Load for pull request review.\n---\n\n- Check the tests.\n",
+  );
   targeted.config.skillsDir = skillsDir;
   targeted.config.skillsDirs = [skillsDir];
   targeted.config.target = { kind: "skill", path: "custom-skills/db/SKILL.md", name: "db" };
@@ -592,6 +613,9 @@ test("a skill target in an absolute in-repo skills directory is staged under its
     proposal.edits.map((edit) => edit.file),
     ["custom-skills/db/SKILL.md"],
   );
+  const prompt = fs.readFileSync(path.join(targeted.config.state.root, "prompts/synthesis-edit.md"), "utf8");
+  assert.match(prompt, /review \(custom-skills\/review\/SKILL\.md;.*Load for pull request review\./);
+  assert.equal(fs.existsSync(path.join(targeted.config.state.root, "synthesis/custom-skills/review/SKILL.md")), false);
 });
 
 test("a skill target stages that skill alone; a staged write to AGENTS.md is refused, a direct one is caught by the fingerprint", async () => {

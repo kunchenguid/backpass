@@ -457,9 +457,10 @@ export async function synthesizeProposal({
     workspacePathFor(overflow.dir);
   // Unstaged skills keep their repository paths in the index: the model may read them
   // there for grounding, and the target rule says they are not writable.
-  const stagedSkillFiles = skillFiles
-    .filter((skill) => target.kind !== "skill" || skill.path === target.path)
-    .map((skill) => ({ ...skill, path: workspace.stagedPaths.get(skill.path) || skill.path }));
+  const stagedSkillFiles = skillFiles.map((skill) => ({
+    ...skill,
+    path: workspace.stagedPaths.get(skill.path) || skill.path,
+  }));
 
   const editValues = {
     ...common,
