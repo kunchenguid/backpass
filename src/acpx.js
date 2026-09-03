@@ -334,7 +334,10 @@ export async function execOneShot({
       throw new AcpxError(`acpx ${agent} exec timed out after ${timeoutSeconds}s`, result);
     }
     if (result.code !== 0) {
-      throw new AcpxError(`acpx ${agent} exec failed (exit ${result.code}): ${firstLine(result.stderr)}`, result);
+      throw new AcpxError(
+        `acpx ${agent} exec failed (exit ${result.code}): ${firstLine(result.stderr) || `exit ${result.code}`}`,
+        result,
+      );
     }
 
     const combined = `${result.stdout}\n${result.stderr}`;
@@ -480,7 +483,7 @@ export async function openSession({ agent, model = null, effort = null, sessionN
     if (result.timedOut) throw new AcpxError(`acpx ${agent} session prompt timed out after ${timeoutSeconds}s`, result);
     if (result.code !== 0) {
       throw new AcpxError(
-        `acpx ${agent} session prompt failed (exit ${result.code}): ${firstLine(result.stderr)}`,
+        `acpx ${agent} session prompt failed (exit ${result.code}): ${firstLine(result.stderr) || `exit ${result.code}`}`,
         result,
       );
     }
