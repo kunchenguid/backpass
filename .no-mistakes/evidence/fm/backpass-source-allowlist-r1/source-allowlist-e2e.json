@@ -1,0 +1,47 @@
+{
+  "foldIssuedSourceCount": 4,
+  "minGapProjects": 1,
+  "outcomes": [
+    {
+      "edit": "e1",
+      "decision": "accepted",
+      "countedSessions": 3,
+      "sourcesIssuedByFold": [
+        true,
+        true,
+        true
+      ],
+      "violation": null
+    },
+    {
+      "edit": "e2",
+      "decision": "accepted",
+      "countedSessions": 2,
+      "sourcesIssuedByFold": [
+        true,
+        true
+      ],
+      "violation": null
+    },
+    {
+      "edit": "e3",
+      "decision": "refused",
+      "countedSessions": 1,
+      "sourcesIssuedByFold": [
+        true,
+        false
+      ],
+      "violation": "edit e1 (\"e3\") changes AGENTS.md backed by 1 session(s); 2 are required"
+    },
+    {
+      "edit": "e4",
+      "decision": "accepted",
+      "countedSessions": 2,
+      "sourcesIssuedByFold": [
+        true,
+        true
+      ],
+      "violation": null
+    }
+  ]
+}
