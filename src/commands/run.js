@@ -70,8 +70,8 @@ export async function cmdRun(ctx) {
       return 0;
     }
 
-    // The banner shows what the gate measures: the always-loaded surface, which is the
-    // memory file plus every skill description line.
+    // The banner shows what the gate measures: the always-loaded write target, either
+    // the file plus skill descriptions or a targeted skill's description alone.
     const descriptionTokens = skillDescriptionTokens(analysis.skills || []);
     const alwaysLoaded =
       analysis.file.alwaysLoadedTokens != null

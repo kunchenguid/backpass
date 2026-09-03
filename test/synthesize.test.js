@@ -620,9 +620,6 @@ test("a skill target stages only that skill, so a write to AGENTS.md cannot ente
   assert.match(editPrompt, new RegExp(`Budget: ${descriptionTokens} / 1 estimated always-loaded tokens`));
   assert.match(editPrompt, /targeted skill description is ALREADY/);
   assert.doesNotMatch(editPrompt, /lead with skill extractions/);
-  const freshPrompt = fs.readFileSync(
-    path.join(repo.root, ".backpass", "prompts", "synthesis-annotate-2.md"),
-    "utf8",
-  );
+  const freshPrompt = fs.readFileSync(path.join(repo.root, ".backpass", "prompts", "synthesis-annotate-2.md"), "utf8");
   assert.match(freshPrompt, new RegExp(`SKILL\\.md.* - ${descriptionTokens} tokens, OVER BUDGET`));
 });

@@ -14,7 +14,7 @@ import { isSkillFilePath, normalizeRecoveryLine, recoveredLineCounts } from "./w
  * gates it must clear before a human ever sees it (design sections 3, 6, 7). The
  * budget gate (`budgetGateKind`) runs again on the accepted subset at apply.
  *
- * The synthesis agent edits a staging copy of the memory file and project skills natively
+ * The synthesis agent edits a staging copy of the run's writable surface natively
  * (`src/workspace.js`); backpass measures the result as anchored hunks (`src/diff.js`)
  * and the agent annotates them - kind, title, rationale, evidence - by id. An edit is
  * therefore a group of measured changes, normally against one file (an extract also

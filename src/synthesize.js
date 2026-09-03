@@ -25,10 +25,10 @@ import { UserError, color, info, warn } from "./logger.js";
  * evidence into concrete edits.
  *
  * The agent never describes an edit for backpass to locate - it makes the edit, with its
- * harness's own file tools, in a staging copy of the memory file and project skills
+ * harness's own file tools, in a staging copy of the run's writable surface
  * (`src/workspace.js`). A run starts in one session with two kinds of turn:
  *
- *   edit      the synthesis prompt; the agent edits `./AGENTS.md` in the staging copy
+ *   edit      the synthesis prompt; the agent edits the file under audit in the staging copy
  *   annotate  backpass measures the copy against the original (`src/diff.js`) and shows
  *             the changes by id; the agent attaches kind, title, rationale, and evidence
  *
@@ -78,10 +78,11 @@ function alwaysLoadedTokensOf(memoryFile, descriptionTokens = 0, runTarget = nul
 }
 
 /**
- * The budget the prompts frame is the always-loaded surface: the memory file plus
- * every skill description line, the same sum the mechanical gate measures
- * (`buildProposal`). Framing one number and gating another would set the model up to
- * fail a gate it was never told about.
+ * The budget the prompts frame is the always-loaded write target: the memory file plus
+ * every skill description line for a surface or memory target, or the targeted skill's
+ * description alone. It is the same sum the mechanical gate measures (`buildProposal`).
+ * Framing one number and gating another would set the model up to fail a gate it was
+ * never told about.
  */
 function budgetRule(memoryFile, config, maxEdits, descriptionTokens = 0, runTarget = null) {
   const skillTarget = runTarget?.kind === "skill";

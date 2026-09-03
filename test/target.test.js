@@ -444,11 +444,11 @@ test("the CLI rejects invalid target usage without widening", () => {
   assert.notEqual(empty.status, 0);
   assert.match(`${empty.stdout}${empty.stderr}`, /--target cannot be empty/);
 
-  const emptyCombined = spawnSync(
-    process.execPath,
-    [CLI, "status", "--target", "", "--memory-file", "AGENTS.md"],
-    { cwd: dir, encoding: "utf8", env },
-  );
+  const emptyCombined = spawnSync(process.execPath, [CLI, "status", "--target", "", "--memory-file", "AGENTS.md"], {
+    cwd: dir,
+    encoding: "utf8",
+    env,
+  });
   assert.notEqual(emptyCombined.status, 0);
   assert.match(`${emptyCombined.stdout}${emptyCombined.stderr}`, /cannot be combined with --memory-file/);
 

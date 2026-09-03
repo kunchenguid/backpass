@@ -116,7 +116,10 @@ backpass apply --scope user
 
 ### One file instead of the whole surface
 
-The default run, and `backpass --scope user`, still train the whole named surface: the primary memory file plus every skill. `--target` names one memory file or one skill for this run and does not silently expand to the rest.
+The default run, and `backpass --scope user`, still train the whole named surface: the
+primary memory file plus every skill. `--target` names one memory file or one skill for
+this run and does not silently expand to the rest. Empty, unknown, or ambiguous targets
+fail instead of falling back to the whole surface.
 
 ```sh
 backpass --target AGENTS.md
@@ -124,7 +127,11 @@ backpass --target db                          # skill name, or a SKILL.md path
 backpass --scope user --target db
 ```
 
-A memory-file target may still extract a **new** skill (that is how the file shrinks). Existing skills are not writable on that run. A skill target writes only that SKILL.md. `--target` cannot be combined with `--memory-file`.
+A memory-file target may still extract a **new** skill (that is how the file shrinks).
+Existing skills are not writable on that run. A skill target writes only that SKILL.md.
+`--target` cannot be combined with `--memory-file`, and `init` does not accept it. A plain
+`backpass apply` applies the saved proposal's target; if `--target` is repeated on apply,
+it must resolve to that same target.
 
 ## How It Works
 
@@ -226,8 +233,9 @@ weights still evolve as transcripts age, so the selected set can change over tim
 `--max-transcripts all` to analyze every transcript, or `--seed <n>` to draw a different,
 equally reproducible sample.
 
-Each distilled trace goes to a cheap model with the memory file, the project skill index,
-and a rubric. It returns strict JSON: which instructions helped, which were violated, and
+Each distilled trace goes to a cheap model with the file under audit, the applicable
+skill index, and a rubric. A skill target excludes every other skill from that index. The
+model returns strict JSON: which instructions helped, which were violated, and
 what mistakes no current instruction covers. Every negative carries a class - `harm` (following the instruction
 caused damage), `non-compliance` (the agent ignored it), or `irrelevant` - because those
 argue for opposite fates: harm argues against an instruction, non-compliance argues for
@@ -251,11 +259,13 @@ draw repeated non-compliance, synthesis is steered to restructure the paragraph 
 items instead of adding a cosmetic label.
 
 Results are cached per transcript, keyed to the transcript's content, the effective
-memory-surface hash, and the analysis-index version. The surface hash covers the memory-file
-set plus every project skill's name and description. Edit a memory file or skill description
-and the evidence correctly re-computes; edit only a skill body and the cache remains valid
-because bodies are inspected only for failed-trigger confirmation. A repo without skills
-keeps the prior memory-set hash. A surface edit therefore reanalyzes without `--force` - that
+memory-surface hash, and the analysis-index version. On a whole-surface or memory-file run,
+the surface hash covers the memory-file set plus every project skill's name and description.
+Edit a memory file or skill description and the evidence correctly re-computes; edit only a
+skill body and the cache remains valid because bodies are inspected only for failed-trigger
+confirmation. A skill target instead hashes the complete targeted SKILL.md because that is
+the file under audit. A repo without skills keeps the prior memory-set hash. A surface edit
+therefore reanalyzes without `--force` - that
 is not a cache miss, it is the cache doing its job - and the run says so on stderr, naming the
 old and new hash, so a "0 reused" line reads as "the surface changed" rather than "reuse is
 broken." Evidence files that are not refreshed remain on disk but are excluded while their
@@ -313,8 +323,8 @@ of the proposal entirely.
 A high-reasoning synthesis run turns the aggregated gradients into concrete edits: ADD,
 REMOVE, REWRITE, EXTRACT→SKILL, or MOVE. The agent does not describe edits for backpass to
 splice in - it makes them, with its harness's own file tools, in a **staging copy** of the
-memory file and project skills under `.backpass/synthesis/` (the repo itself is read-only
-to it, for grounding). backpass then diffs the copy against the original and shows the agent the
+run's writable surface under `.backpass/synthesis/` (the repo itself is read-only to it,
+for grounding). backpass then diffs the copy against the original and shows the agent the
 measured changes by id; the agent annotates each one with a title, rationale, and the
 verbatim evidence behind it. Nothing textual is ever taken from the model: every hunk's
 text is copied out of your file by construction, so an edit can never "not appear" in it.
@@ -391,11 +401,12 @@ pass optimizes under.
 **Default: 5,000 estimated tokens (~20KB)** for the always-loaded surface, configurable.
 The estimator is bytes/4 - harness-neutral, ±15%.
 
-The gated number is the **memory file plus every skill's `description:` line** - that is
-what an agent actually pays on every session. Skill bodies stay free until triggered and
-never compete for this budget. (A repo that already carries many skills may find itself
-over budget with no file having changed when upgrading to this accounting - that is the
-one-time re-tune of `budgetTokens`, not a regression.)
+For a whole-surface or memory-file run, the gated number is the **memory file plus every
+skill's `description:` line** - that is what an agent actually pays on every session. For
+a skill target, it is that skill's `description:` line only. Skill bodies stay free until
+triggered and never compete for this budget. (A repo that already carries many skills may
+find itself over budget with no file having changed when upgrading to this accounting -
+that is the one-time re-tune of `budgetTokens`, not a regression.)
 
 ```
 AGENTS.md      [###############.................] 2,412 / 5,000 tok · 63 instructions
@@ -486,9 +497,10 @@ backpass apply --dry-run   # show what would be written
 
 ### 9. Which file is the weights
 
-`memoryFiles` is an ordered list (default `["AGENTS.md", "CLAUDE.md"]`); the first one
-that exists is the file a run optimizes, so **AGENTS.md is canonical**. Resolution is
-pointer-aware:
+On a whole-surface run, `memoryFiles` is an ordered list (default
+`["AGENTS.md", "CLAUDE.md"]`); the first one that exists is the file the run optimizes, so
+**AGENTS.md is canonical**. `--target` overrides that selection for its narrowed run.
+Resolution is pointer-aware:
 
 - `CLAUDE.md` containing only `@AGENTS.md` (the standard import) is a pointer: optimizing
   AGENTS.md covers both harness families and the pointer stays valid. Nothing to report.
@@ -654,7 +666,7 @@ exclude (`.git/info/exclude`, written by `backpass init`) rather than the tracke
   evidence/<identity>.json per-transcript loss
   evidence-summary.json  aggregated gradients
   proposal.json          the latest parseable gradient-descent step (absent if none was produced)
-  synthesis/             the staging copy the gradient-descent agent edited (memory file + skills)
+  synthesis/             the staging copy of the run's writable surface
   prompts/               the exact prompts of the last run
   agent-probe-cache.json which harnesses were available and logged in, and when
   rejections.json        edits you turned down, and the evidence behind them

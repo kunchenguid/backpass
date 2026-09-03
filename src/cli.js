@@ -119,7 +119,7 @@ BUDGET AND SHAPE
   --min-gap-projects <n>    user-scope: distinct projects needed for a gap [1]
   --scope <project|user>   which surface a run reads and writes          [project]
   --project <glob>         user-scope: only sessions whose project/cwd matches (repeatable)
-  --memory-file <path>     memory file to optimize (repeatable)
+  --memory-file <path>     primary memory file for a whole-surface run (repeatable)
   --target <path>          one memory file or one skill (name or SKILL.md);
                            does not expand to the rest of the surface
   --skills-dir <path>      where skill extractions are written          [.agents/skills]

@@ -58,7 +58,8 @@ export function readSkill(repoRoot, file, fallbackName = null) {
   const frontmatter = parseFrontmatter(text);
   const relative = path.relative(repoRoot, file);
   const skillPath = relative.startsWith("..") || path.isAbsolute(relative) ? file : relative;
-  const inferredName = path.basename(file) === "SKILL.md" ? path.basename(path.dirname(file)) : path.basename(file, ".md");
+  const inferredName =
+    path.basename(file) === "SKILL.md" ? path.basename(path.dirname(file)) : path.basename(file, ".md");
   return {
     name: frontmatter.name || fallbackName || inferredName,
     description: frontmatter.description || "",
