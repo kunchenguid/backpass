@@ -37,9 +37,9 @@ Hard rules - a violation fails the whole proposal:
 2. **At most {{MAX_EDITS}} edits** - the learning rate. Regroup or revert if you are over.
 3. **Every edit carries at least one verbatim quote in `evidence`**, with its source.
 4. **Every `add`, `rewrite` and `remove` - of {{MEMORY_PATH}} or of a skill file - carries
-   quotes from at least {{MIN_GAP_EVIDENCE}} distinct sessions.** Backpass counts the
-   distinct `source` values in your `evidence`; do not report a count of your own, it is
-   not read. This covers
+   quotes from at least {{MIN_GAP_EVIDENCE}} distinct sessions.** Backpass counts distinct
+   `source` values in your `evidence` only when they match source labels issued by this
+   run's fold; do not report a count of your own, it is not read. This covers
    rewrites of every shape, a tightening included - one session is not enough to change
    text that loads on every future run. `extract` and `move` are exempt, because they keep
    every line. If you have only one session for a change, revert it in the file, or cite a

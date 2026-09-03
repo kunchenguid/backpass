@@ -317,7 +317,9 @@ Then mechanical gates run, and they are not negotiable:
   is a violation, so is an edit that names no change
 - every edit that changes the always-loaded surface - adding, rewriting or removing text -
   needs quotes from `minGapEvidence` distinct sessions. The count is measured from the
-  edit's own quote sources; a session count the model reports is ignored. Rewrites are not
+  edit's own quote sources, and only source labels issued by this run's fold count. A
+  mistyped or invented label does not create another session, and a session count the model
+  reports is ignored. Rewrites are not
   classified by shape: a one-session tightening is refused along with a one-session
   append, because deciding which is which is a question about meaning that a line diff
   cannot answer. `extract` and `move` are exempt - they keep every always-loaded line.
