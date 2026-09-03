@@ -671,14 +671,30 @@ test("the proposal carries the fold's gap-funnel counts for the apply surface", 
   assert.equal(funneled.proposal.stats.instructionsWithNegatives, 3);
 
   // A summary from before the counts existed yields null, never an invented zero.
-  const legacy = gate({ edit, annotation, context: { summary: { analyzedSessions: 4, totals: {} } } });
+  const legacy = gate({
+    edit,
+    annotation,
+    context: {
+      summary: {
+        analyzedSessions: 4,
+        totals: { positive: 3, negative: 2, gapClusters: 1 },
+        instructions: Array.from({ length: 20 }, (_, i) => ({
+          instruction: `AG-${String(i + 1).padStart(3, "0")}`,
+          negative: 4,
+          harmSessions: 4,
+          sessions: 4,
+        })),
+      },
+    },
+  });
   assert.equal(legacy.proposal.stats.gapSightings, null);
   assert.equal(legacy.proposal.stats.orchestrationGapSightings, null);
   assert.equal(legacy.proposal.stats.reportOnlyGapClusters, null);
   assert.equal(legacy.proposal.stats.reportOnlyByReason, null);
   assert.equal(legacy.proposal.stats.droppedGapSingletons, null);
   assert.equal(legacy.proposal.stats.instructionsWithNegatives, null);
-  assert.equal(legacy.proposal.stats.instructionsLeftAlone, null, "no instruction rows means nothing to count");
+  assert.equal(legacy.proposal.stats.instructionsLeftAlone, null, "legacy instruction rows do not invent counts");
+  assert.equal(legacy.proposal.stats.leftAloneMaxSessions, null);
   assert.equal(legacy.proposal.stats.instructionsSuppressed, null);
 });
 
@@ -727,7 +743,7 @@ test("the funnel's left-alone count names the candidates no accepted edit touche
   assert.equal(gated.proposal.stats.leftAloneMaxSessions, 1, "the maximum does not imply every count is one");
   assert.ok(
     funnelLines(renderTemplateScript(gated.proposal)).some(
-      (line) => line.drop === "2 dropped - the model chose not to edit",
+      (line) => line.drop === "2 dropped - no accepted edit named these candidates",
     ),
   );
 
@@ -739,7 +755,16 @@ test("the funnel's left-alone count names the candidates no accepted edit touche
     context: {
       summary: {
         analyzedSessions: 4,
-        totals: { positive: 3, negative: 2, gapClusters: 1 },
+        totals: {
+          positive: 3,
+          negative: 2,
+          gapClusters: 1,
+          gapSightings: 1,
+          reportOnlyGapClusters: 0,
+          reportOnlyByReason: { majorityOrchestration: 0, belowFloorMixed: 0, tooFewProjects: 0 },
+          droppedGapSingletons: 0,
+          instructionsWithNegatives: 2,
+        },
         instructions: [row("AG-001", 3, 1), row("AG-002", 1, 6), { ...row("AG-003", 0, 0), positive: 5 }],
       },
     },
@@ -1298,7 +1323,29 @@ test("a previously rejected edit is suppressed until new evidence arrives", () =
         claim(["H1"], { kind: "remove", title: "drop the stale Node pin", instructions: ["AG-001"] }),
       ],
     },
-    context: { rejections, isSuppressed: isSuppressedByRejection },
+    context: {
+      rejections,
+      isSuppressed: isSuppressedByRejection,
+      summary: {
+        analyzedSessions: 4,
+        totals: {
+          positive: 3,
+          negative: 80,
+          gapClusters: 1,
+          gapSightings: 1,
+          reportOnlyGapClusters: 0,
+          reportOnlyByReason: { majorityOrchestration: 0, belowFloorMixed: 0, tooFewProjects: 0 },
+          droppedGapSingletons: 0,
+          instructionsWithNegatives: 20,
+        },
+        instructions: Array.from({ length: 20 }, (_, i) => ({
+          instruction: `AG-${String(i + 1).padStart(3, "0")}`,
+          negative: 4,
+          harmSessions: 4,
+          sessions: 4,
+        })),
+      },
+    },
   });
   assert.equal(suppressed.proposal.edits.length, 0, "same evidence weight stays rejected");
   assert.deepEqual(suppressed.violations, [], "a suppressed edit is dropped, not a violation");
@@ -2061,7 +2108,7 @@ test("the apply surface draws one funnel from findings to the edits it proposed"
       "32 dropped - seen only once: a second session has to confirm them (kept for later runs)",
       "1 dropped - not this project's fault: the tooling that ran the session caused it",
       "sent to synthesis 8",
-      "2 dropped - the model chose not to edit",
+      "2 dropped - no accepted edit named these candidates",
       "1 dropped - a previous review rejected the same edit",
       "edits proposed 4 of 5",
     ],

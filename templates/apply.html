@@ -1008,7 +1008,7 @@
                   " projects",
           );
           funnelBar(bars, "sent to synthesis", funnel.sent, scale);
-          funnelDrop(bars, funnel.leftAlone, "the model chose not to edit");
+          funnelDrop(bars, funnel.leftAlone, "no accepted edit named these candidates");
           funnelDrop(bars, funnel.suppressed, "a previous review rejected the same edit");
           funnelBar(bars, "edits proposed", funnel.proposed, scale, {
             lit: true,

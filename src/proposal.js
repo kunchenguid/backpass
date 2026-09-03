@@ -795,11 +795,16 @@ export function buildProposal(rawResult, context) {
 }
 
 // Display counter for the apply surface's funnel: the instructions that drew a negative
-// finding and that no accepted edit names. `maxSessions` lets the surface say "ignored in
-// only 1 session each" when that is true of all of them, and stay silent otherwise. A
-// summary from before the instruction rows existed yields null, never an invented zero.
+// finding and that no accepted edit names. A summary from before the funnel counters
+// existed yields null, never an invented zero.
 function funnelInstructionOutcome(summary, accepted, suppressed) {
-  if (!Array.isArray(summary?.instructions)) return null;
+  if (
+    !Array.isArray(summary?.instructions) ||
+    typeof summary?.totals?.instructionsWithNegatives !== "number" ||
+    !summary?.totals?.reportOnlyByReason ||
+    typeof summary.totals.reportOnlyByReason !== "object"
+  )
+    return null;
   const candidates = summary.instructions.filter((row) => row.negative > 0);
   const candidateIds = new Set(candidates.map((row) => row.instruction));
   const acceptedIds = new Set(accepted.flatMap((edit) => edit.instructions || []).filter((id) => candidateIds.has(id)));
