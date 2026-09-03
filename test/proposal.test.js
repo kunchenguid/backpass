@@ -702,10 +702,19 @@ test("the funnel's left-alone count names the candidates no accepted edit touche
     context: {
       summary: {
         analyzedSessions: 4,
-        totals: { positive: 3, negative: 2, gapClusters: 1 },
+        totals: {
+          positive: 0,
+          negative: 4,
+          gapClusters: 0,
+          gapSightings: 0,
+          reportOnlyGapClusters: 0,
+          reportOnlyByReason: { majorityOrchestration: 0, belowFloorMixed: 0, tooFewProjects: 0 },
+          droppedGapSingletons: 0,
+          instructionsWithNegatives: 2,
+        },
         instructions: [
           // The accepted edit claims no instruction, so every candidate is left alone.
-          row("AG-001", 3, 1),
+          row("AG-001", 3, 0),
           row("AG-002", 1, 1),
           // Only positives: never a candidate, so never "left alone" either.
           { ...row("AG-003", 0, 0), positive: 5 },
@@ -715,7 +724,12 @@ test("the funnel's left-alone count names the candidates no accepted edit touche
   });
   assert.deepEqual(gated.violations, []);
   assert.equal(gated.proposal.stats.instructionsLeftAlone, 2);
-  assert.equal(gated.proposal.stats.leftAloneMaxSessions, 1, "both were ignored in a single session");
+  assert.equal(gated.proposal.stats.leftAloneMaxSessions, 1, "the maximum does not imply every count is one");
+  assert.ok(
+    funnelLines(renderTemplateScript(gated.proposal)).some(
+      (line) => line.drop === "2 dropped - the model chose not to edit",
+    ),
+  );
 
   // An edit that names one of them removes it from the count, and the surviving
   // candidate's session count is reported as it stands.
@@ -2047,7 +2061,7 @@ test("the apply surface draws one funnel from findings to the edits it proposed"
       "32 dropped - seen only once: a second session has to confirm them (kept for later runs)",
       "1 dropped - not this project's fault: the tooling that ran the session caused it",
       "sent to synthesis 8",
-      "2 dropped - the model chose not to edit: ignored in only 1 session each",
+      "2 dropped - the model chose not to edit",
       "1 dropped - a previous review rejected the same edit",
       "edits proposed 4 of 5",
     ],
@@ -2078,6 +2092,15 @@ test("the apply surface draws one funnel from findings to the edits it proposed"
   );
   assert.equal(rendered.nodes.get("ctx").hidden, false, "the band frame is revealed");
   assert.ok(!rendered.nodes.has("statrow"), "the band replaces the classic stat row rather than joining it");
+
+  const projectCovered = renderTemplateScript({ ...proposal, scope: "user" });
+  assert.ok(
+    funnelLines(projectCovered).some(
+      (line) =>
+        line.drop ===
+        "32 dropped - fewer than 2 sessions count toward corroboration: 2 qualifying sessions are required (kept for later runs)",
+    ),
+  );
 
   const higherFloor = renderTemplateScript({
     ...proposal,

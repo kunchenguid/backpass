@@ -979,9 +979,15 @@
           funnelDrop(
             bars,
             funnel.seenOnce,
-            funnel.floor === 2
+            funnel.floor === 2 && P.scope !== "user"
               ? "seen only once: a second session has to confirm them (kept for later runs)"
-              : "seen in fewer than " +
+              : P.scope === "user"
+                ? "fewer than " +
+                  funnel.floor +
+                  " sessions count toward corroboration: " +
+                  funnel.floor +
+                  " qualifying sessions are required (kept for later runs)"
+                : "seen in fewer than " +
                   funnel.floor +
                   " sessions: " +
                   funnel.floor +
@@ -1002,12 +1008,7 @@
                   " projects",
           );
           funnelBar(bars, "sent to synthesis", funnel.sent, scale);
-          funnelDrop(
-            bars,
-            funnel.leftAlone,
-            "the model chose not to edit" +
-              (funnel.leftAloneMaxSessions === 1 ? ": ignored in only 1 session each" : ""),
-          );
+          funnelDrop(bars, funnel.leftAlone, "the model chose not to edit");
           funnelDrop(bars, funnel.suppressed, "a previous review rejected the same edit");
           funnelBar(bars, "edits proposed", funnel.proposed, scale, {
             lit: true,
