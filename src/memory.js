@@ -453,26 +453,32 @@ export function reanchor(reference, file, threshold = 0.6) {
  * A file is a pointer to `target` when, ignoring blank lines and HTML comments, its
  * only content is the import line (`@AGENTS.md` or `@./AGENTS.md`).
  */
-export function isPointerTo(text, target, options = {}) {
+export function pointerImportPath(text, options = {}) {
   const lines = text
     .replace(/<!--[\s\S]*?-->/g, "")
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
-  if (lines.length !== 1) return false;
+  if (lines.length !== 1) return null;
   const imported = lines[0].replace(/^@\.\//, "@");
-  if (!imported.startsWith("@")) return false;
+  if (!imported.startsWith("@")) return null;
 
   const spec = imported.slice(1);
   const home = options.home || os.homedir();
   const fromDir = options.fromDir || options.root || "";
-  const expand = (p) => {
-    if (p === "~") return home;
-    if (p.startsWith("~/")) return path.join(home, p.slice(2));
-    return p;
-  };
-  const resolvedSpec = path.isAbsolute(expand(spec)) ? expand(spec) : path.resolve(fromDir || ".", spec);
-  const resolvedTarget = path.isAbsolute(expand(target)) ? expand(target) : path.resolve(fromDir || ".", target);
+  const expanded = spec === "~" ? home : spec.startsWith("~/") ? path.join(home, spec.slice(2)) : spec;
+  return path.isAbsolute(expanded) ? expanded : path.resolve(fromDir || ".", expanded);
+}
+
+export function isPointerTo(text, target, options = {}) {
+  const resolvedSpec = pointerImportPath(text, options);
+  if (!resolvedSpec) return false;
+  const home = options.home || os.homedir();
+  const expandedTarget = target === "~" ? home : target.startsWith("~/") ? path.join(home, target.slice(2)) : target;
+  const fromDir = options.fromDir || options.root || "";
+  const resolvedTarget = path.isAbsolute(expandedTarget)
+    ? expandedTarget
+    : path.resolve(fromDir || ".", expandedTarget);
   return resolvedSpec === resolvedTarget;
 }
 

@@ -61,14 +61,20 @@ test("--target resolves only an exact configured memory-file entry or an exact l
 });
 
 test("a pointer-only memory target is rejected with its imported canonical file", () => {
-  const { scope } = projectScope({ "CLAUDE.md": "@AGENTS.md\n" });
-  assert.throws(
-    () => resolveTarget("CLAUDE.md", scope),
-    (err) =>
-      err instanceof UserError &&
-      /CLAUDE\.md is only a pointer to AGENTS\.md/.test(err.message) &&
-      /target AGENTS\.md instead/.test(err.hint),
-  );
+  const assertPointerRejected = (scope) =>
+    assert.throws(
+      () => resolveTarget("CLAUDE.md", scope),
+      (err) =>
+        err instanceof UserError &&
+        /CLAUDE\.md is only a pointer to AGENTS\.md/.test(err.message) &&
+        /target AGENTS\.md instead/.test(err.hint),
+    );
+
+  assertPointerRejected(projectScope({ "CLAUDE.md": "@AGENTS.md\n" }).scope);
+
+  const repo = makeRepo({ "AGENTS.md": AGENTS, "CLAUDE.md": "@AGENTS.md\n" });
+  const config = loadConfig(repo.root, { memoryFiles: ["CLAUDE.md"] });
+  assertPointerRejected(resolveScope(repo.root, { scope: "project" }, config, repo));
 });
 
 test("a target validates every configured project memory path before narrowing", () => {

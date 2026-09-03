@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { userClaudeSkillsDir } from "./config.js";
 import { UserError, info } from "./logger.js";
-import { isPointerTo, resolveMemoryFiles } from "./memory.js";
+import { pointerImportPath, resolveMemoryFiles } from "./memory.js";
 import { pathInRoot, resolveInRoot } from "./scope.js";
 import { loadProjectSkills, resolveOverflowTarget } from "./skills.js";
 
@@ -57,16 +57,13 @@ export function resolveTarget(spec, scope) {
     }
     const selected = resolvedMemory.all.find((file) => file.path === entry);
     const imported = selected
-      ? resolvedMemory.all.find(
-          (file) =>
-            file !== selected &&
-            isPointerTo(selected.text, file.absolute, { fromDir: path.dirname(selected.absolute) }),
-        )
+      ? pointerImportPath(selected.text, { fromDir: path.dirname(selected.absolute) })
       : null;
     if (imported) {
+      const importedPath = pathInRoot(imported, root);
       throw new UserError(
-        `--target ${entry} is only a pointer to ${imported.path} and cannot be trained directly`,
-        `target ${imported.path} instead`,
+        `--target ${entry} is only a pointer to ${importedPath} and cannot be trained directly`,
+        `target ${importedPath} instead`,
       );
     }
     return { kind: "memory", path: entry };
