@@ -1,0 +1,16 @@
+{
+  "scenario": "Two same-day Codex ULIDs sharing the formerly truncated 8-character prefix",
+  "formerlyCollidingPrefix": "01K4M0ND",
+  "issuedSources": [
+    "codex · 01K4M0NDEKTSV4RRFFQ69G5FAV · 2026-09-03",
+    "codex · 01K4M0NDZZABCDEFGHJKMNPQRS · 2026-09-03"
+  ],
+  "sourceProjects": {
+    "codex · 01K4M0NDEKTSV4RRFFQ69G5FAV · 2026-09-03": "repo-a",
+    "codex · 01K4M0NDZZABCDEFGHJKMNPQRS · 2026-09-03": "repo-b"
+  },
+  "proposalOutcome": "accepted",
+  "violations": [],
+  "countedSessions": 2,
+  "countedProjects": 2
+}
