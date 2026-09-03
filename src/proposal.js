@@ -104,7 +104,11 @@ export class ProposalViolation extends Error {
 function normalizeEdit(raw, index) {
   const kind = String(raw?.kind || "").toLowerCase();
   const refs = Array.isArray(raw?.changes) ? raw.changes : Array.isArray(raw?.hunks) ? raw.hunks : [];
-  const evidence = normalizeEvidence(raw?.evidence);
+  const normalizedEvidence = normalizeEvidence(raw?.evidence);
+  const evidence = normalizedEvidence.map((item) => ({
+    ...item,
+    source: item.source.trim() || "unknown source",
+  }));
   return {
     id: `e${index + 1}`,
     kind,
@@ -116,7 +120,7 @@ function normalizeEdit(raw, index) {
     // Corroboration is measured from the edit's own quotes, never taken from the model's
     // own count: a dry run produced edits declaring 11 and 20 sessions over quotes drawn
     // from 3 and 2. Same rule as every other number here - see AGENTS.md.
-    transcripts: countSources(evidence),
+    transcripts: countSources(normalizedEvidence),
   };
 }
 
@@ -127,7 +131,7 @@ function normalizeEvidence(evidence) {
     .map((e) => ({
       polarity: e.polarity === "positive" ? "positive" : e.polarity === "neutral" ? "neutral" : "negative",
       text: String(e.text).trim().slice(0, 600),
-      source: String(e.source || "unknown source").slice(0, 120),
+      source: String(e.source || "").slice(0, 120),
     }));
 }
 

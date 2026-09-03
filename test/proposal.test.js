@@ -371,6 +371,41 @@ test("empty evidence cannot pad a single-session rewrite", () => {
   );
 });
 
+test("sourceless evidence cannot pad a single-session rewrite and remains visible", () => {
+  for (const source of [undefined, "", "   "]) {
+    const sourceless = { polarity: "negative", text: "another quote", ...(source === undefined ? {} : { source }) };
+    const { proposal, violations } = gate({
+      edit: memoryEdit(REWRITE_SHAPES["append a sentence"]),
+      annotation: {
+        edits: [claim(["H1"], { kind: "rewrite", evidence: [...ONE_SESSION, sourceless] })],
+      },
+    });
+    assert.equal(proposal.edits.length, 0);
+    assert.ok(
+      violations.some((v) => /backed by 1 session/.test(v)),
+      violations.join("\n"),
+    );
+  }
+
+  const { proposal, violations } = gate({
+    edit: memoryEdit(REWRITE_SHAPES["append a sentence"]),
+    annotation: {
+      edits: [
+        claim(["H1"], {
+          kind: "rewrite",
+          evidence: [...QUOTE, { polarity: "negative", text: "visible quote" }],
+        }),
+      ],
+    },
+  });
+  assert.deepEqual(violations, []);
+  assert.equal(proposal.edits[0].transcripts, 2);
+  assert.deepEqual(
+    proposal.edits[0].evidence.find((item) => item.text === "visible quote"),
+    { polarity: "negative", text: "visible quote", source: "unknown source" },
+  );
+});
+
 test("source-label whitespace cannot pad a single-session rewrite", () => {
   const repeated = { ...ONE_SESSION[0], source: "claude  ·  abc · turn 3" };
   const { proposal, violations } = gate({
