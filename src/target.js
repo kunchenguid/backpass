@@ -56,9 +56,7 @@ export function resolveTarget(spec, scope) {
       throw new UserError(`--target ${entry} is configured but does not exist`, "a targeted run never creates it");
     }
     const selected = resolvedMemory.all.find((file) => file.path === entry);
-    const imported = selected
-      ? pointerImportPath(selected.text, { fromDir: path.dirname(selected.absolute) })
-      : null;
+    const imported = selected ? pointerImportPath(selected.text, { fromDir: path.dirname(selected.absolute) }) : null;
     if (imported) {
       const importedPath = pathInRoot(imported, root);
       throw new UserError(

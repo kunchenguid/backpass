@@ -588,7 +588,10 @@ test("a skill target in an absolute in-repo skills directory is staged under its
 
   const { proposal, violations } = await targeted.run();
   assert.deepEqual(violations, []);
-  assert.deepEqual(proposal.edits.map((edit) => edit.file), ["custom-skills/db/SKILL.md"]);
+  assert.deepEqual(
+    proposal.edits.map((edit) => edit.file),
+    ["custom-skills/db/SKILL.md"],
+  );
 });
 
 test("a skill target stages that skill alone; a staged write to AGENTS.md is refused, a direct one is caught by the fingerprint", async () => {

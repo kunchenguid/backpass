@@ -311,9 +311,7 @@ export function resolveOverflowTarget(
   const resolvedSkillsDir = path.isAbsolute(configuredDir) ? configuredDir : path.join(repoRoot, configuredDir);
   if (explicit && !allowExternal) assertSkillsDirInsideRepo(repoRoot, configuredDir, resolvedSkillsDir);
   const dir =
-    explicit && fs.existsSync(resolvedSkillsDir)
-      ? logicalSkillDir(repoRoot, configuredDir)
-      : CANONICAL_SKILLS_DIR;
+    explicit && fs.existsSync(resolvedSkillsDir) ? logicalSkillDir(repoRoot, configuredDir) : CANONICAL_SKILLS_DIR;
   if (claude.state === "dir" && dir === CANONICAL_SKILLS_DIR)
     warnings.push(claudeSkillsDirWarning(claudeSkillsDir, target));
   return { kind: "skills", dir, warnings };

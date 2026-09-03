@@ -120,7 +120,10 @@ backpass apply --scope user
 `--target` narrows a run to one configured memory file or one skill, named exactly: a
 `memoryFiles` entry, or a skill's `name:`. Nothing else resolves - not a basename, a
 directory, a path to a SKILL.md, or an existing file the config does not name - and an
-unknown name fails, listing the valid ones, instead of falling back to the whole surface.
+unknown name fails, listing the valid ones, instead of falling back to the whole surface. A
+configured file that contains only an `@` import is rejected rather than rewritten or silently
+mapped to its import; the error names the imported memory file, which must itself be configured
+to be targeted.
 
 ```sh
 backpass --target AGENTS.md          # this memory file; existing skills are read-only
@@ -133,7 +136,8 @@ skill target writes only that `SKILL.md`, and its budget is still the whole alwa
 surface: the memory file plus every description line, moved by the description-line delta
 of the edit. Analysis, evidence, and state are those of the whole surface; only staging and
 the proposal gate narrow. `--target` applies to the default run, `analyze`, `propose`, and
-`apply` (where it must name the saved proposal's target); it cannot be combined with
+`apply`; on `apply` it is optional, but when supplied it must match the saved proposal's target.
+It cannot be combined with
 `--memory-file`, and a targeted run never bootstraps a missing memory file.
 
 ## How It Works
