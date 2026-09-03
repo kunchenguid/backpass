@@ -2091,6 +2091,28 @@ test("the apply surface draws one funnel from findings to the edits it proposed"
     ),
   );
 
+  const projectFloor = (minGapProjects) =>
+    renderTemplateScript({
+      ...proposal,
+      config: { ...proposal.config, minGapProjects },
+      stats: {
+        ...proposal.stats,
+        reportOnlyByReason: { majorityOrchestration: 0, belowFloorMixed: 0, tooFewProjects: 1 },
+      },
+    });
+  assert.ok(
+    funnelLines(projectFloor(2)).some(
+      (line) =>
+        line.drop === "1 dropped - seen in too few projects: the same mistake has to show up in another project",
+    ),
+  );
+  assert.ok(
+    funnelLines(projectFloor(3)).some(
+      (line) =>
+        line.drop === "1 dropped - seen in too few projects: the same mistake has to show up in 3 projects",
+    ),
+  );
+
   const offScaleCap = renderTemplateScript({
     ...proposal,
     stats: {

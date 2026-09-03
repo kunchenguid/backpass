@@ -908,6 +908,7 @@
           }).length;
           return {
             floor: Number((P.config || {}).minGapEvidence) || 2,
+            projectFloor: Number((P.config || {}).minGapProjects) || 1,
             cap: Number((P.config || {}).maxEditsPerRun) || edits.length,
             findings: [(s.positive || 0) + (s.negative || 0), s.gapSightings],
             followed: s.positive || 0,
@@ -994,7 +995,11 @@
           funnelDrop(
             bars,
             funnel.tooFewProjects,
-            "seen in too few projects: the same mistake has to show up in another project",
+            funnel.projectFloor === 2
+              ? "seen in too few projects: the same mistake has to show up in another project"
+              : "seen in too few projects: the same mistake has to show up in " +
+                  funnel.projectFloor +
+                  " projects",
           );
           funnelBar(bars, "sent to synthesis", funnel.sent, scale);
           funnelDrop(
