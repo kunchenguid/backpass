@@ -108,10 +108,11 @@ function fakeSynthesize(captured) {
             changes: ["H1"],
             kind: "rewrite",
             title: "record the migration trap",
-            evidence: [
-              { polarity: "negative", text: "applied the migration to prod-db", source: "claude · s1" },
-              { polarity: "negative", text: "applied the migration to prod-db", source: "claude · s2" },
-            ],
+            evidence: summary.gaps[0].quotes.map((quote) => ({
+              polarity: "negative",
+              text: quote.text,
+              source: quote.source,
+            })),
             transcripts: 2,
           },
         ],

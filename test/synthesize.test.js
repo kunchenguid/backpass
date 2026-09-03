@@ -497,12 +497,12 @@ test("an oversized non-compliance blob synthesizes as a list-item restructure, n
                   {
                     polarity: "negative",
                     text: "skipped the second sentence of the blob entirely here",
-                    source: "claude · s1 · turn 4",
+                    source: summary.sources[0],
                   },
                   {
                     polarity: "negative",
                     text: "the same blob's second sentence was skipped again",
-                    source: "codex · s2 · turn 9",
+                    source: summary.sources[1],
                   },
                 ],
                 instructions: ["AG-001.2"],
