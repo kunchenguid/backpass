@@ -147,10 +147,10 @@ function assertRepoUntouched(repo, before, workspaceRoot) {
   );
 }
 
-function targetRule(target, memoryPath, skillsDir) {
+function targetRule(target, memoryPath, skillsDir, stagedTargetPath = null) {
   if (target.kind === "skill") {
     return (
-      `0. **This run targets \`./${workspacePathFor(target.path)}\` only.** It is the one staged file. ` +
+      `0. **This run targets \`./${stagedTargetPath || workspacePathFor(target.path)}\` only.** It is the one staged file. ` +
       `Do not edit \`./${memoryPath}\` or any other skill, and do not create a skill; extraction does not apply.\n`
     );
   }
@@ -189,7 +189,6 @@ function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts, scop
     BUDGET_RULE: budgetRule(memoryFile, config, maxEdits, descriptionTokens),
     MAX_EDITS: String(maxEdits),
     MIN_GAP_EVIDENCE: String(config.minGapEvidence),
-    TARGET_RULE: targetRule(target, workspacePathFor(memoryFile.path), workspacePathFor(overflow.dir)),
   };
 
   const context = {
@@ -464,6 +463,12 @@ export async function synthesizeProposal({
 
   const editValues = {
     ...common,
+    TARGET_RULE: targetRule(
+      target,
+      workspace.memoryWorkspacePath,
+      stagedSkillsDir,
+      target.kind === "skill" ? workspace.stagedPaths.get(target.path) || workspacePathFor(target.path) : null,
+    ),
     REPO_NAME: repo.name,
     REPO_ROOT: repo.root,
     TRANSCRIPT_COUNT: String(summary.analyzedSessions),

@@ -415,16 +415,20 @@ test("user synthesis can propose against relocated external memory", async () =>
   assert.equal(proposal.edits.length, 0);
 });
 
-test("relocated skill prompts use their actual staged paths", async () => {
+test("an external skill target rule uses its actual staged path", async () => {
   const setupResult = setup(
     { edit: {}, annotations: [{ reply: { edits: [] } }] },
     { scope: { kind: "user" }, externalSkills: true },
   );
+  setupResult.config.target = {
+    kind: "skill",
+    path: path.join(setupResult.externalSkillsDir, "db/SKILL.md"),
+    name: "db",
+  };
   await setupResult.run();
   const prompt = fs.readFileSync(path.join(setupResult.config.state.root, "prompts/synthesis-edit.md"), "utf8");
-  const stagedDir = workspacePathFor(setupResult.externalSkillsDir);
-  assert.ok(prompt.includes(stagedDir));
-  assert.ok(prompt.includes(`${stagedDir}/db/SKILL.md`));
+  const stagedPath = `${workspacePathFor(setupResult.externalSkillsDir)}/db/SKILL.md`;
+  assert.ok(prompt.includes(`This run targets \`./${stagedPath}\` only`));
 });
 
 test("an agent that changes nothing yields an empty proposal, never an invented edit", async () => {
