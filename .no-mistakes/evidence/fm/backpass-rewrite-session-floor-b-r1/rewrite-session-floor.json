@@ -1,0 +1,19 @@
+{
+  "singleSessionAppend": {
+    "acceptedEdits": 0,
+    "declaredSessions": 20,
+    "measuredViolation": "edit e1 (\"Strengthen PR rule\") changes AGENTS.md backed by 1 session(s); 2 are required"
+  },
+  "twoSessionTightening": {
+    "acceptedEdits": 1,
+    "declaredSessions": 1,
+    "measuredSessions": 2,
+    "violations": []
+  },
+  "userScopeInstructionEvidence": {
+    "acceptedEdits": 1,
+    "measuredSessions": 2,
+    "measuredProjects": 2,
+    "violations": []
+  }
+}
