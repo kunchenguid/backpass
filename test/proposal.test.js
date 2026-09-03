@@ -1309,9 +1309,7 @@ test("a previously rejected edit is suppressed until new evidence arrives", () =
   const first = gate({
     edit,
     annotation: {
-      edits: [
-        claim(["H1"], { kind: "remove", title: "drop the stale Node pin", instructions: ["AG-001"] }),
-      ],
+      edits: [claim(["H1"], { kind: "remove", title: "drop the stale Node pin", instructions: ["AG-001"] })],
     },
   });
   const rejections = recordRejection(first.proposal.edits[0], { version: 1, entries: {} });
@@ -1319,9 +1317,7 @@ test("a previously rejected edit is suppressed until new evidence arrives", () =
   const suppressed = gate({
     edit,
     annotation: {
-      edits: [
-        claim(["H1"], { kind: "remove", title: "drop the stale Node pin", instructions: ["AG-001"] }),
-      ],
+      edits: [claim(["H1"], { kind: "remove", title: "drop the stale Node pin", instructions: ["AG-001"] })],
     },
     context: {
       rejections,
@@ -2088,12 +2084,7 @@ test("the apply surface draws one funnel from findings to the edits it proposed"
     },
     config: { maxEditsPerRun: 5, minGapEvidence: 2 },
     budget: { current: 4049, projected: 4117, capTokens: 5000, descriptionTokens: 0, mode: "cap" },
-    edits: [
-      rewrite("e1"),
-      rewrite("e2"),
-      rewrite("e3"),
-      rewrite("e4", 0),
-    ],
+    edits: [rewrite("e1"), rewrite("e2"), rewrite("e3"), rewrite("e4", 0)],
   };
   const rendered = renderTemplateScript(proposal);
 
@@ -2178,8 +2169,7 @@ test("the apply surface draws one funnel from findings to the edits it proposed"
   );
   assert.ok(
     funnelLines(projectFloor(3)).some(
-      (line) =>
-        line.drop === "1 dropped - seen in too few projects: the same mistake has to show up in 3 projects",
+      (line) => line.drop === "1 dropped - seen in too few projects: the same mistake has to show up in 3 projects",
     ),
   );
 

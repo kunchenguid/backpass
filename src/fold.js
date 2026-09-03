@@ -252,9 +252,9 @@ export function foldEvidence(
     totals: {
       positive: positiveCount,
       negative: negativeCount,
-      // The gap funnel's top: every sighting this fold clustered over (the pruned ledger
-      // when one is passed, this run's records otherwise). Orchestration sightings are
-      // per-sighting votes; cluster domain is decided after grouping.
+      // The missing-instruction lane's findings count: every sighting this fold clustered
+      // over (the pruned ledger when one is passed, this run's records otherwise).
+      // Orchestration sightings are per-sighting votes; cluster domain is decided after grouping.
       gapSightings: allObservations.length,
       gapClusters: gaps.length,
       reportOnlyGapClusters: reportOnlyGaps.length,

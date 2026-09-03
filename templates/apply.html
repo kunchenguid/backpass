@@ -902,9 +902,12 @@
           var distinctGaps = eligible + reportOnly + singletons;
           var candidates = s.instructionsWithNegatives;
           var adds = edits.filter(function (e) {
-            return e.hunks.length > 0 && e.hunks.every(function (hunk) {
-              return hunk.removed === 0;
-            });
+            return (
+              e.hunks.length > 0 &&
+              e.hunks.every(function (hunk) {
+                return hunk.removed === 0;
+              })
+            );
           }).length;
           return {
             floor: Number((P.config || {}).minGapEvidence) || 2,
@@ -1003,9 +1006,7 @@
             funnel.tooFewProjects,
             funnel.projectFloor === 2
               ? "seen in too few projects: the same mistake has to show up in another project"
-              : "seen in too few projects: the same mistake has to show up in " +
-                  funnel.projectFloor +
-                  " projects",
+              : "seen in too few projects: the same mistake has to show up in " + funnel.projectFloor + " projects",
           );
           funnelBar(bars, "sent to synthesis", funnel.sent, scale);
           funnelDrop(bars, funnel.leftAlone, "no accepted edit named these candidates");

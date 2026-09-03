@@ -733,9 +733,9 @@ export function buildProposal(rawResult, context) {
     .filter((file) => measured.originals?.has(file))
     .map((file) => ({ file, hash: memoryTextHash(measured.originals.get(file)) }));
 
-  // Instructions the evidence named as candidates that no accepted edit touches: the
-  // model was shown them and chose not to edit. Counted here, not in the fold, because
-  // it depends on the accepted edit list. Display only; nothing downstream reads it.
+  // Instructions the evidence named as candidates that no accepted edit names.
+  // Counted here, not in the fold, because it depends on the accepted edit list.
+  // Display only; nothing downstream reads it.
   const funnelOutcome = funnelInstructionOutcome(summary, accepted, suppressed);
 
   const proposal = {
@@ -774,7 +774,7 @@ export function buildProposal(rawResult, context) {
       reportOnlyByReason: summary?.totals?.reportOnlyByReason ?? null,
       droppedGapSingletons: summary?.totals?.droppedGapSingletons ?? null,
       // The existing-instruction lane of the apply surface's funnel: how many
-      // instructions the negatives land on, and how many of those no edit touched.
+      // instructions the negatives land on, and how many no accepted edit names.
       instructionsWithNegatives: summary?.totals?.instructionsWithNegatives ?? null,
       instructionsLeftAlone: funnelOutcome?.instructionsLeftAlone ?? null,
       leftAloneMaxSessions: funnelOutcome?.leftAloneMaxSessions ?? null,
@@ -809,17 +809,14 @@ function funnelInstructionOutcome(summary, accepted, suppressed) {
   const candidateIds = new Set(candidates.map((row) => row.instruction));
   const acceptedIds = new Set(accepted.flatMap((edit) => edit.instructions || []).filter((id) => candidateIds.has(id)));
   const suppressedIds = new Set(
-    suppressed
-      .flatMap((edit) => edit.instructions || [])
-      .filter((id) => candidateIds.has(id) && !acceptedIds.has(id)),
+    suppressed.flatMap((edit) => edit.instructions || []).filter((id) => candidateIds.has(id) && !acceptedIds.has(id)),
   );
-  const untouched = candidates.filter((row) => !acceptedIds.has(row.instruction) && !suppressedIds.has(row.instruction));
+  const untouched = candidates.filter(
+    (row) => !acceptedIds.has(row.instruction) && !suppressedIds.has(row.instruction),
+  );
   return {
     instructionsLeftAlone: untouched.length,
-    leftAloneMaxSessions: untouched.reduce(
-      (n, row) => Math.max(n, row.nonComplianceSessions ?? row.sessions ?? 0),
-      0,
-    ),
+    leftAloneMaxSessions: untouched.reduce((n, row) => Math.max(n, row.nonComplianceSessions ?? row.sessions ?? 0), 0),
     suppressed: suppressedIds.size,
   };
 }
