@@ -373,6 +373,7 @@ export function buildProposal(rawResult, context) {
   }
 
   const accepted = [];
+  const suppressed = [];
   for (const edit of edits) {
     const changes = edit.changeIds.map((id) => changesById.get(id)).filter(Boolean);
     const created = changes.filter((c) => c.kind === "created");
@@ -632,6 +633,7 @@ export function buildProposal(rawResult, context) {
 
     if (isSuppressed(proposed, rejections)) {
       // Rejections are respected until materially new evidence arrives (captain tweak 3).
+      suppressed.push(proposed);
       continue;
     }
     accepted.push(proposed);
@@ -734,7 +736,7 @@ export function buildProposal(rawResult, context) {
   // Instructions the evidence named as candidates that no accepted edit touches: the
   // model was shown them and chose not to edit. Counted here, not in the fold, because
   // it depends on the accepted edit list. Display only; nothing downstream reads it.
-  const leftAlone = leftAloneInstructions(summary, accepted);
+  const funnelOutcome = funnelInstructionOutcome(summary, accepted, suppressed);
 
   const proposal = {
     version: 2,
@@ -774,8 +776,11 @@ export function buildProposal(rawResult, context) {
       // The existing-instruction lane of the apply surface's funnel: how many
       // instructions the negatives land on, and how many of those no edit touched.
       instructionsWithNegatives: summary?.totals?.instructionsWithNegatives ?? null,
-      instructionsLeftAlone: leftAlone?.count ?? null,
-      leftAloneMaxSessions: leftAlone?.maxSessions ?? null,
+      instructionsLeftAlone: funnelOutcome?.instructionsLeftAlone ?? null,
+      candidatesLeftAlone: funnelOutcome?.candidatesLeftAlone ?? null,
+      leftAloneMaxSessions: funnelOutcome?.leftAloneMaxSessions ?? null,
+      instructionsSuppressed: funnelOutcome?.suppressed ?? null,
+      candidatesCombined: funnelOutcome?.combined ?? null,
       skillExtractions: accepted.reduce((n, e) => {
         if (e.kind !== "extract") return n;
         const createdSkills = editSkills(e).length;
@@ -795,13 +800,33 @@ export function buildProposal(rawResult, context) {
 // finding and that no accepted edit names. `maxSessions` lets the surface say "ignored in
 // only 1 session each" when that is true of all of them, and stay silent otherwise. A
 // summary from before the instruction rows existed yields null, never an invented zero.
-function leftAloneInstructions(summary, accepted) {
+function funnelInstructionOutcome(summary, accepted, suppressed) {
   if (!Array.isArray(summary?.instructions)) return null;
-  const touched = new Set(accepted.flatMap((edit) => edit.instructions || []));
-  const rows = summary.instructions.filter((row) => row.negative > 0 && !touched.has(row.instruction));
+  const candidates = summary.instructions.filter((row) => row.negative > 0);
+  const candidateIds = new Set(candidates.map((row) => row.instruction));
+  const acceptedIds = new Set(accepted.flatMap((edit) => edit.instructions || []).filter((id) => candidateIds.has(id)));
+  const suppressedIds = new Set(
+    suppressed
+      .flatMap((edit) => edit.instructions || [])
+      .filter((id) => candidateIds.has(id) && !acceptedIds.has(id)),
+  );
+  const untouched = candidates.filter((row) => !acceptedIds.has(row.instruction) && !suppressedIds.has(row.instruction));
+  const measuredAddition = (edit) => edit.hunks.length > 0 && edit.hunks.every((hunk) => hunk.removed === 0);
+  const acceptedAdds = accepted.filter(measuredAddition).length;
+  const suppressedAdds = suppressed.filter(measuredAddition).length;
+  const missingLeftAlone = Math.max(0, (summary?.totals?.gapClusters ?? 0) - acceptedAdds - suppressedAdds);
+  const sent = candidates.length + (summary?.totals?.gapClusters ?? 0);
+  const leftAlone = untouched.length + missingLeftAlone;
+  const suppressedCount = suppressedIds.size + suppressedAdds;
   return {
-    count: rows.length,
-    maxSessions: rows.reduce((n, row) => Math.max(n, row.nonComplianceSessions ?? row.sessions ?? 0), 0),
+    instructionsLeftAlone: untouched.length,
+    candidatesLeftAlone: leftAlone,
+    leftAloneMaxSessions: untouched.reduce(
+      (n, row) => Math.max(n, row.nonComplianceSessions ?? row.sessions ?? 0),
+      0,
+    ),
+    suppressed: suppressedCount,
+    combined: Math.max(0, sent - leftAlone - suppressedCount - accepted.length),
   };
 }
 

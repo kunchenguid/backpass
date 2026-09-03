@@ -679,6 +679,9 @@ test("the proposal carries the fold's gap-funnel counts for the apply surface", 
   assert.equal(legacy.proposal.stats.droppedGapSingletons, null);
   assert.equal(legacy.proposal.stats.instructionsWithNegatives, null);
   assert.equal(legacy.proposal.stats.instructionsLeftAlone, null, "no instruction rows means nothing to count");
+  assert.equal(legacy.proposal.stats.candidatesLeftAlone, null);
+  assert.equal(legacy.proposal.stats.instructionsSuppressed, null);
+  assert.equal(legacy.proposal.stats.candidatesCombined, null);
 });
 
 test("the funnel's left-alone count names the candidates no accepted edit touched", () => {
@@ -732,6 +735,38 @@ test("the funnel's left-alone count names the candidates no accepted edit touche
   assert.deepEqual(claimed.violations, []);
   assert.equal(claimed.proposal.stats.instructionsLeftAlone, 1);
   assert.equal(claimed.proposal.stats.leftAloneMaxSessions, 6);
+});
+
+test("the funnel accounts for candidates combined into one edit", () => {
+  const edit = memoryEdit((t) => t.replace("- Use Node 18 via nvm before running any script.\n", ""));
+  const gated = gate({
+    edit,
+    annotation: {
+      edits: [
+        claim(["H1"], {
+          kind: "remove",
+          title: "drop the stale Node pin",
+          instructions: ["AG-001", "AG-002"],
+        }),
+      ],
+    },
+    context: {
+      summary: {
+        analyzedSessions: 4,
+        totals: { positive: 0, negative: 8, gapClusters: 0 },
+        instructions: [
+          { instruction: "AG-001", negative: 4, harmSessions: 4, sessions: 4 },
+          { instruction: "AG-002", negative: 4, harmSessions: 4, sessions: 4 },
+          { instruction: "AG-003", negative: 0, harmSessions: 4, sessions: 4 },
+        ],
+      },
+    },
+  });
+
+  assert.deepEqual(gated.violations, []);
+  assert.equal(gated.proposal.stats.candidatesLeftAlone, 0);
+  assert.equal(gated.proposal.stats.candidatesCombined, 1);
+  assert.equal(gated.proposal.edits.length, 1);
 });
 
 test("the funnel's display counters never change which edits are proposed or refused", () => {
@@ -1268,17 +1303,27 @@ test("a previously rejected edit is suppressed until new evidence arrives", () =
   const edit = memoryEdit((t) => t.replace("- Use Node 18 via nvm before running any script.\n", ""));
   const first = gate({
     edit,
-    annotation: { edits: [claim(["H1"], { kind: "remove", title: "drop the stale Node pin" })] },
+    annotation: {
+      edits: [
+        claim(["H1"], { kind: "remove", title: "drop the stale Node pin", instructions: ["AG-001"] }),
+      ],
+    },
   });
   const rejections = recordRejection(first.proposal.edits[0], { version: 1, entries: {} });
 
   const suppressed = gate({
     edit,
-    annotation: { edits: [claim(["H1"], { kind: "remove", title: "drop the stale Node pin" })] },
+    annotation: {
+      edits: [
+        claim(["H1"], { kind: "remove", title: "drop the stale Node pin", instructions: ["AG-001"] }),
+      ],
+    },
     context: { rejections, isSuppressed: isSuppressedByRejection },
   });
   assert.equal(suppressed.proposal.edits.length, 0, "same evidence weight stays rejected");
   assert.deepEqual(suppressed.violations, [], "a suppressed edit is dropped, not a violation");
+  assert.equal(suppressed.proposal.stats.instructionsLeftAlone, 19);
+  assert.equal(suppressed.proposal.stats.instructionsSuppressed, 1);
 
   const revived = gate({
     edit,
@@ -1291,6 +1336,7 @@ test("a previously rejected edit is suppressed until new evidence arrives", () =
             ...QUOTE,
             { polarity: "negative", text: "a third session hit the same pin", source: "pi · ghi · turn 2" },
           ],
+          instructions: ["AG-001"],
         }),
       ],
     },
@@ -1985,15 +2031,15 @@ test("the apply surface separates memory, description, and on-trigger deltas", (
 });
 
 test("the apply surface draws one funnel from findings to the edits it proposed", () => {
-  const rewrite = (id) => ({
+  const rewrite = (id, removed = 1) => ({
     id,
     kind: "rewrite",
     file: "AGENTS.md",
     targetsMemoryFile: true,
-    hunks: [],
+    hunks: [{ removed, added: 1 }],
     evidence: [],
   });
-  const rendered = renderTemplateScript({
+  const proposal = {
     generatedAt: "2026-09-02T00:00:00.000Z",
     repo: { name: "user" },
     memoryFile: { path: ".claude/CLAUDE.md" },
@@ -2001,15 +2047,18 @@ test("the apply surface draws one funnel from findings to the edits it proposed"
       harnessCounts: {},
       transcripts: 82,
       positive: 70,
-      negative: 25,
+      negative: 27,
       gapSightings: 36,
       gapClusters: 1,
       reportOnlyGapClusters: 1,
       reportOnlyByReason: { majorityOrchestration: 1, belowFloorMixed: 0, tooFewProjects: 0 },
       droppedGapSingletons: 32,
-      instructionsWithNegatives: 5,
+      instructionsWithNegatives: 7,
       instructionsLeftAlone: 2,
+      candidatesLeftAlone: 2,
       leftAloneMaxSessions: 1,
+      instructionsSuppressed: 1,
+      candidatesCombined: 1,
       skillExtractions: 0,
     },
     config: { maxEditsPerRun: 5, minGapEvidence: 2 },
@@ -2018,25 +2067,28 @@ test("the apply surface draws one funnel from findings to the edits it proposed"
       rewrite("e1"),
       rewrite("e2"),
       rewrite("e3"),
-      { id: "e4", kind: "add", file: "SKILL.md", targetsMemoryFile: false, hunks: [], evidence: [] },
+      rewrite("e4", 0),
     ],
-  });
+  };
+  const rendered = renderTemplateScript(proposal);
 
   const lines = funnelLines(rendered);
   assert.deepEqual(
     lines.map((l) => l.drop ?? `${l.label} ${l.value}`),
     [
-      "findings 131",
+      "findings 133",
       "70 dropped - the instruction was followed: nothing to fix",
       "22 dropped - duplicates: the same instruction or the same mistake, reported more than once",
-      "candidates 39",
+      "candidates 41",
       "32 dropped - seen only once: a second session has to confirm them (kept for later runs)",
       "1 dropped - not this project's fault: the tooling that ran the session caused it",
-      "sent to synthesis 6",
+      "sent to synthesis 8",
       "2 dropped - the model chose not to edit: ignored in only 1 session each",
+      "1 dropped - a previous review rejected the same edit",
+      "1 dropped - combined with another candidate in the same edit",
       "edits proposed 4 of 5",
     ],
-    "one funnel: 131 - 70 - 22 = 39, 39 - 32 - 1 = 6, 6 - 2 = 4",
+    "one funnel: 133 - 70 - 22 = 41, 41 - 32 - 1 = 8, 8 - 2 - 1 - 1 = 4",
   );
   assert.ok(
     !lines.some((l) => (l.drop || "").includes("too few projects")),
@@ -2045,13 +2097,13 @@ test("the apply surface draws one funnel from findings to the edits it proposed"
 
   // Every bar shares one scale (findings = 100%) so a lane can be followed down the
   // band, and each bar splits into existing-instruction then missing-instruction.
-  const share = (n) => `${(n / 131) * 100}%`;
+  const share = (n) => `${(n / 133) * 100}%`;
   assert.deepEqual(
     lines.filter((l) => l.label).map((l) => l.lanes),
     [
-      [share(95), share(36)],
-      [share(5), share(34)],
-      [share(5), share(1)],
+      [share(97), share(36)],
+      [share(7), share(34)],
+      [share(7), share(1)],
       [share(3), share(1)],
     ],
   );
@@ -2063,6 +2115,18 @@ test("the apply surface draws one funnel from findings to the edits it proposed"
   );
   assert.equal(rendered.nodes.get("ctx").hidden, false, "the band frame is revealed");
   assert.ok(!rendered.nodes.has("statrow"), "the band replaces the classic stat row rather than joining it");
+
+  const higherFloor = renderTemplateScript({
+    ...proposal,
+    config: { ...proposal.config, minGapEvidence: 3 },
+  });
+  assert.ok(
+    funnelLines(higherFloor).some(
+      (line) =>
+        line.drop ===
+        "32 dropped - seen in fewer than 3 sessions: 3 sessions have to confirm them (kept for later runs)",
+    ),
+  );
 });
 
 test("a proposal saved before the funnel counts existed falls back to the classic stat row", () => {

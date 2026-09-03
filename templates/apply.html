@@ -901,7 +901,9 @@
           var distinctGaps = eligible + reportOnly + singletons;
           var candidates = s.instructionsWithNegatives;
           var adds = edits.filter(function (e) {
-            return e.kind === "add";
+            return e.hunks.length > 0 && e.hunks.every(function (hunk) {
+              return hunk.removed === 0;
+            });
           }).length;
           return {
             floor: Number((P.config || {}).minGapEvidence) || 2,
@@ -917,8 +919,13 @@
             orchestration: byReason.majorityOrchestration || 0,
             tooFewProjects: byReason.tooFewProjects || 0,
             sent: [candidates, eligible],
-            leftAlone: s.instructionsLeftAlone || 0,
-            leftAloneMaxSessions: s.leftAloneMaxSessions,
+            leftAlone: s.candidatesLeftAlone == null ? s.instructionsLeftAlone || 0 : s.candidatesLeftAlone,
+            leftAloneMaxSessions:
+              s.candidatesLeftAlone == null || s.candidatesLeftAlone === s.instructionsLeftAlone
+                ? s.leftAloneMaxSessions
+                : null,
+            suppressed: s.instructionsSuppressed || 0,
+            combined: s.candidatesCombined || 0,
             proposed: [edits.length - adds, adds],
             sighted: s.gapSightings,
             eligible: eligible,
@@ -974,7 +981,13 @@
           funnelDrop(
             bars,
             funnel.seenOnce,
-            "seen only once: a second session has to confirm them (kept for later runs)",
+            funnel.floor === 2
+              ? "seen only once: a second session has to confirm them (kept for later runs)"
+              : "seen in fewer than " +
+                  funnel.floor +
+                  " sessions: " +
+                  funnel.floor +
+                  " sessions have to confirm them (kept for later runs)",
           );
           funnelDrop(
             bars,
@@ -993,6 +1006,8 @@
             "the model chose not to edit" +
               (funnel.leftAloneMaxSessions === 1 ? ": ignored in only 1 session each" : ""),
           );
+          funnelDrop(bars, funnel.suppressed, "a previous review rejected the same edit");
+          funnelDrop(bars, funnel.combined, "combined with another candidate in the same edit");
           funnelBar(bars, "edits proposed", funnel.proposed, scale, {
             lit: true,
             small: "of " + fmt(funnel.cap),
