@@ -152,6 +152,10 @@ export function foldEvidence(
   // when a majority of its sightings vote orchestration. Mixed clusters stay visible
   // so one inconsistent classifier call cannot drop a real recurrence below the floor.
   const allObservations = gapObservations ?? recordObservations;
+  for (const observation of allObservations) {
+    const source = normalizeSourceLabel(observation?.source);
+    if (source) sources.add(source);
+  }
   const orchestrationGapSightings = allObservations.filter((obs) => obs?.domain === "orchestration").length;
 
   const gapClusters = clusterGapObservations(allObservations, { checkProjectCoverage });

@@ -96,6 +96,23 @@ test("a gap seen once now and once on a later run accumulates to two sessions an
   assert.deepEqual(second.gaps[0].quotes.map((q) => q.text).sort(), ["quote from claude-s1", "quote from claude-s2"]);
 });
 
+test("persisted selected gap sources remain fold-issued without fresh evidence", async () => {
+  const h = harness();
+  const old = record("claude-s1", [GAP]);
+  await run(h, [old]);
+
+  const fresh = record("claude-s2", [GAP_REPHRASED], { memoryHash: "h2" });
+  h.state.writeEvidence(fresh.transcript.id, fresh);
+  const summary = await foldForRun(h.ctx, memoryFile(), "h2", [], [old.transcript, fresh.transcript]);
+
+  assert.equal(summary.analyzedSessions, 1, "the stale evidence record stays excluded");
+  assert.equal(summary.gaps.length, 1, "its selected ledger observation still corroborates the gap");
+  assert.equal(summary.gaps[0].sessions, 2);
+  for (const quote of summary.gaps[0].quotes) {
+    assert.ok(summary.sources.includes(quote.source), `fold-issued gap source missing from allowlist: ${quote.source}`);
+  }
+});
+
 test("the same session is never double-counted across runs", async () => {
   const h = harness();
   await run(h, [record("claude-s1", [GAP])]);
