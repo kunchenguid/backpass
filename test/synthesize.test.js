@@ -577,17 +577,21 @@ test("a skill target stages only that skill, so a write to AGENTS.md cannot ente
     {
       edit: {
         [workspacePathFor(".agents/skills/db/SKILL.md")]: {
-          replace: [["Keep transactions short.", "Keep every transaction short."]],
+          replace: [
+            ["Load for database work.", "Database work."],
+            ["Keep transactions short.", "Keep every transaction short."],
+          ],
         },
         "AGENTS.md": "# hijack\n",
       },
-      annotations: [{ reply: { edits: [tighten(["H1"])], verdicts: [], notes: [] } }],
+      annotations: [{ reply: "" }, { reply: { edits: [tighten(["H1", "H2"])], verdicts: [], notes: [] } }],
     },
     { text: AGENTS },
   );
   fs.mkdirSync(path.join(repo.root, ".agents/skills/db"), { recursive: true });
   fs.writeFileSync(path.join(repo.root, ".agents/skills/db/SKILL.md"), skillText);
   const memoryFile = readMemoryFile(repo.root, ".agents/skills/db/SKILL.md");
+  config.budgetTokens = 1;
   config.runTarget = {
     kind: "skill",
     path: memoryFile.path,
@@ -610,4 +614,15 @@ test("a skill target stages only that skill, so a write to AGENTS.md cannot ente
     false,
   );
   assert.equal(fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8"), AGENTS);
+
+  const descriptionTokens = (await import("../src/tokens.js")).estimateTokens("Load for database work.");
+  const editPrompt = fs.readFileSync(path.join(repo.root, ".backpass", "prompts", "synthesis-edit.md"), "utf8");
+  assert.match(editPrompt, new RegExp(`Budget: ${descriptionTokens} / 1 estimated always-loaded tokens`));
+  assert.match(editPrompt, /targeted skill description is ALREADY/);
+  assert.doesNotMatch(editPrompt, /lead with skill extractions/);
+  const freshPrompt = fs.readFileSync(
+    path.join(repo.root, ".backpass", "prompts", "synthesis-annotate-2.md"),
+    "utf8",
+  );
+  assert.match(freshPrompt, new RegExp(`SKILL\\.md.* - ${descriptionTokens} tokens, OVER BUDGET`));
 });

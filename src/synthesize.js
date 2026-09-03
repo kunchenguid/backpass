@@ -71,8 +71,9 @@ const EMPTY_TURN_VIOLATION =
 const UNPARSEABLE_VIOLATION = "synthesis answered with text, but not with a JSON object";
 const KEPT_EDITING_VIOLATION = "synthesis kept editing the staging copy instead of annotating the measured changes";
 
-function alwaysLoadedTokensOf(memoryFile, descriptionTokens = 0) {
+function alwaysLoadedTokensOf(memoryFile, descriptionTokens = 0, runTarget = null) {
   if (memoryFile.alwaysLoadedTokens != null) return memoryFile.alwaysLoadedTokens;
+  if (runTarget?.kind === "skill") return descriptionTokens;
   return memoryFile.tokens + descriptionTokens;
 }
 
@@ -82,13 +83,25 @@ function alwaysLoadedTokensOf(memoryFile, descriptionTokens = 0) {
  * (`buildProposal`). Framing one number and gating another would set the model up to
  * fail a gate it was never told about.
  */
-function budgetRule(memoryFile, config, maxEdits, descriptionTokens = 0) {
-  const current = alwaysLoadedTokensOf(memoryFile, descriptionTokens);
+function budgetRule(memoryFile, config, maxEdits, descriptionTokens = 0, runTarget = null) {
+  const skillTarget = runTarget?.kind === "skill";
+  const current = alwaysLoadedTokensOf(memoryFile, descriptionTokens, runTarget);
   const remaining = config.budgetTokens - current;
-  const counted = descriptionTokens
-    ? ` The budget counts this file plus every skill description line (${descriptionTokens} tok of descriptions today); skill bodies stay free until triggered.`
-    : "";
+  const counted = skillTarget
+    ? ` The budget counts only this skill's description (${current} tok today); its body stays free until triggered.`
+    : descriptionTokens
+      ? ` The budget counts this file plus every skill description line (${descriptionTokens} tok of descriptions today); skill bodies stay free until triggered.`
+      : "";
   if (remaining <= 0) {
+    if (skillTarget) {
+      return (
+        `The targeted skill description is ALREADY ${Math.abs(remaining)} tokens OVER budget, so this run is a ` +
+        `SHRINK PLAN. You are NOT expected to reach ${config.budgetTokens} tokens in one run. What is required is ` +
+        `real progress: the description MUST be net-negative. Tighten its trigger without losing when the skill ` +
+        `should load. Extraction does not apply, and any description addition must be offset by a larger description ` +
+        `removal.${counted}`
+      );
+    }
     return (
       `The always-loaded surface is ALREADY ${Math.abs(remaining)} tokens OVER budget, so this run is a SHRINK ` +
       `PLAN. You are NOT expected to reach ${config.budgetTokens} tokens in one run - the ` +
@@ -104,21 +117,23 @@ function budgetRule(memoryFile, config, maxEdits, descriptionTokens = 0) {
     );
   }
   if (remaining < config.budgetTokens * 0.15) {
-    return (
-      `Only ${remaining} tokens of headroom remain. Treat this as zero-sum: every addition must ` +
-      `name its offsetting removal or skill extraction. The post-edit always-loaded surface must stay at or below ` +
-      `${config.budgetTokens} tokens.` +
-      counted
-    );
+    return skillTarget
+      ? `Only ${remaining} tokens of description headroom remain. Treat this as zero-sum: every description addition ` +
+          `must name its offsetting description removal. The post-edit description must stay at or below ` +
+          `${config.budgetTokens} tokens.${counted}`
+      : `Only ${remaining} tokens of headroom remain. Treat this as zero-sum: every addition must ` +
+          `name its offsetting removal or skill extraction. The post-edit always-loaded surface must stay at or below ` +
+          `${config.budgetTokens} tokens.${counted}`;
   }
-  return (
-    `The post-edit always-loaded surface must stay at or below ${config.budgetTokens} tokens ` +
-    `(${remaining} tokens of headroom today).${counted}`
-  );
+  return skillTarget
+    ? `The targeted skill description must stay at or below ${config.budgetTokens} tokens ` +
+        `(${remaining} tokens of headroom today).${counted}`
+    : `The post-edit always-loaded surface must stay at or below ${config.budgetTokens} tokens ` +
+        `(${remaining} tokens of headroom today).${counted}`;
 }
 
-function budgetState(memoryFile, config, descriptionTokens = 0) {
-  const ratio = alwaysLoadedTokensOf(memoryFile, descriptionTokens) / config.budgetTokens;
+function budgetState(memoryFile, config, descriptionTokens = 0, runTarget = null) {
+  const ratio = alwaysLoadedTokensOf(memoryFile, descriptionTokens, runTarget) / config.budgetTokens;
   if (ratio > 1) return "OVER BUDGET";
   if (ratio > 0.85) return "near budget";
   return "within budget";
@@ -195,7 +210,7 @@ function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts, scop
 
   const common = {
     MEMORY_PATH: workspacePathFor(memoryFile.path),
-    BUDGET_RULE: budgetRule(memoryFile, config, maxEdits, descriptionTokens),
+    BUDGET_RULE: budgetRule(memoryFile, config, maxEdits, descriptionTokens, runTarget),
     MAX_EDITS: String(maxEdits),
     MIN_GAP_EVIDENCE: String(config.minGapEvidence),
     TARGET_RULE: targetRule(runTarget, workspacePathFor(memoryFile.path), workspacePathFor(overflow.dir)),
@@ -241,14 +256,14 @@ function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts, scop
  * fresh session used after an empty reply would otherwise be asked to quote evidence it
  * has never been shown.
  */
-function prefaceFor({ memoryFile, summary, config, repo, workspaceRoot, descriptionTokens = 0 }) {
+function prefaceFor({ memoryFile, summary, config, repo, workspaceRoot, descriptionTokens = 0, runTarget = null }) {
   return render(loadPrompt("annotate-preface"), {
     MEMORY_PATH: workspacePathFor(memoryFile.path),
     REPO_NAME: repo.name,
     REPO_ROOT: repo.root,
     WORKSPACE_ROOT: workspaceRoot,
-    CURRENT_TOKENS: String(memoryFile.tokens + descriptionTokens),
-    BUDGET_STATE: budgetState(memoryFile, config, descriptionTokens),
+    CURRENT_TOKENS: String(alwaysLoadedTokensOf(memoryFile, descriptionTokens, runTarget)),
+    BUDGET_STATE: budgetState(memoryFile, config, descriptionTokens, runTarget),
     TRANSCRIPT_COUNT: String(summary.analyzedSessions),
     EVIDENCE: renderEvidenceForPrompt(summary),
   });
@@ -486,10 +501,7 @@ export async function synthesizeProposal({
       ? "(this run targets this skill only; other skills are out of scope)"
       : renderSkillIndex(skillIndexSkills);
 
-  const alwaysLoadedNow =
-    runTarget?.kind === "skill"
-      ? (memoryFile.alwaysLoadedTokens ?? descriptionTokens)
-      : memoryFile.tokens + descriptionTokens;
+  const alwaysLoadedNow = alwaysLoadedTokensOf(memoryFile, descriptionTokens, runTarget);
 
   const editValues = {
     ...common,
@@ -503,7 +515,7 @@ export async function synthesizeProposal({
         .join(" · ") || "none",
     CURRENT_TOKENS: String(alwaysLoadedNow),
     BUDGET_TOKENS: String(config.budgetTokens),
-    BUDGET_STATE: budgetState(memoryFile, config, runTarget?.kind === "skill" ? 0 : descriptionTokens),
+    BUDGET_STATE: budgetState(memoryFile, config, descriptionTokens, runTarget),
     INSTRUCTION_INDEX: renderInstructionIndex(memoryFile),
     SKILLS_DIR: stagedSkillsDir,
     SKILL_INDEX: skillIndex,
@@ -621,7 +633,15 @@ export async function synthesizeProposal({
       overflow,
       progress,
       renderPreface: () =>
-        prefaceFor({ memoryFile, summary, config, repo, workspaceRoot: workspace.root, descriptionTokens }),
+        prefaceFor({
+          memoryFile,
+          summary,
+          config,
+          repo,
+          workspaceRoot: workspace.root,
+          descriptionTokens,
+          runTarget,
+        }),
     });
   } finally {
     await holder.session.close();
