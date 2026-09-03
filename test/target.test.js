@@ -246,6 +246,45 @@ test("buildProposal on a memory-file target refuses to recreate an existing skil
   assert.equal(proposal.target.kind, "memory");
 });
 
+test("a skill target refuses pure deletion even with harm evidence", () => {
+  const repo = repoWith({ ".agents/skills/db/SKILL.md": DB_SKILL });
+  const memoryFile = readMemoryFile(repo.root, ".agents/skills/db/SKILL.md");
+  const workspace = prepareWorkspace({
+    state: new State(repo.root).ensure(),
+    repo,
+    memoryFile,
+    skillsDir: ".agents/skills",
+    skillDirs: [],
+    copyExistingSkills: false,
+  });
+  writeIn(workspace.root, workspacePathFor(memoryFile.path), (text) =>
+    text.replace("- Wrap migrations in a transaction.\n", ""),
+  );
+  const measured = measureWorkspace(workspace);
+  const { proposal, violations } = buildProposal(
+    {
+      edits: [
+        {
+          changes: measured.changes.map((change) => change.id),
+          kind: "remove",
+          title: "drop transaction guidance",
+          evidence: QUOTE,
+        },
+      ],
+    },
+    {
+      memoryFile,
+      config: { budgetTokens: 5000, maxEditsPerRun: 5, minGapEvidence: 2, skillsDir: ".agents/skills" },
+      repo,
+      summary: summary(),
+      measured,
+      runTarget: { kind: "skill", path: memoryFile.path, name: "db" },
+    },
+  );
+  assert.equal(proposal.edits.length, 0);
+  assert.ok(violations.some((violation) => /no evidence can attribute to skill files/.test(violation)));
+});
+
 test("a skill target ignores other writes and applies against its description-only budget", () => {
   const repo = repoWith({ ".agents/skills/db/SKILL.md": DB_SKILL });
   const memoryFile = readMemoryFile(repo.root, ".agents/skills/db/SKILL.md");

@@ -597,6 +597,21 @@ export function buildProposal(rawResult, context) {
       continue;
     }
 
+    if (!preservesAlwaysLoaded(edit.kind) && runTarget?.kind === "skill") {
+      const deleted = hunks
+        .filter((hunk) => hunk.removed && !hunk.added)
+        .flatMap((hunk) => (hunk.lines || []).filter((line) => line.type === "del").map((line) => line.text))
+        .filter((text) => text.trim());
+      if (deleted.length) {
+        violations.push(
+          `edit ${edit.id} ("${edit.title}") deletes "${deleted[0].trim().slice(0, 80)}" from ${files[0]}; ` +
+            `no evidence can attribute to skill files, so no deletion there clears the ` +
+            `${config.minGapEvidence}-session harm floor - revert the deletion`,
+        );
+        continue;
+      }
+    }
+
     // A removal is measured the same way: a hunk that only deletes text, outside an
     // extraction or move, deletes instructions - whatever the edit's kind says. Deleting
     // an instruction needs the same corroboration adding one does, and only negatives the
