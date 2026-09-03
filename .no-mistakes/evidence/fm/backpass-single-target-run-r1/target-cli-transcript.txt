@@ -1,0 +1,49 @@
+$ backpass status --target db
+targeting skill db (.agents/skills/db/SKILL.md); the memory file and other skills are out of this run
+backpass-target-e2e.o8LReC /private/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/backpass-target-e2e.o8LReC
+
+BUDGET (always-loaded)
+  AGENTS.md + skill descriptions [................................] 22 / 5,000 tok · 1 instructions
+  overflow: 1 skill(s) in .agents/skills · 27 tok on trigger, 10 tok always loaded
+
+CACHE
+  scan cache      0 file(s) fingerprinted
+  evidence        0 ok · 0 skipped · 0 failed
+  rejections      0 remembered
+
+PROPOSAL
+  none yet - run `backpass`
+
+MODELS
+  analysis        auto - 7 candidates, none probed yet
+  synthesis       auto - 7 candidates, none probed yet
+
+$ backpass status --target AGENTS.md
+targeting AGENTS.md; existing skills are not writable this run
+backpass-target-e2e.o8LReC /private/var/folders/0k/bf8mwt2n5qddzk24r20gfk0c0000gn/T/backpass-target-e2e.o8LReC
+
+BUDGET (always-loaded)
+  AGENTS.md + skill descriptions [................................] 22 / 5,000 tok · 1 instructions
+  overflow: 1 skill(s) in .agents/skills · 27 tok on trigger, 10 tok always loaded
+
+CACHE
+  scan cache      0 file(s) fingerprinted
+  evidence        0 ok · 0 skipped · 0 failed
+  rejections      0 remembered
+
+PROPOSAL
+  none yet - run `backpass`
+
+MODELS
+  analysis        auto - 7 candidates, none probed yet
+  synthesis       auto - 7 candidates, none probed yet
+
+$ backpass status --target no-such-skill
+error --target "no-such-skill" is not a memory file or skill in this repo
+  known skills: db
+[exit 1]
+
+$ backpass status --target db --memory-file AGENTS.md
+error --target cannot be combined with --memory-file
+  name the one file with --target
+[exit 1]
