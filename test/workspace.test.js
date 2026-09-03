@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import { readMemoryFile } from "../src/memory.js";
@@ -11,6 +12,7 @@ import {
   parseSkillFile,
   prepareWorkspace,
   repoFingerprint,
+  workspacePathFor,
 } from "../src/workspace.js";
 import { makeRepo, stageAndMeasure, writeIn } from "./helpers/staging.js";
 
@@ -76,6 +78,63 @@ test("an untouched workspace measures as no change, and ids are stable across re
   assert.notEqual(first.signature, a.signature);
 });
 
+test("external user memory and skills use workspace-relative staging paths", () => {
+  const repo = makeRepo({});
+  const external = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-external-workspace-"));
+  const memoryPath = path.join(external, "CLAUDE.md");
+  const skillsDir = path.join(external, "skills");
+  fs.mkdirSync(path.join(skillsDir, "db"), { recursive: true });
+  fs.writeFileSync(memoryPath, AGENTS);
+  fs.writeFileSync(path.join(skillsDir, "db/SKILL.md"), SKILL);
+  const workspace = prepareWorkspace({
+    state: new State(repo.root).ensure(),
+    repo,
+    memoryFile: readMemoryFile(repo.root, memoryPath, { allowExternal: true }),
+    skillsDir,
+    skillDirs: [skillsDir],
+  });
+
+  assert.equal(path.isAbsolute(workspace.memoryWorkspacePath), false);
+  writeIn(workspace.root, workspace.memoryWorkspacePath, (text) => text.replace("- two", "- 2"));
+  writeIn(path.join(workspace.root, workspacePathFor(skillsDir)), "new/SKILL.md", SKILL.replace("db", "new"));
+  const measured = measureWorkspace(workspace);
+  assert.deepEqual(
+    measured.changes.map((change) => [change.kind, change.file]),
+    [
+      ["hunk", memoryPath],
+      ["created", path.join(skillsDir, "new/SKILL.md")],
+    ],
+  );
+});
+
+test("split external memory hunks retain their staged path", () => {
+  const repo = makeRepo({});
+  const external = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-external-split-"));
+  const memoryPath = path.join(external, "CLAUDE.md");
+  const skillsDir = path.join(external, "skills");
+  fs.writeFileSync(memoryPath, "# M\n\n- carry\n- delete\n- keep\n");
+  const workspace = prepareWorkspace({
+    state: new State(repo.root).ensure(),
+    repo,
+    memoryFile: readMemoryFile(repo.root, memoryPath, { allowExternal: true }),
+    skillsDir,
+    skillDirs: [skillsDir],
+  });
+  writeIn(workspace.root, workspace.memoryWorkspacePath, (text) => text.replace("- carry\n- delete\n", ""));
+  writeIn(
+    path.join(workspace.root, workspacePathFor(skillsDir)),
+    "carry/SKILL.md",
+    "---\nname: carry\ndescription: Load for carry rules.\n---\n\n- carry\n",
+  );
+
+  const hunks = measureWorkspace(workspace).changes.filter((change) => change.kind === "hunk");
+  assert.equal(hunks.length, 2);
+  assert.equal(
+    hunks.every((hunk) => hunk.workspaceFile === workspace.memoryWorkspacePath),
+    true,
+  );
+});
+
 test("only the skill layouts a harness loads count as created skills; anything else is stray", () => {
   assert.equal(isSkillFilePath(".agents/skills/db/SKILL.md", ".agents/skills"), true);
   assert.equal(isSkillFilePath(".agents/skills/db.md", ".agents/skills"), true);
@@ -94,6 +153,9 @@ test("only the skill layouts a harness loads count as created skills; anything e
     staged.measured.changes.map((change) => [change.kind, change.file]),
     [["created", ".claude/skills/new/SKILL.md"]],
   );
+  assert.equal(isSkillFilePath("C:\\cfg\\skills\\db\\SKILL.md", "C:\\cfg\\skills"), true);
+  assert.equal(isSkillFilePath("C:\\cfg\\skills\\db.md", "C:\\cfg\\skills"), true);
+  assert.equal(isSkillFilePath("C:\\cfg\\other\\db\\SKILL.md", "C:\\cfg\\skills"), false);
 
   assert.deepEqual(parseSkillFile("x/SKILL.md", SKILL), {
     name: "db",

@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import { foldEvidence, renderEvidenceForPrompt, renderEvidenceReport } from "../src/fold.js";
 import { parseMemoryUnits } from "../src/memory.js";
@@ -36,6 +39,35 @@ test("evidence is grouped per instruction with session-level relevance", () => {
   assert.equal(row.negative, 1);
   assert.equal(row.sessions, 2);
   assert.equal(row.relevance, 0.5);
+});
+
+test("fold lists every analyzed session source even when the record has no project", () => {
+  const quoted = record("alpha1", { positive: [{ instruction: "AG-001", quote: "q1" }] });
+  const silent = record("beta2", {});
+  const otherProject = record("gamma3", {
+    transcript: {
+      id: "gamma3",
+      harness: "codex",
+      project: "wheelhouse",
+      startedAt: Date.parse("2026-08-02T00:00:00Z"),
+    },
+    negative: [{ instruction: "AG-001", quote: "q2", class: "non-compliance" }],
+  });
+  const summary = foldEvidence([quoted, silent, otherProject], { memoryFile });
+
+  assert.equal(summary.sources.length, 3, "every usable record issues a source, including one with no quotes");
+  assert.equal(summary.sourceProjects[summary.sources.find((label) => label.startsWith("codex"))], "wheelhouse");
+  assert.equal(
+    Object.keys(summary.sourceProjects).length,
+    1,
+    "project-less records must not be dropped from sources just because sourceProjects is empty for them",
+  );
+  const instructionQuoteSources = summary.instructions
+    .flatMap((row) => row.quotes.map((quote) => quote.source))
+    .filter(Boolean);
+  for (const source of instructionQuoteSources) {
+    assert.ok(summary.sources.includes(source), `fold-issued quote source missing from sources: ${source}`);
+  }
 });
 
 test("instructions with no evidence still appear - they are the removal candidates", () => {
@@ -134,6 +166,79 @@ test("the fold records the sightings it clustered over - the gap funnel's top", 
     fromLedger.totals.droppedGapSingletons,
     2,
     "the schema and pure-orchestration gaps stay below the floor",
+  );
+});
+
+test("the fold counts the funnel's display splits: candidate instructions and why report-only", () => {
+  const summary = foldEvidence(
+    [
+      record("s1", {
+        positive: [{ instruction: "AG-003", quote: "followed it" }],
+        negative: [{ instruction: "AG-001", quote: "n1", class: "non-compliance" }],
+      }),
+      record("s2", {
+        negative: [
+          { instruction: "AG-001", quote: "n2", class: "non-compliance" },
+          { instruction: "AG-002", quote: "n3", class: "non-compliance" },
+        ],
+      }),
+    ],
+    {
+      memoryFile,
+      minGapEvidence: 3,
+      minGapProjects: 2,
+      gapObservations: [
+        // Eligible: three sessions, two projects, nobody blamed the tooling.
+        { proposedInstruction: "Always vendor the lockfile.", sessionId: "a", domain: "project", project: "p1" },
+        { proposedInstruction: "Always vendor the lockfile.", sessionId: "b", domain: "project", project: "p2" },
+        { proposedInstruction: "Always vendor the lockfile.", sessionId: "c", domain: "project", project: "p2" },
+        // Report only, majority orchestration: every sighting blamed the tooling.
+        {
+          proposedInstruction: "Never bypass the release gate.",
+          sessionId: "a",
+          domain: "orchestration",
+          project: "p1",
+        },
+        {
+          proposedInstruction: "Never bypass the release gate.",
+          sessionId: "b",
+          domain: "orchestration",
+          project: "p2",
+        },
+        {
+          proposedInstruction: "Never bypass the release gate.",
+          sessionId: "c",
+          domain: "orchestration",
+          project: "p2",
+        },
+        // Report only, too few projects: corroborated, but only ever in one project.
+        { proposedInstruction: "Pin the schema version.", sessionId: "a", domain: "project", project: "p1" },
+        { proposedInstruction: "Pin the schema version.", sessionId: "b", domain: "project", project: "p1" },
+        { proposedInstruction: "Pin the schema version.", sessionId: "c", domain: "project", project: "p1" },
+        // Report only, mixed and still below the floor: two sessions, one vote each way.
+        { proposedInstruction: "Rotate the deploy token.", sessionId: "a", domain: "project", project: "p1" },
+        { proposedInstruction: "Rotate the deploy token.", sessionId: "b", domain: "orchestration", project: "p2" },
+        // Dropped singleton: one session, no orchestration vote to make it mixed.
+        { proposedInstruction: "Tag the release commit.", sessionId: "c", domain: "project", project: "p3" },
+      ],
+    },
+  );
+
+  assert.equal(summary.totals.instructionsWithNegatives, 2, "AG-001 and AG-002 drew a negative; AG-003 only positives");
+  assert.equal(summary.totals.gapClusters, 1);
+  assert.equal(summary.totals.reportOnlyGapClusters, 3);
+  assert.equal(summary.totals.droppedGapSingletons, 1);
+  assert.deepEqual(summary.totals.reportOnlyByReason, {
+    majorityOrchestration: 1,
+    belowFloorMixed: 1,
+    tooFewProjects: 1,
+  });
+  assert.equal(
+    summary.totals.reportOnlyByReason.majorityOrchestration +
+      summary.totals.reportOnlyByReason.belowFloorMixed +
+      summary.totals.reportOnlyByReason.tooFewProjects,
+    summary.totals.reportOnlyGapClusters,
+    "every report-only cluster is attributed to exactly one reason",
   );
 });
 
@@ -531,4 +636,227 @@ test("an oversized high-non-compliance paragraph attributes per sentence and inv
   assert.match(rendered, /- AG-001 is \d+ tokens as one paragraph \(attribution: \[AG-001\.1\]/);
   assert.doesNotMatch(rendered, /\[AG-001\](?!\.)/);
   assert.doesNotMatch(rendered, /\[AG-001\] \+0 -0/);
+});
+
+test("minGapProjects 2 keeps a single-project cluster report-only", () => {
+  const phrasing = "Always vendor the lockfile.";
+  const summary = foldEvidence(
+    [
+      record("s1", {
+        transcript: { id: "s1", harness: "claude", project: "/repos/alpha" },
+        gaps: [{ proposedInstruction: phrasing, quote: "q", recurrenceRisk: "high" }],
+      }),
+      record("s2", {
+        transcript: { id: "s2", harness: "claude", project: "/repos/alpha" },
+        gaps: [{ proposedInstruction: phrasing, quote: "q2", recurrenceRisk: "high" }],
+      }),
+    ],
+    { minGapEvidence: 2, minGapProjects: 2 },
+  );
+  assert.equal(summary.gaps.length, 0);
+  assert.equal(summary.reportOnlyGaps.length, 1);
+  assert.equal(summary.reportOnlyGaps[0].sessions, 2);
+  assert.equal(summary.reportOnlyGaps[0].projects, 1);
+  assert.match(summary.reportOnlyGaps[0].reportOnlyReason, /project-specific/);
+});
+
+test("report-only gaps name the actual number of observed projects", () => {
+  const phrasing = "Always vendor the lockfile.";
+  const summary = foldEvidence(
+    [
+      record("s1", {
+        transcript: { id: "s1", harness: "claude", project: "/repos/alpha" },
+        gaps: [{ proposedInstruction: phrasing, quote: "q", recurrenceRisk: "high" }],
+      }),
+      record("s2", {
+        transcript: { id: "s2", harness: "claude", project: "/repos/beta" },
+        gaps: [{ proposedInstruction: phrasing, quote: "q2", recurrenceRisk: "high" }],
+      }),
+    ],
+    { minGapEvidence: 2, minGapProjects: 3 },
+  );
+
+  assert.equal(summary.reportOnlyGaps.length, 1);
+  assert.equal(summary.reportOnlyGaps[0].projects, 2);
+  assert.match(summary.reportOnlyGaps[0].reportOnlyReason, /seen in 2 projects; minGapProjects is 3/);
+  assert.doesNotMatch(summary.reportOnlyGaps[0].reportOnlyReason, /only/);
+});
+
+test("minGapProjects 2 admits a cluster seen in two projects", () => {
+  const phrasing = "Always vendor the lockfile.";
+  const summary = foldEvidence(
+    [
+      record("s1", {
+        transcript: { id: "s1", harness: "claude", project: "/repos/alpha" },
+        gaps: [{ proposedInstruction: phrasing, quote: "q", recurrenceRisk: "high" }],
+      }),
+      record("s2", {
+        transcript: { id: "s2", harness: "claude", project: "/repos/beta" },
+        gaps: [{ proposedInstruction: phrasing, quote: "q2", recurrenceRisk: "high" }],
+      }),
+    ],
+    { minGapEvidence: 2, minGapProjects: 2 },
+  );
+  assert.equal(summary.gaps.length, 1);
+  assert.equal(summary.gaps[0].projects, 2);
+  assert.equal(summary.reportOnlyGaps.length, 0);
+});
+
+test("the default minGapProjects of 1 does not require a second project", () => {
+  const phrasing = "Always vendor the lockfile.";
+  const summary = foldEvidence(
+    [
+      record("s1", {
+        transcript: { id: "s1", harness: "claude", project: "/repos/alpha" },
+        gaps: [{ proposedInstruction: phrasing, quote: "q", recurrenceRisk: "high" }],
+      }),
+      record("s2", {
+        transcript: { id: "s2", harness: "claude", project: "/repos/alpha" },
+        gaps: [{ proposedInstruction: phrasing, quote: "q2", recurrenceRisk: "high" }],
+      }),
+    ],
+    { minGapEvidence: 2, minGapProjects: 1 },
+  );
+  assert.equal(summary.gaps.length, 1);
+  assert.equal(summary.gaps[0].projects, 1);
+});
+
+test("duplicate sightings from a covered session do not count toward gap sessions", () => {
+  const coveredRoot = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-fold-duplicate-covered-"));
+  const covered = "Always pin the Node version with nvm.";
+  const similarUncovered = "Pin the Node version using nvm.";
+  fs.writeFileSync(path.join(coveredRoot, "AGENTS.md"), `# T\n\n- ${covered}\n`);
+  const records = [
+    record("s1", {
+      transcript: { id: "s1", harness: "claude", project: coveredRoot, projectRoot: coveredRoot },
+      gaps: [
+        { proposedInstruction: similarUncovered, quote: "q1", recurrenceRisk: "high" },
+        { proposedInstruction: covered, quote: "q2", recurrenceRisk: "high" },
+      ],
+    }),
+    record("s2", {
+      transcript: { id: "s2", harness: "claude", project: "/repos/other", projectRoot: null },
+      gaps: [{ proposedInstruction: similarUncovered, quote: "q3", recurrenceRisk: "high" }],
+    }),
+  ];
+
+  const belowFloor = foldEvidence(records, { minGapEvidence: 2, checkProjectCoverage: true });
+  assert.equal(belowFloor.gaps.length, 0);
+  assert.equal(belowFloor.totals.droppedGapSingletons, 1);
+
+  const eligible = foldEvidence(records, { minGapEvidence: 1, checkProjectCoverage: true });
+  assert.equal(eligible.gaps.length, 1);
+  assert.equal(eligible.gaps[0].sessions, 1);
+  assert.equal(eligible.gaps[0].projectCoveredSessions, 1);
+  assert.equal(eligible.gaps[0].projects, 1);
+});
+
+test("project-covered sightings do not control eligible cluster metadata", () => {
+  const coveredRoot = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-fold-covered-votes-"));
+  const phrasing = "Always pin deployment artifact digests.";
+  fs.writeFileSync(path.join(coveredRoot, "AGENTS.md"), `# T\n\n- ${phrasing}\n`);
+  const records = [
+    record("p1", {
+      transcript: { id: "p1", harness: "claude", project: "/repos/one", projectRoot: null },
+      gaps: [{ proposedInstruction: phrasing, quote: "eligible one", recurrenceRisk: "medium" }],
+    }),
+    record("p2", {
+      transcript: { id: "p2", harness: "claude", project: "/repos/two", projectRoot: null },
+      gaps: [{ proposedInstruction: phrasing, quote: "eligible two", recurrenceRisk: "medium" }],
+    }),
+    ...["c1", "c2", "c3"].map((id) =>
+      record(id, {
+        transcript: { id, harness: "claude", project: coveredRoot, projectRoot: coveredRoot },
+        gaps: [
+          {
+            proposedInstruction: phrasing,
+            quote: `covered ${id}`,
+            recurrenceRisk: "high",
+            domain: "orchestration",
+            coveredBySkill: "deploy",
+          },
+        ],
+      }),
+    ),
+  ];
+  const summary = foldEvidence(records, { minGapEvidence: 2, checkProjectCoverage: true });
+  assert.equal(summary.gaps.length, 1);
+  assert.equal(summary.gaps[0].sessions, 2);
+  assert.equal(summary.gaps[0].projectCoveredSessions, 3);
+  assert.equal(summary.gaps[0].orchestrationSightings, 0);
+  assert.equal(summary.gaps[0].majorityOrchestration, false);
+  assert.equal(summary.gaps[0].recurrenceRisk, "medium");
+  assert.deepEqual(
+    summary.gaps[0].quotes.map((quote) => quote.text),
+    ["eligible one", "eligible two"],
+  );
+  assert.equal(summary.gaps[0].failedTriggerSkill, undefined);
+});
+
+test("project coverage honors the project's configured memory file", () => {
+  const coveredRoot = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-fold-custom-memory-"));
+  const phrasing = "Always read the deployment guide before releasing.";
+  fs.mkdirSync(path.join(coveredRoot, "docs"), { recursive: true });
+  fs.writeFileSync(path.join(coveredRoot, "AGENTS.md"), "# T\n\n- Keep releases reproducible.\n");
+  fs.writeFileSync(path.join(coveredRoot, "docs/AI.md"), `# T\n\n- ${phrasing}\n`);
+  fs.writeFileSync(
+    path.join(coveredRoot, ".backpassrc.json"),
+    JSON.stringify({ memoryFiles: ["AGENTS.md", "docs/AI.md"] }),
+  );
+  const summary = foldEvidence(
+    [
+      record("s1", {
+        transcript: { id: "s1", harness: "claude", project: coveredRoot, projectRoot: coveredRoot },
+        gaps: [{ proposedInstruction: phrasing, quote: "q", recurrenceRisk: "high" }],
+      }),
+      record("s2", {
+        transcript: { id: "s2", harness: "claude", project: "/repos/other", projectRoot: null },
+        gaps: [{ proposedInstruction: phrasing, quote: "q2", recurrenceRisk: "high" }],
+      }),
+    ],
+    { minGapEvidence: 2, checkProjectCoverage: true },
+  );
+  assert.equal(summary.gaps.length, 0);
+  assert.equal(summary.totals.droppedGapSingletons, 1);
+});
+
+test("a project-covered sighting does not count toward gap sessions", () => {
+  const coveredRoot = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-fold-covered-"));
+  const phrasing = "Always pin the Node version with nvm.";
+  fs.writeFileSync(path.join(coveredRoot, "AGENTS.md"), `# T\n\n- ${phrasing}\n`);
+  const summary = foldEvidence(
+    [
+      record("s1", {
+        transcript: { id: "s1", harness: "claude", project: coveredRoot, projectRoot: coveredRoot },
+        gaps: [{ proposedInstruction: phrasing, quote: "q", recurrenceRisk: "high" }],
+      }),
+      record("s2", {
+        transcript: { id: "s2", harness: "claude", project: "/repos/other", projectRoot: null },
+        gaps: [{ proposedInstruction: phrasing, quote: "q2", recurrenceRisk: "high" }],
+      }),
+    ],
+    { minGapEvidence: 2, checkProjectCoverage: true },
+  );
+  assert.equal(summary.gaps.length, 0);
+  assert.equal(summary.totals.droppedGapSingletons, 1);
+  const cluster = [...summary.gaps, ...summary.reportOnlyGaps];
+  assert.equal(cluster.length, 0);
+  // Re-fold at minGapEvidence 1 so the uncovered session is eligible, and the covered one is not.
+  const uncovered = foldEvidence(
+    [
+      record("s1", {
+        transcript: { id: "s1", harness: "claude", project: coveredRoot, projectRoot: coveredRoot },
+        gaps: [{ proposedInstruction: phrasing, quote: "q", recurrenceRisk: "high" }],
+      }),
+      record("s2", {
+        transcript: { id: "s2", harness: "claude", project: "/repos/other", projectRoot: null },
+        gaps: [{ proposedInstruction: phrasing, quote: "q2", recurrenceRisk: "high" }],
+      }),
+    ],
+    { minGapEvidence: 1, checkProjectCoverage: true },
+  );
+  assert.equal(uncovered.gaps.length, 1);
+  assert.equal(uncovered.gaps[0].sessions, 1);
+  assert.equal(uncovered.gaps[0].projectCoveredSessions, 1);
+  assert.equal(uncovered.gaps[0].projects, 1);
 });

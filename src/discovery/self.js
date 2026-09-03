@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 
 import { SELF_SESSION_SENTINEL } from "../prompts.js";
 
@@ -37,11 +38,29 @@ export function headHasSelfSentinel(text) {
   return SENTINEL_PATTERN.test(text || "");
 }
 
+function realpathOrResolve(p) {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
+
+function isUnder(child, parent) {
+  if (!child || !parent) return false;
+  const a = realpathOrResolve(child);
+  const b = realpathOrResolve(parent);
+  if (a === b) return true;
+  return a.startsWith(b.endsWith(path.sep) ? b : b + path.sep);
+}
+
 /**
- * @param {{ path?: string | null }} transcript
+ * @param {{ path?: string | null, cwd?: string | null }} transcript
+ * @param {{ stateDir?: string | null }} [options]
  * @returns {boolean}
  */
-export function isSelfSession(transcript) {
+export function isSelfSession(transcript, { stateDir } = {}) {
+  if (stateDir && isUnder(transcript?.cwd, stateDir)) return true;
   const file = transcript?.path;
   if (!file) return false;
   let fd;

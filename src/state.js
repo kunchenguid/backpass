@@ -3,7 +3,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 
 import { STATE_DIRNAME } from "./config.js";
-import { warn } from "./logger.js";
+import { UserError, warn } from "./logger.js";
 import { ensureLocalExclude } from "./repo.js";
 import { transcriptIdentity } from "./transcript.js";
 
@@ -28,8 +28,14 @@ export const STATE_EXCLUDE_LINE = `${STATE_DIRNAME}/`;
  *   apply/                 the rendered Lavish apply surface
  */
 export class State {
-  constructor(repoRoot) {
-    this.root = path.join(repoRoot, STATE_DIRNAME);
+  /**
+   * @param {string} repoRoot project checkout, or ignored when `options.stateDir` is set
+   * @param {{ stateDir?: string, mode?: number, exclude?: boolean }} [options]
+   */
+  constructor(repoRoot, options = {}) {
+    this.root = options.stateDir || path.join(repoRoot, STATE_DIRNAME);
+    this.dirMode = options.mode;
+    this.skipExclude = options.exclude === false;
     this.evidenceDir = path.join(this.root, "evidence");
     this.applyDir = path.join(this.root, "apply");
     this.scanCachePath = path.join(this.root, "scan-cache.json");
@@ -42,12 +48,31 @@ export class State {
 
   /**
    * Creates the state dir and excludes it from git in the same step. The exclude is
-   * local-only and fail-soft: a non-git directory is silently left alone.
+   * local-only and fail-soft: a non-git directory is silently left alone. User-scope
+   * state is created 0700 and is never git-excluded (it does not live in a checkout).
    */
   ensure() {
+    fs.mkdirSync(this.root, { recursive: true, ...(this.dirMode ? { mode: this.dirMode } : {}) });
+    if (this.dirMode) {
+      try {
+        fs.chmodSync(this.root, this.dirMode);
+      } catch (err) {
+        throw new UserError(
+          `could not secure state directory ${this.root} as mode ${this.dirMode.toString(8)}: ${err.message}`,
+        );
+      }
+      const actualMode = fs.statSync(this.root).mode & 0o777;
+      if (actualMode !== this.dirMode) {
+        throw new UserError(
+          `could not secure state directory ${this.root} as mode ${this.dirMode.toString(8)} (got ${actualMode.toString(8)})`,
+        );
+      }
+    }
     fs.mkdirSync(this.evidenceDir, { recursive: true });
     fs.mkdirSync(this.applyDir, { recursive: true });
-    this.exclude = ensureLocalExclude(path.dirname(this.root), STATE_EXCLUDE_LINE);
+    this.exclude = this.skipExclude
+      ? { status: "skipped" }
+      : ensureLocalExclude(path.dirname(this.root), STATE_EXCLUDE_LINE);
     return this;
   }
 

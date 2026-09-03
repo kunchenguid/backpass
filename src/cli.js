@@ -4,8 +4,9 @@ import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 
 import { UserError, fail, setQuiet } from "./logger.js";
-import { loadConfig, parseMaxTranscripts } from "./config.js";
+import { loadConfig, parseMaxTranscripts, parseScopeKind } from "./config.js";
 import { resolveRepo } from "./repo.js";
+import { printScopeNote, resolveScope } from "./scope.js";
 import { State } from "./state.js";
 import { AgentResolver } from "./agents.js";
 
@@ -41,6 +42,9 @@ const OPTIONS = {
   "max-transcripts": { type: "string" },
   seed: { type: "string" },
   "min-gap-evidence": { type: "string" },
+  "min-gap-projects": { type: "string" },
+  scope: { type: "string" },
+  project: { type: "string", multiple: true },
   "memory-file": { type: "string", multiple: true },
   "skills-dir": { type: "string" },
 
@@ -78,7 +82,7 @@ COMMANDS
              turning the aggregated evidence into edits (tier 2)
   apply      review the proposal and write the accepted edits (the only writer)
   status     cache state, evidence counts, and the budget bar
-  init       write .backpassrc.json and exclude .backpass/ via .git/info/exclude
+  init       write .backpassrc.json, or with --scope user the user config block
 
 COLLECT SAMPLES
   --since <dur>            only sessions newer than this (30d, 12h, 2w, all)  [30d]
@@ -110,6 +114,9 @@ BUDGET AND SHAPE
   --budget <tokens>        always-loaded budget per memory file         [5000]
   --max-edits <n>          edits per run - the learning rate            [adaptive]
   --min-gap-evidence <n>   sessions needed to add or remove instruction [2]
+  --min-gap-projects <n>    user-scope: distinct projects needed for a gap [1]
+  --scope <project|user>   which surface a run reads and writes          [project]
+  --project <glob>         user-scope: only sessions whose project/cwd matches (repeatable)
   --memory-file <path>     memory file to optimize (repeatable)
   --skills-dir <path>      where skill extractions are written          [.agents/skills]
 
@@ -134,6 +141,7 @@ or below 60 columns - stdout and --json output are identical either way.
 EXAMPLES
   backpass                                  a full run, ending with a proposal
   backpass scan --since 7d --strict         what would be collected, deterministic only
+  backpass --scope user                     train the user-level memory file and skills
   backpass --synthesis-agent claude --synthesis-model claude-opus-5
   backpass apply --no-ui                    review and write from the terminal
 `;
@@ -159,6 +167,13 @@ function overridesFrom(values) {
   if (values.seed !== undefined) overrides.seed = toSeed(values.seed);
   if (values["min-gap-evidence"]) {
     overrides.minGapEvidence = toInt(values["min-gap-evidence"], "--min-gap-evidence");
+  }
+  if (values["min-gap-projects"]) {
+    overrides.minGapProjects = toInt(values["min-gap-projects"], "--min-gap-projects");
+  }
+  if (values.project?.length) {
+    overrides.discovery = overrides.discovery || {};
+    overrides.discovery.includeProjects = values.project;
   }
   if (values["memory-file"]?.length) overrides.memoryFiles = values["memory-file"];
   if (values["skills-dir"]) overrides.skillsDir = values["skills-dir"];
@@ -231,17 +246,35 @@ export async function main(argv) {
   }
 
   try {
-    const repo = resolveRepo(process.cwd());
-    const config = loadConfig(repo.root, overridesFrom(values));
-    config.state = new State(repo.root).ensure();
+    const kind = parseScopeKind(values.scope);
+    const overrides = overridesFrom(values);
+    let repo = null;
+    let config;
+    if (kind === "user") {
+      config = loadConfig(null, overrides, { kind: "user" });
+    } else {
+      repo = resolveRepo(process.cwd());
+      config = loadConfig(repo.root, overrides);
+    }
+    const scope = resolveScope(process.cwd(), { ...values, scope: kind, strict: Boolean(values.strict) }, config, repo);
+    printScopeNote(scope);
+    config.memoryFiles = scope.memoryFiles;
+    config.skillsDir = scope.overflowDir;
+    if (scope.skillDirs.length) config.skillsDirs = scope.skillDirs;
+    config.state = new State(scope.root, {
+      stateDir: scope.stateDir,
+      mode: kind === "user" ? 0o700 : undefined,
+      exclude: kind === "user" ? false : undefined,
+    }).ensure();
     config.agents = new AgentResolver(config, {
       state: config.state,
-      cwd: repo.root,
+      cwd: scope.modelCwd,
       bypassCache: Boolean(values.force),
     });
 
     const ctx = {
-      repo,
+      repo: scope.repo,
+      scope,
       config,
       flags: values,
       positionals: positionals.slice(1),

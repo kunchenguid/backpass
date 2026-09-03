@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { anchoredHunks, countOccurrences, span } from "./diff.js";
 import { parseMemoryUnits } from "./memory.js";
-import { normalizeSkillsDir, parseFrontmatter, skillBody } from "./skills.js";
+import { parseFrontmatter, skillBody } from "./skills.js";
 import { sha256 } from "./state.js";
 
 /**
@@ -25,6 +25,11 @@ export function workspaceRoot(state) {
   return path.join(state.root, WORKSPACE_DIRNAME);
 }
 
+export function workspacePathFor(file) {
+  if (!path.isAbsolute(file)) return file.split(path.sep).join("/");
+  return path.posix.join(".external", sha256(file).slice(0, 16), path.basename(file));
+}
+
 /**
  * Build a fresh staging copy. `originals` records every file placed there, so the
  * measurement can tell a modified file from a created or deleted one.
@@ -35,25 +40,43 @@ export function prepareWorkspace({ state, repo, memoryFile, skillsDir, skillDirs
   fs.mkdirSync(root, { recursive: true });
 
   const originals = new Map();
-  const memoryTarget = path.join(root, memoryFile.path);
+  const stagedPaths = new Map();
+  const memoryWorkspacePath = workspacePathFor(memoryFile.path);
+  const memoryTarget = path.join(root, memoryWorkspacePath);
   fs.mkdirSync(path.dirname(memoryTarget), { recursive: true });
   fs.writeFileSync(memoryTarget, memoryFile.text);
   originals.set(memoryFile.path, memoryFile.text);
+  stagedPaths.set(memoryFile.path, memoryWorkspacePath);
 
-  for (const sourceDir of skillDirs) {
-    const skillsSource = path.join(repo.root, sourceDir);
+  const skillMappings = skillDirs.map((logical) => ({ logical, staged: workspacePathFor(logical) }));
+  for (const { logical: sourceDir, staged: stagedDir } of skillMappings) {
+    const skillsSource = path.isAbsolute(sourceDir) ? sourceDir : path.join(repo.root, sourceDir);
     if (!fs.existsSync(skillsSource) || !fs.statSync(skillsSource).isDirectory()) continue;
     for (const relative of walkFiles(skillsSource)) {
       const from = path.join(skillsSource, relative);
-      const to = path.join(root, sourceDir, relative);
+      const logical = path.isAbsolute(sourceDir)
+        ? path.join(sourceDir, relative)
+        : path.posix.join(sourceDir, relative);
+      const staged = path.posix.join(stagedDir, relative);
+      const to = path.join(root, staged);
       fs.mkdirSync(path.dirname(to), { recursive: true });
       fs.copyFileSync(from, to);
-      originals.set(path.posix.join(sourceDir, relative), fs.readFileSync(from, "utf8"));
+      originals.set(logical, fs.readFileSync(from, "utf8"));
+      stagedPaths.set(logical, staged);
     }
   }
-  fs.mkdirSync(path.join(root, skillsDir), { recursive: true });
+  fs.mkdirSync(path.join(root, workspacePathFor(skillsDir)), { recursive: true });
 
-  return { root, memoryPath: memoryFile.path, skillsDir, skillDirs, originals };
+  return {
+    root,
+    memoryPath: memoryFile.path,
+    memoryWorkspacePath,
+    skillsDir,
+    skillDirs,
+    skillMappings,
+    stagedPaths,
+    originals,
+  };
 }
 
 function walkFiles(dir, prefix = "") {
@@ -76,10 +99,12 @@ function walkFiles(dir, prefix = "") {
 export function isSkillFilePath(relative, skillsDir) {
   const dirs = Array.isArray(skillsDir) ? skillsDir : [skillsDir];
   return dirs.some((dir) => {
-    const prefix = `${normalizeSkillsDir(dir)}/`;
-    if (!relative.startsWith(prefix)) return false;
-    const inside = relative.slice(prefix.length);
-    const parts = inside.split("/");
+    if (!relative || !dir) return false;
+    const windows = relative.includes("\\") || dir.includes("\\") || path.win32.isAbsolute(relative);
+    const paths = windows ? path.win32 : path;
+    const inside = paths.relative(dir, relative);
+    if (!inside || inside === ".." || inside.startsWith(`..${paths.sep}`) || paths.isAbsolute(inside)) return false;
+    const parts = inside.split(paths.sep);
     if (parts.length === 1) return parts[0].endsWith(".md");
     return parts.length === 2 && parts[1] === "SKILL.md";
   });
@@ -217,7 +242,15 @@ export function splitRemovalHunk(hunk, { oldText, oldLines, recovered }) {
  * workspace yields identical ids.
  */
 export function measureWorkspace(workspace) {
-  const { root, memoryPath, skillsDir, skillDirs = [skillsDir], originals } = workspace;
+  const {
+    root,
+    memoryPath,
+    skillsDir,
+    skillDirs = [skillsDir],
+    skillMappings = skillDirs.map((logical) => ({ logical, staged: workspacePathFor(logical) })),
+    stagedPaths = new Map([...workspace.originals.keys()].map((file) => [file, workspacePathFor(file)])),
+    originals,
+  } = workspace;
   /** @type {any[]} */
   const changes = [];
   const stray = [];
@@ -226,26 +259,45 @@ export function measureWorkspace(workspace) {
   const present = new Set(walkFiles(root).map((p) => p.split(path.sep).join("/")));
 
   const ordered = [memoryPath, ...[...originals.keys()].filter((f) => f !== memoryPath).sort()];
-  for (const relative of ordered) {
-    const original = originals.get(relative);
-    if (!present.has(relative)) {
-      changes.push({ kind: "deleted", file: relative });
+  for (const logical of ordered) {
+    const original = originals.get(logical);
+    const staged = stagedPaths.get(logical) || workspacePathFor(logical);
+    if (!present.has(staged)) {
+      changes.push({ kind: "deleted", file: logical, workspaceFile: staged });
       continue;
     }
-    const text = fs.readFileSync(path.join(root, relative), "utf8");
-    texts.set(relative, text);
-    for (const hunk of anchoredHunks(original, text)) changes.push({ kind: "hunk", file: relative, ...hunk });
+    const text = fs.readFileSync(path.join(root, staged), "utf8");
+    texts.set(logical, text);
+    for (const hunk of anchoredHunks(original, text)) {
+      changes.push({ kind: "hunk", file: logical, workspaceFile: staged, ...hunk });
+    }
   }
 
-  for (const relative of [...present].sort()) {
-    if (originals.has(relative)) continue;
-    if (!isSkillFilePath(relative, skillDirs)) {
-      stray.push(relative);
+  const knownStaged = new Set(stagedPaths.values());
+  for (const staged of [...present].sort()) {
+    if (knownStaged.has(staged)) continue;
+    const mapping = skillMappings.find(({ staged: dir }) => staged === dir || staged.startsWith(`${dir}/`));
+    if (!mapping) {
+      stray.push(staged);
       continue;
     }
-    const text = fs.readFileSync(path.join(root, relative), "utf8");
-    texts.set(relative, text);
-    changes.push({ kind: "created", file: relative, text, skill: parseSkillFile(relative, text) });
+    const inside = staged.slice(mapping.staged.length).replace(/^\//, "");
+    const logical = path.isAbsolute(mapping.logical)
+      ? path.join(mapping.logical, inside)
+      : path.posix.join(mapping.logical, inside);
+    if (!isSkillFilePath(logical, skillDirs)) {
+      stray.push(staged);
+      continue;
+    }
+    const text = fs.readFileSync(path.join(root, staged), "utf8");
+    texts.set(logical, text);
+    changes.push({
+      kind: "created",
+      file: logical,
+      workspaceFile: staged,
+      text,
+      skill: parseSkillFile(logical, text),
+    });
   }
 
   // Split any memory-file removal that mixes extracted text (recovered in a created
@@ -271,8 +323,16 @@ export function measureWorkspace(workspace) {
         continue;
       }
       const subHunks = splitRemovalHunk(change, { oldText, oldLines, recovered });
-      if (subHunks) measured.push(...subHunks.map((sub) => ({ kind: "hunk", file: memoryPath, ...sub })));
-      else measured.push(change);
+      if (subHunks) {
+        measured.push(
+          ...subHunks.map((sub) => ({
+            kind: "hunk",
+            file: memoryPath,
+            workspaceFile: change.workspaceFile,
+            ...sub,
+          })),
+        );
+      } else measured.push(change);
     }
     changes.splice(0, changes.length, ...measured);
   }
@@ -294,7 +354,7 @@ function signatureOf(changes) {
 export function repoFingerprint(repo, files) {
   const out = {};
   for (const relative of files) {
-    const absolute = path.join(repo.root, relative);
+    const absolute = path.isAbsolute(relative) ? relative : path.join(repo.root, relative);
     out[relative] = fs.existsSync(absolute) ? sha256(fs.readFileSync(absolute, "utf8")) : null;
   }
   return out;

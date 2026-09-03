@@ -1,4 +1,7 @@
+import path from "node:path";
+
 import { analyzeTranscripts } from "../analyze.js";
+import { userClaudeSkillsDir } from "../config.js";
 import { UserError, color, info, json, out, warn } from "../logger.js";
 import { memorySurfaceHash, resolveMemoryFiles } from "../memory.js";
 import { loadProjectSkills, resolveOverflowTarget, skillDescriptionTokens } from "../skills.js";
@@ -23,24 +26,38 @@ import { capTranscripts } from "../sample.js";
  * When no configured file exists, `backpass` (the default run) bootstraps one; every
  * other command fails with a pointer to that.
  */
-export function primaryMemoryFile(repo, config) {
-  const resolved = resolveMemoryFiles(repo.root, config.memoryFiles);
+export function primaryMemoryFile(repo, config, scope = null) {
+  const resolved = resolveMemoryFiles(repo.root, config.memoryFiles, { allowExternal: scope?.kind === "user" });
   if (!resolved.primary) {
+    if (scope?.kind === "user") {
+      throw new UserError(
+        `no user memory file found (looked for ${config.memoryFiles.join(", ")})`,
+        "set user.memoryFiles in ~/.config/backpass/config.json",
+      );
+    }
     throw new UserError(
       `no memory file found (looked for ${config.memoryFiles.join(", ")})`,
       "run `backpass` to bootstrap an AGENTS.md, or set memoryFiles in .backpassrc.json",
     );
   }
   for (const other of resolved.separate) {
+    const relativeImport = path
+      .relative(path.dirname(other.absolute), resolved.primary.absolute)
+      .split(path.sep)
+      .join("/");
+    const pointerImport = relativeImport;
     warn(
       `${other.path} is a separate memory file and will NOT be updated - only ${resolved.primary.path} is optimized. ` +
         `To cover both, consolidate: move its content into ${resolved.primary.path} and make ${other.path} a pointer ` +
-        `(a single line: @${resolved.primary.path}).`,
+        `(a single line: @${pointerImport}).`,
     );
   }
   // Overflow-layout warnings are the synthesis stage's to print; this resolution is read-only.
-  const overflow = resolveOverflowTarget(repo.root, config.skillsDir);
-  const skills = loadProjectSkills(repo.root, overflow.dir);
+  const userScope = scope?.kind === "user";
+  const overflow = resolveOverflowTarget(repo.root, config.skillsDir, {
+    claudeSkillsDir: userScope ? userClaudeSkillsDir() : undefined,
+  });
+  const skills = loadProjectSkills(repo.root, overflow.dir, config.skillsDirs || [], { exact: userScope });
   return {
     file: resolved.primary,
     all: resolved.all,
@@ -51,8 +68,8 @@ export function primaryMemoryFile(repo, config) {
 }
 
 export async function runAnalysis(ctx) {
-  const { repo, config } = ctx;
-  const { file, hash, skills } = primaryMemoryFile(repo, config);
+  const { repo, scope, config } = ctx;
+  const { file, hash, skills } = primaryMemoryFile(repo, config, scope);
   // Deterministic by design: tokens and units come from parsing the file, no model.
   const descriptionTokens = skillDescriptionTokens(skills);
   emitProgress("memory", {
@@ -66,7 +83,7 @@ export async function runAnalysis(ctx) {
   const { transcripts, perHarness } = capTranscripts(await discoverForRun(ctx), config);
 
   if (!transcripts.length) {
-    info(`${color.yellow("·")} no transcripts associated with this repo`);
+    info(`${color.yellow("·")} no transcripts associated with this ${scope?.kind === "user" ? "user" : "repo"}`);
     return { file, hash, skills, transcripts, perHarness, summary: null };
   }
 
@@ -76,6 +93,7 @@ export async function runAnalysis(ctx) {
     skills,
     config,
     repo,
+    modelCwd: scope?.modelCwd || repo.root,
     memoryHash: hash,
     force: Boolean(ctx.flags.force),
   });

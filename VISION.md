@@ -12,7 +12,8 @@ It owns exactly one thing: the backward pass from session transcripts to a propo
 Every claim a model makes carries a verbatim quote copied from the trace, and a claim without one is discarded rather than softened.
 A signal extracted mechanically, with no judgment applied to it, is noise until a quote anchors it to a real moment, so there is no quoteless path into the file.
 A visible violation outranks any number of "it went fine" observations, because negative evidence is what proves the file was steering anything at all.
-A new instruction needs corroboration from at least two distinct sessions, and one session never counts twice however often it is re-analyzed.
+Adding, rewording, or deleting instruction content needs corroboration from at least two distinct sessions, and one session never counts twice however often it is re-analyzed; extraction and movement are exempt because they preserve that content.
+That bar is drawn on sessions rather than on the shape of the change, because whether a reworded line carries new instruction is a question about meaning that no measurement of the text can settle.
 The bar is sessions, not repositories: a gap does not also have to appear in more than one project.
 Removing an instruction takes the same corroboration adding one does, and only harm from following it counts, because a rule that was merely skipped argues for reinforcement rather than deletion.
 Corroboration accumulates across runs in a ledger rather than resetting each run, so a gap seen today and again next week still graduates.

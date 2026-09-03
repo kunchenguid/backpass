@@ -116,6 +116,7 @@ async function analyzeOne({
   memoryFile,
   config,
   repo,
+  modelCwd = null,
   slot = 0,
   openGapIndex = "(none yet)",
   skillIndex = "(this repo has no skills)",
@@ -171,7 +172,7 @@ async function analyzeOne({
       agent: pick.agent,
       model: pick.model,
       promptFile,
-      cwd: repo.root,
+      cwd: modelCwd || repo.root,
       timeoutSeconds: config.timeoutSeconds,
       promptRetries: config.promptRetries,
     };
@@ -226,6 +227,7 @@ export async function analyzeTranscripts({
   skills = [],
   config,
   repo,
+  modelCwd = null,
   memoryHash,
   force = false,
 }) {
@@ -241,16 +243,27 @@ export async function analyzeTranscripts({
     staleMemoryHash: 0,
   };
   const priorHashes = new Set();
+  const transcriptMetadata = (transcript) => ({
+    harness: transcript.harness,
+    id: transcript.id,
+    identity: transcriptIdentity(transcript),
+    path: transcript.path,
+    mtimeMs: transcript.mtimeMs,
+    bytes: transcript.bytes,
+    startedAt: transcript.startedAt,
+    association: transcript.association,
+    interaction: classifyInteraction(transcript),
+    cwd: transcript.cwd || null,
+    project: transcript.project || null,
+    projectRoot: transcript.projectRoot || null,
+  });
 
   for (const transcript of transcripts) {
     const existing = state.readEvidence(transcript);
     if (!force && isEvidenceFresh(existing, transcript, memoryHash)) {
-      const interaction = classifyInteraction(transcript);
-      if (existing.transcript?.interaction !== interaction) {
-        state.writeEvidence(transcript, {
-          ...existing,
-          transcript: { ...existing.transcript, interaction },
-        });
+      const updatedTranscript = { ...existing.transcript, ...transcriptMetadata(transcript) };
+      if (JSON.stringify(existing.transcript) !== JSON.stringify(updatedTranscript)) {
+        state.writeEvidence(transcript, { ...existing, transcript: updatedTranscript });
       }
       summary.cached += 1;
       continue;
@@ -299,23 +312,20 @@ export async function analyzeTranscripts({
   // the skill index, so a mistake an existing skill's content covers is reported as a
   // failed trigger (`coveredBySkill`) instead of a brand-new gap.
   const openGapIndex = renderOpenGapIndex(state.readGapLedger(), memoryFile.path);
-  const skillIndex = renderSkillIndexForAnalysis(skills);
+  const skillIndex = renderSkillIndexForAnalysis(
+    modelCwd && path.resolve(modelCwd) !== path.resolve(repo.root)
+      ? skills.map((skill) => ({
+          ...skill,
+          path: path.isAbsolute(skill.path) ? skill.path : path.join(repo.root, skill.path),
+        }))
+      : skills,
+  );
 
   let done = 0;
   const evidenceTotals = { positive: 0, negative: 0, gaps: 0 };
   await pool(pending, config.jobs, async (transcript, _index, slot) => {
     const base = {
-      transcript: {
-        harness: transcript.harness,
-        id: transcript.id,
-        identity: transcriptIdentity(transcript),
-        path: transcript.path,
-        mtimeMs: transcript.mtimeMs,
-        bytes: transcript.bytes,
-        startedAt: transcript.startedAt,
-        association: transcript.association,
-        interaction: classifyInteraction(transcript),
-      },
+      transcript: transcriptMetadata(transcript),
       memoryHash,
       memoryPath: memoryFile.path,
       key: evidenceKey(transcript, memoryHash),
@@ -331,7 +341,16 @@ export async function analyzeTranscripts({
     });
 
     try {
-      const result = await analyzeOne({ transcript, memoryFile, config, repo, slot, openGapIndex, skillIndex });
+      const result = await analyzeOne({
+        transcript,
+        memoryFile,
+        config,
+        repo,
+        modelCwd,
+        slot,
+        openGapIndex,
+        skillIndex,
+      });
       if (result.status === "skipped") {
         summary.skipped += 1;
         state.writeEvidence(transcript, { ...base, status: "skipped", reason: result.reason });

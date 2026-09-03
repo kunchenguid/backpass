@@ -384,11 +384,24 @@ test("cached evidence is upgraded with the current interaction category", async 
     bytes: 200,
     interactionSignals: { originator: "codex_exec", source: "exec" },
     interaction: NON_INTERACTIVE,
+    startedAt: "2026-09-02T10:00:00.000Z",
+    cwd: "/repos/restored",
+    project: "github.com/acme/restored",
+    projectRoot: "/repos/restored",
+    association: { tier: 1, confidence: "git", reason: "restored checkout" },
   };
   const memoryHash = "sha256:memory";
   state.writeEvidence(transcript, {
     status: "ok",
-    transcript: { harness: "codex", id: transcript.id, identity: "codex:robot-1" },
+    transcript: {
+      harness: "codex",
+      id: transcript.id,
+      identity: "codex:robot-1",
+      cwd: "/repos/deleted",
+      project: "github.com/acme/restored",
+      projectRoot: null,
+      association: { tier: 2, confidence: "remote", reason: "checkout absent" },
+    },
     memoryHash,
     memoryPath: "AGENTS.md",
     key: evidenceKey(transcript, memoryHash),
@@ -412,6 +425,11 @@ test("cached evidence is upgraded with the current interaction category", async 
   assert.deepEqual([summary.cached, summary.analyzed], [1, 0]);
   const [upgraded] = state.listEvidence();
   assert.equal(upgraded.transcript.interaction, NON_INTERACTIVE);
+  assert.equal(upgraded.transcript.cwd, transcript.cwd);
+  assert.equal(upgraded.transcript.project, transcript.project);
+  assert.equal(upgraded.transcript.projectRoot, transcript.projectRoot);
+  assert.deepEqual(upgraded.transcript.association, transcript.association);
+  assert.equal(upgraded.transcript.startedAt, transcript.startedAt);
   assert.deepEqual(foldEvidence([upgraded]).analyzedByInteraction, {
     [INTERACTIVE]: 0,
     [NON_INTERACTIVE]: 1,

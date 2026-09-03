@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { userClaudeSkillsDir } from "../config.js";
 import { color, json, out } from "../logger.js";
 import { resolveMemoryFiles } from "../memory.js";
 import {
@@ -15,10 +16,10 @@ import { table } from "./scan.js";
 import { candidateKey, isProbeEntryFresh, resolvedEffort } from "../agents.js";
 
 export async function cmdStatus(ctx) {
-  const { repo, config } = ctx;
+  const { repo, config, scope } = ctx;
   const state = config.state;
 
-  const resolved = resolveMemoryFiles(repo.root, config.memoryFiles);
+  const resolved = resolveMemoryFiles(repo.root, config.memoryFiles, { allowExternal: scope?.kind === "user" });
   const files = resolved.all;
   const evidence = state.listEvidence();
   const counts = { ok: 0, failed: 0, skipped: 0 };
@@ -28,9 +29,12 @@ export async function cmdStatus(ctx) {
   const summary = state.readSummary();
   const proposal = state.readProposal();
   const rejections = state.readRejections();
-  const overflow = resolveOverflowTarget(repo.root, config.skillsDir);
-  const skillDirs = resolveProjectSkillDirs(repo.root, overflow.dir);
-  const skills = loadProjectSkills(repo.root, overflow.dir);
+  const userScope = scope?.kind === "user";
+  const overflow = resolveOverflowTarget(repo.root, config.skillsDir, {
+    claudeSkillsDir: userScope ? userClaudeSkillsDir() : undefined,
+  });
+  const skillDirs = resolveProjectSkillDirs(repo.root, overflow.dir, config.skillsDirs || [], { exact: userScope });
+  const skills = loadProjectSkills(repo.root, overflow.dir, config.skillsDirs || [], { exact: userScope });
   const descriptionTokens = skillDescriptionTokens(skills);
 
   const duplicates = files
@@ -66,7 +70,7 @@ export async function cmdStatus(ctx) {
     return 0;
   }
 
-  out(`${color.bold(repo.name)} ${color.dim(repo.root)}`);
+  out(`${color.bold(ctx.scope?.kind === "user" ? "user scope" : repo.name)} ${color.dim(repo.root)}`);
   out("");
 
   out(color.dim("BUDGET (always-loaded)"));

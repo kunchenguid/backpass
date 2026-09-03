@@ -37,6 +37,11 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
 
 ## Sharp edges
 
+- **User-scope runs are a separate triple.** See README's User-level memory section
+  for user-facing paths and defaults. Association, filters, and the synthetic homedir
+  repo live in `src/scope.js`; user state never enters `<repo>/.backpass/`.
+  `minGapProjects` defaults to 1 (the gate exists; cross-project corroboration is not
+  required). A project-scoped run never writes a user-level file.
 - **Sibling clones are a live-path tier, not a recorded-remote one.** `git worktree
 list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches the
   parent of each worktree (and `discovery.cloneRoots`) for other checkouts that share a
@@ -142,6 +147,20 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   pure deletion inside a skill file is refused outright - skill content is rewritten or
   extracted, never dropped. Non-compliance never satisfies the floor; the >= 20%-relevance
   placement table stays prompt guidance by the captain's explicit decision - do not harden it.
+- **One session floor covers the whole always-loaded surface.** Every edit whose kind is
+  not `extract` or `move` must quote `minGapEvidence` distinct sessions - add, rewrite and
+  remove alike. `buildProposal` discards empty quote text, then counts canonical non-empty
+  source labels from the edit's own `evidence` that also appear in `summary.sources`
+  (the labels this run's fold issued; `src/fold.js`). The model's `transcripts` field is
+  not read. A misspelled or date-shifted label is not a second session. Sourceless quotes
+  remain visible as `unknown source` but do not count. There is no shape predicate
+  separating an additive rewrite from a tightening, so a one-session tightening is
+  refused too. Never reintroduce a lexical-overlap, token-growth, or other text classifier
+  here. In user scope the same edits also clear `minGapProjects` (unchanged default),
+  counted by `countedEvidenceProjects` from cited gap clusters and from
+  `summary.sourceProjects`, the fold's source -> project map that lets instruction-row
+  evidence answer for a rewrite. `sourceProjects` is empty without a project;
+  `summary.sources` is the allowlist for both scopes.
 - **Negative evidence has a sign the pipeline must not lose.** Analysis classifies every
   negative (`harm` / `non-compliance` / `irrelevant`, `sanitizeEvidence` drops other
   values) and `renderEvidenceForPrompt` renders the class AND the `effect` text with each
@@ -160,8 +179,16 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   unsplit. The instruction index and fold use those parts so evidence cannot smear across a
   blob, and synthesis is told to restructure repeated non-compliance into list items rather
   than bold-label it. See `src/memory.js` and `renderEvidenceForPrompt` in `src/fold.js`.
-- **Never trust model-reported numbers.** Token deltas and budget projections are measured
-  in `src/proposal.js` from the actual text; the synthesis model's own figures are ignored.
+- **The apply surface's funnel band is presentation, and its counters must stay that way.**
+  `templates/apply.html` draws one band from findings to edits proposed on one scale, in two
+  lanes (an existing instruction, a missing one), each drop named in plain words. It is fed by
+  display-only counters - `reportOnlyByReason` and `instructionsWithNegatives` in the fold's
+  `totals`, plus the instruction-outcome counters in `buildProposal` - that no gate may ever
+  read; changing what the band shows must never change what is proposed or refused.
+  A proposal lacking them falls back to the classic stat row rather than inventing zeros.
+- **Never trust model-reported numbers.** Token deltas, budget projections and an edit's
+  session count are measured in `src/proposal.js` from the actual text and quotes; the
+  synthesis model's own figures are ignored.
   Usage accounting comes from acpx's `[acpx] tokens:` stderr line, which acpx prints
   when the ACP adapter returns usage (codex, claude do; pi-acp does not), with one
   harness-store fallback: pi's per-turn usage is read back from its own session file,

@@ -96,6 +96,23 @@ test("a gap seen once now and once on a later run accumulates to two sessions an
   assert.deepEqual(second.gaps[0].quotes.map((q) => q.text).sort(), ["quote from claude-s1", "quote from claude-s2"]);
 });
 
+test("persisted selected gap sources remain fold-issued without fresh evidence", async () => {
+  const h = harness();
+  const old = record("claude-s1", [GAP]);
+  await run(h, [old]);
+
+  const fresh = record("claude-s2", [GAP_REPHRASED], { memoryHash: "h2" });
+  h.state.writeEvidence(fresh.transcript.id, fresh);
+  const summary = await foldForRun(h.ctx, memoryFile(), "h2", [], [old.transcript, fresh.transcript]);
+
+  assert.equal(summary.analyzedSessions, 1, "the stale evidence record stays excluded");
+  assert.equal(summary.gaps.length, 1, "its selected ledger observation still corroborates the gap");
+  assert.equal(summary.gaps[0].sessions, 2);
+  for (const quote of summary.gaps[0].quotes) {
+    assert.ok(summary.sources.includes(quote.source), `fold-issued gap source missing from allowlist: ${quote.source}`);
+  }
+});
+
 test("the same session is never double-counted across runs", async () => {
   const h = harness();
   await run(h, [record("claude-s1", [GAP])]);
@@ -155,6 +172,33 @@ function age(h, days) {
   }
   h.state.writeGapLedger(ledger);
 }
+
+test("ledger preserves covered duplicate phrasings for each session", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-ledger-covered-"));
+  const covered = "Always pin the Node version with nvm.";
+  const uncovered = "Pin the Node version using nvm.";
+  fs.writeFileSync(path.join(root, "AGENTS.md"), `# T\n\n- ${covered}\n`);
+  const first = record("s1", [uncovered, covered]);
+  first.transcript.project = root;
+  first.transcript.projectRoot = root;
+  const second = record("s2", [uncovered]);
+  second.transcript.project = "/repos/other";
+  const ledger = { version: 1, entries: {} };
+
+  recordGapObservations(ledger, [first, second]);
+  const observations = ledgerGapObservations(ledger, MEMORY_PATH);
+  const summary = foldEvidence([], {
+    gapObservations: observations,
+    minGapEvidence: 2,
+    minGapProjects: 2,
+    checkProjectCoverage: true,
+  });
+
+  const persisted = observations.find((observation) => observation.sessionId === "s1");
+  assert.deepEqual(persisted.phrasings, [uncovered, covered]);
+  assert.equal(summary.gaps.length, 0);
+  assert.equal(summary.totals.droppedGapSingletons, 1);
+});
 
 test("a later uncited observation preserves the session's failed-trigger citation", () => {
   const phrasing = "Wrap migrations in a transaction.";
@@ -363,16 +407,27 @@ test("mergeGapEntries preserves absorbed citations for duplicate sessions", () =
     { id: targetId, text: "Check the database contract before changing queries.", sessions: ["s1", "s2"] },
     { id: absorbedId, text: "Read schema docs before SQL edits.", sessions: ["s1", "s2"] },
   );
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-merged-project-"));
+  fs.writeFileSync(path.join(projectRoot, "AGENTS.md"), "# T\n\n- Read schema docs before SQL edits.\n");
   ledger.entries[absorbedId].sessions.s1.coveredBySkill = "db-schema";
+  ledger.entries[absorbedId].sessions.s1.project = projectRoot;
+  ledger.entries[absorbedId].sessions.s1.projectRoot = projectRoot;
   ledger.entries[absorbedId].sessions.s2.coveredBySkill = "db-schema";
 
   mergeGapEntries(ledger, [[targetId, absorbedId]]);
   const observations = ledgerGapObservations(ledger, MEMORY_PATH, [{ name: "db-schema" }]);
-  const summary = foldEvidence([], { gapObservations: observations, minGapEvidence: 2 });
+  const summary = foldEvidence([], {
+    gapObservations: observations,
+    minGapEvidence: 1,
+    checkProjectCoverage: true,
+  });
 
   assert.equal(observations.length, 2, "each session remains one observation");
+  assert.equal(observations.find((observation) => observation.sessionId === "s1").projectRoot, projectRoot);
+  assert.equal(summary.gaps[0].sessions, 1);
+  assert.equal(summary.gaps[0].projectCoveredSessions, 1);
   assert.equal(summary.gaps[0].failedTriggerSkill, "db-schema");
-  assert.equal(summary.gaps[0].failedTriggerSessions, 2);
+  assert.equal(summary.gaps[0].failedTriggerSessions, 1);
 });
 
 test("merged gap identities remain durable as the canonical phrasing changes", () => {

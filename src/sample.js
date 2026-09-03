@@ -180,19 +180,42 @@ export function sampleTranscripts(
 }
 
 /**
+ * Cap each project's transcripts before the global cap, so one hot repo cannot fill
+ * the sample. Uses the same sticky recency-weighted draw as the global cap.
+ */
+export function capPerProject(transcripts, maxPerProject, options = {}) {
+  if (!Number.isInteger(maxPerProject) || maxPerProject < 1) return transcripts;
+  const groups = new Map();
+  for (const transcript of transcripts) {
+    const key = transcript.project || transcript.cwd || transcriptIdentity(transcript);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(transcript);
+  }
+  const kept = new Set();
+  for (const group of groups.values()) {
+    for (const transcript of sampleTranscripts(group, maxPerProject, options)) kept.add(transcript);
+  }
+  return transcripts.filter((transcript) => kept.has(transcript));
+}
+
+/**
  * Apply the configured cap to a discovery result, reporting it on stderr when sampling
  * actually happened. Under the cap the set passes through untouched and nothing is
  * printed.
  */
 export function capTranscripts(result, config, { now = Date.now() } = {}) {
+  const options = { seed: config.seed ?? undefined, now, halfLife: config.sampleHalfLife };
+  let transcripts = result.transcripts;
+  const perProject = config.discovery?.maxTranscriptsPerProject;
+  if (Number.isInteger(perProject) && perProject > 0) {
+    transcripts = capPerProject(transcripts, perProject, options);
+  }
   const cap = parseMaxTranscripts(config.maxTranscripts);
   const discovered = result.transcripts.length;
-  if (cap === null || discovered <= cap) return result;
-  const sampled = sampleTranscripts(result.transcripts, cap, {
-    seed: config.seed ?? undefined,
-    now,
-    halfLife: config.sampleHalfLife,
-  });
+  if (cap === null || transcripts.length <= cap) {
+    return transcripts === result.transcripts ? result : { ...result, transcripts };
+  }
+  const sampled = sampleTranscripts(transcripts, cap, options);
   const sampledMix = corpusMix(sampled);
   const discoveredMix = corpusMix(result.transcripts);
   const mixed = discoveredMix.interactive > 0 && discoveredMix.nonInteractive > 0;

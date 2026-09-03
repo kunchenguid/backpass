@@ -3,7 +3,8 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 
 import { applyEdit, filesOfEdit, sliceEditForFile } from "../proposal.js";
-import { memoryTextHash } from "../memory.js";
+import { memoryTextHash, resolveMemoryPath } from "../memory.js";
+import { userClaudeSkillsDir } from "../config.js";
 import { budgetGateKind, budgetStatus, estimateTokens, formatTokens } from "../tokens.js";
 import { recordRejection } from "../state.js";
 import {
@@ -24,6 +25,39 @@ import {
  * are part of the count, the bare file when there are none - a number shown to a person
  * must describe the thing it measures.
  */
+function resolveTarget(root, relative) {
+  if (!relative) return relative;
+  return path.isAbsolute(relative) ? relative : path.join(root, relative);
+}
+
+/** Named refusal when a user-level target is a symlink into a read-only store. */
+export function readOnlySymlinkMessage(absolute, realPath) {
+  return `${absolute} is a symlink to ${realPath}, which is not writable; edit the source that generates it`;
+}
+
+function refuseReadOnlySymlink(absolute) {
+  let lstat;
+  try {
+    lstat = fs.lstatSync(absolute);
+  } catch {
+    return null;
+  }
+  if (!lstat.isSymbolicLink()) return null;
+  let real;
+  try {
+    real = fs.realpathSync(absolute);
+  } catch {
+    return null;
+  }
+  try {
+    fs.accessSync(real, fs.constants.W_OK);
+    fs.accessSync(path.dirname(real), fs.constants.W_OK | fs.constants.X_OK);
+    return null;
+  } catch {
+    return readOnlySymlinkMessage(absolute, real);
+  }
+}
+
 function surfaceLabel(memoryPath, descriptionTokens) {
   return descriptionTokens ? `the always-loaded surface (${memoryPath} + skill descriptions)` : memoryPath;
 }
@@ -86,7 +120,11 @@ function memoryFileSnapshot(proposal, repo) {
   const relative = proposal.memoryFile?.path;
   if (!relative) return { text: null };
 
-  const absolute = path.join(repo.root, relative);
+  const absolute = resolveTarget(repo.root, relative);
+  const blocked = refuseReadOnlySymlink(absolute);
+  if (blocked) {
+    return { text: null, failure: { file: relative, error: blocked } };
+  }
   if (!fs.existsSync(absolute)) {
     if (!expected) return { text: null };
     return {
@@ -170,7 +208,11 @@ function commitStillCurrent(commit) {
 function absentParentDirectories(root, files) {
   const directories = new Set();
   for (const file of files) {
-    for (let current = path.dirname(file); current !== root; current = path.dirname(current)) {
+    for (
+      let current = path.dirname(file);
+      current !== root && path.dirname(current) !== current;
+      current = path.dirname(current)
+    ) {
       if (!fs.existsSync(current)) directories.add(current);
     }
   }
@@ -216,6 +258,20 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     rejectionsRecorded: false,
   };
 
+  if ((proposal.scope || "project") === "project") {
+    const targets = new Set([
+      proposal.memoryFile?.path,
+      ...[...accepted, ...rejected].flatMap((edit) => filesOfEdit(edit)),
+      ...accepted.flatMap((edit) => editSkills(edit).map((skill) => skill.path)),
+    ]);
+    try {
+      for (const target of targets) if (target) resolveMemoryPath(repo.root, target);
+    } catch (err) {
+      results.failed.push({ error: err.message });
+      return results;
+    }
+  }
+
   let memoryText = null;
   if (accepted.length || rejected.length) {
     const snapshot = memoryFileSnapshot(proposal, repo);
@@ -228,11 +284,15 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
 
   // The always-loaded skill layer as it exists on disk right now - the budget below
   // covers the whole surface, not the memory file alone.
+  const userScope = proposal.scope === "user";
+  const claudeSkillsLink = userScope ? userClaudeSkillsDir() : CLAUDE_SKILLS_LINK;
   const skillsDir = resolveOverflowTarget(
     repo.root,
     proposal.config?.skillsDir || config.skillsDir || CANONICAL_SKILLS_DIR,
+    { claudeSkillsDir: claudeSkillsLink },
   ).dir;
-  const skillsNow = loadProjectSkills(repo.root, skillsDir);
+  const configuredSkillDirs = proposal.config?.skillsDirs || proposal.config?.skillDirs || config.skillsDirs || [];
+  const skillsNow = loadProjectSkills(repo.root, skillsDir, configuredSkillDirs, { exact: userScope });
   const descriptionTokensNow = skillDescriptionTokens(skillsNow);
 
   // Freshness for every non-memory file a decision targets, the same contract the
@@ -247,7 +307,12 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
       checkedTargets.add(relative);
       const expected = expectedTargetHashes.get(relative);
       if (!expected) continue;
-      const absolute = path.join(repo.root, relative);
+      const absolute = resolveTarget(repo.root, relative);
+      const blocked = refuseReadOnlySymlink(absolute);
+      if (blocked) {
+        results.failed.push({ file: relative, error: blocked });
+        continue;
+      }
       if (!fs.existsSync(absolute)) {
         results.failed.push({ file: relative, error: "file does not exist" });
         continue;
@@ -281,9 +346,14 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
   const landed = new Set();
 
   for (const [relative, edits] of byFile) {
-    const absolute = path.join(repo.root, relative);
+    const absolute = resolveTarget(repo.root, relative);
     if (!fs.existsSync(absolute)) {
       results.failed.push({ file: relative, error: "file does not exist" });
+      continue;
+    }
+    const blocked = refuseReadOnlySymlink(absolute);
+    if (blocked) {
+      results.failed.push({ file: relative, error: blocked });
       continue;
     }
 
@@ -351,7 +421,7 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
   for (const edit of accepted) {
     if (edit.kind !== "extract" || !landed.has(edit.id)) continue;
     for (const skill of editSkills(edit)) {
-      const absolute = path.join(repo.root, skill.path);
+      const absolute = resolveTarget(repo.root, skill.path);
       if (skillPaths.has(skill.path) || fs.existsSync(absolute)) {
         results.failed.push({
           file: skill.path,
@@ -395,8 +465,8 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     ({ skill }) => skill.path === CANONICAL_SKILLS_DIR || skill.path.startsWith(`${CANONICAL_SKILLS_DIR}/`),
   );
   const createdDirectoryCandidates = absentParentDirectories(repo.root, [
-    ...plannedSkills.map(({ skill }) => path.join(repo.root, skill.path)),
-    ...(canonical ? [path.join(repo.root, CLAUDE_SKILLS_LINK)] : []),
+    ...plannedSkills.map(({ skill }) => resolveTarget(repo.root, skill.path)),
+    ...(canonical ? [resolveTarget(repo.root, claudeSkillsLink)] : []),
   ]);
   const skillFailures = [];
   const ownedSkillPaths = [];
@@ -487,9 +557,10 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     try {
       if (!dryRun) commit = atomicReplace(resolved, text);
     } catch (err) {
+      const blocked = refuseReadOnlySymlink(item.absolute);
       results.failed.push({
         file: relative,
-        error: `${relative} could not be written: ${err.message}`,
+        error: blocked || `${relative} could not be written: ${err.message}`,
       });
       rollbackCommitted();
       rollbackSkills();
@@ -513,12 +584,12 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
 
   if (!dryRun && canonical) {
     try {
-      const layout = ensureSkillsLayout(repo.root);
+      const layout = ensureSkillsLayout(repo.root, claudeSkillsLink);
       const result = results.skills.find(({ path: skillPath }) => skillPath === canonical.skill.path);
       result.created = [...new Set([...result.created, ...layout.created])];
       for (const w of layout.warnings) if (!results.warnings.includes(w)) results.warnings.push(w);
     } catch (err) {
-      results.failed.push({ file: CLAUDE_SKILLS_LINK, edit: canonical.edit.id, error: err.message });
+      results.failed.push({ file: claudeSkillsLink, edit: canonical.edit.id, error: err.message });
       rollbackCommitted();
       rollbackSkills();
       return results;

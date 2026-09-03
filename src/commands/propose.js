@@ -71,6 +71,7 @@ export async function foldForRun(ctx, memoryFile, memoryHash, skills = [], trans
     memoryPath: memoryFile.path,
     config: ctx.config,
     repo: ctx.repo,
+    modelCwd: ctx.scope?.modelCwd || ctx.repo?.root,
   });
   pruneGapLedger(ledger, { memoryFile, memoryPath: memoryFile.path, skills, maxAge: gapLedgerMaxAge });
   state.writeGapLedger(ledger);
@@ -80,6 +81,8 @@ export async function foldForRun(ctx, memoryFile, memoryHash, skills = [], trans
   );
   const summary = foldEvidence(relevant, {
     minGapEvidence,
+    minGapProjects: ctx.scope?.kind === "user" ? ctx.config.minGapProjects || 1 : 0,
+    checkProjectCoverage: ctx.scope?.kind === "user",
     memoryFile,
     gapObservations,
     skills,
@@ -100,7 +103,7 @@ export async function runProposal(ctx, precomputed = null) {
   // folding, and agent resolution can all fail before synthesis starts; none of those
   // failures may leave an older proposal available to apply as if it came from this run.
   config.state.clearProposal();
-  const { file, hash, skills } = precomputed || primaryMemoryFile(repo, config);
+  const { file, hash, skills } = precomputed || primaryMemoryFile(repo, config, ctx.scope);
   const transcripts = precomputed?.transcripts || capTranscripts(await discoverForRun(ctx), config).transcripts;
 
   const foldStarted = Date.now();
@@ -128,6 +131,7 @@ export async function runProposal(ctx, precomputed = null) {
     config,
     repo,
     transcripts,
+    scope: ctx.scope,
   });
 
   accountForConsolidationUsage(proposal, summary);
@@ -169,7 +173,11 @@ export function printProposal(proposal, { applied = false, analysisUsage = [] } 
     const delta = edit.deltaTokens || 0;
     out(
       `  ${color.cyan(edit.id)} ${kind.padEnd(8)} ${edit.title} ` +
-        color.dim(`(${delta > 0 ? "+" : ""}${delta} tok, ${edit.transcripts} transcript(s))`),
+        color.dim(
+          `(${delta > 0 ? "+" : ""}${delta} tok, ${edit.transcripts} transcript(s)` +
+            (edit.projects != null ? `, projects=${edit.projects}` : "") +
+            `)`,
+        ),
     );
   }
 

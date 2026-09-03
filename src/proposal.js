@@ -1,4 +1,5 @@
 import { renderHunkLines } from "./diff.js";
+import { normalizeSourceLabel } from "./gap-ledger.js";
 import { mixFromCounts } from "./interaction.js";
 import { memoryTextHash } from "./memory.js";
 import { editSkills, parseFrontmatter, skillDescriptionTokens } from "./skills.js";
@@ -101,9 +102,14 @@ export class ProposalViolation extends Error {
   }
 }
 
-function normalizeEdit(raw, index) {
+function normalizeEdit(raw, index, knownSources = null) {
   const kind = String(raw?.kind || "").toLowerCase();
   const refs = Array.isArray(raw?.changes) ? raw.changes : Array.isArray(raw?.hunks) ? raw.hunks : [];
+  const normalizedEvidence = normalizeEvidence(raw?.evidence);
+  const evidence = normalizedEvidence.map((item) => ({
+    ...item,
+    source: item.source.trim() || "unknown source",
+  }));
   return {
     id: `e${index + 1}`,
     kind,
@@ -111,8 +117,11 @@ function normalizeEdit(raw, index) {
     title: String(raw?.title || "").trim() || "(untitled edit)",
     rationale: String(raw?.rationale || "").trim(),
     instructions: Array.isArray(raw?.instructions) ? raw.instructions.map(String) : [],
-    evidence: normalizeEvidence(raw?.evidence),
-    transcripts: Number.isFinite(raw?.transcripts) ? Number(raw.transcripts) : countSources(raw?.evidence),
+    evidence,
+    // Corroboration is measured from the edit's normalized quotes, never from a
+    // model-reported count. When the fold handed over this run's source labels,
+    // only those labels count - a typed-but-never-issued source is not a session.
+    transcripts: countSources(normalizedEvidence, knownSources),
   };
 }
 
@@ -123,13 +132,15 @@ function normalizeEvidence(evidence) {
     .map((e) => ({
       polarity: e.polarity === "positive" ? "positive" : e.polarity === "neutral" ? "neutral" : "negative",
       text: String(e.text).trim().slice(0, 600),
-      source: String(e.source || "unknown source").slice(0, 120),
+      source: String(e.source || "").slice(0, 120),
     }));
 }
 
-function countSources(evidence) {
+function countSources(evidence, known = null) {
   if (!Array.isArray(evidence)) return 0;
-  return new Set(evidence.map((e) => e?.source).filter(Boolean)).size;
+  const labels = new Set(evidence.map((e) => normalizeSourceLabel(e?.source)).filter(Boolean));
+  if (!known) return labels.size;
+  return [...labels].filter((label) => known.has(label)).length;
 }
 
 /** The del-line texts of a hunk that are not carried by `lineCounts` (blank lines ignored). */
@@ -271,7 +282,7 @@ export function renderChangesForPrompt(measured, memoryFile) {
   };
   return measured.changes
     .map((change) => {
-      const head = `[${describeChange(change)}${unitsAt(change)}]`;
+      const head = `[${describeChange({ ...change, file: change.workspaceFile || change.file })}${unitsAt(change)}]`;
       if (change.kind === "deleted") return head;
       if (change.kind === "created") {
         return `${head}\n${renderHunkLines(
@@ -292,6 +303,23 @@ export function renderChangesForPrompt(measured, memoryFile) {
  * the model's annotation. Nothing textual is taken from the model: the hunks, their
  * deltas, the projected budget, and even whether an edit is an addition are measured.
  */
+function countedEvidenceProjects(edit, summary) {
+  const quoted = new Set(edit.evidence.map((item) => `${item.source || ""}\n${item.text || ""}`));
+  const byGap = (summary?.gaps || [])
+    .filter((gap) => gap.quotes?.some((quote) => quoted.has(`${quote.source || ""}\n${quote.text || ""}`)))
+    .map((gap) => gap.projects || 0);
+  // Gap clusters carry their own project count, but an edit that rewrites or reinforces
+  // an existing instruction quotes instruction-row evidence, which carries none. The fold
+  // hands over the session -> project map behind those rows, so the edit's own quote
+  // sources answer for themselves. A run whose evidence predates the map (or a
+  // project-scoped one, which has no projects) still has the gap count.
+  const sourceProjects = summary?.sourceProjects || {};
+  const byQuoteSource = new Set(
+    edit.evidence.map((item) => sourceProjects[normalizeSourceLabel(item.source)]).filter(Boolean),
+  );
+  return Math.max(0, byQuoteSource.size, ...byGap);
+}
+
 export function buildProposal(rawResult, context) {
   const {
     memoryFile,
@@ -303,12 +331,16 @@ export function buildProposal(rawResult, context) {
     rejections = { entries: {} },
     isSuppressed = () => false,
     skillFiles = [],
+    scope = null,
   } = context;
 
   const violations = [];
   const notes = Array.isArray(rawResult?.notes) ? rawResult.notes.map(String) : [];
   const rawEdits = Array.isArray(rawResult?.edits) ? rawResult.edits : [];
-  const edits = rawEdits.map((raw, i) => normalizeEdit(raw, i));
+  const knownSources = Array.isArray(summary?.sources)
+    ? new Set(summary.sources.map(normalizeSourceLabel).filter(Boolean))
+    : null;
+  const edits = rawEdits.map((raw, i) => normalizeEdit(raw, i, knownSources));
   const changesById = new Map(measured.changes.map((c) => [c.id, c]));
 
   // Skill description lines are always loaded, so they sit under the same cap as the
@@ -347,6 +379,7 @@ export function buildProposal(rawResult, context) {
   }
 
   const accepted = [];
+  const suppressed = [];
   for (const edit of edits) {
     const changes = edit.changeIds.map((id) => changesById.get(id)).filter(Boolean);
     const created = changes.filter((c) => c.kind === "created");
@@ -500,12 +533,28 @@ export function buildProposal(rawResult, context) {
       }
     }
 
-    // An addition is measured, not declared: text that only goes in is a new instruction.
+    // Corroboration is measured, not declared, and it covers the whole always-loaded
+    // surface: adding, rewriting and removing text all clear the same session floor.
+    // Asking instead whether a rewrite "really" adds an instruction requires a semantic
+    // text classifier. Counting the distinct sessions behind an edit's own quotes asks
+    // nothing of the text, so there is no shape to game. Extract and move keep every line
+    // on the always-loaded surface, so they stay exempt; a removal keeps the harm floor
+    // below on top of this one.
     const onlyAdds = hunks.every((h) => h.removed === 0);
-    if (!preservesAlwaysLoaded(edit.kind) && onlyAdds && edit.transcripts < config.minGapEvidence) {
+    const changed = onlyAdds ? "adds a new instruction" : `changes ${files[0] ?? memoryFile.path}`;
+    const projectGate = scope?.kind === "user" && config.minGapProjects != null;
+    const evidenceProjects = projectGate ? countedEvidenceProjects(edit, summary) : null;
+    if (!preservesAlwaysLoaded(edit.kind) && edit.transcripts < config.minGapEvidence) {
       violations.push(
-        `edit ${edit.id} ("${edit.title}") adds a new instruction backed by ${edit.transcripts} session(s); ` +
+        `edit ${edit.id} ("${edit.title}") ${changed} backed by ${edit.transcripts} session(s); ` +
           `${config.minGapEvidence} are required`,
+      );
+      continue;
+    }
+    if (!preservesAlwaysLoaded(edit.kind) && projectGate && evidenceProjects < config.minGapProjects) {
+      violations.push(
+        `edit ${edit.id} ("${edit.title}") ${changed} backed by evidence from ${evidenceProjects} project(s); ` +
+          `${config.minGapProjects} are required`,
       );
       continue;
     }
@@ -569,6 +618,7 @@ export function buildProposal(rawResult, context) {
       instructions: edit.instructions,
       evidence: edit.evidence,
       transcripts: edit.transcripts,
+      ...(evidenceProjects != null ? { projects: evidenceProjects } : {}),
       skills: created.map((c) => c.skill),
       hunks: hunks.map((h) => ({
         id: h.id,
@@ -582,10 +632,14 @@ export function buildProposal(rawResult, context) {
         lines: h.lines,
       })),
       targetsMemoryFile: file === memoryFile.path,
+      applicable: true,
+      deltaTokens: 0,
+      descriptionDelta: 0,
     };
 
     if (isSuppressed(proposed, rejections)) {
       // Rejections are respected until materially new evidence arrives (captain tweak 3).
+      suppressed.push(proposed);
       continue;
     }
     accepted.push(proposed);
@@ -685,11 +739,17 @@ export function buildProposal(rawResult, context) {
     .filter((file) => measured.originals?.has(file))
     .map((file) => ({ file, hash: memoryTextHash(measured.originals.get(file)) }));
 
+  // Instructions the evidence named as candidates that no accepted edit names.
+  // Counted here, not in the fold, because it depends on the accepted edit list.
+  // Display only; nothing downstream reads it.
+  const funnelOutcome = funnelInstructionOutcome(summary, accepted, suppressed);
+
   const proposal = {
     version: 2,
     tool: "backpass",
     generatedAt: new Date().toISOString(),
     repo: { name: repo.name, root: repo.root },
+    scope: scope?.kind || "project",
     memoryFile: { path: memoryFile.path, hash: memoryFile.hash, tokens: memoryFile.tokens },
     targetFiles,
     budget,
@@ -697,8 +757,9 @@ export function buildProposal(rawResult, context) {
       budgetTokens: config.budgetTokens,
       maxEditsPerRun: maxEdits,
       minGapEvidence: config.minGapEvidence,
+      ...(config.minGapProjects != null ? { minGapProjects: config.minGapProjects } : {}),
       skillsDir: config.skillsDir,
-      skillDirs: config.skillDirs,
+      skillsDirs: config.skillsDirs,
       analysis: config.analysis,
       synthesis: config.synthesis,
     },
@@ -716,7 +777,14 @@ export function buildProposal(rawResult, context) {
       gapSightings: summary?.totals?.gapSightings ?? null,
       orchestrationGapSightings: summary?.totals?.orchestrationGapSightings ?? null,
       reportOnlyGapClusters: summary?.totals?.reportOnlyGapClusters ?? null,
+      reportOnlyByReason: summary?.totals?.reportOnlyByReason ?? null,
       droppedGapSingletons: summary?.totals?.droppedGapSingletons ?? null,
+      // The existing-instruction lane of the apply surface's funnel: how many
+      // instructions the negatives land on, and how many no accepted edit names.
+      instructionsWithNegatives: summary?.totals?.instructionsWithNegatives ?? null,
+      instructionsLeftAlone: funnelOutcome?.instructionsLeftAlone ?? null,
+      leftAloneMaxSessions: funnelOutcome?.leftAloneMaxSessions ?? null,
+      instructionsSuppressed: funnelOutcome?.suppressed ?? null,
       skillExtractions: accepted.reduce((n, e) => {
         if (e.kind !== "extract") return n;
         const createdSkills = editSkills(e).length;
@@ -730,6 +798,33 @@ export function buildProposal(rawResult, context) {
   };
 
   return { proposal, violations };
+}
+
+// Display counter for the apply surface's funnel: the instructions that drew a negative
+// finding and that no accepted edit names. A summary from before the funnel counters
+// existed yields null, never an invented zero.
+function funnelInstructionOutcome(summary, accepted, suppressed) {
+  if (
+    !Array.isArray(summary?.instructions) ||
+    typeof summary?.totals?.instructionsWithNegatives !== "number" ||
+    !summary?.totals?.reportOnlyByReason ||
+    typeof summary.totals.reportOnlyByReason !== "object"
+  )
+    return null;
+  const candidates = summary.instructions.filter((row) => row.negative > 0);
+  const candidateIds = new Set(candidates.map((row) => row.instruction));
+  const acceptedIds = new Set(accepted.flatMap((edit) => edit.instructions || []).filter((id) => candidateIds.has(id)));
+  const suppressedIds = new Set(
+    suppressed.flatMap((edit) => edit.instructions || []).filter((id) => candidateIds.has(id) && !acceptedIds.has(id)),
+  );
+  const untouched = candidates.filter(
+    (row) => !acceptedIds.has(row.instruction) && !suppressedIds.has(row.instruction),
+  );
+  return {
+    instructionsLeftAlone: untouched.length,
+    leftAloneMaxSessions: untouched.reduce((n, row) => Math.max(n, row.nonComplianceSessions ?? row.sessions ?? 0), 0),
+    suppressed: suppressedIds.size,
+  };
 }
 
 export function slug(text) {

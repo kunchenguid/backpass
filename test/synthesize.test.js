@@ -80,6 +80,7 @@ const { foldEvidence } = await import("../src/fold.js");
 const { ProposalViolation } = await import("../src/proposal.js");
 const { State } = await import("../src/state.js");
 const { UserError, setLoggerSink } = await import("../src/logger.js");
+const { workspacePathFor } = await import("../src/workspace.js");
 const { makeRepo } = await import("./helpers/staging.js");
 
 setLoggerSink(() => {});
@@ -107,19 +108,24 @@ const QUOTE = {
   text: "the agent re-read the adapter fixture instead",
   source: "claude · s1 · turn 4",
 };
+// Every edit to the always-loaded surface clears the session floor, so the fixtures
+// quote two sessions; the count is measured from these, not declared.
+const QUOTE2 = {
+  polarity: "negative",
+  text: "and here it re-read the same fixture a second time",
+  source: "codex · s2 · turn 9",
+};
 const removal = (changes) => ({
   changes,
   kind: "remove",
   title: "drop two sharp edges nobody hits",
-  evidence: [QUOTE],
-  transcripts: 3,
+  evidence: [QUOTE, QUOTE2],
 });
 const tighten = (changes) => ({
   changes,
   kind: "rewrite",
   title: "sharpen the brevity rule",
-  evidence: [QUOTE],
-  transcripts: 2,
+  evidence: [QUOTE, QUOTE2],
 });
 
 function summaryFor(sessions = 3) {
@@ -140,9 +146,32 @@ function summaryFor(sessions = 3) {
 const pick = { agent: "claude", model: "claude-opus-5", effort: "high", pinned: true };
 const agents = { resolve: async () => pick, withFallthrough: async (_role, fn) => fn(pick) };
 
-function setup(script, { text = AGENTS, overrides = {}, summary = summaryFor() } = {}) {
-  const repo = makeRepo({ "AGENTS.md": text });
-  const config = loadConfig(repo.root, overrides);
+function setup(
+  script,
+  {
+    text = AGENTS,
+    overrides = {},
+    summary = summaryFor(),
+    scope = null,
+    externalMemory = false,
+    externalSkills = false,
+  } = {},
+) {
+  const repo = makeRepo(externalMemory ? {} : { "AGENTS.md": text });
+  const externalSkillsDir = externalSkills
+    ? path.join(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-external-skills-")), "skills")
+    : null;
+  if (externalSkillsDir) {
+    fs.mkdirSync(path.join(externalSkillsDir, "db"), { recursive: true });
+    fs.writeFileSync(
+      path.join(externalSkillsDir, "db/SKILL.md"),
+      "---\nname: db\ndescription: Load for database work.\n---\n\n- Keep transactions short.\n",
+    );
+  }
+  const config = loadConfig(
+    repo.root,
+    externalSkillsDir ? { ...overrides, skillsDir: externalSkillsDir, skillsDirs: [externalSkillsDir] } : overrides,
+  );
   config.state = new State(repo.root).ensure();
   config.agents = agents;
   const log = path.join(fakeDir, `log-${Date.now()}-${Math.random().toString(16).slice(2)}.jsonl`);
@@ -151,8 +180,20 @@ function setup(script, { text = AGENTS, overrides = {}, summary = summaryFor() }
   process.env.FAKE_ACPX_SCRIPT = path.join(repo.root, "fake-script.json");
   process.env.FAKE_ACPX_STATE = path.join(repo.root, "fake-state.json");
   fs.writeFileSync(process.env.FAKE_ACPX_SCRIPT, JSON.stringify(script));
-  const memoryFile = readMemoryFile(repo.root, "AGENTS.md");
-  const run = () => synthesizeProposal({ memoryFile, summary, config, repo, transcripts: [{ harness: "claude" }] });
+  const memoryPath = externalMemory
+    ? path.join(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-external-synth-")), "CLAUDE.md")
+    : "AGENTS.md";
+  if (externalMemory) fs.writeFileSync(memoryPath, text);
+  const memoryFile = readMemoryFile(repo.root, memoryPath, { allowExternal: externalMemory });
+  const run = () =>
+    synthesizeProposal({
+      memoryFile,
+      summary,
+      config,
+      repo,
+      transcripts: [{ harness: "claude" }],
+      scope,
+    });
   const calls = () =>
     fs
       .readFileSync(log, "utf8")
@@ -160,7 +201,7 @@ function setup(script, { text = AGENTS, overrides = {}, summary = summaryFor() }
       .split("\n")
       .filter(Boolean)
       .map((l) => JSON.parse(l));
-  return { repo, config, memoryFile, run, calls };
+  return { repo, config, memoryFile, externalSkillsDir, run, calls };
 }
 
 test("synthesis edits the staging copy natively; measured hunks anchor to the raw file and nothing touches the repo until apply", async () => {
@@ -363,6 +404,29 @@ test("a harness that writes to the repository instead of the staging copy is ref
   });
 });
 
+test("user synthesis can propose against relocated external memory", async () => {
+  const { run, memoryFile } = setup(
+    { edit: {}, annotations: [{ reply: { edits: [] } }] },
+    { scope: { kind: "user" }, externalMemory: true },
+  );
+  const { proposal, violations } = await run();
+  assert.deepEqual(violations, []);
+  assert.equal(proposal.memoryFile.path, memoryFile.path);
+  assert.equal(proposal.edits.length, 0);
+});
+
+test("relocated skill prompts use their actual staged paths", async () => {
+  const setupResult = setup(
+    { edit: {}, annotations: [{ reply: { edits: [] } }] },
+    { scope: { kind: "user" }, externalSkills: true },
+  );
+  await setupResult.run();
+  const prompt = fs.readFileSync(path.join(setupResult.config.state.root, "prompts/synthesis-edit.md"), "utf8");
+  const stagedDir = workspacePathFor(setupResult.externalSkillsDir);
+  assert.ok(prompt.includes(stagedDir));
+  assert.ok(prompt.includes(`${stagedDir}/db/SKILL.md`));
+});
+
 test("an agent that changes nothing yields an empty proposal, never an invented edit", async () => {
   const { run } = setup({ edit: {}, annotations: [{ reply: { edits: [], notes: ["the evidence is too thin"] } }] });
   const { proposal, violations } = await run();
@@ -433,10 +497,14 @@ test("an oversized non-compliance blob synthesizes as a list-item restructure, n
                   {
                     polarity: "negative",
                     text: "skipped the second sentence of the blob entirely here",
-                    source: "claude · s1 · turn 4",
+                    source: summary.sources[0],
+                  },
+                  {
+                    polarity: "negative",
+                    text: "the same blob's second sentence was skipped again",
+                    source: summary.sources[1],
                   },
                 ],
-                transcripts: 2,
                 instructions: ["AG-001.2"],
               },
             ],

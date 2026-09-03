@@ -36,8 +36,22 @@ export function normalizeRemote(remote) {
   return s.toLowerCase() || null;
 }
 
+/**
+ * Live git toplevel for a cwd, or null when the path is missing or not a checkout.
+ * User-scope association uses this as the project key when the worktree still exists.
+ */
+export function gitToplevel(cwd) {
+  if (!cwd) return null;
+  try {
+    if (!fs.existsSync(cwd)) return null;
+    return realpathOrSelf(git(["rev-parse", "--show-toplevel"], cwd));
+  } catch {
+    return null;
+  }
+}
+
 /** Worktree paths for the repo, realpath-normalized (design section 2.1, tier 1). */
-function listWorktrees(root) {
+export function listWorktrees(root) {
   let raw;
   try {
     raw = git(["worktree", "list", "--porcelain"], root);
@@ -105,6 +119,7 @@ function listRemoteUrls(root) {
     return [];
   }
 
+  names.sort((a, b) => (a === "origin" ? -1 : b === "origin" ? 1 : a.localeCompare(b)));
   const urls = new Set();
   for (const name of names) {
     for (const args of [
@@ -125,6 +140,19 @@ function listRemoteUrls(root) {
 
 function listRemotes(root) {
   return [...new Set(listRemoteUrls(root).map(normalizeRemote).filter(Boolean))];
+}
+
+export function gitProjectIdentity(root) {
+  const remote = listRemotes(root)[0];
+  if (remote) return remote;
+
+  try {
+    const commonDir = git(["rev-parse", "--git-common-dir"], root);
+    const absolute = realpathOrSelf(path.isAbsolute(commonDir) ? commonDir : path.resolve(root, commonDir));
+    return path.basename(absolute) === ".git" ? path.dirname(absolute) : `git:${absolute}`;
+  } catch {
+    return realpathOrSelf(root);
+  }
 }
 
 function listCloneRemotes(root) {

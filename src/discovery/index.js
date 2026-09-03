@@ -14,6 +14,7 @@ import { sinceCutoff } from "../config.js";
 import { emitProgress } from "../progress.js";
 import { warn } from "../logger.js";
 import { transcriptIdentity } from "../transcript.js";
+import { passesProjectFilter } from "../scope.js";
 
 export const ADAPTERS = {
   claude,
@@ -48,10 +49,22 @@ export function getAdapter(harness) {
  * files under this repo's cwd) are excluded after association and counted in
  * `perHarness[h].self` - see `./self.js`.
  */
-export async function discoverTranscripts({ repo, config, strict = false, harnesses = null, now = Date.now() }) {
+export async function discoverTranscripts({
+  repo,
+  scope = null,
+  config,
+  strict = false,
+  harnesses = null,
+  now = Date.now(),
+}) {
   const cutoffMs = sinceCutoff(config.discovery.since, now);
   const selected = harnesses || config.discovery.harnesses;
   const cache = config.state.readScanCache();
+  const associateFn =
+    scope?.associate ||
+    ((descriptor) => associate(descriptor, repo, { worktreeGlobs: config.discovery.worktreeGlobs }));
+  const stateDir = config.state?.root;
+  const userFilter = scope?.kind === "user";
 
   const transcripts = [];
   const identities = new Set();
@@ -73,7 +86,16 @@ export async function discoverTranscripts({ repo, config, strict = false, harnes
 
     try {
       const found = adapter.discover
-        ? await discoverDirect(adapter, { repo, config, cutoffMs, strict, stats })
+        ? await discoverDirect(adapter, {
+            repo,
+            config,
+            cutoffMs,
+            strict,
+            stats,
+            associateFn,
+            stateDir,
+            userFilter,
+          })
         : discoverFiles(adapter, {
             repo,
             config,
@@ -81,6 +103,9 @@ export async function discoverTranscripts({ repo, config, strict = false, harnes
             strict,
             stats,
             cache,
+            associateFn,
+            stateDir,
+            userFilter,
             markDirty: () => {
               cacheDirty = true;
             },
@@ -109,6 +134,7 @@ export async function discoverTranscripts({ repo, config, strict = false, harnes
 
   if (cacheDirty) config.state.writeScanCache(cache);
 
+  scope?.normalizeProjects?.(transcripts);
   transcripts.sort((a, b) => (b.mtimeMs || 0) - (a.mtimeMs || 0));
   emitProgress("discover:done", { total: transcripts.length });
   return { transcripts, perHarness, cutoffMs };
@@ -123,20 +149,22 @@ function tierCounts(found) {
   return tiers;
 }
 
-async function discoverDirect(adapter, { repo, config, cutoffMs, strict, stats }) {
+async function discoverDirect(adapter, { repo, config, cutoffMs, strict, stats, associateFn, stateDir, userFilter }) {
   const rows = await adapter.discover({ cutoffMs, repo, config });
   const out = [];
   for (const row of rows) {
     stats.scanned += 1;
-    const association = associate({ cwd: row.cwd, remotes: row.remotes || [], gitRoot: row.gitRoot }, repo, {
-      worktreeGlobs: config.discovery.worktreeGlobs,
-    });
+    const association = associateFn({ cwd: row.cwd, remotes: row.remotes || [], gitRoot: row.gitRoot });
     if (!passesStrict(association, strict)) {
       stats.skipped += 1;
       continue;
     }
     const transcript = toTranscript(adapter, row, association, row.id);
-    if (isSelfSession(transcript)) {
+    if (userFilter && !passesProjectFilter(transcript, config)) {
+      stats.skipped += 1;
+      continue;
+    }
+    if (isSelfSession(transcript, { stateDir })) {
       stats.self += 1;
       continue;
     }
@@ -145,7 +173,10 @@ async function discoverDirect(adapter, { repo, config, cutoffMs, strict, stats }
   return out;
 }
 
-function discoverFiles(adapter, { repo, config, cutoffMs, strict, stats, cache, markDirty }) {
+function discoverFiles(
+  adapter,
+  { repo, config, cutoffMs, strict, stats, cache, markDirty, associateFn, stateDir, userFilter },
+) {
   const candidates = adapter.enumerate({ cutoffMs, repo, config });
   const out = [];
 
@@ -186,20 +217,24 @@ function discoverFiles(adapter, { repo, config, cutoffMs, strict, stats, cache, 
       continue;
     }
 
-    const association = associate(
-      { cwd: descriptor.cwd, remotes: descriptor.remotes || [], gitRoot: descriptor.gitRoot },
-      repo,
-      { worktreeGlobs: config.discovery.worktreeGlobs },
-    );
+    const association = associateFn({
+      cwd: descriptor.cwd,
+      remotes: descriptor.remotes || [],
+      gitRoot: descriptor.gitRoot,
+    });
     if (!passesStrict(association, strict)) {
       stats.skipped += 1;
       continue;
     }
 
     const transcript = toTranscript(adapter, { ...candidate, ...descriptor }, association, descriptor.id);
+    if (userFilter && !passesProjectFilter(transcript, config)) {
+      stats.skipped += 1;
+      continue;
+    }
     // backpass's own acpx runs land in this store under this cwd; drop them here so
     // they never reach sampling or analysis (see ./self.js).
-    if (isSelfSession(transcript)) {
+    if (isSelfSession(transcript, { stateDir })) {
       stats.self += 1;
       continue;
     }
@@ -226,6 +261,8 @@ function toTranscript(adapter, row, association, id) {
     association,
     extra: row.extra || {},
     interactionSignals: row.interactionSignals ?? row.extra?.interactionSignals ?? emptyInteractionSignals(),
+    project: association?.project || null,
+    projectRoot: association?.projectRoot || null,
   };
   transcript.identity = transcriptIdentity(transcript);
   transcript.interaction = classifyInteraction(transcript);

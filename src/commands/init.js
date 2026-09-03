@@ -1,14 +1,54 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { CONFIG_FILENAME, initialConfig, repoConfigPath } from "../config.js";
-import { color, info, out, warn } from "../logger.js";
+import { CONFIG_FILENAME, initialConfig, initialUserConfig, repoConfigPath, userConfigPath } from "../config.js";
+import { UserError, color, info, out, warn } from "../logger.js";
 import { loadMemoryFiles } from "../memory.js";
 import { ensureLocalExclude } from "../repo.js";
 import { STATE_EXCLUDE_LINE as EXCLUDE_LINE } from "../state.js";
 import { budgetBar, budgetStatus, formatTokens } from "../tokens.js";
 
-export async function cmdInit({ repo, config, flags }) {
+export async function cmdInit({ repo, scope = null, config, flags }) {
+  if (scope?.kind === "user") return initUser(config, flags);
+  return initProject(repo, config, flags);
+}
+
+async function initUser(config, flags) {
+  const target = userConfigPath();
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  let existing = {};
+  if (fs.existsSync(target)) {
+    try {
+      existing = JSON.parse(fs.readFileSync(target, "utf8"));
+    } catch (err) {
+      throw new UserError(`${target} is not valid JSON: ${err.message}`);
+    }
+    if (existing === null || typeof existing !== "object" || Array.isArray(existing)) {
+      throw new UserError(`${target} must contain a JSON object`);
+    }
+  }
+  if (existing.user && !flags.force) {
+    info(`${color.yellow("·")} ${target} already has a user block - leaving it alone (use --force to overwrite)`);
+  } else {
+    const next = { ...existing, user: initialUserConfig() };
+    fs.writeFileSync(target, `${JSON.stringify(next, null, 2)}\n`);
+    info(`${color.green("·")} wrote user block in ${target}`);
+  }
+
+  const stateDir = config.state.root;
+  fs.mkdirSync(stateDir, { recursive: true });
+  try {
+    fs.chmodSync(stateDir, 0o700);
+  } catch {
+    // State.ensure already enforced 0700 before this command; this repeat is best-effort.
+  }
+  info(`${color.green("·")} user state ${stateDir} (0700)`);
+  out("");
+  out("Next: `backpass --scope user` to run a backward pass on the user-level memory file and skills.");
+  return 0;
+}
+
+async function initProject(repo, config, flags) {
   const target = repoConfigPath(repo.root);
   const existing = fs.existsSync(target);
 

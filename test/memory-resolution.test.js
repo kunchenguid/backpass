@@ -61,8 +61,10 @@ function applyOneEdit(repo, config) {
           changes: ["H1"],
           kind: "rewrite",
           title: "tighten",
-          evidence: [{ polarity: "negative", text: "skipped tests", source: "claude · s1 · turn 2" }],
-          transcripts: 2,
+          evidence: [
+            { polarity: "negative", text: "skipped tests", source: "claude · s1 · turn 2" },
+            { polarity: "negative", text: "pushed without running tests", source: "codex · s2 · turn 5" },
+          ],
         },
       ],
     },
@@ -81,6 +83,41 @@ test("isPointerTo accepts the @AGENTS.md import forms and nothing else", () => {
   assert.equal(isPointerTo("@docs/AGENTS.md", "AGENTS.md"), false);
   assert.equal(isPointerTo(SEPARATE_CLAUDE, "AGENTS.md"), false);
   assert.equal(isPointerTo("", "AGENTS.md"), false);
+});
+
+test("a relative pointer resolves from the importing file's directory", () => {
+  const repo = repoWith({
+    ".agents/AGENTS.md": AGENTS,
+    ".claude/CLAUDE.md": renderPointer("AGENTS.md"),
+  });
+
+  const relative = resolveMemoryFiles(repo.root, [".agents/AGENTS.md", ".claude/CLAUDE.md"]);
+  assert.equal(relative.pointers.length, 0);
+  assert.equal(relative.separate.length, 1);
+  const { warnings } = captureWarnings(() =>
+    primaryMemoryFile(
+      repo,
+      { memoryFiles: [".agents/AGENTS.md", ".claude/CLAUDE.md"], skillsDir: ".agents/skills" },
+      { kind: "user" },
+    ),
+  );
+  assert.match(warnings[0], /@\.\.\/\.agents\/AGENTS\.md/);
+
+  fs.writeFileSync(path.join(repo.root, ".claude/CLAUDE.md"), `@${path.join(repo.root, ".agents/AGENTS.md")}\n`);
+  const absolute = resolveMemoryFiles(repo.root, [".agents/AGENTS.md", ".claude/CLAUDE.md"]);
+  assert.equal(absolute.pointers.length, 1);
+  assert.equal(absolute.separate.length, 0);
+});
+
+test("only CLAUDE.md can cover a secondary memory file by import", () => {
+  const repo = repoWith({ ".claude/CLAUDE.md": AGENTS, ".codex/AGENTS.md": "@placeholder\n" });
+  fs.writeFileSync(path.join(repo.root, ".codex/AGENTS.md"), `@${path.join(repo.root, ".claude/CLAUDE.md")}\n`);
+  const resolved = resolveMemoryFiles(repo.root, [".claude/CLAUDE.md", ".codex/AGENTS.md"]);
+  assert.equal(resolved.pointers.length, 0);
+  assert.deepEqual(
+    resolved.separate.map((file) => file.path),
+    [".codex/AGENTS.md"],
+  );
 });
 
 test("CLAUDE.md as a pointer resolves AGENTS.md silently and only AGENTS.md is written", () => {
@@ -128,6 +165,15 @@ test("a single AGENTS.md or a single CLAUDE.md resolves as before, without warni
     assert.deepEqual(warnings, []);
     assert.equal(result.all.length, 1);
   }
+});
+
+test("project memory resolution rejects external paths while user resolution permits them", () => {
+  const repo = repoWith({ "AGENTS.md": AGENTS });
+  const external = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-external-memory-")), "AGENTS.md");
+  fs.writeFileSync(external, AGENTS);
+
+  assert.throws(() => resolveMemoryFiles(repo.root, [external]), /outside the project root/);
+  assert.equal(resolveMemoryFiles(repo.root, [external], { allowExternal: true }).primary.absolute, external);
 });
 
 test("a configured memoryFiles override still picks its own primary", () => {

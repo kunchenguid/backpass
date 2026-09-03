@@ -22,19 +22,25 @@ import { resolveMemoryFiles } from "../memory.js";
  * stdout, so piped and logged output is unchanged.
  */
 export async function cmdRun(ctx) {
-  const { repo, config } = ctx;
+  const { repo, scope, config } = ctx;
   const tui = await startTui(ctx);
 
   try {
     info(
       `${color.bold("backpass")} ${color.dim(
-        `v${ctx.version} · ${repo.name} · budget ${formatTokens(config.budgetTokens)} tok · since ${config.discovery.since}`,
+        `v${ctx.version} · ${scope?.kind === "user" ? "user scope" : repo.name} · budget ${formatTokens(config.budgetTokens)} tok · since ${config.discovery.since}`,
       )}`,
     );
 
     config.state.clearProposal();
 
-    if (!resolveMemoryFiles(repo.root, config.memoryFiles).primary) {
+    if (!resolveMemoryFiles(repo.root, config.memoryFiles, { allowExternal: scope?.kind === "user" }).primary) {
+      if (scope?.kind === "user") {
+        throw new UserError(
+          `no user memory file found (looked for ${config.memoryFiles.join(", ")})`,
+          "set user.memoryFiles in ~/.config/backpass/config.json",
+        );
+      }
       const result = await bootstrapRun(ctx);
       tui?.stop();
       if (ctx.flags.json) bootstrapJson(result);
@@ -47,12 +53,17 @@ export async function cmdRun(ctx) {
     if (!analysis.transcripts.length) {
       tui?.stop();
       out("");
-      out("No agent transcripts are associated with this repo yet.");
-      out(
-        color.dim(
-          "  `backpass scan --since all` widens the time window; --include-cursor-ide adds the Cursor IDE store.",
-        ),
-      );
+      if (scope?.kind === "user") {
+        out("No agent transcripts found for user scope yet.");
+        out(color.dim("  `backpass scan --scope user --since all` widens the time window."));
+      } else {
+        out("No agent transcripts are associated with this repo yet.");
+        out(
+          color.dim(
+            "  `backpass scan --since all` widens the time window; --include-cursor-ide adds the Cursor IDE store.",
+          ),
+        );
+      }
       return 0;
     }
 

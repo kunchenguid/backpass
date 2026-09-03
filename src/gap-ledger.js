@@ -67,6 +67,12 @@ export function gapSource(transcript = {}) {
     .slice(0, 8)} · ${date}`;
 }
 
+export function normalizeSourceLabel(source) {
+  return String(source || "")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
 function normalize(text) {
   return String(text || "")
     .toLowerCase()
@@ -155,6 +161,14 @@ export function recordGapObservations(ledger, evidenceRecords, options = {}) {
       if (aliasPrior) delete entry.sessions[transcript.id];
       const coveredBySkill =
         gap.coveredBySkill || priors.find((observation) => observation.coveredBySkill)?.coveredBySkill;
+      const phrasings = [
+        ...new Set([
+          ...priors.flatMap(
+            (observation) => observation.phrasings || [observation.proposedInstruction].filter(Boolean),
+          ),
+          gap.proposedInstruction,
+        ]),
+      ];
       entry.sessions[sessionIdentity] = {
         firstObservedAt: firstObservedAt || observedAt,
         observedAt,
@@ -165,11 +179,14 @@ export function recordGapObservations(ledger, evidenceRecords, options = {}) {
         mistake: gap.mistake,
         quote: gap.quote,
         recurrenceRisk: gap.recurrenceRisk,
+        phrasings,
         domain: gap.domain === "orchestration" ? "orchestration" : "project",
         // A failed trigger: the analysis judged an existing skill's content to cover
         // this mistake. Absent when no skill covers it (including all pre-existing
         // observations), and absence never counts as a citation.
         ...(coveredBySkill ? { coveredBySkill } : {}),
+        ...(transcript.project ? { project: transcript.project } : {}),
+        ...(transcript.projectRoot ? { projectRoot: transcript.projectRoot } : {}),
       };
       recorded += 1;
     }
@@ -246,6 +263,7 @@ export function ledgerGapObservations(ledger, memoryPath, skills = null) {
     for (const [sessionId, obs] of Object.entries(entry.sessions)) {
       observations.push({
         proposedInstruction: entry.proposedInstruction,
+        phrasings: obs.phrasings?.length ? obs.phrasings : [entry.proposedInstruction],
         sessionId,
         source: obs.source,
         mistake: obs.mistake,
@@ -255,6 +273,8 @@ export function ledgerGapObservations(ledger, memoryPath, skills = null) {
         ...(obs.coveredBySkill && (!skillNames || skillNames.has(obs.coveredBySkill))
           ? { coveredBySkill: obs.coveredBySkill }
           : {}),
+        ...(obs.project ? { project: obs.project } : {}),
+        ...(obs.projectRoot ? { projectRoot: obs.projectRoot } : {}),
       });
     }
   }
@@ -311,6 +331,14 @@ export function mergeGapEntries(ledger, groups) {
           if (earlier) prior.firstObservedAt = obs.firstObservedAt || obs.observedAt;
           if (prior.domain === "orchestration" && obs.domain !== "orchestration") prior.domain = "project";
           if (!prior.coveredBySkill && obs.coveredBySkill) prior.coveredBySkill = obs.coveredBySkill;
+          if (!prior.project && obs.project) prior.project = obs.project;
+          if (!prior.projectRoot && obs.projectRoot) prior.projectRoot = obs.projectRoot;
+          prior.phrasings = [
+            ...new Set([
+              ...(prior.phrasings || [target.proposedInstruction]),
+              ...(obs.phrasings || [entry.proposedInstruction]),
+            ]),
+          ];
         }
       }
       target.aliases = [...new Set([...(target.aliases || []), entry.id, ...(entry.aliases || [])])];

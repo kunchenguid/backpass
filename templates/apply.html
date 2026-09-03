@@ -21,6 +21,10 @@
         --defer: #ffc857;
         --defer-dim: rgba(255, 200, 87, 0.1);
         --blue: #6ea8ff;
+        /* The funnel's two lanes: a finding about an existing instruction, and one
+           about a missing instruction. Used by the legend swatches and the bars. */
+        --lane-a: rgba(110, 168, 255, 0.4);
+        --lane-b: rgba(255, 200, 87, 0.38);
         --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
         --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
       }
@@ -126,7 +130,7 @@
         margin-top: 3px;
       }
 
-      /* ---------- gap funnel ---------- */
+      /* ---------- run funnel ---------- */
       /* The template's own display rules (.statrow's grid) would beat the UA
          stylesheet's [hidden]; this keeps the hidden attribute authoritative. */
       [hidden] {
@@ -136,20 +140,13 @@
         border: 1px solid var(--line);
         background: var(--line);
         display: grid;
-        grid-template-columns: minmax(0, 3fr) minmax(280px, 2fr);
+        grid-template-columns: minmax(0, 1fr);
         gap: 1px;
         margin-bottom: 36px;
       }
       .ctx-funnel {
         background: var(--panel);
-        padding: 13px 18px 14px;
-        min-width: 0;
-      }
-      .ctx-stats {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        grid-auto-rows: 1fr;
-        gap: 1px;
+        padding: 13px 18px 12px;
         min-width: 0;
       }
       .funnel-head {
@@ -173,6 +170,29 @@
         color: var(--text);
         font-weight: 500;
       }
+      /* Lane key. Blue is a finding about an instruction that already exists, amber a
+         finding about one that is missing; the same two colours run left to right on
+         every bar, so a lane can be followed from the findings row to the last bar. */
+      .funnel-head .legend {
+        font-family: var(--mono);
+        font-size: 10.5px;
+        color: var(--faint);
+      }
+      .funnel-head .legend i {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        margin: 0 5px 0 10px;
+        vertical-align: 0;
+      }
+      .lane-a {
+        background: var(--lane-a);
+        border: 1px solid var(--blue);
+      }
+      .lane-b {
+        background: var(--lane-b);
+        border: 1px solid var(--defer);
+      }
       .frow {
         display: flex;
         align-items: center;
@@ -180,7 +200,7 @@
         margin: 4px 0;
       }
       .frow .fl {
-        width: 148px;
+        width: 160px;
         flex: none;
         font-family: var(--mono);
         font-size: 10px;
@@ -192,6 +212,7 @@
         text-overflow: ellipsis;
       }
       .frow .fb {
+        position: relative;
         flex: 1;
         min-width: 0;
         display: flex;
@@ -202,23 +223,64 @@
       }
       .frow .fb i {
         display: block;
+        flex-shrink: 0;
         height: 100%;
-        background: rgba(110, 168, 255, 0.38);
-        border-right: 1px solid rgba(110, 168, 255, 0.75);
       }
-      .frow.lit .fb i {
-        background: rgba(79, 227, 193, 0.4);
-        border-right-color: var(--accent);
+      .frow .fb i.a {
+        background: var(--lane-a);
+        border-right: 1px solid var(--blue);
+      }
+      .frow .fb i.b {
+        background: var(--lane-b);
+        border-right: 1px solid var(--defer);
+      }
+      .frow.lit .fb i.a {
+        background: rgba(110, 168, 255, 0.62);
+      }
+      .frow.lit .fb i.b {
+        background: rgba(255, 200, 87, 0.62);
       }
       .frow.zero .fb i {
         border-right: none;
       }
+      .frow .fb .overscale {
+        position: absolute;
+        inset: -1px 0 -1px auto;
+        width: 9px;
+        border-right: 2px solid var(--reject);
+        background: repeating-linear-gradient(135deg, transparent 0 2px, var(--reject) 2px 3px);
+      }
+      /* The learning-rate cap, on the same scale as the bar it sits over. */
+      .frow .fb .capline {
+        position: absolute;
+        top: -3px;
+        bottom: -3px;
+        width: 2px;
+        background: var(--reject);
+      }
+      .frow .fb .capline::after {
+        content: attr(data-l);
+        position: absolute;
+        left: 5px;
+        top: 0;
+        font-family: var(--mono);
+        font-size: 9.5px;
+        letter-spacing: 0.08em;
+        color: var(--reject);
+        white-space: nowrap;
+      }
       .frow .fv {
         flex: none;
-        width: 34px;
+        width: 58px;
+        text-align: right;
+        white-space: nowrap;
         font-family: var(--mono);
         font-size: 12.5px;
         color: var(--text);
+      }
+      .frow .fv small {
+        color: var(--faint);
+        font-size: 10.5px;
       }
       .frow.zero .fv {
         color: var(--faint);
@@ -227,7 +289,7 @@
         color: var(--accent);
       }
       .fdrop {
-        margin: 1px 0 6px 160px;
+        margin: 1px 0 7px 172px;
         font-size: 12px;
         color: var(--dim);
       }
@@ -235,6 +297,15 @@
         font-family: var(--mono);
         font-weight: 500;
         color: var(--faint);
+      }
+      .fconvert {
+        margin: 2px 58px 7px 172px;
+        padding-top: 5px;
+        border-top: 1px solid var(--line);
+        font-family: var(--mono);
+        font-size: 10px;
+        color: var(--faint);
+        text-align: right;
       }
       .funnel-note {
         margin-top: 10px;
@@ -696,13 +767,13 @@
           padding: 12px 16px;
           gap: 12px;
         }
-        .run-context {
-          grid-template-columns: minmax(0, 1fr);
-        }
         .frow .fl {
-          width: 92px;
+          width: 124px;
         }
         .fdrop {
+          margin-left: 0;
+        }
+        .fconvert {
           margin-left: 0;
         }
       }
@@ -722,13 +793,17 @@
       <div class="run-context" id="ctx" hidden>
         <div class="ctx-funnel">
           <div class="funnel-head">
-            <span class="t">Gap funnel · counted across runs</span>
-            <span class="facts num" id="funnel-floor"></span>
+            <span class="t"
+              >Funnel · this run
+              <span class="legend"
+                ><i class="lane-a"></i>existing instruction<i class="lane-b"></i>missing instruction</span
+              ></span
+            >
+            <span class="facts num" id="funnel-facts"></span>
           </div>
           <div id="funnel-bars"></div>
           <div class="funnel-note" id="funnel-note" hidden></div>
         </div>
-        <div class="ctx-stats" id="ctx-stats"></div>
       </div>
 
       <div class="gauge-block">
@@ -821,90 +896,180 @@
           );
         }
 
-        // ---- run context: one frame, the gap funnel beside the run stats ----
-        // A single bordered band. The left pane tells the gap story as proportional
-        // bars - sightings recorded by analysis -> distinct gaps after clustering ->
-        // eligible to propose - with each drop-off explained in plain words. Domain is
-        // voted after clustering, so orchestration sightings are not subtracted before
-        // the distinct-gap stage. The right pane holds the run facts (edits, evidence,
-        // skills) as stat cells. Every count is recorded by the fold (`totals` in
-        // evidence-summary.json); a proposal saved before the counts existed falls
-        // back to the classic stat row rather than showing zeros nobody measured.
+        // ---- run context: one funnel, analyzed transcripts to proposed edits ----
+        // One band on one scale (findings = 100%), read top to bottom. Every finding the
+        // analysis produced enters at the findings bar and is sorted into two lanes that
+        // stay side by side to the last row: blue is a finding about an instruction that
+        // already exists, amber a finding about one that is missing. Between two bars sit
+        // the drops that explain the difference, in everyday words; a drop that removed
+        // nothing is not drawn. Every count is recorded by the fold (`totals` in
+        // evidence-summary.json) or read off the accepted edits - nothing is estimated,
+        // and nothing drawn here decides which edits are proposed. A proposal saved
+        // before these counts existed falls back to the classic stat row rather than
+        // showing zeros nobody measured. Synthesis is a many-to-many boundary: an edit can
+        // address several candidates, one candidate can produce several edits, and an edit
+        // can carry no existing-instruction id. The conversion line names that unit change
+        // explicitly instead of presenting candidate and edit counts as a conserved drop.
         function funnelCounts() {
-          if (typeof (P.stats || {}).gapSightings !== "number") return null;
-          var eligible = P.stats.gapClusters || 0;
-          var dropped = P.stats.droppedGapSingletons || 0;
-          var reportOnly = P.stats.reportOnlyGapClusters || 0;
-          var distinct = eligible + reportOnly + dropped;
+          var s = P.stats || {};
+          var byReason = s.reportOnlyByReason;
+          if (typeof s.gapSightings !== "number") return null;
+          if (typeof s.instructionsWithNegatives !== "number") return null;
+          if (!byReason || typeof byReason !== "object") return null;
+          var eligible = s.gapClusters || 0;
+          var singletons = s.droppedGapSingletons || 0;
+          var reportOnly = s.reportOnlyGapClusters || 0;
+          // Distinct missing instructions: what the sightings clustered into, before any
+          // gate. The three parts are the only outcomes a cluster can have.
+          var distinctGaps = eligible + reportOnly + singletons;
+          var candidates = s.instructionsWithNegatives;
+          var adds = edits.filter(function (e) {
+            return (
+              e.hunks.length > 0 &&
+              e.hunks.every(function (hunk) {
+                return hunk.removed === 0;
+              })
+            );
+          }).length;
           return {
             floor: Number((P.config || {}).minGapEvidence) || 2,
-            sighted: P.stats.gapSightings,
-            distinct: distinct,
-            merged: Math.max(0, P.stats.gapSightings - distinct),
-            dropped: dropped,
-            reportOnly: reportOnly,
+            projectFloor: Number((P.config || {}).minGapProjects) || 1,
+            cap: Number((P.config || {}).maxEditsPerRun) || edits.length,
+            findings: [(s.positive || 0) + (s.negative || 0), s.gapSightings],
+            followed: s.positive || 0,
+            // A finding is not a candidate: several negatives can name one instruction,
+            // and several sightings can be the same missing instruction seen again.
+            duplicates: Math.max(0, (s.negative || 0) - candidates) + Math.max(0, s.gapSightings - distinctGaps),
+            candidates: [candidates, distinctGaps],
+            // A mixed cluster held back by the floor is the same story as a singleton.
+            seenOnce: singletons + (byReason.belowFloorMixed || 0),
+            orchestration: byReason.majorityOrchestration || 0,
+            tooFewProjects: byReason.tooFewProjects || 0,
+            sent: [candidates, eligible],
+            leftAlone: s.instructionsLeftAlone || 0,
+            leftAloneMaxSessions: s.leftAloneMaxSessions,
+            suppressed: s.instructionsSuppressed || 0,
+            proposed: [edits.length - adds, adds],
+            sighted: s.gapSightings,
             eligible: eligible,
+            dropped: singletons,
+            reportOnly: reportOnly,
           };
         }
-        function funnelBar(host, value, label, max, lit) {
-          var row = el("div", "frow" + (value === 0 ? " zero" : lit ? " lit" : ""));
+        function funnelBar(host, label, lanes, scale, opts) {
+          var o = opts || {};
+          var total = lanes[0] + lanes[1];
+          var row = el("div", "frow" + (total === 0 ? " zero" : o.lit ? " lit" : ""));
           row.appendChild(el("span", "fl", label));
           var track = el("div", "fb");
-          var fill = el("i");
-          fill.style.width = max > 0 ? Math.max((value / max) * 100, value > 0 ? 2 : 0) + "%" : "0%";
-          track.appendChild(fill);
+          var overScale = scale > 0 && total > scale;
+          var widths = lanes.map(function (value) {
+            return scale > 0 ? Math.max((value / (overScale ? total : scale)) * 100, value > 0 ? 0.6 : 0) : 0;
+          });
+          if (overScale && lanes[0] > 0 && lanes[1] > 0) {
+            widths[0] = Math.min(widths[0], 99.4);
+            widths[1] = 100 - widths[0];
+          }
+          ["a", "b"].forEach(function (lane, i) {
+            var fill = el("i", lane);
+            fill.style.width = widths[i] + "%";
+            track.appendChild(fill);
+          });
+          if (overScale) {
+            var overflow = el("span", "overscale");
+            overflow.setAttribute("data-l", fmt(total - scale) + " over scale");
+            track.appendChild(overflow);
+          }
+          if (o.cap != null && scale > 0 && o.cap <= scale) {
+            var tick = el("span", "capline");
+            tick.style.left = (o.cap / scale) * 100 + "%";
+            tick.setAttribute("data-l", "cap");
+            track.appendChild(tick);
+          }
           row.appendChild(track);
-          row.appendChild(el("span", "fv num", fmt(value)));
+          var value = el("span", "fv num", fmt(total));
+          if (o.small) value.appendChild(el("small", null, " " + o.small));
+          row.appendChild(value);
           host.appendChild(row);
         }
         function funnelDrop(host, n, text) {
           if (!n) return;
           var line = el("div", "fdrop");
-          line.appendChild(el("b", null, "− " + fmt(n) + " "));
-          line.appendChild(document.createTextNode(text));
+          line.appendChild(el("b", null, fmt(n) + " dropped"));
+          line.appendChild(document.createTextNode(" - " + text));
+          host.appendChild(line);
+        }
+        function funnelConversion(host, candidates, proposed) {
+          var line = el("div", "fconvert");
+          line.appendChild(document.createTextNode("counting changes here: "));
+          line.appendChild(el("b", null, fmt(candidates) + " candidate" + (candidates === 1 ? "" : "s")));
+          line.appendChild(document.createTextNode(" · "));
+          line.appendChild(el("b", null, fmt(proposed) + " proposed edit" + (proposed === 1 ? "" : "s")));
           host.appendChild(line);
         }
         var funnelNote = null;
         var funnel = funnelCounts();
         if (funnel) {
           var bars = document.getElementById("funnel-bars");
-          funnelBar(bars, funnel.sighted, "sightings", funnel.sighted);
+          var scale = funnel.findings[0] + funnel.findings[1];
+          funnelBar(bars, "findings", funnel.findings, scale);
+          funnelDrop(bars, funnel.followed, "the instruction was followed: nothing to fix");
           funnelDrop(
             bars,
-            funnel.merged,
-            "merged: repeat sightings of a gap already counted - they corroborate it rather than add a new one",
+            funnel.duplicates,
+            "duplicates: the same instruction or the same mistake, reported more than once",
           );
-          funnelBar(bars, funnel.distinct, "distinct gaps", funnel.sighted);
+          funnelBar(bars, "candidates", funnel.candidates, scale);
           funnelDrop(
             bars,
-            funnel.dropped,
-            "below the corroboration floor: seen in fewer than " +
-              funnel.floor +
-              " sessions so far - more transcripts can corroborate them",
+            funnel.seenOnce,
+            funnel.floor === 2 && P.scope !== "user"
+              ? "seen only once: a second session has to confirm them (kept for later runs)"
+              : P.scope === "user"
+                ? "fewer than " +
+                  funnel.floor +
+                  " sessions count toward corroboration: " +
+                  funnel.floor +
+                  " qualifying sessions are required (kept for later runs)"
+                : "seen in fewer than " +
+                  funnel.floor +
+                  " sessions: " +
+                  funnel.floor +
+                  " sessions have to confirm them (kept for later runs)",
           );
           funnelDrop(
             bars,
-            funnel.reportOnly,
-            "report only: mixed clusters below the floor or clusters excluded by a majority orchestration vote",
+            funnel.orchestration,
+            "not this project's fault: the tooling that ran the session caused it",
           );
-          funnelBar(bars, funnel.eligible, "eligible to propose", funnel.sighted, true);
-
-          document.getElementById("funnel-floor").textContent = "corroboration floor · " + funnel.floor + " sessions";
-          var statHost = document.getElementById("ctx-stats");
-          [
-            [
-              String(edits.length) + "/" + String((P.config || {}).maxEditsPerRun || edits.length),
-              "edits proposed / cap",
-            ],
-            [fmt(P.stats.positive), "positive evidence"],
-            [fmt(P.stats.negative), "negative evidence"],
-            [fmt(P.stats.skillExtractions), "skill extractions"],
-          ].forEach(function (s) {
-            var box = el("div", "stat");
-            box.appendChild(el("div", "v num", s[0]));
-            box.appendChild(el("div", "k", s[1]));
-            statHost.appendChild(box);
+          funnelDrop(
+            bars,
+            funnel.tooFewProjects,
+            funnel.projectFloor === 2
+              ? "seen in too few projects: the same mistake has to show up in another project"
+              : "seen in too few projects: the same mistake has to show up in " + funnel.projectFloor + " projects",
+          );
+          funnelBar(bars, "sent to synthesis", funnel.sent, scale);
+          funnelDrop(bars, funnel.leftAlone, "no accepted edit named these candidates");
+          funnelDrop(bars, funnel.suppressed, "a previous review rejected the same edit");
+          funnelConversion(
+            bars,
+            funnel.sent[0] + funnel.sent[1] - funnel.leftAlone - funnel.suppressed,
+            funnel.proposed[0] + funnel.proposed[1],
+          );
+          funnelBar(bars, "edits proposed", funnel.proposed, scale, {
+            lit: true,
+            small: "of " + fmt(funnel.cap),
+            cap: funnel.cap,
           });
+
+          var facts = document.getElementById("funnel-facts");
+          facts.appendChild(el("b", null, fmt(P.stats.transcripts)));
+          facts.appendChild(document.createTextNode(" transcripts · corroboration floor · "));
+          facts.appendChild(el("b", null, fmt(funnel.floor)));
+          facts.appendChild(document.createTextNode(" sessions · cap · "));
+          facts.appendChild(el("b", null, fmt(funnel.cap)));
+          facts.appendChild(document.createTextNode(" edits"));
 
           // The drop lines carry the takeaway; the visible note only speaks when there
           // are no bars to read. funnelNote itself still feeds the zero-edit empty state.

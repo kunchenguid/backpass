@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { extractJson, openSession, usageRecord } from "./acpx.js";
+import { userClaudeSkillsDir } from "./config.js";
 import { renderEvidenceForPrompt } from "./fold.js";
 import { renderInstructionIndex } from "./memory.js";
 import { renderPrompt, render, loadPrompt } from "./prompts.js";
@@ -15,7 +16,7 @@ import {
 } from "./skills.js";
 import { isSuppressedByRejection } from "./state.js";
 import { emitProgress } from "./progress.js";
-import { measureWorkspace, prepareWorkspace, repoFingerprint } from "./workspace.js";
+import { measureWorkspace, prepareWorkspace, repoFingerprint, workspacePathFor } from "./workspace.js";
 import { UserError, color, info, warn } from "./logger.js";
 
 /**
@@ -149,18 +150,21 @@ function assertRepoUntouched(repo, before, workspaceRoot) {
  * Everything the edit and annotation turns need: prompt values, the `buildProposal`
  * context, and the overflow target.
  */
-function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts }) {
+function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts, scope = null }) {
   const state = config.state;
   const rejections = state.readRejections();
-  const overflow = resolveOverflowTarget(repo.root, config.skillsDir);
+  const userScope = scope?.kind === "user";
+  const overflow = resolveOverflowTarget(repo.root, config.skillsDir, {
+    claudeSkillsDir: userScope ? userClaudeSkillsDir() : undefined,
+  });
   for (const w of overflow.warnings) warn(w);
-  const skillDirs = resolveProjectSkillDirs(repo.root, overflow.dir);
-  const skillFiles = loadProjectSkills(repo.root, overflow.dir);
+  const skillDirs = resolveProjectSkillDirs(repo.root, overflow.dir, config.skillsDirs || [], { exact: userScope });
+  const skillFiles = loadProjectSkills(repo.root, overflow.dir, config.skillsDirs || [], { exact: userScope });
   const descriptionTokens = skillDescriptionTokens(skillFiles);
   const maxEdits = effectiveMaxEdits(memoryFile, config, descriptionTokens);
 
   const common = {
-    MEMORY_PATH: memoryFile.path,
+    MEMORY_PATH: workspacePathFor(memoryFile.path),
     BUDGET_RULE: budgetRule(memoryFile, config, maxEdits, descriptionTokens),
     MAX_EDITS: String(maxEdits),
     MIN_GAP_EVIDENCE: String(config.minGapEvidence),
@@ -170,6 +174,7 @@ function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts }) {
     memoryFile,
     config: { ...config, skillsDir: overflow.dir, skillDirs },
     repo,
+    scope,
     summary,
     harnessCounts,
     rejections,
@@ -202,7 +207,7 @@ function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts }) {
  */
 function prefaceFor({ memoryFile, summary, config, repo, workspaceRoot, descriptionTokens = 0 }) {
   return render(loadPrompt("annotate-preface"), {
-    MEMORY_PATH: memoryFile.path,
+    MEMORY_PATH: workspacePathFor(memoryFile.path),
     REPO_NAME: repo.name,
     REPO_ROOT: repo.root,
     WORKSPACE_ROOT: workspaceRoot,
@@ -387,7 +392,15 @@ async function annotateLoop({
   });
 }
 
-export async function synthesizeProposal({ memoryFile, summary, config, repo, transcripts, runNote = "" }) {
+export async function synthesizeProposal({
+  memoryFile,
+  summary,
+  config,
+  repo,
+  transcripts,
+  runNote = "",
+  scope = null,
+}) {
   config.state.clearProposal();
   const harnessCounts = harnessCountsOf(transcripts);
   const {
@@ -407,7 +420,17 @@ export async function synthesizeProposal({ memoryFile, summary, config, repo, tr
     config,
     repo,
     harnessCounts,
+    scope,
   });
+
+  let workspace = prepareWorkspace({ state, repo, memoryFile, skillsDir: overflow.dir, skillDirs });
+  const stagedSkillsDir =
+    workspace.skillMappings.find((mapping) => mapping.logical === overflow.dir)?.staged ||
+    workspacePathFor(overflow.dir);
+  const stagedSkillFiles = skillFiles.map((skill) => ({
+    ...skill,
+    path: workspace.stagedPaths.get(skill.path) || workspacePathFor(skill.path),
+  }));
 
   const editValues = {
     ...common,
@@ -423,8 +446,8 @@ export async function synthesizeProposal({ memoryFile, summary, config, repo, tr
     BUDGET_TOKENS: String(config.budgetTokens),
     BUDGET_STATE: budgetState(memoryFile, config, descriptionTokens),
     INSTRUCTION_INDEX: renderInstructionIndex(memoryFile),
-    SKILLS_DIR: overflow.dir,
-    SKILL_INDEX: renderSkillIndex(skillFiles),
+    SKILLS_DIR: stagedSkillsDir,
+    SKILL_INDEX: renderSkillIndex(stagedSkillFiles),
     EVIDENCE: renderEvidenceForPrompt(summary),
     REJECTIONS: renderRejections(rejections),
   };
@@ -479,8 +502,6 @@ export async function synthesizeProposal({ memoryFile, summary, config, repo, tr
       return this.session.prompt(args);
     },
   };
-  /** @type {ReturnType<typeof prepareWorkspace>} */
-  let workspace = null;
   const editResult = await config.agents.withFallthrough("synthesis", async (current) => {
     ranWith = current.agent;
     holder.ranWith = current.agent;

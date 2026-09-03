@@ -21,6 +21,11 @@ export async function cmdApply(ctx) {
   if (!proposal) {
     throw new UserError("no proposal to apply", "run `backpass` first to produce one");
   }
+  const proposalScope = proposal.scope || "project";
+  const runScope = ctx.scope?.kind || "project";
+  if (proposalScope !== runScope) {
+    throw new UserError(`this proposal is ${proposalScope} scope; run \`backpass apply --scope ${proposalScope}\``);
+  }
   if (proposal.violations?.length) {
     throw new UserError(
       "the saved proposal failed its mechanical gates and was never approved for apply",

@@ -35,9 +35,9 @@ memory file and project skills - under a token budget, gated by you.
 - **Local-first** - Reads the transcript stores of seven agent harnesses directly from disk.
   No API, no upload; transcripts never leave your machine except into an agent you already
   authenticated, and obvious secrets are redacted before they do.
-- **Evidence-gated** - Every proposed edit carries verbatim quotes from real sessions, a
-  new instruction needs evidence from at least two independent sessions, and one run
-  proposes at most five edits. Small, noisy, repeated steps - not a rewrite.
+- **Evidence-gated** - Every proposed edit carries verbatim quotes from real sessions,
+  and every `add`, `rewrite`, or `remove` edit needs evidence from at least two distinct
+  sessions. Small, noisy, bounded steps - not a rewrite.
 - **Human in the loop** - Analysis never writes. `backpass apply` is the only writing
   command, and it shows each edit with its evidence for you to accept or reject.
 
@@ -51,8 +51,7 @@ AGENTS.md / CLAUDE.md + skills (the weights)
   → back to the weights
 ```
 
-One run is one gradient step: at most five edits, and a new instruction needs evidence
-from at least two independent sessions.
+One run is one bounded gradient step.
 
 ## Quick Start
 
@@ -72,6 +71,47 @@ cd your-repo
 backpass init      # write .backpassrc.json, exclude .backpass/ via .git/info/exclude
 backpass           # collect samples → calculate loss → aggregate gradients → gradient descent (never writes)
 backpass apply     # review each edit, accept or reject, then write
+```
+
+### User-level memory
+
+A run is one scope. The default is the checkout you are in. `backpass --scope user`
+trains the always-loaded user file and user-level skills from Claude Code and Codex
+sessions across projects, and writes only those files. A project-scoped run never
+writes a user-level file.
+
+Canonical user memory is the first existing file in this order: `~/.agents/AGENTS.md`,
+`$CLAUDE_CONFIG_DIR/CLAUDE.md` (default `~/.claude/CLAUDE.md`), and
+`$CODEX_HOME/AGENTS.md` (default `~/.codex/AGENTS.md`). User-level skill extractions
+follow the project layout at `~/.agents/skills`, with a warning if Claude's active
+`skills` path is a real directory rather than the usual symlink.
+
+In user scope every `add`, `rewrite`, or `remove` edit also clears `minGapProjects`
+(default `1`): the distinct projects behind its own quotes, counted from the gap
+clusters it cites and from the session-to-project map behind the instruction evidence
+rows. `extract` and `move` edits remain exempt.
+
+State lives in `$XDG_CONFIG_HOME/backpass/user/` (default
+`~/.config/backpass/user/`) with mode 0700, isolated from every project's
+`.backpass/`. User-scope evidence, ledgers, proposals, and apply surfaces stay in
+that one directory.
+
+Harness load paths, verified for v1:
+
+- **Claude Code** loads `CLAUDE.md` from `CLAUDE_CONFIG_DIR` (default `~/.claude`)
+  and inlines `@` imports, including `~/` and absolute paths. A CLAUDE.md containing
+  only an import that resolves to the canonical user memory is a valid pointer, such
+  as `@~/.agents/AGENTS.md` with the default paths.
+- **Codex** loads `AGENTS.md` from `CODEX_HOME` (default `~/.codex`). It follows the
+  AGENTS.md convention; `@` import is not assumed.
+
+A target that is a symlink into a read-only store (dotfiles, nix) is refused with
+`<path> is a symlink to <real>, which is not writable; edit the source that generates it`.
+
+```sh
+backpass init --scope user
+backpass --scope user
+backpass apply --scope user
 ```
 
 ## How It Works
@@ -275,8 +315,14 @@ Then mechanical gates run, and they are not negotiable:
   An explicit `--max-edits` or config value always pins it.
 - every measured change belongs to exactly one annotated edit - an unexplained change
   is a violation, so is an edit that names no change
-- new instructions need evidence from `minGapEvidence` distinct sessions (an edit that
-  only adds text is a new instruction, whatever the model calls it)
+- every edit that changes the always-loaded surface - adding, rewriting or removing text -
+  needs quotes from `minGapEvidence` distinct sessions. The count is measured from the
+  edit's own quote sources, and only source labels issued by this run's fold count. A
+  mistyped or invented label does not create another session, and a session count the model
+  reports is ignored. Rewrites are not
+  classified by shape: a one-session tightening is refused along with a one-session
+  append, because deciding which is which is a question about meaning that a line diff
+  cannot answer. `extract` and `move` are exempt - they keep every always-loaded line.
 - removing a memory-file instruction outright needs harm-class negatives from
   `minGapEvidence` distinct sessions - non-compliance never counts, because a rule that
   was skipped needs reinforcement, not deletion. A pure deletion in a skill file is also
@@ -379,9 +425,12 @@ changed since the proposal measured it, exactly as it refuses a drifted memory f
 
 `backpass apply` is the only command that writes. It serves a review surface through
 [`lavish-axi`](https://github.com/kunchenguid/lavish-axi): one card per edit with the diff,
-the evidence quotes and their sources, a live budget gauge, and ACCEPT / REJECT. A compact
-gap funnel summarizes recorded gap evidence and proposal eligibility; older proposals
-without recorded funnel counts omit it.
+the evidence quotes and their sources, a live budget gauge, and ACCEPT / REJECT. Above them
+one funnel band runs from every finding the analysis recorded down to the edits proposed.
+Blue and amber lanes distinguish existing-instruction work from missing-instruction work;
+the final row counts edits by their measured shape, while the earlier rows count findings
+or candidates. Each drop between two rows is named in plain words. Older proposals without
+the recorded funnel counts fall back to a stat row.
 
 The surface is a static template shipped in the package - the CLI injects one JSON payload,
 so it is instant, deterministic, and identical every run. Nothing there is model-generated.
@@ -451,7 +500,7 @@ pointer-aware:
 | `backpass propose` | aggregate gradients + gradient descent: the tier-2 pass from cached evidence             |
 | `backpass apply`   | review and write the accepted edits                                                      |
 | `backpass status`  | cache state, failed transcripts, budget bars, and cross-surface overlaps                 |
-| `backpass init`    | write `.backpassrc.json`, exclude `.backpass/` locally                                   |
+| `backpass init`    | initialize the selected scope's config and state                                         |
 
 Run `backpass --help` for the full flag list.
 
@@ -556,10 +605,36 @@ CLI flags on top:
 }
 ```
 
+That example is the project scope. User scope ignores `.backpassrc.json` and instead
+layers the `"user"` block in `$XDG_CONFIG_HOME/backpass/config.json` (default
+`~/.config/backpass/config.json`) over its defaults. The user block can override the
+regular settings; its path and user-only settings include `memoryFiles`, `skillsDir`,
+`skillsDirs`, `minGapProjects` (default `1`), and these discovery controls:
+
+```json
+{
+  "user": {
+    "discovery": {
+      "harnesses": ["claude", "codex"],
+      "includeProjects": [],
+      "excludeProjects": [],
+      "maxTranscriptsPerProject": null
+    }
+  }
+}
+```
+
+`includeProjects` and `excludeProjects` are globs matched against each project key and
+session cwd. Repeated `--project <glob>` flags set the include globs for that
+invocation. A non-null `maxTranscriptsPerProject` applies a sticky,
+recency-weighted per-project cap before
+`maxTranscripts` applies to the whole run.
+
 ### State
 
-Everything mutable lives in `.backpass/`, kept out of git via the repo's local exclude
-(`.git/info/exclude`, written by `backpass init`) rather than the tracked `.gitignore`:
+Project-scoped mutable state lives in `.backpass/`, kept out of git via the repo's local
+exclude (`.git/info/exclude`, written by `backpass init`) rather than the tracked
+`.gitignore`:
 
 ```
 .backpass/
@@ -575,6 +650,9 @@ Everything mutable lives in `.backpass/`, kept out of git via the repo's local e
   apply/apply.html       the rendered review surface
 ```
 
+For the user-scope state location and isolation contract, see
+[User-level memory](#user-level-memory).
+
 ## Limitations
 
 - **Causal attribution is genuinely hard.** A model can confabulate influence. The
@@ -584,7 +662,8 @@ Everything mutable lives in `.backpass/`, kept out of git via the repo's local e
   pinned by a golden fixture and fails soft.
 - **Cursor IDE is deferred to v1.1.** Its composer→workspace link is version-dependent;
   `--include-cursor-ide` enables a best-effort pass, but it is not a v1 guarantee.
-- Global memory (`~/.claude/CLAUDE.md`) is treated as context, never an edit target.
+- A project-scoped run never writes a user-level file. User-level edits are
+  `--scope user` only (see [User-level memory](#user-level-memory)).
 - Paths are verified on macOS and Linux.
 
 ## Development
