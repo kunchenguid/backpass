@@ -67,6 +67,10 @@ export function gapSource(transcript = {}) {
     .slice(0, 8)} · ${date}`;
 }
 
+export function normalizeSourceLabel(source) {
+  return String(source || "").trim().replace(/\s+/g, " ");
+}
+
 function normalize(text) {
   return String(text || "")
     .toLowerCase()

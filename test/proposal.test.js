@@ -547,11 +547,15 @@ test("the user-scope project floor counts instruction evidence, not only gap quo
     );
 
   const rewrite = memoryEdit((t) => t.replace("include its URL.", "include its full https:// URL."));
-  const proposeWith = (summary, minGapProjects) => {
-    const evidence = summary.instructions[0].quotes.map((quote) => ({
+  const proposeWith = (summary, minGapProjects, varySourceWhitespace = false) => {
+    const evidence = summary.instructions[0].quotes.map((quote, index) => ({
       polarity: "negative",
       text: quote.text,
-      source: quote.source,
+      source: varySourceWhitespace
+        ? index === 0
+          ? `  ${quote.source}  `
+          : quote.source.replaceAll(" · ", "  ·   ")
+        : quote.source,
     }));
     return gate({
       edit: rewrite,
@@ -567,7 +571,7 @@ test("the user-scope project floor counts instruction evidence, not only gap quo
     oneProject.violations.join("\n"),
   );
 
-  const twoProjects = proposeWith(foldFor(["repo-a", "repo-b"]), 2);
+  const twoProjects = proposeWith(foldFor(["repo-a", "repo-b"]), 2, true);
   assert.deepEqual(twoProjects.violations, [], twoProjects.violations.join("\n"));
   assert.equal(twoProjects.proposal.edits[0].projects, 2);
 

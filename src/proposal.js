@@ -1,4 +1,5 @@
 import { renderHunkLines } from "./diff.js";
+import { normalizeSourceLabel } from "./gap-ledger.js";
 import { mixFromCounts } from "./interaction.js";
 import { memoryTextHash } from "./memory.js";
 import { editSkills, parseFrontmatter, skillDescriptionTokens } from "./skills.js";
@@ -137,11 +138,7 @@ function normalizeEvidence(evidence) {
 
 function countSources(evidence) {
   if (!Array.isArray(evidence)) return 0;
-  return new Set(
-    evidence
-      .map((e) => String(e?.source || "").trim().replace(/\s+/g, " "))
-      .filter(Boolean),
-  ).size;
+  return new Set(evidence.map((e) => normalizeSourceLabel(e?.source)).filter(Boolean)).size;
 }
 
 /** The del-line texts of a hunk that are not carried by `lineCounts` (blank lines ignored). */
@@ -315,7 +312,9 @@ function countedEvidenceProjects(edit, summary) {
   // sources answer for themselves. A run whose evidence predates the map (or a
   // project-scoped one, which has no projects) still has the gap count.
   const sourceProjects = summary?.sourceProjects || {};
-  const byQuoteSource = new Set(edit.evidence.map((item) => sourceProjects[item.source]).filter(Boolean));
+  const byQuoteSource = new Set(
+    edit.evidence.map((item) => sourceProjects[normalizeSourceLabel(item.source)]).filter(Boolean),
+  );
   return Math.max(0, byQuoteSource.size, ...byGap);
 }
 
