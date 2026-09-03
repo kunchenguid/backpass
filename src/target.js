@@ -5,7 +5,7 @@ import { userClaudeSkillsDir } from "./config.js";
 import { UserError, info } from "./logger.js";
 import { readMemoryFile, resolveMemoryPath } from "./memory.js";
 import { expandUserPath } from "./scope.js";
-import { loadProjectSkills, resolveOverflowTarget, resolveProjectSkillDirs } from "./skills.js";
+import { loadProjectSkills, readSkill, resolveOverflowTarget, resolveProjectSkillDirs } from "./skills.js";
 
 /**
  * A run's write surface. Default is the whole project or user surface (the primary
@@ -83,7 +83,7 @@ function matchSkill(spec, skills, { root }) {
   if (!file) return null;
   const logical = posixRel(root, file);
   if (path.basename(file) === "SKILL.md" || /(?:^|\/)skills\/.+\.md$/.test(logical.replaceAll("\\", "/"))) {
-    return skills.find((skill) => skill.path === logical) || { name: path.basename(path.dirname(file)), path: logical };
+    return skills.find((skill) => skill.path === logical) || readSkill(root, file);
   }
   return null;
 }

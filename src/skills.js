@@ -41,27 +41,32 @@ export function loadSkills(repoRoot, skillsDir) {
         ? path.join(root, entry.name)
         : null;
     if (!file || !fs.existsSync(file)) continue;
-    let text;
-    try {
-      text = fs.readFileSync(file, "utf8");
-    } catch {
-      continue;
-    }
-    const frontmatter = parseFrontmatter(text);
-    skills.push({
-      name: frontmatter.name || entry.name.replace(/\.md$/, ""),
-      description: frontmatter.description || "",
-      path: (() => {
-        const relative = path.relative(repoRoot, file);
-        return relative.startsWith("..") || path.isAbsolute(relative) ? file : relative;
-      })(),
-      body: skillBody(text),
-      bodyTokens: estimateTokens(text),
-      descriptionTokens: estimateTokens(frontmatter.description || ""),
-    });
+    const skill = readSkill(repoRoot, file, entry.name.replace(/\.md$/, ""));
+    if (skill) skills.push(skill);
   }
 
   return skills.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function readSkill(repoRoot, file, fallbackName = null) {
+  let text;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return null;
+  }
+  const frontmatter = parseFrontmatter(text);
+  const relative = path.relative(repoRoot, file);
+  const skillPath = relative.startsWith("..") || path.isAbsolute(relative) ? file : relative;
+  const inferredName = path.basename(file) === "SKILL.md" ? path.basename(path.dirname(file)) : path.basename(file, ".md");
+  return {
+    name: frontmatter.name || fallbackName || inferredName,
+    description: frontmatter.description || "",
+    path: skillPath,
+    body: skillBody(text),
+    bodyTokens: estimateTokens(text),
+    descriptionTokens: estimateTokens(frontmatter.description || ""),
+  };
 }
 
 /**

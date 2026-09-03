@@ -92,6 +92,20 @@ test("resolveRunTarget accepts a skill by name or SKILL.md path", () => {
   assert.equal(byDir.path, ".agents/skills/db/SKILL.md");
 });
 
+test("a direct SKILL.md target retains parsed trigger metadata", () => {
+  const directSkill = DB_SKILL.replace("name: db", "name: database-ops");
+  const repo = repoWith({ "custom/db/SKILL.md": directSkill });
+  const config = cfg(repo);
+  const target = resolveRunTarget("custom/db/SKILL.md", { repo, config });
+  assert.equal(target.kind, "skill");
+  assert.equal(target.name, "database-ops");
+  assert.equal(target.skill.description, "Load before touching the database.");
+  assert.equal(target.skill.descriptionTokens, estimateTokens("Load before touching the database."));
+  config.runTarget = target;
+  const resolved = primaryMemoryFile(repo, config);
+  assert.equal(resolved.file.alwaysLoadedTokens, target.skill.descriptionTokens);
+});
+
 test("resolveRunTarget refuses empty and unknown names instead of widening", () => {
   const repo = repoWith({ ".agents/skills/db/SKILL.md": DB_SKILL });
   const config = cfg(repo);
