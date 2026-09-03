@@ -70,6 +70,65 @@ test("fold lists every analyzed session source even when the record has no proje
   }
 });
 
+test("same-day Codex ULIDs that share an 8-character prefix stay distinct source keys", () => {
+  // Codex session ids are time-prefixed ULIDs. Truncating to 8 characters after the
+  // harness prefix collapses two sessions that started in the same minute, and
+  // sourceProjects last-write-wins would keep only one project.
+  const startedAt = Date.parse("2026-09-03T00:01:00Z");
+  const a = "01K4M0NDEKTSV4RRFFQ69G5FAV";
+  const b = "01K4M0NDZZABCDEFGHJKMNPQRS";
+  const session = (nativeId, project) =>
+    record(`codex-${nativeId}`, {
+      transcript: {
+        id: `codex-${nativeId}`,
+        nativeId,
+        identity: `identity-${nativeId}`,
+        harness: "codex",
+        project,
+        startedAt,
+      },
+      negative: [{ instruction: "AG-001", quote: `quote ${nativeId}`, class: "non-compliance" }],
+    });
+  const summary = foldEvidence([session(a, "repo-a"), session(b, "repo-b")], { memoryFile });
+
+  assert.equal(new Set(summary.sources).size, 2);
+  assert.ok(summary.sources.some((label) => label.includes(a)));
+  assert.ok(summary.sources.some((label) => label.includes(b)));
+  assert.equal(summary.sources.filter((label) => label === `codex · ${a.slice(0, 8)} · 2026-09-03`).length, 0);
+  assert.deepEqual(new Set(Object.values(summary.sourceProjects)), new Set(["repo-a", "repo-b"]));
+  assert.equal(Object.keys(summary.sourceProjects).length, 2);
+});
+
+test("legacy truncated gap sources with distinct session ids are not last-write-wins", () => {
+  const truncated = "codex · 01K4M0ND · 2026-09-03";
+  const phrasing = "Always vendor the lockfile.";
+  const summary = foldEvidence([], {
+    minGapEvidence: 2,
+    gapObservations: [
+      {
+        proposedInstruction: phrasing,
+        quote: "q-a",
+        mistake: "skipped it",
+        source: truncated,
+        sessionId: "identity-a",
+        project: "repo-a",
+      },
+      {
+        proposedInstruction: phrasing,
+        quote: "q-b",
+        mistake: "skipped it again",
+        source: truncated,
+        sessionId: "identity-b",
+        project: "repo-b",
+      },
+    ],
+  });
+  assert.equal(summary.gaps.length, 1);
+  assert.equal(summary.gaps[0].sessions, 2);
+  assert.equal(new Set(summary.gaps[0].quotes.map((quote) => quote.source)).size, 2);
+  assert.ok(summary.gaps[0].quotes.every((quote) => summary.sources.includes(quote.source)));
+});
+
 test("instructions with no evidence still appear - they are the removal candidates", () => {
   const summary = foldEvidence([record("s1", { positive: [{ instruction: "AG-001", quote: "q" }] })], { memoryFile });
 

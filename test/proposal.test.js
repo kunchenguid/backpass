@@ -769,6 +769,56 @@ test("the user-scope project floor counts instruction evidence, not only gap quo
   assert.deepEqual(projectScope.violations, [], projectScope.violations.join("\n"));
 });
 
+test("same-day Codex ULID prefix collisions still clear the two-session rewrite floor", () => {
+  const startedAt = Date.parse("2026-09-03T00:01:00Z");
+  const a = "01K4M0NDEKTSV4RRFFQ69G5FAV";
+  const b = "01K4M0NDZZABCDEFGHJKMNPQRS";
+  const record = (nativeId, project) => ({
+    status: "ok",
+    transcript: {
+      id: `codex-${nativeId}`,
+      nativeId,
+      identity: `identity-${nativeId}`,
+      harness: "codex",
+      project,
+      startedAt,
+    },
+    positive: [],
+    negative: [
+      {
+        instruction: "AG-001",
+        quote: `quote from ${nativeId}`,
+        effect: "the URL was omitted",
+        class: "non-compliance",
+      },
+    ],
+    gaps: [],
+  });
+  const summary = foldEvidence([record(a, "repo-a"), record(b, "repo-b")], {
+    memoryFile: { units: parseMemoryUnits(MEMORY_TEXT) },
+    minGapEvidence: 2,
+  });
+  const truncated = `codex · ${a.slice(0, 8)} · 2026-09-03`;
+  assert.equal(summary.sources.includes(truncated), false);
+  assert.equal(Object.keys(summary.sourceProjects).length, 2);
+  assert.deepEqual(new Set(Object.values(summary.sourceProjects)), new Set(["repo-a", "repo-b"]));
+
+  const evidence = summary.instructions[0].quotes.map((quote) => ({
+    polarity: "negative",
+    text: quote.text,
+    source: quote.source,
+  }));
+  const { proposal, violations } = gate({
+    edit: memoryEdit((t) => t.replace("include its URL.", "include its full https:// URL.")),
+    annotation: { edits: [claim(["H1"], { kind: "rewrite", title: "spell out the URL", evidence })] },
+    config: config({ minGapProjects: 2 }),
+    context: { summary, scope: { kind: "user" } },
+  });
+  assert.deepEqual(violations, [], violations.join("\n"));
+  assert.equal(proposal.edits[0].transcripts, 2);
+  assert.equal(proposal.edits[0].projects, 2);
+});
+
 test("an edit with no verbatim quote is rejected", () => {
   const { proposal, violations } = gate({
     edit: memoryEdit((t) => t.replace("- Use Node 18 via nvm before running any script.\n", "")),

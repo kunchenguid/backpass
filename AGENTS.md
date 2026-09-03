@@ -151,15 +151,19 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   not `extract` or `move` must quote `minGapEvidence` distinct sessions - add, rewrite and
   remove alike. `buildProposal` discards empty quote text, then counts canonical non-empty
   source labels from the edit's own `evidence` that also appear in `summary.sources`
-  (the labels this run's fold issued; `src/fold.js`). The model's `transcripts` field is
-  not read. A misspelled or date-shifted label is not a second session. Sourceless quotes
+  (the labels this run's fold issued; `gapSource` / `disambiguateSourceLabels` in
+  `src/gap-ledger.js`, folded in `src/fold.js`). Labels carry the untruncated native
+  session id, not an 8-character prefix: Codex ULIDs are time-prefixed, so same-minute
+  sessions collide at 8 characters and would over-refuse a valid two-session rewrite.
+  The model's `transcripts` field is not read. A misspelled or date-shifted label is not a second session. Sourceless quotes
   remain visible as `unknown source` but do not count. There is no shape predicate
   separating an additive rewrite from a tightening, so a one-session tightening is
   refused too. Never reintroduce a lexical-overlap, token-growth, or other text classifier
   here. In user scope the same edits also clear `minGapProjects` (unchanged default),
   counted by `countedEvidenceProjects` from cited gap clusters and from
   `summary.sourceProjects`, the fold's source -> project map that lets instruction-row
-  evidence answer for a rewrite. `sourceProjects` is empty without a project;
+  evidence answer for a rewrite. That map is keyed by the same unique labels, never
+  last-write-wins on a colliding truncated id. `sourceProjects` is empty without a project;
   `summary.sources` is the allowlist for both scopes.
 - **Negative evidence has a sign the pipeline must not lose.** Analysis classifies every
   negative (`harm` / `non-compliance` / `irrelevant`, `sanitizeEvidence` drops other

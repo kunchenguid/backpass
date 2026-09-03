@@ -60,17 +60,58 @@ export function emptyGapLedger() {
   return { version: 1, entries: {} };
 }
 
+/**
+ * Fold-issued source label for one session. Evidence floors, `summary.sources`, and
+ * `sourceProjects` all key off this string, so it must not collapse two sessions.
+ * Time-prefixed Codex ULIDs share an 8-character prefix when they start in the same
+ * minute; keep the native id whole.
+ */
 export function gapSource(transcript = {}) {
   const date = transcript.startedAt ? new Date(transcript.startedAt).toISOString().slice(0, 10) : "unknown date";
-  return `${transcript.harness} · ${String(transcript.id || "")
-    .replace(/^[a-z-]+-/, "")
-    .slice(0, 8)} · ${date}`;
+  return `${transcript.harness} · ${sessionSourceId(transcript)} · ${date}`;
+}
+
+export function sessionSourceId(transcript = {}) {
+  const native = String(transcript.nativeId ?? "").trim();
+  if (native) return native;
+  const raw = String(transcript.id || "").trim();
+  const harness = String(transcript.harness || "");
+  if (harness && raw.startsWith(`${harness}-`)) return raw.slice(harness.length + 1);
+  return raw.replace(/^[a-z-]+-/, "") || String(transcript.identity || "").trim();
 }
 
 export function normalizeSourceLabel(source) {
   return String(source || "")
     .trim()
     .replace(/\s+/g, " ");
+}
+
+/**
+ * When two sessions share a base source label, suffix the canonical session identity
+ * so `summary.sources` and `sourceProjects` stay 1:1 with sessions instead of
+ * last-write-wins on the colliding key.
+ *
+ * @param {{ source?: string, identity?: string }[]} entries
+ * @returns {string[]}
+ */
+export function disambiguateSourceLabels(entries) {
+  const identitiesBySource = new Map();
+  const normalized = (Array.isArray(entries) ? entries : []).map((entry) => ({
+    source: normalizeSourceLabel(entry?.source),
+    identity: String(entry?.identity || "").trim(),
+  }));
+  for (const entry of normalized) {
+    if (!entry.source) continue;
+    if (!identitiesBySource.has(entry.source)) identitiesBySource.set(entry.source, new Set());
+    identitiesBySource.get(entry.source).add(entry.identity || entry.source);
+  }
+  return normalized.map((entry) => {
+    const identities = identitiesBySource.get(entry.source);
+    if (identities?.size > 1 && entry.identity && !entry.source.includes(entry.identity)) {
+      return `${entry.source} · ${entry.identity}`;
+    }
+    return entry.source;
+  });
 }
 
 function normalize(text) {

@@ -132,7 +132,7 @@ function normalizeEvidence(evidence) {
     .map((e) => ({
       polarity: e.polarity === "positive" ? "positive" : e.polarity === "neutral" ? "neutral" : "negative",
       text: String(e.text).trim().slice(0, 600),
-      source: String(e.source || "").slice(0, 120),
+      source: String(e.source || "").slice(0, 256),
     }));
 }
 

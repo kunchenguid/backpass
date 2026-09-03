@@ -3,7 +3,13 @@ import fs from "node:fs";
 import { loadConfig } from "./config.js";
 import { classifyInteraction, INTERACTIVE, NON_INTERACTIVE } from "./interaction.js";
 import { findInstructionUnit, instructionUnits, resolveMemoryFiles, similarity } from "./memory.js";
-import { GAP_COVERED_THRESHOLD, GAP_SIMILARITY_THRESHOLD, gapSource, normalizeSourceLabel } from "./gap-ledger.js";
+import {
+  GAP_COVERED_THRESHOLD,
+  GAP_SIMILARITY_THRESHOLD,
+  disambiguateSourceLabels,
+  gapSource,
+  normalizeSourceLabel,
+} from "./gap-ledger.js";
 import { crossSurfaceDuplicates } from "./overlap.js";
 
 /**
@@ -91,9 +97,15 @@ export function foldEvidence(
   // without the project requirement, so a project-scoped run still has an allowlist.
   const sources = new Set();
   const sourceProjects = {};
-  for (const record of usable) {
+  const recordSources = disambiguateSourceLabels(
+    usable.map((record) => ({
+      source: gapSource(record.transcript),
+      identity: record.transcript.identity || record.transcript.id,
+    })),
+  );
+  for (const [index, record] of usable.entries()) {
     if (record.usedRawTranscript) usedRawCount += 1;
-    const source = normalizeSourceLabel(gapSource(record.transcript));
+    const source = recordSources[index];
     sources.add(source);
     if (record.transcript.project) sourceProjects[source] = record.transcript.project;
 
@@ -152,13 +164,14 @@ export function foldEvidence(
   // when a majority of its sightings vote orchestration. Mixed clusters stay visible
   // so one inconsistent classifier call cannot drop a real recurrence below the floor.
   const allObservations = gapObservations ?? recordObservations;
-  for (const observation of allObservations) {
+  const labeledObservations = labelObservationSources(allObservations);
+  for (const observation of labeledObservations) {
     const source = normalizeSourceLabel(observation?.source);
     if (source) sources.add(source);
   }
-  const orchestrationGapSightings = allObservations.filter((obs) => obs?.domain === "orchestration").length;
+  const orchestrationGapSightings = labeledObservations.filter((obs) => obs?.domain === "orchestration").length;
 
-  const gapClusters = clusterGapObservations(allObservations, { checkProjectCoverage });
+  const gapClusters = clusterGapObservations(labeledObservations, { checkProjectCoverage });
 
   // Instructions that exist in the file but drew no evidence at all are the strongest
   // removal / extraction candidates, so they must appear in the summary too.
@@ -317,6 +330,19 @@ function oversizedRestructureTargets(memoryFile, nonComplianceSessions, minGapEv
     });
   }
   return targets;
+}
+
+function labelObservationSources(observations) {
+  const labels = disambiguateSourceLabels(
+    observations.map((observation) => ({
+      source: observation?.source,
+      identity: observation?.sessionId,
+    })),
+  );
+  return observations.map((observation, index) => ({
+    ...observation,
+    source: labels[index] || observation?.source,
+  }));
 }
 
 /**
