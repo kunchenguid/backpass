@@ -95,17 +95,27 @@ export function normalizeSourceLabel(source) {
  * @returns {string[]}
  */
 export function disambiguateSourceLabels(entries) {
-  const identitiesBySource = new Map();
   const normalized = (Array.isArray(entries) ? entries : []).map((entry) => ({
     source: normalizeSourceLabel(entry?.source),
     identity: String(entry?.identity || "").trim(),
   }));
+  const sourceByIdentity = new Map();
   for (const entry of normalized) {
+    if (entry.identity && entry.source && !sourceByIdentity.has(entry.identity)) {
+      sourceByIdentity.set(entry.identity, entry.source);
+    }
+  }
+  const canonical = normalized.map((entry) => ({
+    ...entry,
+    source: sourceByIdentity.get(entry.identity) || entry.source,
+  }));
+  const identitiesBySource = new Map();
+  for (const entry of canonical) {
     if (!entry.source) continue;
     if (!identitiesBySource.has(entry.source)) identitiesBySource.set(entry.source, new Set());
     identitiesBySource.get(entry.source).add(entry.identity || entry.source);
   }
-  return normalized.map((entry) => {
+  return canonical.map((entry) => {
     const identities = identitiesBySource.get(entry.source);
     if (identities?.size > 1 && entry.identity && !entry.source.includes(entry.identity)) {
       return `${entry.source} · ${entry.identity}`;

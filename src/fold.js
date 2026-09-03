@@ -97,12 +97,19 @@ export function foldEvidence(
   // without the project requirement, so a project-scoped run still has an allowlist.
   const sources = new Set();
   const sourceProjects = {};
-  const recordSources = disambiguateSourceLabels(
-    usable.map((record) => ({
+  const persistedObservations = gapObservations ?? [];
+  const issuedSources = disambiguateSourceLabels([
+    ...usable.map((record) => ({
       source: gapSource(record.transcript),
       identity: record.transcript.identity || record.transcript.id,
     })),
-  );
+    ...persistedObservations.map((observation) => ({
+      source: observation?.source,
+      identity: observation?.sessionId,
+    })),
+  ]);
+  const recordSources = issuedSources.slice(0, usable.length);
+  const observationSources = issuedSources.slice(usable.length);
   for (const [index, record] of usable.entries()) {
     if (record.usedRawTranscript) usedRawCount += 1;
     const source = recordSources[index];
@@ -163,11 +170,18 @@ export function foldEvidence(
   // with project sightings of the same gap; a cluster is withheld from proposals only
   // when a majority of its sightings vote orchestration. Mixed clusters stay visible
   // so one inconsistent classifier call cannot drop a real recurrence below the floor.
-  const allObservations = gapObservations ?? recordObservations;
-  const labeledObservations = labelObservationSources(allObservations);
+  const labeledObservations = gapObservations
+    ? persistedObservations.map((observation, index) => ({
+        ...observation,
+        source: observationSources[index] || observation?.source,
+      }))
+    : recordObservations;
+  const allObservations = labeledObservations;
   for (const observation of labeledObservations) {
     const source = normalizeSourceLabel(observation?.source);
-    if (source) sources.add(source);
+    if (!source) continue;
+    sources.add(source);
+    if (observation.project && !sourceProjects[source]) sourceProjects[source] = observation.project;
   }
   const orchestrationGapSightings = labeledObservations.filter((obs) => obs?.domain === "orchestration").length;
 
@@ -330,19 +344,6 @@ function oversizedRestructureTargets(memoryFile, nonComplianceSessions, minGapEv
     });
   }
   return targets;
-}
-
-function labelObservationSources(observations) {
-  const labels = disambiguateSourceLabels(
-    observations.map((observation) => ({
-      source: observation?.source,
-      identity: observation?.sessionId,
-    })),
-  );
-  return observations.map((observation, index) => ({
-    ...observation,
-    source: labels[index] || observation?.source,
-  }));
 }
 
 /**

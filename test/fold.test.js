@@ -99,10 +99,23 @@ test("same-day Codex ULIDs that share an 8-character prefix stay distinct source
   assert.equal(Object.keys(summary.sourceProjects).length, 2);
 });
 
-test("legacy truncated gap sources with distinct session ids are not last-write-wins", () => {
+test("current records and legacy gap observations share one label per session", () => {
   const truncated = "codex · 01K4M0ND · 2026-09-03";
+  const nativeId = "01K4M0NDEKTSV4RRFFQ69G5FAV";
   const phrasing = "Always vendor the lockfile.";
-  const summary = foldEvidence([], {
+  const current = record(`codex-${nativeId}`, {
+    transcript: {
+      id: `codex-${nativeId}`,
+      nativeId,
+      identity: "identity-a",
+      harness: "codex",
+      project: "repo-a",
+      startedAt: Date.parse("2026-09-03T00:01:00Z"),
+    },
+    negative: [{ instruction: "AG-001", quote: "current q-a", class: "non-compliance" }],
+  });
+  const summary = foldEvidence([current], {
+    memoryFile,
     minGapEvidence: 2,
     gapObservations: [
       {
@@ -126,7 +139,10 @@ test("legacy truncated gap sources with distinct session ids are not last-write-
   assert.equal(summary.gaps.length, 1);
   assert.equal(summary.gaps[0].sessions, 2);
   assert.equal(new Set(summary.gaps[0].quotes.map((quote) => quote.source)).size, 2);
+  assert.equal(summary.sources.length, 2);
+  assert.equal(summary.instructions[0].quotes[0].source, summary.gaps[0].quotes[0].source);
   assert.ok(summary.gaps[0].quotes.every((quote) => summary.sources.includes(quote.source)));
+  assert.deepEqual(new Set(Object.values(summary.sourceProjects)), new Set(["repo-a", "repo-b"]));
 });
 
 test("instructions with no evidence still appear - they are the removal candidates", () => {
