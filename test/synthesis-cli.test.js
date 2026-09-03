@@ -160,9 +160,14 @@ test("propose stages extracts in an existing configured Claude skills directory"
   assert.ok(staged[".claude/skills/release-checklist/SKILL.md"]);
   assert.ok(staged[".claude/skills/incident-response/SKILL.md"]);
   assert.equal(staged[".agents/skills/release-checklist/SKILL.md"], undefined);
-  assert.deepEqual(proposalOf(dir).edits[0].hunks.map((hunk) => hunk.file), ["AGENTS.md"]);
   assert.deepEqual(
-    proposalOf(dir).edits[0].skills.map((skill) => skill.path).sort(),
+    proposalOf(dir).edits[0].hunks.map((hunk) => hunk.file),
+    ["AGENTS.md"],
+  );
+  assert.deepEqual(
+    proposalOf(dir)
+      .edits[0].skills.map((skill) => skill.path)
+      .sort(),
     [".claude/skills/incident-response/SKILL.md", ".claude/skills/release-checklist/SKILL.md"],
   );
 });
