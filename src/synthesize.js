@@ -77,27 +77,8 @@ const KEPT_EDITING_VIOLATION = "synthesis kept editing the staging copy instead 
  * (`buildProposal`). Framing one number and gating another would set the model up to
  * fail a gate it was never told about.
  */
-function budgetRule(memoryFile, config, maxEdits, descriptionTokens = 0, target = SURFACE_TARGET) {
+function budgetRule(memoryFile, config, maxEdits, descriptionTokens = 0) {
   const remaining = config.budgetTokens - memoryFile.tokens - descriptionTokens;
-  if (target.kind === "skill") {
-    if (remaining <= 0) {
-      return (
-        `The always-loaded surface is ALREADY ${Math.abs(remaining)} tokens OVER budget. ` +
-        `Because this run targets one skill, its edit set MUST shorten that skill's description line enough to be net-negative. ` +
-        `Skill-body text is free until triggered and does not change the always-loaded budget.`
-      );
-    }
-    if (remaining < config.budgetTokens * 0.15) {
-      return (
-        `Only ${remaining} tokens of headroom remain. Keep the target skill's description-line delta within that headroom; ` +
-        `skill-body text is free until triggered.`
-      );
-    }
-    return (
-      `Keep the target skill's description-line delta within the ${remaining} tokens of headroom. ` +
-      `Skill-body text is free until triggered.`
-    );
-  }
   const counted = descriptionTokens
     ? ` The budget counts this file plus every skill description line (${descriptionTokens} tok of descriptions today); skill bodies stay free until triggered.`
     : "";
@@ -166,46 +147,20 @@ function assertRepoUntouched(repo, before, workspaceRoot) {
   );
 }
 
-function targetPromptValues(target, memoryPath, skillsDir, minGapEvidence) {
+function targetRule(target, memoryPath, skillsDir) {
   if (target.kind === "skill") {
-    const skillPath = workspacePathFor(target.path);
-    return {
-      WORKSPACE_SCOPE:
-        `the memory file at \`./${memoryPath}\` for read-only context and the targeted skill at ` +
-        `\`./${skillPath}\` as the only writable file`,
-      EDIT_DIRECTIVE: `Make your edits only in \`./${skillPath}\` with your file tools. Do not edit \`./${memoryPath}\` or create any files.`,
-      SKILL_GUIDANCE: loadPrompt("synthesis-target-skill-guidance"),
-      EVIDENCE_FLOOR_RULE:
-        `2. **Every change to the target skill's description or body needs evidence from at least ${minGapEvidence} distinct sessions.** One bad session never rewrites the skill.`,
-      TARGET_RULE: `0. **This run targets \`./${skillPath}\` only.** Do not edit the memory file or create or edit another skill.\n`,
-      RELOCATION_RULES: "",
-      EXTRACTION_RULE: "",
-      WRITE_SCOPE_RULE: `9. Change only \`./${skillPath}\`. Never delete it or create notes, scripts, or scratch files.`,
-      PLACEMENT_GUIDANCE:
-        `A skill's description is always loaded and its body is free until triggered. If the evidence shows an agent lacked knowledge this skill already contains, rewrite its description line so the trigger is detectable.`,
-    };
+    return (
+      `0. **This run targets \`./${workspacePathFor(target.path)}\` only.** It is the one staged file. ` +
+      `Do not edit \`./${memoryPath}\` or any other skill, and do not create a skill; extraction does not apply.\n`
+    );
   }
-  const memoryTarget = target.kind === "memory";
-  return {
-    WORKSPACE_SCOPE:
-      `the memory file at \`./${memoryPath}\` and the skills directory at \`./${skillsDir}/\``,
-    EDIT_DIRECTIVE: `Make your edits by editing \`./${memoryPath}\` in place with your file tools.`,
-    SKILL_GUIDANCE: render(loadPrompt(memoryTarget ? "synthesis-new-skill-guidance" : "synthesis-skill-guidance"), {
-      MEMORY_PATH: memoryPath,
-      SKILLS_DIR: skillsDir,
-    }),
-    EVIDENCE_FLOOR_RULE:
-      `2. **Every change to this always-loaded file needs evidence from at least ${minGapEvidence} distinct sessions** - adding text, rewriting text and removing text alike, whatever the shape of the change. One bad session never rewrites the weights. Extracting text into a skill and moving text within the file are exempt: they keep every line. If only one session supports a wording change, leave the wording alone.`,
-    TARGET_RULE: memoryTarget
-      ? `0. **This run targets \`./${memoryPath}\` only.** Existing skills are read-only, but you may extract into a new skill under \`./${skillsDir}/\`.\n`
-      : "",
-    RELOCATION_RULES: render(loadPrompt("synthesis-relocation-rules"), { MEMORY_PATH: memoryPath }),
-    EXTRACTION_RULE: memoryTarget
-      ? "8. You can extract a long, narrow, crisply-triggered section into a new skill instead of deleting it: extraction frees the removed always-loaded tokens for one description line and loses nothing."
-      : "8. You can extract a long, narrow, crisply-triggered section instead of deleting it: extraction frees the same always-loaded tokens and loses nothing. You can extract into an existing skill when that file is the right home, instead of creating a new one.",
-    WRITE_SCOPE_RULE: `9. Change only \`./${memoryPath}\` and files under \`./${skillsDir}/\`. Never delete a file. Do not create notes, scripts, or scratch files.`,
-    PLACEMENT_GUIDANCE: loadPrompt("synthesis-placement"),
-  };
+  if (target.kind === "memory") {
+    return (
+      `0. **This run targets \`./${memoryPath}\` only.** The skills listed above live in the repository and are ` +
+      `read-only: do not edit them. You may still extract a NEW skill under \`./${skillsDir}/\`.\n`
+    );
+  }
+  return "";
 }
 
 /**
@@ -229,14 +184,12 @@ function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts, scop
   const maxEdits = effectiveMaxEdits(memoryFile, config, descriptionTokens);
   const target = config.target || SURFACE_TARGET;
 
-  const memoryPath = workspacePathFor(memoryFile.path);
-  const skillsDir = workspacePathFor(overflow.dir);
   const common = {
-    MEMORY_PATH: memoryPath,
-    BUDGET_RULE: budgetRule(memoryFile, config, maxEdits, descriptionTokens, target),
+    MEMORY_PATH: workspacePathFor(memoryFile.path),
+    BUDGET_RULE: budgetRule(memoryFile, config, maxEdits, descriptionTokens),
     MAX_EDITS: String(maxEdits),
     MIN_GAP_EVIDENCE: String(config.minGapEvidence),
-    ...targetPromptValues(target, memoryPath, skillsDir, config.minGapEvidence),
+    TARGET_RULE: targetRule(target, workspacePathFor(memoryFile.path), workspacePathFor(overflow.dir)),
   };
 
   const context = {
@@ -532,9 +485,7 @@ export async function synthesizeProposal({
   const editPromptFile = path.join(promptDir, "synthesis-edit.md");
   fs.writeFileSync(editPromptFile, renderPrompt("synthesis", editValues));
 
-  const fingerprint = repoFingerprint(repo, [
-    ...new Set([...(scope?.memoryFiles || config.memoryFiles || []), memoryFile.path, ...skillFiles.map((s) => s.path)]),
-  ]);
+  const fingerprint = repoFingerprint(repo, [memoryFile.path, ...skillFiles.map((s) => s.path)]);
   const sessionName = `backpass-synth-${process.pid}`;
   const timeoutSeconds = Math.max(config.timeoutSeconds, 900);
   const usage = [];

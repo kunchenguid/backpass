@@ -60,6 +60,24 @@ test("--target resolves only an exact configured memory-file entry or an exact l
   assert.throws(() => resolveTarget("CLAUDE.md", scope), /is configured but does not exist/);
 });
 
+test("a pointer-only memory target is rejected with its imported canonical file", () => {
+  const { scope } = projectScope({ "CLAUDE.md": "@AGENTS.md\n" });
+  assert.throws(
+    () => resolveTarget("CLAUDE.md", scope),
+    (err) =>
+      err instanceof UserError &&
+      /CLAUDE\.md is only a pointer to AGENTS\.md/.test(err.message) &&
+      /target AGENTS\.md instead/.test(err.hint),
+  );
+});
+
+test("a target validates every configured project memory path before narrowing", () => {
+  const repo = makeRepo({ "AGENTS.md": AGENTS });
+  const config = loadConfig(repo.root, { memoryFiles: ["AGENTS.md", "../private.txt"] });
+  const scope = resolveScope(repo.root, { scope: "project" }, config, repo);
+  assert.throws(() => resolveTarget("AGENTS.md", scope), /private\.txt resolves outside the project root/);
+});
+
 test("a name that is both a skill and a memory file is refused, never picked", () => {
   const { scope } = projectScope({ ".agents/skills/agents/SKILL.md": DB.replace("name: db", "name: AGENTS.md") });
   assert.throws(() => resolveTarget("AGENTS.md", scope), /ambiguous: it names AGENTS\.md and \.agents\/skills\/agents/);

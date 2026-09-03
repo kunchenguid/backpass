@@ -1,7 +1,9 @@
 import fs from "node:fs";
+import path from "node:path";
 
 import { userClaudeSkillsDir } from "./config.js";
 import { UserError, info } from "./logger.js";
+import { isPointerTo, resolveMemoryFiles } from "./memory.js";
 import { pathInRoot, resolveInRoot } from "./scope.js";
 import { loadProjectSkills, resolveOverflowTarget } from "./skills.js";
 
@@ -30,6 +32,7 @@ export function resolveTarget(spec, scope) {
   if (spec === undefined) return SURFACE_TARGET;
   const user = scope.kind === "user";
   const root = scope.root;
+  const resolvedMemory = resolveMemoryFiles(root, scope.memoryFiles, { allowExternal: user });
   const overflow = resolveOverflowTarget(root, scope.overflowDir, {
     claudeSkillsDir: user ? userClaudeSkillsDir() : undefined,
     allowExternal: user,
@@ -51,6 +54,20 @@ export function resolveTarget(spec, scope) {
     const entry = memoryMatches[0];
     if (!fs.existsSync(resolveInRoot(root, entry))) {
       throw new UserError(`--target ${entry} is configured but does not exist`, "a targeted run never creates it");
+    }
+    const selected = resolvedMemory.all.find((file) => file.path === entry);
+    const imported = selected
+      ? resolvedMemory.all.find(
+          (file) =>
+            file !== selected &&
+            isPointerTo(selected.text, file.absolute, { fromDir: path.dirname(selected.absolute) }),
+        )
+      : null;
+    if (imported) {
+      throw new UserError(
+        `--target ${entry} is only a pointer to ${imported.path} and cannot be trained directly`,
+        `target ${imported.path} instead`,
+      );
     }
     return { kind: "memory", path: entry };
   }
