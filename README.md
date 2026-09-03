@@ -115,6 +115,27 @@ backpass --scope user
 backpass apply --scope user
 ```
 
+### One file instead of the whole surface
+
+`--target` narrows a run to one configured memory file or one skill, named exactly: a
+`memoryFiles` entry, or a skill's `name:`. Nothing else resolves - not a basename, a
+directory, a path to a SKILL.md, or an existing file the config does not name - and an
+unknown name fails, listing the valid ones, instead of falling back to the whole surface.
+
+```sh
+backpass --target AGENTS.md          # this memory file; existing skills are read-only
+backpass --target db                 # this skill only; the memory file and other skills are read-only
+backpass --scope user --target db    # the same, against the user-level surface
+```
+
+A memory-file target may still extract a **new** skill (that is how the file shrinks). A
+skill target writes only that `SKILL.md`, and its budget is still the whole always-loaded
+surface: the memory file plus every description line, moved by the description-line delta
+of the edit. Analysis, evidence, and state are those of the whole surface; only staging and
+the proposal gate narrow. `--target` applies to the default run, `analyze`, `propose`, and
+`apply` (where it must name the saved proposal's target); it cannot be combined with
+`--memory-file`, and a targeted run never bootstraps a missing memory file.
+
 ## How It Works
 
 ### 1. Collect samples - which sessions belong to this repo

@@ -332,6 +332,7 @@ export function buildProposal(rawResult, context) {
     isSuppressed = () => false,
     skillFiles = [],
     scope = null,
+    target = { kind: "surface" },
   } = context;
 
   const violations = [];
@@ -397,6 +398,26 @@ export function buildProposal(rawResult, context) {
     if (!edit.evidence.length) {
       violations.push(`edit ${edit.id} ("${edit.title}") carries no verbatim evidence quote`);
       continue;
+    }
+
+    // A targeted run writes one file. Staging already holds nothing else, so this is
+    // the gate that names a widening attempt, not the mechanism that prevents it.
+    if (target.kind !== "surface") {
+      const outside =
+        target.kind === "skill"
+          ? [...files, ...created.map((c) => c.file)].find((file) => file !== target.path)
+          : files.find((file) => file !== memoryFile.path);
+      if (outside) {
+        violations.push(`edit ${edit.id}: this run targets ${target.path} only; ${outside} is out of scope`);
+        continue;
+      }
+      const clash = created.find((c) => skillFiles.some((skill) => skill.path === c.file));
+      if (clash) {
+        violations.push(
+          `edit ${edit.id}: ${clash.file} already exists; existing skills are read-only when this run targets ${target.path}`,
+        );
+        continue;
+      }
     }
 
     const skillsDir = config.skillDirs || config.skillsDir;
@@ -750,6 +771,7 @@ export function buildProposal(rawResult, context) {
     generatedAt: new Date().toISOString(),
     repo: { name: repo.name, root: repo.root },
     scope: scope?.kind || "project",
+    target,
     memoryFile: { path: memoryFile.path, hash: memoryFile.hash, tokens: memoryFile.tokens },
     targetFiles,
     budget,

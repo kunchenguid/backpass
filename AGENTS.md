@@ -42,6 +42,13 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   repo live in `src/scope.js`; user state never enters `<repo>/.backpass/`.
   `minGapProjects` defaults to 1 (the gate exists; cross-project corroboration is not
   required). A project-scoped run never writes a user-level file.
+- **`--target` is a write surface, not a second scope or a second budget.** `resolveTarget`
+  in `src/target.js` accepts only an exact configured memory-file entry or an exact loaded
+  skill name; every other spelling errors with the valid names - never add a basename,
+  directory, path, or glob match. A skill target keeps the primary memory file as the file
+  under audit, so analysis, evidence, hashes, and the always-loaded budget are unchanged;
+  only staging (`stagedSkills` in `prepareWorkspace`) and the `buildProposal` gate narrow.
+  `TARGET_COMMANDS` lists where the flag applies; everything else rejects it.
 - **Sibling clones are a live-path tier, not a recorded-remote one.** `git worktree
 list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches the
   parent of each worktree (and `discovery.cloneRoots`) for other checkouts that share a

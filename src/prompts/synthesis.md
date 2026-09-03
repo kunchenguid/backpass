@@ -70,7 +70,7 @@ signal.
 
 ## Hard rules - a violation fails the whole proposal
 
-1. **At most {{MAX_EDITS}} edits.** This is the learning rate. An edit is one change a
+{{TARGET_RULE}}1. **At most {{MAX_EDITS}} edits.** This is the learning rate. An edit is one change a
    human can decide on; pick the highest-signal ones. A small correct step beats a large
    speculative one.
 2. **Every change to this always-loaded file needs evidence from at least

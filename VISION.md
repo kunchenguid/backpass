@@ -4,6 +4,7 @@
 It serves the developer who owns that surface, whether it is a project's `AGENTS.md`, the `CLAUDE.md` Claude Code reads in its place, or user-level memory, and it turns transcripts already sitting on their disk into a small set of reviewable edits.
 By default the project file is the one it trains, because learned knowledge belongs with the repo it was learned in, and a write into a person's user-level file from a project run would pollute every project at once.
 A person's user-level surface (`~/.claude/CLAUDE.md`, user-level skills) is a target only when they name it as the scope of a run: that is still the human choosing which weights to train, and it is the only way a person who keeps their instructions at user level has a file to improve.
+A run may name one memory file or one skill instead of the whole surface; that is still the human naming the weights, and the run must not silently widen to the rest.
 Project-scoped and user-scoped evidence stay isolated, so one run cannot launder the other's corroboration.
 It owns exactly one thing: the backward pass from session transcripts to a proposed change in the named memory surface - the memory file and the skills loaded with it.
 

@@ -5,6 +5,7 @@ import { closeApplySurface, openApplySurface, pollDecisions, renderApplySurface 
 import { reviewInTerminal } from "../apply/terminal.js";
 import { openInBrowser } from "../apply/browser.js";
 import { budgetBar, formatTokens } from "../tokens.js";
+import { describeTarget } from "../target.js";
 
 /**
  * The human gate. `backpass apply` is the only command that writes to the repo.
@@ -26,6 +27,16 @@ export async function cmdApply(ctx) {
   if (proposalScope !== runScope) {
     throw new UserError(`this proposal is ${proposalScope} scope; run \`backpass apply --scope ${proposalScope}\``);
   }
+  // A proposal carries its own target; the flag on apply may only restate it.
+  const savedTarget = proposal.target || { kind: "surface" };
+  const sameTarget = config.target.kind === savedTarget.kind && config.target.path === savedTarget.path;
+  if (ctx.flags.target !== undefined && !sameTarget) {
+    throw new UserError(
+      `this proposal targets ${describeTarget(savedTarget)}, not ${describeTarget(config.target)}`,
+      "apply it without --target, or run backpass again with the target you want",
+    );
+  }
+  if (savedTarget.kind !== "surface") info(`${color.cyan("·")} proposal targets ${describeTarget(savedTarget)}`);
   if (proposal.violations?.length) {
     throw new UserError(
       "the saved proposal failed its mechanical gates and was never approved for apply",

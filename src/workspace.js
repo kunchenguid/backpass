@@ -32,9 +32,11 @@ export function workspacePathFor(file) {
 
 /**
  * Build a fresh staging copy. `originals` records every file placed there, so the
- * measurement can tell a modified file from a created or deleted one.
+ * measurement can tell a modified file from a created or deleted one. `stagedSkills`
+ * narrows which existing skill files are copied (a targeted run stages only its write
+ * surface); the skill-dir mappings stay, so a created SKILL.md is still measured.
  */
-export function prepareWorkspace({ state, repo, memoryFile, skillsDir, skillDirs = [skillsDir] }) {
+export function prepareWorkspace({ state, repo, memoryFile, skillsDir, skillDirs = [skillsDir], stagedSkills = null }) {
   const root = workspaceRoot(state);
   fs.rmSync(root, { recursive: true, force: true });
   fs.mkdirSync(root, { recursive: true });
@@ -57,6 +59,7 @@ export function prepareWorkspace({ state, repo, memoryFile, skillsDir, skillDirs
       const logical = path.isAbsolute(sourceDir)
         ? path.join(sourceDir, relative)
         : path.posix.join(sourceDir, relative);
+      if (stagedSkills && !stagedSkills.includes(logical)) continue;
       const staged = path.posix.join(stagedDir, relative);
       const to = path.join(root, staged);
       fs.mkdirSync(path.dirname(to), { recursive: true });

@@ -7,6 +7,7 @@ import { UserError, fail, setQuiet } from "./logger.js";
 import { loadConfig, parseMaxTranscripts, parseScopeKind } from "./config.js";
 import { resolveRepo } from "./repo.js";
 import { printScopeNote, resolveScope } from "./scope.js";
+import { printTargetNote, resolveTarget, TARGET_COMMANDS } from "./target.js";
 import { State } from "./state.js";
 import { AgentResolver } from "./agents.js";
 
@@ -46,6 +47,7 @@ const OPTIONS = {
   scope: { type: "string" },
   project: { type: "string", multiple: true },
   "memory-file": { type: "string", multiple: true },
+  target: { type: "string" },
   "skills-dir": { type: "string" },
 
   "analysis-agent": { type: "string" },
@@ -118,6 +120,8 @@ BUDGET AND SHAPE
   --scope <project|user>   which surface a run reads and writes          [project]
   --project <glob>         user-scope: only sessions whose project/cwd matches (repeatable)
   --memory-file <path>     memory file to optimize (repeatable)
+  --target <name>          train one configured memory file or one skill (by name)
+                           instead of the whole surface; never widens
   --skills-dir <path>      where skill extractions are written          [.agents/skills]
 
 APPLY
@@ -142,6 +146,7 @@ EXAMPLES
   backpass                                  a full run, ending with a proposal
   backpass scan --since 7d --strict         what would be collected, deterministic only
   backpass --scope user                     train the user-level memory file and skills
+  backpass --target db                      train only the skill named db
   backpass --synthesis-agent claude --synthesis-model claude-opus-5
   backpass apply --no-ui                    review and write from the terminal
 `;
@@ -258,7 +263,19 @@ export async function main(argv) {
     }
     const scope = resolveScope(process.cwd(), { ...values, scope: kind, strict: Boolean(values.strict) }, config, repo);
     printScopeNote(scope);
-    config.memoryFiles = scope.memoryFiles;
+    if (values.target !== undefined && !TARGET_COMMANDS.has(commandName)) {
+      throw new UserError(
+        `--target does not apply to ${commandName}`,
+        "it narrows the default run, analyze, propose, and apply",
+      );
+    }
+    if (values.target !== undefined && Array.isArray(values["memory-file"]) && values["memory-file"].length) {
+      throw new UserError("--target cannot be combined with --memory-file", "name the one file with --target");
+    }
+    // Resolved after the scope so user-scope entries and skill dirs are the ones matched.
+    config.target = resolveTarget(values.target, scope);
+    printTargetNote(config.target);
+    config.memoryFiles = config.target.kind === "memory" ? [config.target.path] : scope.memoryFiles;
     config.skillsDir = scope.overflowDir;
     if (scope.skillDirs.length) config.skillsDirs = scope.skillDirs;
     config.state = new State(scope.root, {

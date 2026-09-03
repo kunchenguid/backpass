@@ -35,6 +35,12 @@ export async function cmdRun(ctx) {
     config.state.clearProposal();
 
     if (!resolveMemoryFiles(repo.root, config.memoryFiles, { allowExternal: scope?.kind === "user" }).primary) {
+      if (config.target?.kind === "skill") {
+        throw new UserError(
+          `no memory file found (looked for ${config.memoryFiles.join(", ")}); a targeted run never bootstraps one`,
+          "run `backpass` without --target to bootstrap an AGENTS.md first",
+        );
+      }
       if (scope?.kind === "user") {
         throw new UserError(
           `no user memory file found (looked for ${config.memoryFiles.join(", ")})`,
