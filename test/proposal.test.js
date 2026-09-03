@@ -679,9 +679,7 @@ test("the proposal carries the fold's gap-funnel counts for the apply surface", 
   assert.equal(legacy.proposal.stats.droppedGapSingletons, null);
   assert.equal(legacy.proposal.stats.instructionsWithNegatives, null);
   assert.equal(legacy.proposal.stats.instructionsLeftAlone, null, "no instruction rows means nothing to count");
-  assert.equal(legacy.proposal.stats.candidatesLeftAlone, null);
   assert.equal(legacy.proposal.stats.instructionsSuppressed, null);
-  assert.equal(legacy.proposal.stats.candidatesCombined, null);
 });
 
 test("the funnel's left-alone count names the candidates no accepted edit touched", () => {
@@ -735,38 +733,6 @@ test("the funnel's left-alone count names the candidates no accepted edit touche
   assert.deepEqual(claimed.violations, []);
   assert.equal(claimed.proposal.stats.instructionsLeftAlone, 1);
   assert.equal(claimed.proposal.stats.leftAloneMaxSessions, 6);
-});
-
-test("the funnel accounts for candidates combined into one edit", () => {
-  const edit = memoryEdit((t) => t.replace("- Use Node 18 via nvm before running any script.\n", ""));
-  const gated = gate({
-    edit,
-    annotation: {
-      edits: [
-        claim(["H1"], {
-          kind: "remove",
-          title: "drop the stale Node pin",
-          instructions: ["AG-001", "AG-002"],
-        }),
-      ],
-    },
-    context: {
-      summary: {
-        analyzedSessions: 4,
-        totals: { positive: 0, negative: 8, gapClusters: 0 },
-        instructions: [
-          { instruction: "AG-001", negative: 4, harmSessions: 4, sessions: 4 },
-          { instruction: "AG-002", negative: 4, harmSessions: 4, sessions: 4 },
-          { instruction: "AG-003", negative: 0, harmSessions: 4, sessions: 4 },
-        ],
-      },
-    },
-  });
-
-  assert.deepEqual(gated.violations, []);
-  assert.equal(gated.proposal.stats.candidatesLeftAlone, 0);
-  assert.equal(gated.proposal.stats.candidatesCombined, 1);
-  assert.equal(gated.proposal.edits.length, 1);
 });
 
 test("the funnel's display counters never change which edits are proposed or refused", () => {
@@ -2055,10 +2021,8 @@ test("the apply surface draws one funnel from findings to the edits it proposed"
       droppedGapSingletons: 32,
       instructionsWithNegatives: 7,
       instructionsLeftAlone: 2,
-      candidatesLeftAlone: 2,
       leftAloneMaxSessions: 1,
       instructionsSuppressed: 1,
-      candidatesCombined: 1,
       skillExtractions: 0,
     },
     config: { maxEditsPerRun: 5, minGapEvidence: 2 },
@@ -2085,10 +2049,9 @@ test("the apply surface draws one funnel from findings to the edits it proposed"
       "sent to synthesis 8",
       "2 dropped - the model chose not to edit: ignored in only 1 session each",
       "1 dropped - a previous review rejected the same edit",
-      "1 dropped - combined with another candidate in the same edit",
       "edits proposed 4 of 5",
     ],
-    "one funnel: 133 - 70 - 22 = 41, 41 - 32 - 1 = 8, 8 - 2 - 1 - 1 = 4",
+    "the final step reports measured edits rather than inferring candidate attribution",
   );
   assert.ok(
     !lines.some((l) => (l.drop || "").includes("too few projects")),
@@ -2127,6 +2090,25 @@ test("the apply surface draws one funnel from findings to the edits it proposed"
         "32 dropped - seen in fewer than 3 sessions: 3 sessions have to confirm them (kept for later runs)",
     ),
   );
+
+  const offScaleCap = renderTemplateScript({
+    ...proposal,
+    stats: {
+      ...proposal.stats,
+      positive: 0,
+      negative: 1,
+      gapSightings: 0,
+      gapClusters: 0,
+      reportOnlyGapClusters: 0,
+      reportOnlyByReason: { majorityOrchestration: 0, belowFloorMixed: 0, tooFewProjects: 0 },
+      droppedGapSingletons: 0,
+      instructionsWithNegatives: 1,
+      instructionsLeftAlone: 0,
+      instructionsSuppressed: 0,
+    },
+    edits: [rewrite("e1")],
+  });
+  assert.equal(funnelLines(offScaleCap).at(-1).cap, undefined, "an off-scale cap tick is hidden");
 });
 
 test("a proposal saved before the funnel counts existed falls back to the classic stat row", () => {

@@ -777,10 +777,8 @@ export function buildProposal(rawResult, context) {
       // instructions the negatives land on, and how many of those no edit touched.
       instructionsWithNegatives: summary?.totals?.instructionsWithNegatives ?? null,
       instructionsLeftAlone: funnelOutcome?.instructionsLeftAlone ?? null,
-      candidatesLeftAlone: funnelOutcome?.candidatesLeftAlone ?? null,
       leftAloneMaxSessions: funnelOutcome?.leftAloneMaxSessions ?? null,
       instructionsSuppressed: funnelOutcome?.suppressed ?? null,
-      candidatesCombined: funnelOutcome?.combined ?? null,
       skillExtractions: accepted.reduce((n, e) => {
         if (e.kind !== "extract") return n;
         const createdSkills = editSkills(e).length;
@@ -811,22 +809,13 @@ function funnelInstructionOutcome(summary, accepted, suppressed) {
       .filter((id) => candidateIds.has(id) && !acceptedIds.has(id)),
   );
   const untouched = candidates.filter((row) => !acceptedIds.has(row.instruction) && !suppressedIds.has(row.instruction));
-  const measuredAddition = (edit) => edit.hunks.length > 0 && edit.hunks.every((hunk) => hunk.removed === 0);
-  const acceptedAdds = accepted.filter(measuredAddition).length;
-  const suppressedAdds = suppressed.filter(measuredAddition).length;
-  const missingLeftAlone = Math.max(0, (summary?.totals?.gapClusters ?? 0) - acceptedAdds - suppressedAdds);
-  const sent = candidates.length + (summary?.totals?.gapClusters ?? 0);
-  const leftAlone = untouched.length + missingLeftAlone;
-  const suppressedCount = suppressedIds.size + suppressedAdds;
   return {
     instructionsLeftAlone: untouched.length,
-    candidatesLeftAlone: leftAlone,
     leftAloneMaxSessions: untouched.reduce(
       (n, row) => Math.max(n, row.nonComplianceSessions ?? row.sessions ?? 0),
       0,
     ),
-    suppressed: suppressedCount,
-    combined: Math.max(0, sent - leftAlone - suppressedCount - accepted.length),
+    suppressed: suppressedIds.size,
   };
 }
 

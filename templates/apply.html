@@ -886,7 +886,8 @@
         // evidence-summary.json) or read off the accepted edits - nothing is estimated,
         // and nothing drawn here decides which edits are proposed. A proposal saved
         // before these counts existed falls back to the classic stat row rather than
-        // showing zeros nobody measured.
+        // showing zeros nobody measured. The last step deliberately changes units from
+        // candidate instructions to edits, so its counts are measured rather than reconciled.
         function funnelCounts() {
           var s = P.stats || {};
           var byReason = s.reportOnlyByReason;
@@ -919,13 +920,9 @@
             orchestration: byReason.majorityOrchestration || 0,
             tooFewProjects: byReason.tooFewProjects || 0,
             sent: [candidates, eligible],
-            leftAlone: s.candidatesLeftAlone == null ? s.instructionsLeftAlone || 0 : s.candidatesLeftAlone,
-            leftAloneMaxSessions:
-              s.candidatesLeftAlone == null || s.candidatesLeftAlone === s.instructionsLeftAlone
-                ? s.leftAloneMaxSessions
-                : null,
+            leftAlone: s.instructionsLeftAlone || 0,
+            leftAloneMaxSessions: s.leftAloneMaxSessions,
             suppressed: s.instructionsSuppressed || 0,
-            combined: s.candidatesCombined || 0,
             proposed: [edits.length - adds, adds],
             sighted: s.gapSightings,
             eligible: eligible,
@@ -946,9 +943,9 @@
             fill.style.width = scale > 0 ? Math.max((lanes[i] / scale) * 100, lanes[i] > 0 ? 0.6 : 0) + "%" : "0%";
             track.appendChild(fill);
           });
-          if (o.cap != null && scale > 0) {
+          if (o.cap != null && scale > 0 && o.cap <= scale) {
             var tick = el("span", "capline");
-            tick.style.left = Math.min((o.cap / scale) * 100, 100) + "%";
+            tick.style.left = (o.cap / scale) * 100 + "%";
             tick.setAttribute("data-l", "cap");
             track.appendChild(tick);
           }
@@ -1007,7 +1004,6 @@
               (funnel.leftAloneMaxSessions === 1 ? ": ignored in only 1 session each" : ""),
           );
           funnelDrop(bars, funnel.suppressed, "a previous review rejected the same edit");
-          funnelDrop(bars, funnel.combined, "combined with another candidate in the same edit");
           funnelBar(bars, "edits proposed", funnel.proposed, scale, {
             lit: true,
             small: "of " + fmt(funnel.cap),
