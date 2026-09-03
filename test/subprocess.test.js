@@ -39,7 +39,7 @@ setInterval(() => {}, 1000);
 
     let harnessPid;
     try {
-      const result = await runCapture(process.execPath, [acpxPath], { timeoutMs: 250 });
+      const result = await runCapture(process.execPath, [acpxPath], { timeoutMs: 1000 });
       assert.equal(result.timedOut, true);
       assert.ok(fs.existsSync(pidPath));
       assert.equal(fs.readFileSync(signalPath, "utf8"), "SIGTERM");

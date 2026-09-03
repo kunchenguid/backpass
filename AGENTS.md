@@ -42,6 +42,11 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   repo live in `src/scope.js`; user state never enters `<repo>/.backpass/`.
   `minGapProjects` defaults to 1 (the gate exists; cross-project corroboration is not
   required). A project-scoped run never writes a user-level file.
+- **`--target` is a write-surface, not a second scope.** `src/target.js` resolves one
+  memory file or one skill. Default and `--scope user` still train the whole surface.
+  A targeted run must not copy or propose the rest of the surface; existing skills stay
+  read-only on a memory-file target except for **new** extracts. Tests live in
+  `test/target.test.js`.
 - **Sibling clones are a live-path tier, not a recorded-remote one.** `git worktree
 list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches the
   parent of each worktree (and `discovery.cloneRoots`) for other checkouts that share a

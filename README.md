@@ -114,6 +114,18 @@ backpass --scope user
 backpass apply --scope user
 ```
 
+### One file instead of the whole surface
+
+The default run, and `backpass --scope user`, still train the whole named surface: the primary memory file plus every skill. `--target` names one memory file or one skill for this run and does not silently expand to the rest.
+
+```sh
+backpass --target AGENTS.md
+backpass --target db                          # skill name, or a SKILL.md path
+backpass --scope user --target db
+```
+
+A memory-file target may still extract a **new** skill (that is how the file shrinks). Existing skills are not writable on that run. A skill target writes only that SKILL.md. `--target` cannot be combined with `--memory-file`.
+
 ## How It Works
 
 ### 1. Collect samples - which sessions belong to this repo

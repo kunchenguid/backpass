@@ -543,3 +543,71 @@ test("an oversized non-compliance blob synthesizes as a list-item restructure, n
   assert.match(editPrompt, /Preferred reinforcement is a restructure-in-place/);
   assert.match(editPrompt, /bold label on the blob is not a strengthen/);
 });
+
+test("a memory-file target does not stage existing skills, and the proposal cannot name them", async () => {
+  const { repo, config, run } = setup({
+    edit: {
+      "AGENTS.md": { replace: [["- Keep this file short.\n", "- Keep this file short; point at files.\n"]] },
+    },
+    annotations: [{ reply: { edits: [tighten(["H1"])], verdicts: [], notes: [] } }],
+  });
+  fs.mkdirSync(path.join(repo.root, ".agents/skills/db"), { recursive: true });
+  fs.writeFileSync(
+    path.join(repo.root, ".agents/skills/db/SKILL.md"),
+    "---\nname: db\ndescription: Load for database work.\n---\n\n- Keep transactions short.\n",
+  );
+  config.runTarget = { kind: "memory", path: "AGENTS.md" };
+  const { proposal, violations } = await run();
+  assert.deepEqual(violations, []);
+  assert.equal(proposal.target.kind, "memory");
+  assert.equal(proposal.memoryFile.path, "AGENTS.md");
+  assert.equal(proposal.edits.length, 1);
+  assert.equal(proposal.edits[0].file, "AGENTS.md");
+  assert.equal(fs.existsSync(path.join(repo.root, ".backpass", "synthesis", ".agents/skills/db/SKILL.md")), false);
+  assert.equal(
+    proposal.edits.some((e) => (e.hunks || []).some((h) => String(h.file).includes("SKILL.md"))),
+    false,
+  );
+  assert.match(fs.readFileSync(path.join(repo.root, ".agents/skills/db/SKILL.md"), "utf8"), /Load for database work/);
+});
+
+test("a skill target stages only that skill, so a write to AGENTS.md cannot enter the proposal", async () => {
+  const skillText = "---\nname: db\ndescription: Load for database work.\n---\n\n- Keep transactions short.\n";
+  const { repo, config } = setup(
+    {
+      edit: {
+        [workspacePathFor(".agents/skills/db/SKILL.md")]: {
+          replace: [["Keep transactions short.", "Keep every transaction short."]],
+        },
+        "AGENTS.md": "# hijack\n",
+      },
+      annotations: [{ reply: { edits: [tighten(["H1"])], verdicts: [], notes: [] } }],
+    },
+    { text: AGENTS },
+  );
+  fs.mkdirSync(path.join(repo.root, ".agents/skills/db"), { recursive: true });
+  fs.writeFileSync(path.join(repo.root, ".agents/skills/db/SKILL.md"), skillText);
+  const memoryFile = readMemoryFile(repo.root, ".agents/skills/db/SKILL.md");
+  config.runTarget = {
+    kind: "skill",
+    path: memoryFile.path,
+    name: "db",
+    skill: { name: "db", path: memoryFile.path, description: "Load for database work." },
+    file: memoryFile,
+  };
+  const { proposal, violations } = await synthesizeProposal({
+    memoryFile,
+    summary: summaryFor(),
+    config,
+    repo,
+    transcripts: [{ harness: "claude" }],
+  });
+  assert.ok(violations.length === 0 || proposal.edits.every((e) => e.file === memoryFile.path));
+  assert.equal(proposal.target.kind, "skill");
+  assert.equal(proposal.memoryFile.path, ".agents/skills/db/SKILL.md");
+  assert.equal(
+    proposal.edits.some((e) => e.file === "AGENTS.md" || (e.hunks || []).some((h) => h.file === "AGENTS.md")),
+    false,
+  );
+  assert.equal(fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8"), AGENTS);
+});

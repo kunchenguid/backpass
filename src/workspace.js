@@ -34,7 +34,14 @@ export function workspacePathFor(file) {
  * Build a fresh staging copy. `originals` records every file placed there, so the
  * measurement can tell a modified file from a created or deleted one.
  */
-export function prepareWorkspace({ state, repo, memoryFile, skillsDir, skillDirs = [skillsDir] }) {
+export function prepareWorkspace({
+  state,
+  repo,
+  memoryFile,
+  skillsDir,
+  skillDirs = [skillsDir],
+  copyExistingSkills = true,
+}) {
   const root = workspaceRoot(state);
   fs.rmSync(root, { recursive: true, force: true });
   fs.mkdirSync(root, { recursive: true });
@@ -51,21 +58,22 @@ export function prepareWorkspace({ state, repo, memoryFile, skillsDir, skillDirs
   const skillMappings = skillDirs.map((logical) => ({ logical, staged: workspacePathFor(logical) }));
   for (const { logical: sourceDir, staged: stagedDir } of skillMappings) {
     const skillsSource = path.isAbsolute(sourceDir) ? sourceDir : path.join(repo.root, sourceDir);
-    if (!fs.existsSync(skillsSource) || !fs.statSync(skillsSource).isDirectory()) continue;
-    for (const relative of walkFiles(skillsSource)) {
-      const from = path.join(skillsSource, relative);
-      const logical = path.isAbsolute(sourceDir)
-        ? path.join(sourceDir, relative)
-        : path.posix.join(sourceDir, relative);
-      const staged = path.posix.join(stagedDir, relative);
-      const to = path.join(root, staged);
-      fs.mkdirSync(path.dirname(to), { recursive: true });
-      fs.copyFileSync(from, to);
-      originals.set(logical, fs.readFileSync(from, "utf8"));
-      stagedPaths.set(logical, staged);
+    if (copyExistingSkills && fs.existsSync(skillsSource) && fs.statSync(skillsSource).isDirectory()) {
+      for (const relative of walkFiles(skillsSource)) {
+        const from = path.join(skillsSource, relative);
+        const logical = path.isAbsolute(sourceDir)
+          ? path.join(sourceDir, relative)
+          : path.posix.join(sourceDir, relative);
+        const staged = path.posix.join(stagedDir, relative);
+        const to = path.join(root, staged);
+        fs.mkdirSync(path.dirname(to), { recursive: true });
+        fs.copyFileSync(from, to);
+        originals.set(logical, fs.readFileSync(from, "utf8"));
+        stagedPaths.set(logical, staged);
+      }
     }
   }
-  fs.mkdirSync(path.join(root, workspacePathFor(skillsDir)), { recursive: true });
+  if (skillsDir) fs.mkdirSync(path.join(root, workspacePathFor(skillsDir)), { recursive: true });
 
   return {
     root,

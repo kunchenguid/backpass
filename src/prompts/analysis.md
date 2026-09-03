@@ -4,7 +4,7 @@ Your job is NOT to review the code. It is to measure how well the memory file's
 instructions actually steered this session, and to spot mistakes an instruction could
 have prevented. This is the loss signal for a backward pass over the memory file.
 
-## The memory file under audit: {{MEMORY_PATH}}
+## The file under audit: {{MEMORY_PATH}}
 
 Each instruction has a stable id in [brackets]. Refer to instructions ONLY by these ids.
 

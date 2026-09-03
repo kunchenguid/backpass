@@ -34,7 +34,10 @@ export async function cmdRun(ctx) {
 
     config.state.clearProposal();
 
-    if (!resolveMemoryFiles(repo.root, config.memoryFiles, { allowExternal: scope?.kind === "user" }).primary) {
+    if (
+      config.runTarget?.kind !== "skill" &&
+      !resolveMemoryFiles(repo.root, config.memoryFiles, { allowExternal: scope?.kind === "user" }).primary
+    ) {
       if (scope?.kind === "user") {
         throw new UserError(
           `no user memory file found (looked for ${config.memoryFiles.join(", ")})`,
@@ -70,7 +73,10 @@ export async function cmdRun(ctx) {
     // The banner shows what the gate measures: the always-loaded surface, which is the
     // memory file plus every skill description line.
     const descriptionTokens = skillDescriptionTokens(analysis.skills || []);
-    const alwaysLoaded = analysis.file.tokens + descriptionTokens;
+    const alwaysLoaded =
+      analysis.file.alwaysLoadedTokens != null
+        ? analysis.file.alwaysLoadedTokens
+        : analysis.file.tokens + descriptionTokens;
     const budget = budgetBar({
       utilization: alwaysLoaded / config.budgetTokens,
       withinBudget: alwaysLoaded <= config.budgetTokens,

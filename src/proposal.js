@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+
 import { renderHunkLines } from "./diff.js";
 import { normalizeSourceLabel } from "./gap-ledger.js";
 import { mixFromCounts } from "./interaction.js";
@@ -70,7 +73,8 @@ export const SHRINK_EDIT_TOKENS = 40;
 
 export function effectiveMaxEdits(memoryFile, config, alwaysLoadedExtraTokens = 0) {
   if (Number.isInteger(config.maxEditsPerRun) && config.maxEditsPerRun > 0) return config.maxEditsPerRun;
-  const overage = memoryFile.tokens + alwaysLoadedExtraTokens - config.budgetTokens;
+  const tokens = memoryFile.alwaysLoadedTokens ?? memoryFile.tokens;
+  const overage = tokens + alwaysLoadedExtraTokens - config.budgetTokens;
   if (overage <= 0) return DEFAULT_MAX_EDITS;
   return Math.min(SHRINK_MAX_EDITS, Math.max(DEFAULT_MAX_EDITS, Math.ceil(overage / SHRINK_EDIT_TOKENS)));
 }
@@ -332,6 +336,7 @@ export function buildProposal(rawResult, context) {
     isSuppressed = () => false,
     skillFiles = [],
     scope = null,
+    runTarget = config.runTarget || { kind: "surface" },
   } = context;
 
   const violations = [];
@@ -403,8 +408,41 @@ export function buildProposal(rawResult, context) {
     const memoryHunks = hunks.filter((hunk) => hunk.file === memoryFile.path);
     const otherHunks = hunks.filter((hunk) => hunk.file !== memoryFile.path);
     const destFiles = [...new Set(otherHunks.map((hunk) => hunk.file))];
+    const written = [...new Set([...files, ...created.map((c) => c.file)])];
+    if (runTarget?.kind === "skill") {
+      const extra = written.find((file) => file !== memoryFile.path);
+      if (extra) {
+        violations.push(`edit ${edit.id}: this run targets ${memoryFile.path} only; ${extra} is out of scope`);
+        continue;
+      }
+    }
+    if (runTarget?.kind === "memory") {
+      const existingSkill = created.find((c) => {
+        const abs = path.isAbsolute(c.file) ? c.file : path.join(repo.root, c.file);
+        return fs.existsSync(abs);
+      });
+      if (existingSkill) {
+        violations.push(
+          `edit ${edit.id}: ${existingSkill.file} already exists; this run targets ${memoryFile.path} and does not rewrite existing skills`,
+        );
+        continue;
+      }
+      const extraMemory = written.find(
+        (file) => file !== memoryFile.path && !isSkillFilePath(file, config.skillDirs || config.skillsDir),
+      );
+      if (extraMemory) {
+        violations.push(`edit ${edit.id}: this run targets ${memoryFile.path} only; ${extraMemory} is out of scope`);
+        continue;
+      }
+    }
 
     if (edit.kind === "extract") {
+      if (runTarget?.kind === "skill") {
+        violations.push(
+          `edit ${edit.id}: this run targets ${runTarget.path} only; extraction would write another file`,
+        );
+        continue;
+      }
       if (!memoryHunks.length || (!created.length && !destFiles.length)) {
         violations.push(
           `edit ${edit.id}: kind "extract" must group SKILL.md file(s) (created or extended) with change(s) to ${memoryFile.path}`,
@@ -664,8 +702,10 @@ export function buildProposal(rawResult, context) {
         const next = applyEdit(before, slice);
         running.set(target, next);
         const delta = estimateTokens(next) - estimateTokens(before);
-        if (target === memoryFile.path) memoryDelta += delta;
-        else {
+        if (target === memoryFile.path) {
+          memoryDelta += runTarget?.kind === "skill" ? descriptionLineDelta(before, next) : delta;
+          if (runTarget?.kind === "skill") descriptionDelta += descriptionLineDelta(before, next);
+        } else {
           otherDelta += delta;
           if (isSkillFilePath(target, config.skillDirs || config.skillsDir)) {
             descriptionDelta += descriptionLineDelta(before, next);
@@ -687,10 +727,17 @@ export function buildProposal(rawResult, context) {
   const projectedText = running.get(memoryFile.path) ?? memoryFile.text;
   const descriptionTokensProjected =
     descriptionTokensNow + accepted.reduce((sum, edit) => sum + (edit.descriptionDelta || 0), 0);
-  const budget = budgetStatus(memoryFile.text, projectedText, config.budgetTokens, {
-    current: descriptionTokensNow,
-    projected: descriptionTokensProjected,
-  });
+  const skillTarget = runTarget?.kind === "skill";
+  const budget = skillTarget
+    ? budgetStatus(
+        parseFrontmatter(memoryFile.text).description || "",
+        parseFrontmatter(projectedText).description || "",
+        config.budgetTokens,
+      )
+    : budgetStatus(memoryFile.text, projectedText, config.budgetTokens, {
+        current: descriptionTokensNow,
+        projected: descriptionTokensProjected,
+      });
 
   /**
    * The budget gate has two modes (design section 6).
@@ -700,11 +747,14 @@ export function buildProposal(rawResult, context) {
    * would fail every run on exactly the repos that need backpass most. There, the run is a shrink
    * plan and the gate is progress: the edit set must be strictly net-negative.
    */
-  budget.mode = memoryFile.tokens + descriptionTokensNow > config.budgetTokens ? "shrink" : "cap";
+  const currentAlwaysLoaded = skillTarget
+    ? budget.current
+    : (memoryFile.alwaysLoadedTokens ?? memoryFile.tokens) + descriptionTokensNow;
+  budget.mode = currentAlwaysLoaded > config.budgetTokens ? "shrink" : "cap";
   budget.startedOverBudget = budget.mode === "shrink";
   // For displays: how much of `current` is the skill layer, so a surface number is
   // never presented as if it measured the file alone.
-  budget.descriptionTokens = descriptionTokensNow;
+  budget.descriptionTokens = skillTarget ? budget.current : descriptionTokensNow;
 
   // With skills present the gated number is the surface, not the file alone; name what
   // the number actually measures.
@@ -750,6 +800,12 @@ export function buildProposal(rawResult, context) {
     generatedAt: new Date().toISOString(),
     repo: { name: repo.name, root: repo.root },
     scope: scope?.kind || "project",
+    target:
+      runTarget?.kind === "skill"
+        ? { kind: "skill", path: runTarget.path, name: runTarget.name }
+        : runTarget?.kind === "memory"
+          ? { kind: "memory", path: runTarget.path }
+          : { kind: "surface" },
     memoryFile: { path: memoryFile.path, hash: memoryFile.hash, tokens: memoryFile.tokens },
     targetFiles,
     budget,

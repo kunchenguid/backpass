@@ -1,10 +1,10 @@
 import path from "node:path";
 
 import { analyzeTranscripts } from "../analyze.js";
-import { userClaudeSkillsDir } from "../config.js";
 import { UserError, color, info, json, out, warn } from "../logger.js";
 import { memorySurfaceHash, resolveMemoryFiles } from "../memory.js";
-import { loadProjectSkills, resolveOverflowTarget, skillDescriptionTokens } from "../skills.js";
+import { skillDescriptionTokens } from "../skills.js";
+import { loadScopeSkills } from "../target.js";
 import { emitProgress } from "../progress.js";
 import { discoverForRun } from "./scan.js";
 import { printUsage } from "./usage.js";
@@ -25,8 +25,28 @@ import { capTranscripts } from "../sample.js";
  *
  * When no configured file exists, `backpass` (the default run) bootstraps one; every
  * other command fails with a pointer to that.
+ *
+ * `--target` narrows the write surface. A skill target makes that SKILL.md the file
+ * under audit; a memory-file target still sees every skill as read-only analysis
+ * context so failed triggers stay visible, but those skills are not writable.
  */
 export function primaryMemoryFile(repo, config, scope = null) {
+  const runTarget = config.runTarget || { kind: "surface" };
+  const { skills: allSkills } = loadScopeSkills(repo, config, scope);
+  if (runTarget.kind === "skill") {
+    const file = runTarget.file;
+    file.alwaysLoadedTokens = skillDescriptionTokens([runTarget.skill]);
+    return {
+      file,
+      all: [file],
+      hash: file.hash,
+      resolved: { primary: file, all: [file], pointers: [], separate: [], hash: file.hash },
+      skills: [],
+      allSkills,
+      runTarget,
+    };
+  }
+
   const resolved = resolveMemoryFiles(repo.root, config.memoryFiles, { allowExternal: scope?.kind === "user" });
   if (!resolved.primary) {
     if (scope?.kind === "user") {
@@ -40,30 +60,29 @@ export function primaryMemoryFile(repo, config, scope = null) {
       "run `backpass` to bootstrap an AGENTS.md, or set memoryFiles in .backpassrc.json",
     );
   }
-  for (const other of resolved.separate) {
-    const relativeImport = path
-      .relative(path.dirname(other.absolute), resolved.primary.absolute)
-      .split(path.sep)
-      .join("/");
-    const pointerImport = relativeImport;
-    warn(
-      `${other.path} is a separate memory file and will NOT be updated - only ${resolved.primary.path} is optimized. ` +
-        `To cover both, consolidate: move its content into ${resolved.primary.path} and make ${other.path} a pointer ` +
-        `(a single line: @${pointerImport}).`,
-    );
+  if (runTarget.kind !== "memory") {
+    for (const other of resolved.separate) {
+      const relativeImport = path
+        .relative(path.dirname(other.absolute), resolved.primary.absolute)
+        .split(path.sep)
+        .join("/");
+      const pointerImport = relativeImport;
+      warn(
+        `${other.path} is a separate memory file and will NOT be updated - only ${resolved.primary.path} is optimized. ` +
+          `To cover both, consolidate: move its content into ${resolved.primary.path} and make ${other.path} a pointer ` +
+          `(a single line: @${pointerImport}).`,
+      );
+    }
   }
   // Overflow-layout warnings are the synthesis stage's to print; this resolution is read-only.
-  const userScope = scope?.kind === "user";
-  const overflow = resolveOverflowTarget(repo.root, config.skillsDir, {
-    claudeSkillsDir: userScope ? userClaudeSkillsDir() : undefined,
-  });
-  const skills = loadProjectSkills(repo.root, overflow.dir, config.skillsDirs || [], { exact: userScope });
   return {
     file: resolved.primary,
     all: resolved.all,
-    hash: memorySurfaceHash(resolved.hash, skills),
+    hash: memorySurfaceHash(resolved.hash, allSkills),
     resolved,
-    skills,
+    skills: allSkills,
+    allSkills,
+    runTarget,
   };
 }
 
@@ -72,10 +91,11 @@ export async function runAnalysis(ctx) {
   const { file, hash, skills } = primaryMemoryFile(repo, config, scope);
   // Deterministic by design: tokens and units come from parsing the file, no model.
   const descriptionTokens = skillDescriptionTokens(skills);
+  const alwaysLoaded = file.alwaysLoadedTokens ?? file.tokens + descriptionTokens;
   emitProgress("memory", {
     path: file.path,
     label: skills.length ? `${file.path} + skill descriptions` : file.path,
-    tokens: file.tokens + descriptionTokens,
+    tokens: alwaysLoaded,
     budget: config.budgetTokens,
     units: file.units.length,
   });

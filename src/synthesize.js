@@ -14,6 +14,7 @@ import {
   resolveProjectSkillDirs,
   skillDescriptionTokens,
 } from "./skills.js";
+import { copyExistingSkills, workspaceSkillDirs } from "./target.js";
 import { isSuppressedByRejection } from "./state.js";
 import { emitProgress } from "./progress.js";
 import { measureWorkspace, prepareWorkspace, repoFingerprint, workspacePathFor } from "./workspace.js";
@@ -70,6 +71,11 @@ const EMPTY_TURN_VIOLATION =
 const UNPARSEABLE_VIOLATION = "synthesis answered with text, but not with a JSON object";
 const KEPT_EDITING_VIOLATION = "synthesis kept editing the staging copy instead of annotating the measured changes";
 
+function alwaysLoadedTokensOf(memoryFile, descriptionTokens = 0) {
+  if (memoryFile.alwaysLoadedTokens != null) return memoryFile.alwaysLoadedTokens;
+  return memoryFile.tokens + descriptionTokens;
+}
+
 /**
  * The budget the prompts frame is the always-loaded surface: the memory file plus
  * every skill description line, the same sum the mechanical gate measures
@@ -77,7 +83,8 @@ const KEPT_EDITING_VIOLATION = "synthesis kept editing the staging copy instead 
  * fail a gate it was never told about.
  */
 function budgetRule(memoryFile, config, maxEdits, descriptionTokens = 0) {
-  const remaining = config.budgetTokens - memoryFile.tokens - descriptionTokens;
+  const current = alwaysLoadedTokensOf(memoryFile, descriptionTokens);
+  const remaining = config.budgetTokens - current;
   const counted = descriptionTokens
     ? ` The budget counts this file plus every skill description line (${descriptionTokens} tok of descriptions today); skill bodies stay free until triggered.`
     : "";
@@ -111,7 +118,7 @@ function budgetRule(memoryFile, config, maxEdits, descriptionTokens = 0) {
 }
 
 function budgetState(memoryFile, config, descriptionTokens = 0) {
-  const ratio = (memoryFile.tokens + descriptionTokens) / config.budgetTokens;
+  const ratio = alwaysLoadedTokensOf(memoryFile, descriptionTokens) / config.budgetTokens;
   if (ratio > 1) return "OVER BUDGET";
   if (ratio > 0.85) return "near budget";
   return "within budget";
@@ -146,6 +153,23 @@ function assertRepoUntouched(repo, before, workspaceRoot) {
   );
 }
 
+function targetRule(runTarget, memoryPath, skillsDir) {
+  if (runTarget?.kind === "skill") {
+    return (
+      `This run targets the skill at \`./${memoryPath}\` only. Do not edit any other file, ` +
+      `including the project memory file. Do not create a new skill. Extraction does not apply.\n\n`
+    );
+  }
+  if (runTarget?.kind === "memory") {
+    return (
+      `This run targets \`./${memoryPath}\` only. Existing skills listed below are read-only: ` +
+      `do not edit them. You may create a NEW skill under \`./${skillsDir}/\` as an extraction ` +
+      `from this file. Do not rewrite other memory files.\n\n`
+    );
+  }
+  return "";
+}
+
 /**
  * Everything the edit and annotation turns need: prompt values, the `buildProposal`
  * context, and the overflow target.
@@ -159,20 +183,27 @@ function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts, scop
   });
   for (const w of overflow.warnings) warn(w);
   const skillDirs = resolveProjectSkillDirs(repo.root, overflow.dir, config.skillsDirs || [], { exact: userScope });
-  const skillFiles = loadProjectSkills(repo.root, overflow.dir, config.skillsDirs || [], { exact: userScope });
-  const descriptionTokens = skillDescriptionTokens(skillFiles);
-  const maxEdits = effectiveMaxEdits(memoryFile, config, descriptionTokens);
+  const allSkills = loadProjectSkills(repo.root, overflow.dir, config.skillsDirs || [], { exact: userScope });
+  const runTarget = config.runTarget || { kind: "surface" };
+  const skillFiles = runTarget.kind === "skill" ? [] : allSkills;
+  const descriptionTokens =
+    runTarget.kind === "skill"
+      ? (memoryFile.alwaysLoadedTokens ?? skillDescriptionTokens(runTarget.skill ? [runTarget.skill] : []))
+      : skillDescriptionTokens(skillFiles);
+  const maxEdits = effectiveMaxEdits(memoryFile, config, runTarget.kind === "skill" ? 0 : descriptionTokens);
+  const stagedSkillDirs = workspaceSkillDirs(runTarget, skillDirs);
 
   const common = {
     MEMORY_PATH: workspacePathFor(memoryFile.path),
     BUDGET_RULE: budgetRule(memoryFile, config, maxEdits, descriptionTokens),
     MAX_EDITS: String(maxEdits),
     MIN_GAP_EVIDENCE: String(config.minGapEvidence),
+    TARGET_RULE: targetRule(runTarget, workspacePathFor(memoryFile.path), workspacePathFor(overflow.dir)),
   };
 
   const context = {
     memoryFile,
-    config: { ...config, skillsDir: overflow.dir, skillDirs },
+    config: { ...config, skillsDir: overflow.dir, skillDirs: stagedSkillDirs },
     repo,
     scope,
     summary,
@@ -180,6 +211,7 @@ function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts, scop
     rejections,
     isSuppressed: isSuppressedByRejection,
     skillFiles,
+    runTarget,
   };
 
   const promptDir = path.join(state.root, "prompts");
@@ -189,13 +221,17 @@ function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts, scop
     state,
     rejections,
     overflow,
-    skillDirs,
+    skillDirs: stagedSkillDirs,
+    allSkillDirs: skillDirs,
     skillFiles,
+    allSkills,
+    copyExistingSkills: copyExistingSkills(runTarget),
     descriptionTokens,
     maxEdits,
     common,
     context,
     promptDir,
+    runTarget,
   };
 }
 
@@ -409,11 +445,14 @@ export async function synthesizeProposal({
     overflow,
     skillDirs,
     skillFiles,
+    allSkills,
+    copyExistingSkills: copySkills,
     descriptionTokens,
     maxEdits,
     common,
     context,
     promptDir,
+    runTarget,
   } = synthesisSetup({
     memoryFile,
     summary,
@@ -423,14 +462,34 @@ export async function synthesizeProposal({
     scope,
   });
 
-  let workspace = prepareWorkspace({ state, repo, memoryFile, skillsDir: overflow.dir, skillDirs });
+  const workspaceOpts = {
+    state,
+    repo,
+    memoryFile,
+    skillsDir: overflow.dir,
+    skillDirs,
+    copyExistingSkills: copySkills,
+  };
+  let workspace = prepareWorkspace(workspaceOpts);
   const stagedSkillsDir =
     workspace.skillMappings.find((mapping) => mapping.logical === overflow.dir)?.staged ||
     workspacePathFor(overflow.dir);
-  const stagedSkillFiles = skillFiles.map((skill) => ({
-    ...skill,
-    path: workspace.stagedPaths.get(skill.path) || workspacePathFor(skill.path),
-  }));
+  const skillIndexSkills =
+    runTarget?.kind === "memory"
+      ? allSkills
+      : skillFiles.map((skill) => ({
+          ...skill,
+          path: workspace.stagedPaths.get(skill.path) || workspacePathFor(skill.path),
+        }));
+  const skillIndex =
+    runTarget?.kind === "skill"
+      ? "(this run targets this skill only; other skills are out of scope)"
+      : renderSkillIndex(skillIndexSkills);
+
+  const alwaysLoadedNow =
+    runTarget?.kind === "skill"
+      ? (memoryFile.alwaysLoadedTokens ?? descriptionTokens)
+      : memoryFile.tokens + descriptionTokens;
 
   const editValues = {
     ...common,
@@ -442,12 +501,12 @@ export async function synthesizeProposal({
       Object.entries(harnessCounts)
         .map(([h, n]) => `${h} ${n}`)
         .join(" · ") || "none",
-    CURRENT_TOKENS: String(memoryFile.tokens + descriptionTokens),
+    CURRENT_TOKENS: String(alwaysLoadedNow),
     BUDGET_TOKENS: String(config.budgetTokens),
-    BUDGET_STATE: budgetState(memoryFile, config, descriptionTokens),
+    BUDGET_STATE: budgetState(memoryFile, config, runTarget?.kind === "skill" ? 0 : descriptionTokens),
     INSTRUCTION_INDEX: renderInstructionIndex(memoryFile),
     SKILLS_DIR: stagedSkillsDir,
-    SKILL_INDEX: renderSkillIndex(stagedSkillFiles),
+    SKILL_INDEX: skillIndex,
     EVIDENCE: renderEvidenceForPrompt(summary),
     REJECTIONS: renderRejections(rejections),
   };
@@ -455,7 +514,7 @@ export async function synthesizeProposal({
   const editPromptFile = path.join(promptDir, "synthesis-edit.md");
   fs.writeFileSync(editPromptFile, renderPrompt("synthesis", editValues));
 
-  const fingerprint = repoFingerprint(repo, [memoryFile.path, ...skillFiles.map((s) => s.path)]);
+  const fingerprint = repoFingerprint(repo, [...new Set([memoryFile.path, ...allSkills.map((s) => s.path)])]);
   const sessionName = `backpass-synth-${process.pid}`;
   const timeoutSeconds = Math.max(config.timeoutSeconds, 900);
   const usage = [];
@@ -507,7 +566,7 @@ export async function synthesizeProposal({
     holder.ranWith = current.agent;
     chosen = current;
     if (current !== pick) notes.push(`synthesis fell through to ${current.agent} (${current.model})`);
-    workspace = prepareWorkspace({ state, repo, memoryFile, skillsDir: overflow.dir, skillDirs });
+    workspace = prepareWorkspace(workspaceOpts);
     progress("edit", { attempt: 1 });
     holder.session = await openSession({
       agent: current.agent,

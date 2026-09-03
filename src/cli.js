@@ -7,6 +7,7 @@ import { UserError, fail, setQuiet } from "./logger.js";
 import { loadConfig, parseMaxTranscripts, parseScopeKind } from "./config.js";
 import { resolveRepo } from "./repo.js";
 import { printScopeNote, resolveScope } from "./scope.js";
+import { parseTargetFlag, printTargetNote, resolveRunTarget } from "./target.js";
 import { State } from "./state.js";
 import { AgentResolver } from "./agents.js";
 
@@ -46,6 +47,7 @@ const OPTIONS = {
   scope: { type: "string" },
   project: { type: "string", multiple: true },
   "memory-file": { type: "string", multiple: true },
+  target: { type: "string" },
   "skills-dir": { type: "string" },
 
   "analysis-agent": { type: "string" },
@@ -118,6 +120,8 @@ BUDGET AND SHAPE
   --scope <project|user>   which surface a run reads and writes          [project]
   --project <glob>         user-scope: only sessions whose project/cwd matches (repeatable)
   --memory-file <path>     memory file to optimize (repeatable)
+  --target <path>          one memory file or one skill (name or SKILL.md);
+                           does not expand to the rest of the surface
   --skills-dir <path>      where skill extractions are written          [.agents/skills]
 
 APPLY
@@ -142,6 +146,8 @@ EXAMPLES
   backpass                                  a full run, ending with a proposal
   backpass scan --since 7d --strict         what would be collected, deterministic only
   backpass --scope user                     train the user-level memory file and skills
+  backpass --target AGENTS.md              train only this memory file
+  backpass --target db                      train only this skill (name or SKILL.md path)
   backpass --synthesis-agent claude --synthesis-model claude-opus-5
   backpass apply --no-ui                    review and write from the terminal
 `;
@@ -258,7 +264,17 @@ export async function main(argv) {
     }
     const scope = resolveScope(process.cwd(), { ...values, scope: kind, strict: Boolean(values.strict) }, config, repo);
     printScopeNote(scope);
-    config.memoryFiles = scope.memoryFiles;
+    if (values.target && Array.isArray(values["memory-file"]) && values["memory-file"].length) {
+      throw new UserError("--target cannot be combined with --memory-file", "name the one file with --target");
+    }
+    const runTarget =
+      commandName === "init"
+        ? { kind: "surface" }
+        : resolveRunTarget(parseTargetFlag(values), { repo: scope.repo, config, scope });
+    printTargetNote(runTarget);
+    config.runTarget = runTarget;
+    if (runTarget.kind === "memory") config.memoryFiles = [runTarget.path];
+    else config.memoryFiles = scope.memoryFiles;
     config.skillsDir = scope.overflowDir;
     if (scope.skillDirs.length) config.skillsDirs = scope.skillDirs;
     config.state = new State(scope.root, {
