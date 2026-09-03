@@ -22,6 +22,14 @@ import { estimateTokens } from "./tokens.js";
 
 export const BROAD_RELEVANCE_THRESHOLD = 0.2;
 
+function logicalSkillDir(repoRoot, skillsDir) {
+  const absolute = path.isAbsolute(skillsDir) ? skillsDir : path.resolve(repoRoot, skillsDir);
+  const relative = path.relative(path.resolve(repoRoot), absolute);
+  if (relative === "") return ".";
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return skillsDir;
+  return relative.split(path.sep).join("/");
+}
+
 /** Read the existing skills so synthesis can tune a description instead of duplicating it. */
 export function loadSkills(repoRoot, skillsDir) {
   const root = path.isAbsolute(skillsDir) ? skillsDir : path.join(repoRoot, skillsDir);
@@ -96,7 +104,7 @@ export function resolveProjectSkillDirs(
     }
     if (seen.has(identity)) continue;
     seen.add(identity);
-    dirs.push(dir);
+    dirs.push(logicalSkillDir(repoRoot, dir));
   }
   return dirs;
 }
@@ -302,7 +310,10 @@ export function resolveOverflowTarget(
   const explicit = configuredDir && configuredDir !== CANONICAL_SKILLS_DIR;
   const resolvedSkillsDir = path.isAbsolute(configuredDir) ? configuredDir : path.join(repoRoot, configuredDir);
   if (explicit && !allowExternal) assertSkillsDirInsideRepo(repoRoot, configuredDir, resolvedSkillsDir);
-  const dir = explicit && fs.existsSync(resolvedSkillsDir) ? configuredDir : CANONICAL_SKILLS_DIR;
+  const dir =
+    explicit && fs.existsSync(resolvedSkillsDir)
+      ? logicalSkillDir(repoRoot, configuredDir)
+      : CANONICAL_SKILLS_DIR;
   if (claude.state === "dir" && dir === CANONICAL_SKILLS_DIR)
     warnings.push(claudeSkillsDirWarning(claudeSkillsDir, target));
   return { kind: "skills", dir, warnings };

@@ -587,6 +587,27 @@ test("a memory-file target never stages existing skills, and the run proposes on
   assert.match(prompt, /This run targets `\.\/AGENTS\.md` only/);
 });
 
+test("a skill target in an absolute in-repo skills directory is staged under its repo-relative path", async () => {
+  const targeted = setup({
+    edit: {
+      "custom-skills/db/SKILL.md": {
+        replace: [["Load for database work.", "Load before database work or SQL changes."]],
+      },
+    },
+    annotations: [{ reply: { edits: [tighten(["H1"])] } }],
+  });
+  const skillsDir = path.join(targeted.repo.root, "custom-skills");
+  fs.mkdirSync(path.join(skillsDir, "db"), { recursive: true });
+  fs.writeFileSync(path.join(skillsDir, "db/SKILL.md"), DB_SKILL);
+  targeted.config.skillsDir = skillsDir;
+  targeted.config.skillsDirs = [skillsDir];
+  targeted.config.target = { kind: "skill", path: "custom-skills/db/SKILL.md", name: "db" };
+
+  const { proposal, violations } = await targeted.run();
+  assert.deepEqual(violations, []);
+  assert.deepEqual(proposal.edits.map((edit) => edit.file), ["custom-skills/db/SKILL.md"]);
+});
+
 test("a skill target stages that skill alone; a staged write to AGENTS.md is refused, a direct one is caught by the fingerprint", async () => {
   const target = { kind: "skill", path: ".agents/skills/db/SKILL.md", name: "db" };
   const hijack = setup({
