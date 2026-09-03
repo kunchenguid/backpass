@@ -87,11 +87,14 @@ export function foldEvidence(
   const recordObservations = [];
   // Which project each quote's source label came from. Instruction-row quotes carry no
   // project of their own, so this is what lets the user-scope project floor count a
-  // rewrite's evidence instead of only a gap cluster's.
+  // rewrite's evidence instead of only a gap cluster's. `sources` is the same labels
+  // without the project requirement, so a project-scoped run still has an allowlist.
+  const sources = new Set();
   const sourceProjects = {};
   for (const record of usable) {
     if (record.usedRawTranscript) usedRawCount += 1;
     const source = normalizeSourceLabel(gapSource(record.transcript));
+    sources.add(source);
     if (record.transcript.project) sourceProjects[source] = record.transcript.project;
 
     for (const polarity of ["positive", "negative"]) {
@@ -268,6 +271,7 @@ export function foldEvidence(
       crossSurfaceDuplicates: duplicates.length,
     },
     instructions: instructionRows,
+    sources: [...sources],
     sourceProjects,
     parentHarmSessions,
     gaps,

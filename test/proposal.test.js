@@ -502,6 +502,176 @@ test("the dry run's three appends still pass on their real quote-source counts",
   }
 });
 
+test("a quote counts as a session only when the fold issued its source label", () => {
+  const foldRecord = (id, day, quote) => ({
+    status: "ok",
+    transcript: { id, harness: "claude", startedAt: Date.parse(`2026-08-${day}T00:00:00Z`) },
+    positive: [],
+    negative: [{ instruction: "AG-001", quote, effect: "the rule was skipped", class: "non-compliance" }],
+    gaps: [],
+  });
+  const summary = foldEvidence(
+    [foldRecord("b859b8f3deadbeef", "18", "real quote"), foldRecord("c0ffee00deadbeef", "19", "other quote")],
+    { memoryFile: { units: parseMemoryUnits(MEMORY_TEXT) }, minGapEvidence: 2 },
+  );
+  const issued = summary.sources.find((label) => label.includes("b859b8f3"));
+  assert.ok(issued, "the fold must issue a source for the cited session");
+  const mistypedDate = issued.replace("2026-08-18", "2026-08-17");
+  assert.notEqual(mistypedDate, issued);
+  assert.equal(summary.sources.includes(mistypedDate), false);
+
+  const rewrite = memoryEdit(REWRITE_SHAPES["append a sentence"]);
+  const typo = gate({
+    edit: rewrite,
+    annotation: {
+      edits: [
+        claim(["H1"], {
+          kind: "rewrite",
+          title: "one session under two labels",
+          evidence: [
+            { polarity: "negative", text: "real quote", source: issued },
+            { polarity: "negative", text: "same session, wrong date", source: mistypedDate },
+          ],
+        }),
+      ],
+    },
+    context: { summary },
+  });
+  assert.equal(typo.proposal.edits.length, 0);
+  assert.ok(
+    typo.violations.some((v) => /backed by 1 session\(s\); 2 are required/.test(v)),
+    typo.violations.join("\n"),
+  );
+
+  const twoIssued = gate({
+    edit: rewrite,
+    annotation: {
+      edits: [
+        claim(["H1"], {
+          kind: "rewrite",
+          title: "two fold-issued sessions",
+          evidence: summary.sources.map((source, i) => ({
+            polarity: "negative",
+            text: `quote ${i}`,
+            source,
+          })),
+        }),
+      ],
+    },
+    context: { summary },
+  });
+  assert.deepEqual(twoIssued.violations, [], twoIssued.violations.join("\n"));
+  assert.equal(twoIssued.proposal.edits[0].transcripts, 2);
+
+  const unissued = gate({
+    edit: rewrite,
+    annotation: {
+      edits: [claim(["H1"], { kind: "rewrite", title: "label the fold never issued", evidence: ONE_SESSION })],
+    },
+    context: { summary },
+  });
+  assert.equal(unissued.proposal.edits.length, 0);
+  assert.ok(
+    unissued.violations.some((v) => /backed by 0 session\(s\); 2 are required/.test(v)),
+    unissued.violations.join("\n"),
+  );
+});
+
+test("on the r1 dry-run corpus, only the edit whose second source was never issued is refused", () => {
+  const foldRecord = (id, day, quote) => ({
+    status: "ok",
+    transcript: { id, harness: "claude", startedAt: Date.parse(`2026-08-${day}T00:00:00Z`) },
+    positive: [],
+    negative: [{ instruction: "AG-001", quote, effect: "the rule was skipped", class: "non-compliance" }],
+    gaps: [],
+  });
+  const summary = foldEvidence(
+    [
+      foldRecord("sess0001", "01", "e1a"),
+      foldRecord("sess0002", "02", "e1b"),
+      foldRecord("sess0003", "03", "e1c"),
+      foldRecord("sess0004", "04", "e4b"),
+    ],
+    { memoryFile: { units: parseMemoryUnits(MEMORY_TEXT) }, minGapEvidence: 2 },
+  );
+  const [s1, s2, s3, s4] = summary.sources;
+  const phantom = s1.replace(/2026-08-01/, "2026-08-17");
+  assert.equal(summary.sources.includes(phantom), false);
+
+  const cases = [
+    {
+      name: "e1 em dash",
+      expect: "pass",
+      kind: "rewrite",
+      sources: [s1, s2, s3],
+      edit: (t) =>
+        t.replace(
+          "include its URL.",
+          "include its URL. Before sending prose, check for and replace every bare reference.",
+        ),
+    },
+    {
+      name: "e2 repro before fix",
+      expect: "pass",
+      kind: "rewrite",
+      sources: [s1, s2],
+      edit: (t) =>
+        t.replace(
+          "- Prefer small commits.",
+          "- Prefer small commits. Reproduce before implementing the fix, then repeat the same check after.",
+        ),
+    },
+    {
+      name: "e3 lint warnings",
+      expect: "refuse",
+      kind: "rewrite",
+      sources: [s1, phantom],
+      edit: (t) =>
+        t.replace(
+          "before running any script.",
+          "before running any script. Treat warnings as issues rather than dismissing them.",
+        ),
+    },
+    {
+      name: "e4 current_head skill",
+      expect: "pass",
+      kind: "add",
+      sources: [s2, s4],
+      edit: (t) =>
+        t.replace(
+          "- Prefer small commits.",
+          "- Prefer small commits.\n- Prefer the current branch head when naming git state.",
+        ),
+    },
+  ];
+
+  for (const item of cases) {
+    const evidence = item.sources.map((source, i) => ({
+      polarity: "negative",
+      text: `${item.name} quote ${i}`,
+      source,
+    }));
+    const { proposal, violations } = gate({
+      edit: memoryEdit(item.edit),
+      annotation: {
+        edits: [claim(["H1"], { kind: item.kind, title: item.name, evidence, transcripts: 20 })],
+      },
+      context: { summary },
+    });
+    if (item.expect === "pass") {
+      assert.deepEqual(violations, [], `${item.name}: ${violations.join("\n")}`);
+      assert.equal(proposal.edits.length, 1, item.name);
+      assert.equal(proposal.edits[0].transcripts, item.sources.length, item.name);
+    } else {
+      assert.equal(proposal.edits.length, 0, `${item.name} was accepted`);
+      assert.ok(
+        violations.some((v) => /backed by 1 session\(s\); 2 are required/.test(v)),
+        `${item.name}: ${violations.join("\n")}`,
+      );
+    }
+  }
+});
+
 test("extract and move stay exempt from the session floor: they keep every always-loaded line", () => {
   const extracted = "- Use Node 18 via nvm before running any script.";
   const extract = gate({
@@ -575,12 +745,26 @@ test("the user-scope project floor counts instruction evidence, not only gap quo
   assert.deepEqual(twoProjects.violations, [], twoProjects.violations.join("\n"));
   assert.equal(twoProjects.proposal.edits[0].projects, 2);
 
-  // Same evidence in a project-scoped run: no project gate at all.
+  // Same evidence in a project-scoped run: no project gate at all. Quote the fold's
+  // own labels; a project-scoped fold still issues `sources` even when sourceProjects is empty.
+  const projectSummary = foldFor(["repo-a", "repo-a"]);
   const projectScope = gate({
     edit: rewrite,
-    annotation: { edits: [claim(["H1"], { kind: "rewrite", title: "spell out the URL" })] },
+    annotation: {
+      edits: [
+        claim(["H1"], {
+          kind: "rewrite",
+          title: "spell out the URL",
+          evidence: projectSummary.instructions[0].quotes.map((quote) => ({
+            polarity: "negative",
+            text: quote.text,
+            source: quote.source,
+          })),
+        }),
+      ],
+    },
     config: config({ minGapProjects: 2 }),
-    context: { summary: foldFor(["repo-a", "repo-a"]), scope: { kind: "project" } },
+    context: { summary: projectSummary, scope: { kind: "project" } },
   });
   assert.deepEqual(projectScope.violations, [], projectScope.violations.join("\n"));
 });
@@ -2516,7 +2700,19 @@ test("sentence-level harm clears removal of its oversized parent paragraph", () 
   const result = gate({
     text,
     edit: memoryEdit((current) => current.replace(`${blob}\n\n`, "")),
-    annotation: { edits: [claim(["H1"], { kind: "remove", title: "remove the harmful paragraph" })] },
+    annotation: {
+      edits: [
+        claim(["H1"], {
+          kind: "remove",
+          title: "remove the harmful paragraph",
+          evidence: summary.sources.map((source, i) => ({
+            polarity: "negative",
+            text: `harm quote ${i}`,
+            source,
+          })),
+        }),
+      ],
+    },
     context: { summary },
   });
   assert.deepEqual(result.violations, []);

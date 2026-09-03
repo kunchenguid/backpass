@@ -41,6 +41,35 @@ test("evidence is grouped per instruction with session-level relevance", () => {
   assert.equal(row.relevance, 0.5);
 });
 
+test("fold lists every analyzed session source even when the record has no project", () => {
+  const quoted = record("alpha1", { positive: [{ instruction: "AG-001", quote: "q1" }] });
+  const silent = record("beta2", {});
+  const otherProject = record("gamma3", {
+    transcript: {
+      id: "gamma3",
+      harness: "codex",
+      project: "wheelhouse",
+      startedAt: Date.parse("2026-08-02T00:00:00Z"),
+    },
+    negative: [{ instruction: "AG-001", quote: "q2", class: "non-compliance" }],
+  });
+  const summary = foldEvidence([quoted, silent, otherProject], { memoryFile });
+
+  assert.equal(summary.sources.length, 3, "every usable record issues a source, including one with no quotes");
+  assert.equal(summary.sourceProjects[summary.sources.find((label) => label.startsWith("codex"))], "wheelhouse");
+  assert.equal(
+    Object.keys(summary.sourceProjects).length,
+    1,
+    "project-less records must not be dropped from sources just because sourceProjects is empty for them",
+  );
+  const instructionQuoteSources = summary.instructions
+    .flatMap((row) => row.quotes.map((quote) => quote.source))
+    .filter(Boolean);
+  for (const source of instructionQuoteSources) {
+    assert.ok(summary.sources.includes(source), `fold-issued quote source missing from sources: ${source}`);
+  }
+});
+
 test("instructions with no evidence still appear - they are the removal candidates", () => {
   const summary = foldEvidence([record("s1", { positive: [{ instruction: "AG-001", quote: "q" }] })], { memoryFile });
 

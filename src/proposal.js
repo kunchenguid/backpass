@@ -102,7 +102,7 @@ export class ProposalViolation extends Error {
   }
 }
 
-function normalizeEdit(raw, index) {
+function normalizeEdit(raw, index, knownSources = null) {
   const kind = String(raw?.kind || "").toLowerCase();
   const refs = Array.isArray(raw?.changes) ? raw.changes : Array.isArray(raw?.hunks) ? raw.hunks : [];
   const normalizedEvidence = normalizeEvidence(raw?.evidence);
@@ -119,8 +119,9 @@ function normalizeEdit(raw, index) {
     instructions: Array.isArray(raw?.instructions) ? raw.instructions.map(String) : [],
     evidence,
     // Corroboration is measured from the edit's normalized quotes, never from a
-    // model-reported count.
-    transcripts: countSources(normalizedEvidence),
+    // model-reported count. When the fold handed over this run's source labels,
+    // only those labels count - a typed-but-never-issued source is not a session.
+    transcripts: countSources(normalizedEvidence, knownSources),
   };
 }
 
@@ -135,9 +136,11 @@ function normalizeEvidence(evidence) {
     }));
 }
 
-function countSources(evidence) {
+function countSources(evidence, known = null) {
   if (!Array.isArray(evidence)) return 0;
-  return new Set(evidence.map((e) => normalizeSourceLabel(e?.source)).filter(Boolean)).size;
+  const labels = new Set(evidence.map((e) => normalizeSourceLabel(e?.source)).filter(Boolean));
+  if (!known) return labels.size;
+  return [...labels].filter((label) => known.has(label)).length;
 }
 
 /** The del-line texts of a hunk that are not carried by `lineCounts` (blank lines ignored). */
@@ -334,7 +337,10 @@ export function buildProposal(rawResult, context) {
   const violations = [];
   const notes = Array.isArray(rawResult?.notes) ? rawResult.notes.map(String) : [];
   const rawEdits = Array.isArray(rawResult?.edits) ? rawResult.edits : [];
-  const edits = rawEdits.map((raw, i) => normalizeEdit(raw, i));
+  const knownSources = Array.isArray(summary?.sources)
+    ? new Set(summary.sources.map(normalizeSourceLabel).filter(Boolean))
+    : null;
+  const edits = rawEdits.map((raw, i) => normalizeEdit(raw, i, knownSources));
   const changesById = new Map(measured.changes.map((c) => [c.id, c]));
 
   // Skill description lines are always loaded, so they sit under the same cap as the
