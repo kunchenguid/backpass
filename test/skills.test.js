@@ -18,6 +18,7 @@ import {
 } from "../src/skills.js";
 import { applyDecisions } from "../src/apply/writer.js";
 import { DEFAULT_CONFIG } from "../src/config.js";
+import { UserError } from "../src/logger.js";
 
 function tmpRepo() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "backpass-skills-"));
@@ -145,6 +146,17 @@ test("resolveOverflowTarget honors an existing configured directory", () => {
   });
   assert.equal(resolveOverflowTarget(bare, ".claude/skills/").dir, ".claude/skills");
   assert.equal(resolveOverflowTarget(bare, ".claude\\skills\\").dir, ".claude/skills");
+});
+
+test("configured skills directories cannot escape the repository", () => {
+  const root = tmpRepo();
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-outside-skills-"));
+  fs.mkdirSync(path.join(root, ".claude"), { recursive: true });
+  fs.symlinkSync(outside, path.join(root, ".claude", "skills"), "dir");
+
+  for (const skillsDir of [path.relative(root, outside), ".claude/skills"]) {
+    assert.throws(() => resolveOverflowTarget(root, skillsDir), UserError);
+  }
 });
 
 test("user skill discovery uses only configured harness roots", () => {

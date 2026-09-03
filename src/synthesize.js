@@ -156,6 +156,7 @@ function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts, scop
   const userScope = scope?.kind === "user";
   const overflow = resolveOverflowTarget(repo.root, config.skillsDir, {
     claudeSkillsDir: userScope ? userClaudeSkillsDir() : undefined,
+    allowExternal: userScope,
   });
   for (const w of overflow.warnings) warn(w);
   const skillDirs = resolveProjectSkillDirs(repo.root, overflow.dir, config.skillsDirs || [], { exact: userScope });

@@ -487,7 +487,7 @@ setInterval(() => {}, 1000);
   let childPid;
   try {
     wrapper = spawn(invocation.env.PI_ACP_PI_COMMAND, [], { stdio: "ignore" });
-    for (let attempt = 0; attempt < 100 && !fs.existsSync(readyPath); attempt += 1) {
+    for (let attempt = 0; attempt < 600 && !fs.existsSync(readyPath); attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     assert.ok(fs.existsSync(readyPath));

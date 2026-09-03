@@ -289,7 +289,7 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
   const skillsDir = resolveOverflowTarget(
     repo.root,
     proposal.config?.skillsDir || config.skillsDir || CANONICAL_SKILLS_DIR,
-    { claudeSkillsDir: claudeSkillsLink },
+    { claudeSkillsDir: claudeSkillsLink, allowExternal: userScope },
   ).dir;
   const configuredSkillDirs = proposal.config?.skillsDirs || proposal.config?.skillDirs || config.skillsDirs || [];
   const skillsNow = loadProjectSkills(repo.root, skillsDir, configuredSkillDirs, { exact: userScope });

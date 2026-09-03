@@ -56,6 +56,7 @@ export function primaryMemoryFile(repo, config, scope = null) {
   const userScope = scope?.kind === "user";
   const overflow = resolveOverflowTarget(repo.root, config.skillsDir, {
     claudeSkillsDir: userScope ? userClaudeSkillsDir() : undefined,
+    allowExternal: userScope,
   });
   const skills = loadProjectSkills(repo.root, overflow.dir, config.skillsDirs || [], { exact: userScope });
   return {
