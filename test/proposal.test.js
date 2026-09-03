@@ -2289,6 +2289,39 @@ test("the apply surface separates memory, description, and on-trigger deltas", (
   assert.equal(nodes.get("gauge-title").textContent, "Always-loaded budget · AGENTS.md + skill descriptions");
 });
 
+test("the apply surface counts a targeted skill description once", () => {
+  const proposal = {
+    generatedAt: "2026-08-01T00:00:00.000Z",
+    repo: { name: "demo" },
+    target: { kind: "skill", name: "db", path: ".agents/skills/db/SKILL.md" },
+    memoryFile: { path: ".agents/skills/db/SKILL.md" },
+    stats: { harnessCounts: {}, transcripts: 2, positive: 0, negative: 0, gapClusters: 0, skillExtractions: 0 },
+    config: { maxEditsPerRun: 5, minGapEvidence: 2 },
+    budget: { current: 10, projected: 15, capTokens: 100, descriptionTokens: 10, mode: "cap" },
+    edits: [
+      {
+        id: "e1",
+        kind: "rewrite",
+        title: "improve database guidance",
+        file: ".agents/skills/db/SKILL.md",
+        targetsMemoryFile: true,
+        deltaTokens: 25,
+        descriptionDelta: 5,
+        hunks: [],
+        evidence: [],
+      },
+    ],
+  };
+  const { nodes, textOf } = renderTemplateScript(proposal);
+
+  const card = nodes.get("edits").children[0];
+  assert.match(textOf(card), /Δ on trigger \+20 tok/);
+  assert.match(textOf(card), /Δ description \(always-loaded\) \+5 tok/);
+  assert.doesNotMatch(textOf(card), /Δ memory/);
+  assert.equal(nodes.get("gauge-title").textContent, "Always-loaded budget · .agents/skills/db/SKILL.md description");
+  assert.match(textOf(nodes.get("gauge-readout")), /if accepted 15 tok/);
+});
+
 test("the apply surface draws one funnel from findings to the edits it proposed", () => {
   const rewrite = (id, removed = 1) => ({
     id,

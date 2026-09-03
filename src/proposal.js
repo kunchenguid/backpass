@@ -703,7 +703,7 @@ export function buildProposal(rawResult, context) {
         running.set(target, next);
         const delta = estimateTokens(next) - estimateTokens(before);
         if (target === memoryFile.path) {
-          memoryDelta += runTarget?.kind === "skill" ? descriptionLineDelta(before, next) : delta;
+          memoryDelta += delta;
           if (runTarget?.kind === "skill") descriptionDelta += descriptionLineDelta(before, next);
         } else {
           otherDelta += delta;
@@ -900,7 +900,14 @@ export function slug(text) {
  * (the descriptions on disk at apply time); each accepted edit's measured
  * `descriptionDelta` moves it, so the budget describes the whole surface.
  */
-export function projectWithDecisions(memoryText, edits, acceptedIds, capTokens, descriptionTokensCurrent = 0) {
+export function projectWithDecisions(
+  memoryText,
+  edits,
+  acceptedIds,
+  capTokens,
+  descriptionTokensCurrent = 0,
+  runTarget = null,
+) {
   const chosen = edits.filter((e) => acceptedIds.includes(e.id) && e.targetsMemoryFile && e.applicable !== false);
   let text = memoryText;
   for (const edit of chosen) {
@@ -916,9 +923,16 @@ export function projectWithDecisions(memoryText, edits, acceptedIds, capTokens, 
     .reduce((sum, e) => sum + (e.descriptionDelta || 0), 0);
   return {
     text,
-    budget: budgetStatus(memoryText, text, capTokens, {
-      current: descriptionTokensCurrent,
-      projected: descriptionTokensCurrent + descriptionDelta,
-    }),
+    budget:
+      runTarget?.kind === "skill"
+        ? budgetStatus(
+            parseFrontmatter(memoryText).description || "",
+            parseFrontmatter(text).description || "",
+            capTokens,
+          )
+        : budgetStatus(memoryText, text, capTokens, {
+            current: descriptionTokensCurrent,
+            projected: descriptionTokensCurrent + descriptionDelta,
+          }),
   };
 }

@@ -11,9 +11,10 @@ import { primaryMemoryFile } from "../src/commands/analyze.js";
 import { loadConfig } from "../src/config.js";
 import { UserError } from "../src/logger.js";
 import { readMemoryFile } from "../src/memory.js";
-import { buildProposal } from "../src/proposal.js";
+import { buildProposal, projectWithDecisions } from "../src/proposal.js";
 import { State } from "../src/state.js";
 import { resolveRunTarget } from "../src/target.js";
+import { estimateTokens } from "../src/tokens.js";
 import { prepareWorkspace, measureWorkspace, workspacePathFor } from "../src/workspace.js";
 import { makeRepo, writeIn } from "./helpers/staging.js";
 
@@ -231,7 +232,9 @@ test("a skill target ignores other writes and applies against its description-on
     copyExistingSkills: false,
   });
   writeIn(workspace.root, workspacePathFor(memoryFile.path), (text) =>
-    text.replace("Wrap migrations in a transaction.", "Wrap every migration in a transaction."),
+    text
+      .replace("Load before touching the database.", "Load before planning or changing database storage.")
+      .replace("Wrap migrations in a transaction.", "Wrap every migration in a transaction and verify rollback."),
   );
   writeIn(workspace.root, "AGENTS.md", "# hijack\n");
   const measured = measureWorkspace(workspace);
@@ -240,13 +243,13 @@ test("a skill target ignores other writes and applies against its description-on
     measured.changes.some((c) => c.file === "AGENTS.md"),
     false,
   );
-  const skillHunk = measured.changes.find((c) => c.kind === "hunk" && c.file === memoryFile.path);
-  assert.ok(skillHunk);
+  const skillHunks = measured.changes.filter((c) => c.kind === "hunk" && c.file === memoryFile.path);
+  assert.equal(skillHunks.length, 2);
   const { proposal, violations } = buildProposal(
     {
       edits: [
         {
-          changes: [skillHunk.id],
+          changes: skillHunks.map((hunk) => hunk.id),
           kind: "rewrite",
           title: "sharpen the transaction rule",
           evidence: QUOTE,
@@ -267,6 +270,15 @@ test("a skill target ignores other writes and applies against its description-on
   assert.equal(proposal.edits[0].file, ".agents/skills/db/SKILL.md");
   assert.equal(proposal.target.kind, "skill");
   assert.equal(proposal.memoryFile.path, ".agents/skills/db/SKILL.md");
+  const projectedSkill = fs.readFileSync(path.join(workspace.root, workspacePathFor(memoryFile.path)), "utf8");
+  const descriptionDelta =
+    estimateTokens("Load before planning or changing database storage.") -
+    estimateTokens("Load before touching the database.");
+  assert.equal(proposal.edits[0].deltaTokens, estimateTokens(projectedSkill) - memoryFile.tokens);
+  assert.equal(proposal.edits[0].descriptionDelta, descriptionDelta);
+  assert.equal(proposal.budget.delta, descriptionDelta);
+  const projected = projectWithDecisions(memoryFile.text, proposal.edits, ["e1"], 5000, 0, proposal.target);
+  assert.equal(projected.budget.projected, proposal.budget.projected);
   assert.equal(
     proposal.edits.some((e) => e.file === "AGENTS.md" || (e.hunks || []).some((h) => h.file === "AGENTS.md")),
     false,
@@ -277,7 +289,7 @@ test("a skill target ignores other writes and applies against its description-on
     decisions: { e1: "accepted" },
     repo,
     state,
-    config: { budgetTokens: proposal.budget.current, skillsDir: ".agents/skills" },
+    config: { budgetTokens: 5000, skillsDir: ".agents/skills" },
   });
   assert.deepEqual(results.failed, []);
   assert.equal(results.written[0].budget.current, proposal.budget.current);

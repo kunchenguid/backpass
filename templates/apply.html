@@ -1164,9 +1164,13 @@
               "Δ " + label + " " + (value > 0 ? "+" : "") + fmt(value) + " tok",
             );
           }
-          head.appendChild(
-            edit.targetsMemoryFile ? deltaNode("memory", delta) : deltaNode("on trigger", delta - descriptionDelta),
-          );
+          if (P.target && P.target.kind === "skill") {
+            head.appendChild(deltaNode("on trigger", delta - descriptionDelta));
+          } else {
+            head.appendChild(
+              edit.targetsMemoryFile ? deltaNode("memory", delta) : deltaNode("on trigger", delta - descriptionDelta),
+            );
+          }
           if (descriptionDelta) head.appendChild(deltaNode("description (always-loaded)", descriptionDelta));
           card.appendChild(head);
 
@@ -1325,8 +1329,12 @@
               // The always-loaded projection: memory-file deltas plus each edit's
               // measured description-line delta (a tuned skill trigger, or the
               // description a created skill adds). Skill bodies never move this bar.
-              if (e.targetsMemoryFile) tok += e.deltaTokens || 0;
-              tok += e.descriptionDelta || 0;
+              if (P.target && P.target.kind === "skill") {
+                tok += e.descriptionDelta || 0;
+              } else {
+                if (e.targetsMemoryFile) tok += e.deltaTokens || 0;
+                tok += e.descriptionDelta || 0;
+              }
               descriptionTok += e.descriptionDelta || 0;
             } else if (decisions[e.id] === "rejected") {
               rejected += 1;
@@ -1335,7 +1343,13 @@
           var over = tok > budget.capTokens;
 
           document.getElementById("gauge-title").textContent =
-            "Always-loaded budget · " + (P.memoryFile.path || "") + (descriptionTok > 0 ? " + skill descriptions" : "");
+            "Always-loaded budget · " +
+            (P.memoryFile.path || "") +
+            (P.target && P.target.kind === "skill"
+              ? " description"
+              : descriptionTok > 0
+                ? " + skill descriptions"
+                : "");
           document.getElementById("n-accept").textContent = accepted;
           document.getElementById("n-reject").textContent = rejected;
 

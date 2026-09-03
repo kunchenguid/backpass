@@ -43,7 +43,7 @@ function renderDiff(edit) {
   return lines.join("\n");
 }
 
-export function renderEdit(edit, index, total) {
+export function renderEdit(edit, index, total, target = null) {
   const out = [];
   const kind = edit.kind === "extract" ? "EXTRACT -> SKILL" : edit.kind.toUpperCase();
   const delta = edit.deltaTokens || 0;
@@ -51,11 +51,14 @@ export function renderEdit(edit, index, total) {
   // A skill-file edit is on-trigger text except for its description line, which is
   // always loaded and billed; say which part of the delta is which.
   const signed = (n) => `${n > 0 ? "+" : ""}${formatTokens(n)}`;
-  const deltaText = edit.targetsMemoryFile
-    ? `${signed(delta)} tok${descriptionDelta ? ` (+${formatTokens(descriptionDelta)} tok skill description)` : ""}`
-    : descriptionDelta
+  const deltaText =
+    target?.kind === "skill"
       ? `${signed(descriptionDelta)} tok always-loaded (description), ${signed(delta - descriptionDelta)} tok on trigger`
-      : `${signed(delta)} tok (not always-loaded)`;
+      : edit.targetsMemoryFile
+        ? `${signed(delta)} tok${descriptionDelta ? ` (+${formatTokens(descriptionDelta)} tok skill description)` : ""}`
+        : descriptionDelta
+          ? `${signed(descriptionDelta)} tok always-loaded (description), ${signed(delta - descriptionDelta)} tok on trigger`
+          : `${signed(delta)} tok (not always-loaded)`;
 
   out.push("");
   out.push(`${color.bold(`[${index + 1}/${total}] ${kind}`)}  ${color.dim(deltaText)}`);
@@ -119,7 +122,7 @@ export async function reviewInTerminal(proposal) {
     );
 
     for (const [index, edit] of proposal.edits.entries()) {
-      console.error(renderEdit(edit, index, proposal.edits.length));
+      console.error(renderEdit(edit, index, proposal.edits.length, proposal.target));
       let answer = "";
       while (!["a", "r", "q"].includes(answer)) {
         const reply = await rl.question(`\n  ${color.cyan("[a]ccept / [r]eject / [q]uit")} > `).catch(() => null);
