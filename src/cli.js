@@ -99,7 +99,7 @@ COLLECT SAMPLES
 
 MODELS (two-tier: cheap analysis, smart synthesis - all through acpx)
   By default each pass auto-picks the first harness in its ladder that is installed,
-  logged in, and serves the model (a ~1.5s zero-token probe per candidate, cached):
+  logged in, and serves the model (a cached zero-token probe; cold starts may take 3m):
     analysis   gpt-5.6-luna via pi, opencode, codex  >  claude-sonnet-5 via claude  >  grok-4.6 via pi, opencode, grok
     synthesis  gpt-5.6-sol  via pi, opencode, codex  >  claude-opus-5  via claude  >  grok-4.6 via pi, opencode, grok
   Setting an agent pins that pass and skips its ladder.

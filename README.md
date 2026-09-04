@@ -557,9 +557,11 @@ wins:
 | analysis  | medium | `gpt-5.6-luna` via pi, opencode, codex | `claude-sonnet-5` via claude | `grok-4.6` via pi, opencode, grok |
 | synthesis | high   | `gpt-5.6-sol` via pi, opencode, codex  | `claude-opus-5` via claude   | `grok-4.6` via pi, opencode, grok |
 
-Each candidate is checked with a ~1.5s zero-token acpx probe (claude via `claude auth status`,
-because its adapter accepts sessions while logged out). A potentially transient busy-harness
-miss retries once and is not cached; durable verdicts are cached in
+Each candidate is checked with a zero-token acpx probe (claude also uses `claude auth status`,
+because its adapter accepts sessions while logged out). Session creation may wait up to three
+minutes for a cold-starting adapter; the remaining probe operations retain their shorter
+10-20 second limits. A potentially transient busy-harness miss retries once and is not cached;
+durable verdicts are cached in
 `.backpass/agent-probe-cache.json` for 12h (30min for negatives). Pi and OpenCode entries
 are re-probed when their credential or auth-file state changes; `--force` re-probes every
 entry. The probe is a filter, not a promise: if the chosen harness answers `AUTH_REQUIRED`
