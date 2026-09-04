@@ -116,7 +116,7 @@ function sessionCreateTimeoutError({ agent, acpxAgentArgs, timeoutMs }) {
   const seconds = Math.round(timeoutMs / 1000);
   return new UserError(
     `acpx ${agent} did not create a session within ${seconds}s`,
-    `its ACP adapter never started; acpx spawns built-in adapters through npm, so a cold or stalled package fetch blocks session create - check with: acpx --verbose ${acpxAgentArgs.join(" ")} sessions new --name backpass-probe`,
+    `its ACP adapter did not finish starting; adapter initialization or a cold or stalled npm package fetch can block session creation - check with: acpx --verbose ${acpxAgentArgs.join(" ")} sessions new --name backpass-probe`,
   );
 }
 

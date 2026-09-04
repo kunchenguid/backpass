@@ -53,7 +53,8 @@ fs.chmodSync(fakeAcpx, 0o755);
 
 process.env.BACKPASS_ACPX_BIN = fakeAcpx;
 process.env.FAKE_ACPX_MODE = "hang";
-const { AcpxError, SESSION_CREATE_TIMEOUT_MS, openSession, sessionPrompt } = await import("../src/acpx.js");
+const { AcpxError, openSession, sessionPrompt } = await import("../src/acpx.js");
+const { probeCandidate } = await import("../src/agents.js");
 const { UserError } = await import("../src/logger.js");
 
 test.after(() => {
@@ -69,7 +70,8 @@ test("a session-create timeout is named as a timeout, not as missing session sup
       assert.equal(err.message, "acpx codex did not create a session within 2s");
       assert.doesNotMatch(err.message, /support/i);
       assert.doesNotMatch(String(err.hint), /upgrade acpx/i);
-      assert.match(String(err.hint), /adapter never started/);
+      assert.match(String(err.hint), /adapter did not finish starting/);
+      assert.match(String(err.hint), /adapter initialization or a cold or stalled npm package fetch/);
       return true;
     },
   );
@@ -113,7 +115,19 @@ test("an adapter that really rejects sessions still reports missing session supp
   }
 });
 
-test("the shipped session-create budget covers a cold npm-bridged adapter spawn", () => {
-  // 60s was under the floor: the codex adapter's first spawn installs a ~270MB binary.
-  assert.ok(SESSION_CREATE_TIMEOUT_MS >= 120_000, `too tight for a cold spawn: ${SESSION_CREATE_TIMEOUT_MS}`);
+test("the availability probe gives session creation the cold-start budget", async () => {
+  let receivedTimeoutMs;
+  const result = await probeCandidate(
+    { agent: "codex", model: "gpt-5.6-luna" },
+    {
+      sessionName: "backpass-cold-start-probe",
+      probeSession: async ({ timeoutMs }) => {
+        receivedTimeoutMs = timeoutMs;
+        return { verdict: "ok", detail: "", availableModels: ["gpt-5.6-luna"] };
+      },
+    },
+  );
+
+  assert.equal(result.verdict, "ok");
+  assert.equal(receivedTimeoutMs, 180_000);
 });

@@ -1,6 +1,6 @@
 import { UserError, color, info, warn } from "./logger.js";
 import { DEFAULT_EFFORT, LEGACY_DEFAULT_AGENTS } from "./config.js";
-import { AcpxError, acpxVersion, classifyAcpxFailure, probeSession } from "./acpx.js";
+import { AcpxError, SESSION_CREATE_TIMEOUT_MS, acpxVersion, classifyAcpxFailure, probeSession } from "./acpx.js";
 import { ambiguousModelDetail, providerAuthState, rankCollidingIds, readProviderAuthTypes } from "./provider-auth.js";
 import { runCapture } from "./subprocess.js";
 
@@ -9,8 +9,8 @@ import { runCapture } from "./subprocess.js";
  *
  * Each role (analysis, synthesis) has a ladder of candidates - a model id served by a
  * few harnesses, in preference order. This module walks the ladder and picks the first
- * candidate that is installed, authenticated, and serves the model, using a ~1.5s
- * zero-token probe per candidate. The probe is a *filter*, not a guarantee: the first
+ * candidate that is installed, authenticated, and serves the model, using a zero-token
+ * probe per candidate. The probe is a *filter*, not a guarantee: the first
  * real call is the decider, and a classifiable failure there (AUTH_REQUIRED, model
  * rejected, adapter missing) demotes the candidate and falls through to the next one.
  *
@@ -23,8 +23,8 @@ import { runCapture } from "./subprocess.js";
  * All model invocation still goes through `src/acpx.js`. The one documented exception
  * is `NATIVE_PROBES` below: the claude adapter creates sessions happily while logged
  * out and only fails at prompt time, so its login state has to come from the harness's
- * own `claude auth status`. opencode's ACP session has been seen to wedge for minutes
- * on a large profile, so `opencode models` answers first and the ACP probe is capped.
+ * own `claude auth status`. `opencode models` answers first because its ACP session has
+ * been seen to wedge on a large profile.
  *
  * Verdicts are cached in `.backpass/agent-probe-cache.json` (12h for ok, 30min for
  * negatives) and memoized for the run. An acpx version change invalidates every entry;
@@ -39,8 +39,6 @@ import { runCapture } from "./subprocess.js";
 const OK_TTL_MS = 12 * 60 * 60 * 1000;
 const NEGATIVE_TTL_MS = 30 * 60 * 1000;
 const NATIVE_TIMEOUT_MS = 5_000;
-const PROBE_TIMEOUT_MS = 20_000;
-const PROBE_TIMEOUT_BY_AGENT = { opencode: 10_000 };
 const PROBE_RETRY_BACKOFF_MS = 1_000;
 
 /** Adapters whose model list is open-ended: any id is forwarded, none can be verified. */
@@ -198,7 +196,7 @@ export async function probeCandidate(candidate, options = {}) {
     agent,
     sessionName,
     cwd,
-    timeoutMs: PROBE_TIMEOUT_BY_AGENT[agent] || PROBE_TIMEOUT_MS,
+    timeoutMs: SESSION_CREATE_TIMEOUT_MS,
   });
   if (result.verdict !== "ok") {
     return {
