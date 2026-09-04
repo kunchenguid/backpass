@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.1.18](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.17...backpass-v0.1.18) (2026-09-04)
+
+
+### Features
+
+* add user-level memory scope ([#101](https://github.com/kunchenguid/backpass/issues/101)) ([be2633a](https://github.com/kunchenguid/backpass/commit/be2633a6ab3552582b8e30bc418a86e5a61e44a7))
+* **apply:** unify funnel from findings to proposed edits ([#104](https://github.com/kunchenguid/backpass/issues/104)) ([aa714d1](https://github.com/kunchenguid/backpass/commit/aa714d1d5debe9b1ea39818245411a2563eac3de))
+* let runs target one memory file or skill ([#108](https://github.com/kunchenguid/backpass/issues/108)) ([5392421](https://github.com/kunchenguid/backpass/commit/5392421a7a5e892025e10e7f49721c77e0a1f43b))
+
+
+### Bug Fixes
+
+* **acpx:** send --agent session prompts through the prompt subcommand ([#100](https://github.com/kunchenguid/backpass/issues/100)) ([d9610ea](https://github.com/kunchenguid/backpass/commit/d9610eaae2bfb23fca92804ea468b2d1cf579a81))
+* **acpx:** surface opencode stderr on exec and session-prompt failures ([#109](https://github.com/kunchenguid/backpass/issues/109)) ([e167503](https://github.com/kunchenguid/backpass/commit/e167503bfa58d583f815c00742f98973721e1ac7))
+* allow acpx adapters to finish cold starts ([#110](https://github.com/kunchenguid/backpass/issues/110)) ([46a80e1](https://github.com/kunchenguid/backpass/commit/46a80e1415c1a8aa156c53f5a077ff37e380a755))
+* count only fold-issued sources toward session floors ([#105](https://github.com/kunchenguid/backpass/issues/105)) ([093921b](https://github.com/kunchenguid/backpass/commit/093921bf2f72b9383af34feef2836caf6285ac37))
+* preserve stable evidence session identities ([#106](https://github.com/kunchenguid/backpass/issues/106)) ([c4eb1fa](https://github.com/kunchenguid/backpass/commit/c4eb1fa505d0146b0853ff7d160cd88926cd7216))
+* require corroboration for every always-loaded edit ([#103](https://github.com/kunchenguid/backpass/issues/103)) ([e63f555](https://github.com/kunchenguid/backpass/commit/e63f555c175911a521b3a34652a6c049f1378bb9))
+* **skills:** honor configured Claude skills directory ([#96](https://github.com/kunchenguid/backpass/issues/96)) ([b20c40c](https://github.com/kunchenguid/backpass/commit/b20c40c0e2578ae3f0f7e0af45a4468a9a2e7e20))
+
 ## [0.1.17](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.16...backpass-v0.1.17) (2026-08-31)
 
 
