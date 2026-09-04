@@ -283,14 +283,23 @@ export async function acpxVersion({ timeoutMs = 10_000 } = {}) {
  * @returns {Promise<{ verdict: "ok" | "unauthenticated" | "model-unavailable" | "unreachable" | "timeout",
  *   detail: string, availableModels: string[], transient?: boolean }>}
  */
-export async function probeSession({ agent, sessionName, cwd = undefined, timeoutMs = 20_000 }) {
+export async function probeSession({
+  agent,
+  sessionName,
+  cwd = undefined,
+  timeoutMs = 20_000,
+  createTimeoutMs = timeoutMs,
+}) {
   const acpxAgent = acpxAgentName(agent);
-  const created = await run([acpxAgent, "sessions", "new", "--name", sessionName], { timeoutMs, cwd });
+  const created = await run([acpxAgent, "sessions", "new", "--name", sessionName], {
+    timeoutMs: createTimeoutMs,
+    cwd,
+  });
   if (created.spawnError?.code === "ENOENT") throw notFoundError(created);
   if (created.timedOut) {
     return {
       verdict: "timeout",
-      detail: `probe timed out after ${Math.round(timeoutMs / 1000)}s`,
+      detail: `probe timed out after ${Math.round(createTimeoutMs / 1000)}s`,
       availableModels: [],
     };
   }

@@ -37,11 +37,18 @@ if (argv.includes("config") && argv.includes("show")) {
   process.exit(0);
 }
 const creating = argv.includes("sessions") && argv.includes("new");
+const status = argv.includes("status");
+const closing = argv.includes("sessions") && argv.includes("close");
 if (creating && process.env.FAKE_ACPX_MODE === "no-sessions") {
   process.stderr.write("error: unknown command 'sessions'\\n");
   process.exit(2);
 }
-if (creating) {
+if (creating && process.env.FAKE_ACPX_MODE === "scoped-timeouts") {
+  setTimeout(() => process.exit(0), 300);
+} else if ((status || closing) && process.env.FAKE_ACPX_MODE === "scoped-timeouts") {
+  process.on("SIGTERM", () => process.exit(130));
+  setInterval(() => {}, 1000);
+} else if (creating) {
   process.on("SIGTERM", () => process.exit(130));
   setInterval(() => {}, 1000);
 } else {
@@ -53,8 +60,7 @@ fs.chmodSync(fakeAcpx, 0o755);
 
 process.env.BACKPASS_ACPX_BIN = fakeAcpx;
 process.env.FAKE_ACPX_MODE = "hang";
-const { AcpxError, openSession, sessionPrompt } = await import("../src/acpx.js");
-const { probeCandidate } = await import("../src/agents.js");
+const { AcpxError, openSession, probeSession, sessionPrompt } = await import("../src/acpx.js");
 const { UserError } = await import("../src/logger.js");
 
 test.after(() => {
@@ -115,19 +121,21 @@ test("an adapter that really rejects sessions still reports missing session supp
   }
 });
 
-test("the availability probe gives session creation the cold-start budget", async () => {
-  let receivedTimeoutMs;
-  const result = await probeCandidate(
-    { agent: "codex", model: "gpt-5.6-luna" },
-    {
-      sessionName: "backpass-cold-start-probe",
-      probeSession: async ({ timeoutMs }) => {
-        receivedTimeoutMs = timeoutMs;
-        return { verdict: "ok", detail: "", availableModels: ["gpt-5.6-luna"] };
-      },
-    },
-  );
+test("the availability probe scopes the cold-start budget to session creation", async () => {
+  process.env.FAKE_ACPX_MODE = "scoped-timeouts";
+  const startedAt = Date.now();
+  try {
+    const result = await probeSession({
+      agent: "codex",
+      sessionName: "backpass-scoped-timeouts",
+      cwd: fixtureDir,
+      timeoutMs: 100,
+      createTimeoutMs: 1_000,
+    });
 
-  assert.equal(result.verdict, "ok");
-  assert.equal(receivedTimeoutMs, 180_000);
+    assert.equal(result.verdict, "ok");
+    assert.ok(Date.now() - startedAt < 1_500, "status and close exceeded the short operation budget");
+  } finally {
+    process.env.FAKE_ACPX_MODE = "hang";
+  }
 });

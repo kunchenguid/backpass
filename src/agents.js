@@ -39,6 +39,8 @@ import { runCapture } from "./subprocess.js";
 const OK_TTL_MS = 12 * 60 * 60 * 1000;
 const NEGATIVE_TTL_MS = 30 * 60 * 1000;
 const NATIVE_TIMEOUT_MS = 5_000;
+const PROBE_TIMEOUT_MS = 20_000;
+const PROBE_TIMEOUT_BY_AGENT = { opencode: 10_000 };
 const PROBE_RETRY_BACKOFF_MS = 1_000;
 
 /** Adapters whose model list is open-ended: any id is forwarded, none can be verified. */
@@ -175,7 +177,8 @@ export function candidateKey({ agent, model }) {
  *
  * @param {{ agent: string, model: string }} candidate
  * @param {{ cwd?: string, sessionName?: string,
- *   probeSession?: (args: { agent: string, sessionName: string, cwd?: string, timeoutMs?: number }) =>
+ *   probeSession?: (args: { agent: string, sessionName: string, cwd?: string,
+ *     timeoutMs?: number, createTimeoutMs?: number }) =>
  *     Promise<{ verdict: string, detail: string, availableModels?: string[], transient?: boolean }>,
  *   runCapture?: typeof runCapture,
  *   providerAuthTypes?: Record<string, "subscription" | "api_key">,
@@ -196,7 +199,8 @@ export async function probeCandidate(candidate, options = {}) {
     agent,
     sessionName,
     cwd,
-    timeoutMs: SESSION_CREATE_TIMEOUT_MS,
+    timeoutMs: PROBE_TIMEOUT_BY_AGENT[agent] || PROBE_TIMEOUT_MS,
+    createTimeoutMs: SESSION_CREATE_TIMEOUT_MS,
   });
   if (result.verdict !== "ok") {
     return {
