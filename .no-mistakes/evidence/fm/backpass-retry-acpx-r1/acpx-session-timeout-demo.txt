@@ -1,0 +1,12 @@
+End-user diagnostic:
+error: acpx codex did not create a session within 2s
+  its ACP adapter did not finish starting; adapter initialization or a cold or stalled npm package fetch can block session creation - check with: acpx --verbose codex sessions new --name backpass-probe
+warn could not close acpx probe session scope-demo
+
+Probe timeout scoping:
+{
+  "createDelayMs": 300,
+  "operationBudgetMs": 100,
+  "verdict": "ok",
+  "elapsedMs": 569
+}
