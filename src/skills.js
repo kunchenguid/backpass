@@ -152,6 +152,24 @@ export function skillDescriptionTokens(skills) {
   return (skills || []).reduce((sum, s) => sum + (s.descriptionTokens ?? estimateTokens(s.description || "")), 0);
 }
 
+/**
+ * How many loaded entries are the same file as `file`. One library reached through k links
+ * is loaded k times and billed k times (`skillDescriptionTokens` sums every entry), so a
+ * change to its description line costs k times that delta on the always-loaded surface.
+ */
+export function loadedCopies(repoRoot, skills, file) {
+  const identity = (p) => {
+    try {
+      return fs.realpathSync(path.isAbsolute(p) ? p : path.join(repoRoot, p));
+    } catch {
+      return null;
+    }
+  };
+  const target = identity(file);
+  if (!target) return 1;
+  return Math.max(1, (skills || []).filter((skill) => identity(skill.path) === target).length);
+}
+
 /** Minimal YAML frontmatter reader for plain values and `>` / `|` multi-line values. */
 export function parseFrontmatter(text) {
   const match = /^---\n([\s\S]*?)\n---/.exec(text);

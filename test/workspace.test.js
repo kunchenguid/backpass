@@ -229,14 +229,16 @@ test("a symlinked skill is staged and measured, so a run can edit what the harne
   assert.equal(fs.readFileSync(path.join(library, "SKILL.md"), "utf8"), SKILL, "the library is untouched");
 });
 
-test("a cyclic skill symlink terminates instead of overflowing the traversal stack", () => {
+test("a symlinked skill directory is never recursed, so no cycle can be walked", () => {
   const repo = makeRepo({ "AGENTS.md": AGENTS });
   const loaded = path.join(repo.root, ".agents", "skills");
   const real = path.join(loaded, "db");
   fs.mkdirSync(real, { recursive: true });
   fs.writeFileSync(path.join(real, "SKILL.md"), SKILL);
-  // The three shapes a followed directory link can take: a self link, a link back to an
-  // ancestor, and a mutual pair. Each one revisits a directory the walk has already seen.
+  // The three shapes a directory link can take: a self link, a link back to an ancestor,
+  // and a mutual pair. Staging takes at most one leaf per link and never descends, so
+  // none of them can be entered. (The ancestry guard in walkFiles is a second line of
+  // defence for that; only the top-level self link still reaches it.)
   fs.symlinkSync(real, path.join(real, "self"));
   fs.symlinkSync(loaded, path.join(real, "up"));
   const a = path.join(loaded, "a");

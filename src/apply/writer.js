@@ -13,6 +13,7 @@ import {
   editSkills,
   ensureSkillsLayout,
   loadProjectSkills,
+  loadedCopies,
   parseFrontmatter,
   removeOwnedSkillPaths,
   resolveOverflowTarget,
@@ -451,7 +452,9 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
   let descriptionTokensProjected = descriptionTokensNow;
   for (const item of resolvedPlanned) {
     if (!existingSkillPaths.has(item.relative)) continue;
-    descriptionTokensProjected += descriptionTokensIn(item.text) - descriptionTokensIn(item.before);
+    descriptionTokensProjected +=
+      (descriptionTokensIn(item.text) - descriptionTokensIn(item.before)) *
+      loadedCopies(repo.root, skillsNow, item.relative);
   }
   descriptionTokensProjected += plannedSkills.reduce(
     (sum, { skill }) => sum + estimateTokens(skill.description || ""),

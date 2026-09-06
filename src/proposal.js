@@ -2,7 +2,7 @@ import { renderHunkLines } from "./diff.js";
 import { normalizeSourceLabel } from "./gap-ledger.js";
 import { mixFromCounts } from "./interaction.js";
 import { memoryTextHash } from "./memory.js";
-import { editSkills, parseFrontmatter, skillDescriptionTokens } from "./skills.js";
+import { editSkills, loadedCopies, parseFrontmatter, skillDescriptionTokens } from "./skills.js";
 import { budgetGateKind, budgetStatus, estimateTokens } from "./tokens.js";
 import { isSkillFilePath, normalizeRecoveryLine, recoveredLineCounts } from "./workspace.js";
 
@@ -689,7 +689,7 @@ export function buildProposal(rawResult, context) {
         else {
           otherDelta += delta;
           if (isSkillFilePath(target, config.skillDirs || config.skillsDir)) {
-            descriptionDelta += descriptionLineDelta(before, next);
+            descriptionDelta += descriptionLineDelta(before, next) * loadedCopies(repo.root, skillFiles, target);
           }
         }
       }

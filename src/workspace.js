@@ -63,11 +63,14 @@ export function prepareWorkspace({
   // refusal there drops the whole round. Leaving it out of staging is what makes it
   // impossible for such a file to become an edit at all.
   const confineTo = allowExternal ? null : realPath(repo.root) || path.resolve(repo.root);
-  const skillMappings = skillDirs.map((logical) => ({ logical, staged: workspacePathFor(logical) }));
+  const skillMappings = skillDirs.map((logical) => ({
+    logical,
+    staged: workspacePathFor(logical),
+    source: path.isAbsolute(logical) ? logical : path.join(repo.root, logical),
+  }));
   const unstageable = [];
   const stagedIdentities = new Map();
-  for (const { logical: sourceDir, staged: stagedDir } of skillMappings) {
-    const skillsSource = path.isAbsolute(sourceDir) ? sourceDir : path.join(repo.root, sourceDir);
+  for (const { logical: sourceDir, staged: stagedDir, source: skillsSource } of skillMappings) {
     if (!fs.existsSync(skillsSource) || !fs.statSync(skillsSource).isDirectory()) continue;
     const confined = [];
     const toLogical = (relative) =>
@@ -108,6 +111,7 @@ export function prepareWorkspace({
     originals,
     confineTo,
     unstageable,
+    stagedIdentities,
   };
 }
 
@@ -162,6 +166,11 @@ function walkFiles(dir, prefix = "", confineTo = null, confined = [], ancestors 
   // link, a link back to an ancestor, or a mutual pair. The guard is ancestry, not a
   // global visited set - two separate links to one shared library are two directories
   // the harness really loads, and each must still be walked and billed.
+  //
+  // Leaf-only staging (below) currently keeps this dormant: a symlinked directory is
+  // never recursed into, and a real directory is always deeper than its ancestors, so the
+  // only live effect left is skipping a top-level self-link back to the skills root. It
+  // re-arms the moment subtree walking under a symlinked directory is restored.
   const chain = ancestors || new Set([realPath(dir)].filter(Boolean));
   // One rule for taking a file, wherever the walk reaches it: a path that resolves
   // outside the root is named for the caller instead of staged, so the containment
@@ -208,6 +217,7 @@ const READ_ONLY_OUTSIDE_REPO = "resolves outside the repository";
 /** Why measurement dropped a file the model wrote: the note the human reads must say which. */
 export const STRAY_OUTSIDE_SURFACE = "synthesis wrote it outside the memory file and skills";
 export const STRAY_OUTSIDE_REPO = "it resolves outside the repository, which project scope cannot write";
+export const strayAliasReason = (owner) => `it is the same file already staged as ${owner}`;
 
 /** A created file counts as a skill only in the layouts `loadSkills` reads. */
 export function isSkillFilePath(relative, skillsDir) {
@@ -365,6 +375,7 @@ export function measureWorkspace(workspace) {
     stagedPaths = new Map([...workspace.originals.keys()].map((file) => [file, workspacePathFor(file)])),
     originals,
     confineTo = null,
+    stagedIdentities = new Map(),
   } = workspace;
   /** @type {any[]} */
   const changes = [];
@@ -414,6 +425,14 @@ export function measureWorkspace(workspace) {
         stray.push({ file: logical, reason: STRAY_OUTSIDE_REPO });
         continue;
       }
+    }
+    // Staging gave one name of an aliased library the write; a file written at another of
+    // its names is that same file, and apply refuses a skill whose path already exists -
+    // a refusal that drops every other accepted edit with it.
+    const owner = mapping.source && stagedIdentities.get(realPath(path.join(mapping.source, inside)));
+    if (owner) {
+      stray.push({ file: logical, reason: strayAliasReason(owner) });
+      continue;
     }
     const text = fs.readFileSync(path.join(root, staged), "utf8");
     texts.set(logical, text);
