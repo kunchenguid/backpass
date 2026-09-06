@@ -375,11 +375,14 @@ test("a skill linked into a store nothing may write is billed but never staged w
 
     assert.deepEqual([...workspace.originals.keys()], ["AGENTS.md", ".agents/skills/db/SKILL.md"]);
     assert.deepEqual(walkStaged(path.join(workspace.root, ".agents/skills")), ["db/SKILL.md"]);
-    assert.deepEqual(workspace.unstageable, [
-      { path: ".agents/skills/foo/SKILL.md", reason: "resolves to a location that cannot be written" },
-      { path: ".agents/skills/shared/SKILL.md", reason: "resolves to a location that cannot be written" },
-      { path: ".agents/skills/shared-alias/SKILL.md", reason: "resolves to a location that cannot be written" },
-    ]);
+    assert.deepEqual(
+      workspace.unstageable.map(({ path: p, reason }) => ({ path: p, reason })),
+      [
+        { path: ".agents/skills/foo/SKILL.md", reason: "resolves to a location that cannot be written" },
+        { path: ".agents/skills/shared/SKILL.md", reason: "resolves to a location that cannot be written" },
+        { path: ".agents/skills/shared-alias/SKILL.md", reason: "resolves to a location that cannot be written" },
+      ],
+    );
   } finally {
     fs.chmodSync(store, 0o755);
     fs.chmodSync(path.join(store, "foo"), 0o755);

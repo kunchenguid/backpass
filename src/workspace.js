@@ -93,7 +93,7 @@ export function prepareWorkspace({
       // this whole change exists to follow. Apply refuses such a path and that refusal
       // drops the round, so staging declares it read-only instead of offering the edit.
       if (allowExternal && readOnlyResolvedPath(from)) {
-        unstageable.push({ path: logical, reason: READ_ONLY_UNWRITABLE });
+        unstageable.push({ path: logical, reason: READ_ONLY_UNWRITABLE, identity });
         continue;
       }
       const staged = path.posix.join(stagedDir, relative);
@@ -239,6 +239,8 @@ const READ_ONLY_UNWRITABLE = "resolves to a location that cannot be written";
 export const STRAY_OUTSIDE_SURFACE = "synthesis wrote it outside the memory file and skills";
 export const STRAY_OUTSIDE_REPO = "it resolves outside the repository, which project scope cannot write";
 export const strayAliasReason = (owner) => `it is the same file already staged as ${owner}`;
+export const STRAY_UNWRITABLE =
+  "it resolves to a location that cannot be written, so staging withheld it from the copy";
 
 /** A created file counts as a skill only in the layouts `loadSkills` reads. */
 export function isSkillFilePath(relative, skillsDir) {
@@ -397,6 +399,7 @@ export function measureWorkspace(workspace) {
     originals,
     confineTo = null,
     stagedIdentities = new Map(),
+    unstageable = [],
   } = workspace;
   /** @type {any[]} */
   const changes = [];
@@ -450,9 +453,22 @@ export function measureWorkspace(workspace) {
     // Staging gave one name of an aliased library the write; a file written at another of
     // its names is that same file, and apply refuses a skill whose path already exists -
     // a refusal that drops every other accepted edit with it.
-    const owner = mapping.source && stagedIdentities.get(realPath(path.join(mapping.source, inside)));
+    const repoIdentity = mapping.source ? realPath(path.join(mapping.source, inside)) : null;
+    const owner = stagedIdentities.get(repoIdentity);
     if (owner) {
       stray.push({ file: logical, reason: strayAliasReason(owner) });
+      continue;
+    }
+    // Staging withheld this skill because a write to it could not land, and the skill
+    // index says so - but the model still has its path. Writing there re-creates a file
+    // apply refuses for already existing, and that refusal drops every accepted edit.
+    const withheld = unstageable.some(
+      (entry) =>
+        entry.reason === READ_ONLY_UNWRITABLE &&
+        (entry.path === logical || (entry.identity && entry.identity === repoIdentity)),
+    );
+    if (withheld) {
+      stray.push({ file: logical, reason: STRAY_UNWRITABLE });
       continue;
     }
     const text = fs.readFileSync(path.join(root, staged), "utf8");

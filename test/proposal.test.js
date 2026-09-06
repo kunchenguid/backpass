@@ -23,7 +23,7 @@ import { applyDecisions } from "../src/apply/writer.js";
 import { injectPayload, parseDecisions, renderApplySurface } from "../src/apply/lavish.js";
 import { renderEdit } from "../src/apply/terminal.js";
 import { extractJson, parseTokenLine, stripAcpxNoise } from "../src/acpx.js";
-import { STRAY_OUTSIDE_REPO, STRAY_OUTSIDE_SURFACE, strayAliasReason } from "../src/workspace.js";
+import { STRAY_OUTSIDE_REPO, STRAY_OUTSIDE_SURFACE, STRAY_UNWRITABLE, strayAliasReason } from "../src/workspace.js";
 import { makeRepo, stageAndMeasure, writeIn } from "./helpers/staging.js";
 
 const MEMORY_TEXT = [
@@ -3202,6 +3202,78 @@ test("a skill linked out of the repo behind an in-repo library never reaches app
   assert.deepEqual(results.failed, []);
   assert.match(fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8"), /Always include the full PR URL/);
   assert.equal(fs.readFileSync(path.join(outside, "SKILL.md"), "utf8"), skill, "nothing outside the repository moved");
+});
+
+test("re-creating a withheld unwritable skill is stray, so the round is not dropped", () => {
+  const skill = "---\nname: db\ndescription: old trigger\n---\n\nbody\n";
+  const store = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-store-recreate-")));
+  fs.mkdirSync(path.join(store, "db"));
+  fs.writeFileSync(path.join(store, "db", "SKILL.md"), skill);
+
+  const repo = makeRepo({ "AGENTS.md": MEMORY_TEXT });
+  const loaded = path.join(repo.root, ".agents", "skills");
+  fs.mkdirSync(loaded, { recursive: true });
+  fs.symlinkSync(path.join(store, "db"), path.join(loaded, "db"));
+  fs.chmodSync(path.join(store, "db"), 0o555);
+  fs.chmodSync(store, 0o555);
+
+  try {
+    const extracted =
+      "---\nname: db\ndescription: Load before node work.\n---\n\n- Use Node 18 via nvm before running any script.\n";
+    const staged = stageAndMeasure({
+      repo,
+      allowExternal: true,
+      edit: (root) => {
+        writeIn(root, "AGENTS.md", (text) => text.replace("- Use Node 18 via nvm before running any script.\n", ""));
+        // The index shows `db` read-only, but the model still has its path and the
+        // extraction rule points at the skill that already covers the lines.
+        writeIn(root, ".agents/skills/db/SKILL.md", extracted);
+      },
+    });
+    assert.deepEqual(staged.measured.stray, [{ file: ".agents/skills/db/SKILL.md", reason: STRAY_UNWRITABLE }]);
+    assert.deepEqual(
+      staged.measured.changes.map((change) => change.file),
+      ["AGENTS.md"],
+      "the withheld skill is not carried back in as a created file",
+    );
+
+    // An extract while the created file survives, a plain removal once it does not.
+    const ids = staged.measured.changes.map((change) => change.id);
+    const created = staged.measured.changes.some((change) => change.kind === "created");
+    const built = buildProposal(
+      {
+        edits: [
+          created
+            ? claim(ids, { kind: "extract", title: "extract the node pin" })
+            : claim(ids, { kind: "remove", title: "drop the node pin" }),
+        ],
+      },
+      {
+        memoryFile: staged.memoryFile,
+        config: config(),
+        repo,
+        summary: aliasSummary(),
+        measured: staged.measured,
+      },
+    );
+    assert.deepEqual(built.violations, []);
+
+    const results = applyDecisions({
+      proposal: { ...built.proposal, scope: "user" },
+      decisions: Object.fromEntries(built.proposal.edits.map((edit) => [edit.id, "accepted"])),
+      repo,
+      state: staged.state,
+      config: { budgetTokens: 5000 },
+    });
+
+    assert.deepEqual(results.failed, []);
+    const written = fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8");
+    assert.ok(!written.includes("Node 18"), "the accepted memory edit still landed");
+    assert.equal(fs.readFileSync(path.join(store, "db", "SKILL.md"), "utf8"), skill, "the store is untouched");
+  } finally {
+    fs.chmodSync(store, 0o755);
+    fs.chmodSync(path.join(store, "db"), 0o755);
+  }
 });
 
 test("a skill in a read-only store never joins a user-scope apply round, so the round still lands", () => {
