@@ -30,25 +30,24 @@ function resolveTarget(root, relative) {
   return path.isAbsolute(relative) ? relative : path.join(root, relative);
 }
 
-/** Named refusal when a user-level target is a symlink into a read-only store. */
+/** Named refusal when a target is a symlink into a read-only store. */
 export function readOnlySymlinkMessage(absolute, realPath) {
   return `${absolute} is a symlink to ${realPath}, which is not writable; edit the source that generates it`;
 }
 
+/**
+ * The link is as often a directory on the way to the file (`~/.claude/skills/foo` pointing
+ * into a nix store) as the file itself, so the whole path is resolved rather than the leaf
+ * lstat'd: an lstat of the leaf sees a plain file and hands the user a raw EROFS instead.
+ */
 function refuseReadOnlySymlink(absolute) {
-  let lstat;
-  try {
-    lstat = fs.lstatSync(absolute);
-  } catch {
-    return null;
-  }
-  if (!lstat.isSymbolicLink()) return null;
   let real;
   try {
     real = fs.realpathSync(absolute);
   } catch {
     return null;
   }
+  if (real === path.resolve(absolute)) return null;
   try {
     fs.accessSync(real, fs.constants.W_OK);
     fs.accessSync(path.dirname(real), fs.constants.W_OK | fs.constants.X_OK);

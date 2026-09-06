@@ -450,7 +450,15 @@ export async function synthesizeProposal({
   // Staging holds only the write surface: every skill on a surface run, none of them on
   // a memory-file target (new extracts are still measured), just the one on a skill target.
   const stagedSkills = target.kind === "surface" ? null : target.kind === "skill" ? [target.path] : [];
-  const workspaceOptions = { state, repo, memoryFile, skillsDir: overflow.dir, skillDirs, stagedSkills };
+  const workspaceOptions = {
+    state,
+    repo,
+    memoryFile,
+    skillsDir: overflow.dir,
+    skillDirs,
+    stagedSkills,
+    allowExternal: scope?.kind === "user",
+  };
   let workspace = prepareWorkspace(workspaceOptions);
   const stagedSkillsDir =
     workspace.skillMappings.find((mapping) => mapping.logical === overflow.dir)?.staged ||

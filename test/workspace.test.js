@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { readMemoryFile } from "../src/memory.js";
+import { loadSkills } from "../src/skills.js";
 import { State } from "../src/state.js";
 import {
   isSkillFilePath,
@@ -92,6 +93,7 @@ test("external user memory and skills use workspace-relative staging paths", () 
     memoryFile: readMemoryFile(repo.root, memoryPath, { allowExternal: true }),
     skillsDir,
     skillDirs: [skillsDir],
+    allowExternal: true,
   });
 
   assert.equal(path.isAbsolute(workspace.memoryWorkspacePath), false);
@@ -119,6 +121,7 @@ test("split external memory hunks retain their staged path", () => {
     memoryFile: readMemoryFile(repo.root, memoryPath, { allowExternal: true }),
     skillsDir,
     skillDirs: [skillsDir],
+    allowExternal: true,
   });
   writeIn(workspace.root, workspace.memoryWorkspacePath, (text) => text.replace("- carry\n- delete\n", ""));
   writeIn(
@@ -261,4 +264,46 @@ test("two links to one shared library are both staged: the guard is ancestry, no
 
   assert.ok(workspace.originals.has(".agents/skills/db/SKILL.md"));
   assert.ok(workspace.originals.has(".agents/skills/database/SKILL.md"));
+});
+
+test("project scope bills a skill symlinked out of the repo but never stages it", () => {
+  const repo = makeRepo({ "AGENTS.md": AGENTS });
+  // The layout project scope cannot write: the loaded directory links into a library that
+  // lives outside the repository entirely.
+  const library = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-library-")));
+  fs.mkdirSync(path.join(library, "db"));
+  fs.writeFileSync(path.join(library, "db", "SKILL.md"), SKILL);
+  fs.writeFileSync(path.join(library, "solo.md"), "---\nname: solo\ndescription: Solo.\n---\n\nBody\n");
+  const loaded = path.join(repo.root, ".agents", "skills");
+  fs.mkdirSync(loaded, { recursive: true });
+  fs.symlinkSync(path.join(library, "db"), path.join(loaded, "db"));
+  fs.symlinkSync(path.join(library, "solo.md"), path.join(loaded, "solo.md"));
+  fs.mkdirSync(path.join(loaded, "local"));
+  fs.writeFileSync(path.join(loaded, "local", "SKILL.md"), SKILL.replace("name: db", "name: local"));
+
+  const loadedSkills = loadSkills(repo.root, ".agents/skills");
+  assert.deepEqual(
+    loadedSkills.map((s) => s.name).sort(),
+    ["db", "local", "solo"],
+    "the harness loads all three, so all three are billed",
+  );
+  assert.ok(
+    loadedSkills.find((s) => s.name === "db").descriptionTokens > 0,
+    "an out-of-repo skill still costs always-loaded tokens",
+  );
+
+  const state = new State(repo.root).ensure();
+  const memoryFile = readMemoryFile(repo.root, "AGENTS.md");
+  const workspace = prepareWorkspace({ state, repo, memoryFile, skillsDir: ".agents/skills" });
+
+  assert.ok(workspace.originals.has(".agents/skills/local/SKILL.md"), "an in-repo skill is staged as before");
+  assert.equal(workspace.originals.has(".agents/skills/db/SKILL.md"), false);
+  assert.equal(workspace.originals.has(".agents/skills/solo.md"), false);
+  assert.equal(fs.existsSync(path.join(workspace.root, ".agents/skills/db")), false);
+  assert.equal(fs.existsSync(path.join(workspace.root, ".agents/skills/solo.md")), false);
+
+  // User scope owns files outside any repository, so there the same layout is editable.
+  const external = prepareWorkspace({ state, repo, memoryFile, skillsDir: ".agents/skills", allowExternal: true });
+  assert.equal(external.originals.get(".agents/skills/db/SKILL.md"), SKILL);
+  assert.ok(external.originals.has(".agents/skills/solo.md"));
 });

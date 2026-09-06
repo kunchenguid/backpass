@@ -109,6 +109,48 @@ test("apply names a symlink whose writable file is in a read-only store", () => 
   }
 });
 
+test("apply names the read-only store when the symlink is a directory on the way to the file", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-uapply-dirlink-"));
+  const store = path.join(home, "readonly-store");
+  const source = path.join(store, "AGENTS.md");
+  // Nothing on the path lstats as a symlink except a directory, which is how a
+  // home-manager or nix layout generates the loaded tree.
+  const link = path.join(home, ".agents");
+  const text = "# User memory\n\n- Keep secrets out of prompts.\n";
+  fs.mkdirSync(store, { recursive: true });
+  fs.writeFileSync(source, text, { mode: 0o644 });
+  fs.symlinkSync(store, link, "dir");
+  fs.chmodSync(store, 0o555);
+
+  try {
+    const state = new State(home, {
+      stateDir: path.join(home, ".config", "backpass", "user"),
+      mode: 0o700,
+      exclude: false,
+    }).ensure();
+    const results = applyDecisions({
+      proposal: {
+        memoryFile: { path: ".agents/AGENTS.md", hash: memoryTextHash(text), tokens: 20 },
+        edits: [{ id: "e1", kind: "rewrite", file: ".agents/AGENTS.md" }],
+        config: { budgetTokens: 5000, skillsDir: ".agents/skills" },
+      },
+      decisions: { e1: "accepted" },
+      repo: { root: home, name: "user" },
+      state,
+      config: { budgetTokens: 5000, skillsDir: ".agents/skills" },
+    });
+
+    assert.equal(results.written.length, 0);
+    assert.equal(
+      results.failed[0].error,
+      readOnlySymlinkMessage(path.join(home, ".agents", "AGENTS.md"), fs.realpathSync(source)),
+    );
+    assert.equal(fs.readFileSync(source, "utf8"), text);
+  } finally {
+    fs.chmodSync(store, 0o755);
+  }
+});
+
 test("project apply refuses an external memory target", () => {
   const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-project-apply-"));
   const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-external-apply-"));

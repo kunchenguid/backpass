@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { anchoredHunks, countOccurrences, span } from "./diff.js";
 import { parseMemoryUnits } from "./memory.js";
-import { parseFrontmatter, skillBody } from "./skills.js";
+import { isDirectoryEntry, parseFrontmatter, skillBody } from "./skills.js";
 import { sha256 } from "./state.js";
 
 /**
@@ -36,7 +36,15 @@ export function workspacePathFor(file) {
  * narrows which existing skill files are copied (a targeted run stages only its write
  * surface); the skill-dir mappings stay, so a created SKILL.md is still measured.
  */
-export function prepareWorkspace({ state, repo, memoryFile, skillsDir, skillDirs = [skillsDir], stagedSkills = null }) {
+export function prepareWorkspace({
+  state,
+  repo,
+  memoryFile,
+  skillsDir,
+  skillDirs = [skillsDir],
+  stagedSkills = null,
+  allowExternal = false,
+}) {
   const root = workspaceRoot(state);
   fs.rmSync(root, { recursive: true, force: true });
   fs.mkdirSync(root, { recursive: true });
@@ -50,11 +58,16 @@ export function prepareWorkspace({ state, repo, memoryFile, skillsDir, skillDirs
   originals.set(memoryFile.path, memoryFile.text);
   stagedPaths.set(memoryFile.path, memoryWorkspacePath);
 
+  // A skill that resolves outside the repository is still loaded and still billed, but
+  // project scope cannot write it - `resolveMemoryPath` refuses the path at apply, and a
+  // refusal there drops the whole round. Leaving it out of staging is what makes it
+  // impossible for such a file to become an edit at all.
+  const confineTo = allowExternal ? null : repo.realRoot || realPath(repo.root) || path.resolve(repo.root);
   const skillMappings = skillDirs.map((logical) => ({ logical, staged: workspacePathFor(logical) }));
   for (const { logical: sourceDir, staged: stagedDir } of skillMappings) {
     const skillsSource = path.isAbsolute(sourceDir) ? sourceDir : path.join(repo.root, sourceDir);
     if (!fs.existsSync(skillsSource) || !fs.statSync(skillsSource).isDirectory()) continue;
-    for (const relative of walkFiles(skillsSource)) {
+    for (const relative of walkFiles(skillsSource, "", confineTo)) {
       const from = path.join(skillsSource, relative);
       const logical = path.isAbsolute(sourceDir)
         ? path.join(sourceDir, relative)
@@ -79,32 +92,52 @@ export function prepareWorkspace({ state, repo, memoryFile, skillsDir, skillDirs
     skillMappings,
     stagedPaths,
     originals,
+    confineTo,
   };
 }
 
-/** "dir", "file", or null once symlinks are followed; a broken link is null, never a throw. */
-/** Resolved identity of a directory, or null when it cannot be resolved (broken link). */
-function realDirectory(dir) {
+/** Resolved identity of a path, or null when it cannot be resolved (broken link). */
+function realPath(file) {
   try {
-    return fs.realpathSync(dir);
+    return fs.realpathSync(file);
   } catch {
     return null;
   }
 }
 
+/**
+ * Where a repo-relative target actually lands, following links on the part of it that
+ * already exists - the question apply asks before it writes a file that is not there yet.
+ */
+function resolvedTarget(root, logical) {
+  const absolute = path.isAbsolute(logical) ? logical : path.resolve(root, logical);
+  let existing = absolute;
+  while (!fs.existsSync(existing) && path.dirname(existing) !== existing) existing = path.dirname(existing);
+  const real = realPath(existing);
+  return real ? path.resolve(real, path.relative(existing, absolute)) : null;
+}
+
+/** "dir", "file", or null once symlinks are followed; a broken link is null, never a throw. */
 function entryKind(dir, entry) {
-  if (entry.isDirectory()) return "dir";
+  if (isDirectoryEntry(dir, entry)) return "dir";
   if (entry.isFile()) return "file";
   if (!entry.isSymbolicLink()) return null;
   try {
-    const stat = fs.statSync(path.join(dir, entry.name));
-    return stat.isDirectory() ? "dir" : stat.isFile() ? "file" : null;
+    return fs.statSync(path.join(dir, entry.name)).isFile() ? "file" : null;
   } catch {
     return null;
   }
 }
 
-function walkFiles(dir, prefix = "", ancestors = null) {
+/** True when an already-resolved path lies strictly inside `root`; a null root confines nothing. */
+function withinRoot(root, resolved) {
+  if (!root) return true;
+  if (!resolved) return false;
+  const relative = path.relative(root, resolved);
+  return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
+function walkFiles(dir, prefix = "", confineTo = null, ancestors = null) {
   const out = [];
   let entries;
   try {
@@ -116,7 +149,7 @@ function walkFiles(dir, prefix = "", ancestors = null) {
   // link, a link back to an ancestor, or a mutual pair. The guard is ancestry, not a
   // global visited set - two separate links to one shared library are two directories
   // the harness really loads, and each must still be walked and billed.
-  const chain = ancestors || new Set([realDirectory(dir)].filter(Boolean));
+  const chain = ancestors || new Set([realPath(dir)].filter(Boolean));
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
     const relative = prefix ? path.posix.join(prefix, entry.name) : entry.name;
     // Follow symlinks: a skills directory is commonly a set of links into a shared
@@ -125,10 +158,12 @@ function walkFiles(dir, prefix = "", ancestors = null) {
     const target = entryKind(dir, entry);
     if (target === "dir") {
       const child = path.join(dir, entry.name);
-      const identity = realDirectory(child);
-      if (!identity || chain.has(identity)) continue;
-      out.push(...walkFiles(child, relative, new Set(chain).add(identity)));
-    } else if (target === "file") out.push(relative);
+      const identity = realPath(child);
+      if (!identity || chain.has(identity) || !withinRoot(confineTo, identity)) continue;
+      out.push(...walkFiles(child, relative, confineTo, new Set(chain).add(identity)));
+    } else if (target === "file") {
+      if (!confineTo || withinRoot(confineTo, realPath(path.join(dir, entry.name)))) out.push(relative);
+    }
   }
   return out;
 }
@@ -288,6 +323,7 @@ export function measureWorkspace(workspace) {
     skillMappings = skillDirs.map((logical) => ({ logical, staged: workspacePathFor(logical) })),
     stagedPaths = new Map([...workspace.originals.keys()].map((file) => [file, workspacePathFor(file)])),
     originals,
+    confineTo = null,
   } = workspace;
   /** @type {any[]} */
   const changes = [];
@@ -324,6 +360,12 @@ export function measureWorkspace(workspace) {
       ? path.join(mapping.logical, inside)
       : path.posix.join(mapping.logical, inside);
     if (!isSkillFilePath(logical, skillDirs)) {
+      stray.push(staged);
+      continue;
+    }
+    // Staging leaves out a skill that resolves outside the repository; measurement must
+    // not carry one back in as a created file, which apply could never write either.
+    if (confineTo && !withinRoot(confineTo, resolvedTarget(confineTo, logical))) {
       stray.push(staged);
       continue;
     }
