@@ -182,3 +182,33 @@ test("the repo fingerprint notices a changed or removed guarded file", () => {
   assert.notEqual(after["AGENTS.md"], before["AGENTS.md"]);
   assert.equal(after[".agents/skills/db/SKILL.md"], before[".agents/skills/db/SKILL.md"]);
 });
+
+test("a symlinked skill is staged and measured, so a run can edit what the harness actually loads", () => {
+  const repo = makeRepo({ "AGENTS.md": AGENTS });
+  // The library-plus-symlinks layout: content lives outside the loaded directory.
+  const library = path.join(repo.root, "library", "db");
+  fs.mkdirSync(library, { recursive: true });
+  fs.writeFileSync(path.join(library, "SKILL.md"), SKILL);
+  const loaded = path.join(repo.root, ".agents", "skills");
+  fs.mkdirSync(loaded, { recursive: true });
+  fs.symlinkSync(library, path.join(loaded, "db"));
+
+  const state = new State(repo.root).ensure();
+  const memoryFile = readMemoryFile(repo.root, "AGENTS.md");
+  const workspace = prepareWorkspace({ state, repo, memoryFile, skillsDir: ".agents/skills" });
+
+  const staged = ".agents/skills/db/SKILL.md";
+  assert.ok(workspace.originals.has(staged), "the symlinked skill is part of the staging copy");
+  assert.equal(workspace.originals.get(staged), SKILL);
+
+  const copy = path.join(workspace.root, workspace.stagedPaths.get(staged));
+  assert.ok(fs.existsSync(copy), "it is copied, not linked, so edits never reach the library");
+  assert.ok(!fs.lstatSync(copy).isSymbolicLink());
+
+  fs.writeFileSync(copy, SKILL.replace("Load before touching", "Load before migrating"));
+  const measured = measureWorkspace(workspace);
+  const hunks = measured.changes.filter((c) => c.file === staged);
+  assert.equal(hunks.length, 1, "an edit to the symlinked skill is measured as a change to it");
+  assert.equal(hunks[0].kind, "hunk");
+  assert.equal(fs.readFileSync(path.join(library, "SKILL.md"), "utf8"), SKILL, "the library is untouched");
+});

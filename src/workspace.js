@@ -82,6 +82,19 @@ export function prepareWorkspace({ state, repo, memoryFile, skillsDir, skillDirs
   };
 }
 
+/** "dir", "file", or null once symlinks are followed; a broken link is null, never a throw. */
+function entryKind(dir, entry) {
+  if (entry.isDirectory()) return "dir";
+  if (entry.isFile()) return "file";
+  if (!entry.isSymbolicLink()) return null;
+  try {
+    const stat = fs.statSync(path.join(dir, entry.name));
+    return stat.isDirectory() ? "dir" : stat.isFile() ? "file" : null;
+  } catch {
+    return null;
+  }
+}
+
 function walkFiles(dir, prefix = "") {
   const out = [];
   let entries;
@@ -92,8 +105,12 @@ function walkFiles(dir, prefix = "") {
   }
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
     const relative = prefix ? path.posix.join(prefix, entry.name) : entry.name;
-    if (entry.isDirectory()) out.push(...walkFiles(path.join(dir, entry.name), relative));
-    else if (entry.isFile()) out.push(relative);
+    // Follow symlinks: a skills directory is commonly a set of links into a shared
+    // library, and those are the files the harness loads. Staging copies what it finds,
+    // so an edit lands in the staging copy and never writes through a link.
+    const target = entryKind(dir, entry);
+    if (target === "dir") out.push(...walkFiles(path.join(dir, entry.name), relative));
+    else if (target === "file") out.push(relative);
   }
   return out;
 }

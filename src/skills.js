@@ -30,6 +30,23 @@ function logicalSkillDir(repoRoot, skillsDir) {
   return relative.split(path.sep).join("/");
 }
 
+/**
+ * True when a directory entry is a directory once symlinks are followed. A broken or
+ * cyclic link is not, and never throws.
+ *
+ * @param {string} root
+ * @param {import("node:fs").Dirent} entry
+ */
+export function isDirectoryEntry(root, entry) {
+  if (entry.isDirectory()) return true;
+  if (!entry.isSymbolicLink()) return false;
+  try {
+    return fs.statSync(path.join(root, entry.name)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 /** Read the existing skills so synthesis can tune a description instead of duplicating it. */
 export function loadSkills(repoRoot, skillsDir) {
   const root = path.isAbsolute(skillsDir) ? skillsDir : path.join(repoRoot, skillsDir);
@@ -44,7 +61,11 @@ export function loadSkills(repoRoot, skillsDir) {
   }
 
   for (const entry of entries) {
-    const file = entry.isDirectory()
+    // A harness loads what the path resolves to, so a symlinked skill directory is a skill.
+    // `readdir` reports the link itself, never its target, so the type has to be stat'd -
+    // otherwise a library-plus-symlinks layout (the common way to share skills across
+    // harnesses) is invisible here and its always-loaded descriptions go unbilled.
+    const file = isDirectoryEntry(root, entry)
       ? path.join(root, entry.name, "SKILL.md")
       : entry.name.endsWith(".md")
         ? path.join(root, entry.name)

@@ -322,3 +322,28 @@ test("user apply links relocated Claude skills without relying on directory orde
     else process.env.CLAUDE_CONFIG_DIR = previous;
   }
 });
+
+test("a skill symlinked into the loaded directory is read, because that is what a harness loads", () => {
+  const root = tmpRepo();
+  const library = path.join(root, "library");
+  const loaded = path.join(root, ".claude", "skills");
+  fs.mkdirSync(path.join(library, "beads"), { recursive: true });
+  fs.mkdirSync(loaded, { recursive: true });
+  fs.writeFileSync(
+    path.join(library, "beads", "SKILL.md"),
+    "---\nname: beads\ndescription: Use when tracking project work.\n---\n\n# Beads\n\nTrack work here.\n",
+  );
+  fs.writeFileSync(path.join(library, "solo.md"), "---\nname: solo\ndescription: A single-file skill.\n---\n\nBody.\n");
+  // How the user's machine is laid out: the library holds the content, the harness-loaded
+  // directory holds symlinks into it.
+  fs.symlinkSync(path.join(library, "beads"), path.join(loaded, "beads"));
+  fs.symlinkSync(path.join(library, "solo.md"), path.join(loaded, "solo.md"));
+  fs.symlinkSync(path.join(library, "missing"), path.join(loaded, "broken"));
+
+  const names = loadSkills(root, ".claude/skills").map((s) => s.name);
+  assert.deepEqual(names, ["beads", "solo"], "symlinked skills count; a broken symlink is skipped");
+
+  const beads = loadSkills(root, ".claude/skills").find((s) => s.name === "beads");
+  assert.match(beads.description, /tracking project work/);
+  assert.ok(beads.descriptionTokens > 0, "a symlinked skill's description is billed like any other");
+});
