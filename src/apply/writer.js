@@ -3,7 +3,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 
 import { applyEdit, filesOfEdit, sliceEditForFile } from "../proposal.js";
-import { memoryTextHash, resolveMemoryPath } from "../memory.js";
+import { memoryTextHash, readOnlyResolvedPath, resolveMemoryPath } from "../memory.js";
 import { userClaudeSkillsDir } from "../config.js";
 import { budgetGateKind, budgetStatus, estimateTokens, formatTokens } from "../tokens.js";
 import { recordRejection } from "../state.js";
@@ -47,20 +47,9 @@ export function readOnlyTargetMessage(absolute, realPath) {
  * lstat'd: an lstat of the leaf sees a plain file and hands the user a raw EROFS instead.
  */
 function refuseReadOnlySymlink(absolute) {
-  let real;
-  try {
-    real = fs.realpathSync(absolute);
-  } catch {
-    return null;
-  }
-  if (real === path.resolve(absolute)) return null;
-  try {
-    fs.accessSync(real, fs.constants.W_OK);
-    fs.accessSync(path.dirname(real), fs.constants.W_OK | fs.constants.X_OK);
-    return null;
-  } catch {
-    return isSymbolicLink(absolute) ? readOnlySymlinkMessage(absolute, real) : readOnlyTargetMessage(absolute, real);
-  }
+  const real = readOnlyResolvedPath(absolute);
+  if (!real) return null;
+  return isSymbolicLink(absolute) ? readOnlySymlinkMessage(absolute, real) : readOnlyTargetMessage(absolute, real);
 }
 
 function isSymbolicLink(absolute) {

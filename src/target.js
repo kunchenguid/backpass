@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { userClaudeSkillsDir } from "./config.js";
 import { UserError, info } from "./logger.js";
-import { pointerImportPath, resolveMemoryFiles, resolveMemoryPath } from "./memory.js";
+import { pointerImportPath, readOnlyResolvedPath, resolveMemoryFiles, resolveMemoryPath } from "./memory.js";
 import { pathInRoot, resolveInRoot } from "./scope.js";
 import { loadProjectSkills, resolveOverflowTarget } from "./skills.js";
 
@@ -82,6 +82,15 @@ export function resolveTarget(spec, scope) {
       throw new UserError(
         `--target ${spec} is at ${skill.path}, which resolves outside the repository`,
         "project scope can read and bill that skill but never write it; edit it where it really lives, or run `--scope user`",
+      );
+    }
+    // The same probe staging and apply use: a skill that resolves into a store nothing may
+    // write is loaded and billed, but a run targeting it could only end in a refusal.
+    const unwritable = readOnlyResolvedPath(resolveInRoot(root, skill.path));
+    if (unwritable) {
+      throw new UserError(
+        `--target ${spec} is at ${skill.path}, which resolves to ${unwritable} and cannot be written`,
+        "edit the source that generates it, or point the link at a writable copy",
       );
     }
     if (aliased) {

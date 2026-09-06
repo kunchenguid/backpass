@@ -335,12 +335,65 @@ test("a skill file linked out of the repo through an in-repo library is never st
   assert.equal(external.originals.get(".agents/skills/db/SKILL.md"), SKILL);
 });
 
+test("a skill linked into a store nothing may write is billed but never staged writable", () => {
+  const store = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-readonly-store-")));
+  fs.mkdirSync(path.join(store, "foo"));
+  fs.writeFileSync(path.join(store, "foo", "SKILL.md"), SKILL.replace("name: db", "name: foo"));
+  fs.mkdirSync(path.join(store, "shared"));
+  fs.writeFileSync(path.join(store, "shared", "SKILL.md"), SKILL.replace("name: db", "name: shared"));
+
+  const repo = makeRepo({ "AGENTS.md": AGENTS, ".agents/skills/db/SKILL.md": SKILL });
+  const loaded = path.join(repo.root, ".agents", "skills");
+  fs.symlinkSync(path.join(store, "foo"), path.join(loaded, "foo"));
+  // Two names for one unwritable library: neither may be staged, and the second must not
+  // be reported as an alias of a file that was never staged.
+  fs.symlinkSync(path.join(store, "shared"), path.join(loaded, "shared"));
+  fs.symlinkSync(path.join(store, "shared"), path.join(loaded, "shared-alias"));
+  fs.chmodSync(path.join(store, "foo"), 0o555);
+  fs.chmodSync(path.join(store, "shared"), 0o555);
+  fs.chmodSync(store, 0o555);
+
+  try {
+    // The harness loads them, so they cost description tokens whatever backpass may write.
+    assert.deepEqual(
+      loadSkills(repo.root, ".agents/skills")
+        .map((skill) => skill.name)
+        .sort(),
+      ["db", "foo", "shared", "shared"],
+    );
+
+    const state = new State(repo.root).ensure();
+    const memoryFile = readMemoryFile(repo.root, "AGENTS.md");
+    // User scope: nothing confines the walk, so only writability keeps these out.
+    const workspace = prepareWorkspace({
+      state,
+      repo,
+      memoryFile,
+      skillsDir: ".agents/skills",
+      allowExternal: true,
+    });
+
+    assert.deepEqual([...workspace.originals.keys()], ["AGENTS.md", ".agents/skills/db/SKILL.md"]);
+    assert.deepEqual(walkStaged(path.join(workspace.root, ".agents/skills")), ["db/SKILL.md"]);
+    assert.deepEqual(workspace.unstageable, [
+      { path: ".agents/skills/foo/SKILL.md", reason: "resolves to a location that cannot be written" },
+      { path: ".agents/skills/shared/SKILL.md", reason: "resolves to a location that cannot be written" },
+      { path: ".agents/skills/shared-alias/SKILL.md", reason: "resolves to a location that cannot be written" },
+    ]);
+  } finally {
+    fs.chmodSync(store, 0o755);
+    fs.chmodSync(path.join(store, "foo"), 0o755);
+    fs.chmodSync(path.join(store, "shared"), 0o755);
+  }
+});
+
 test("a skill in a store this user cannot read is skipped and named, not thrown", () => {
   const store = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-locked-store-")));
   fs.mkdirSync(path.join(store, "locked"));
   const unreadable = path.join(store, "locked", "SKILL.md");
   fs.writeFileSync(unreadable, SKILL);
-  fs.chmodSync(unreadable, 0o000);
+  // Write-only: the writability probe accepts it, so only the read failure keeps it out.
+  fs.chmodSync(unreadable, 0o222);
 
   const repo = makeRepo({ "AGENTS.md": AGENTS, ".agents/skills/db/SKILL.md": SKILL });
   const loaded = path.join(repo.root, ".agents", "skills");

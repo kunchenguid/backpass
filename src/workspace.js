@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { anchoredHunks, countOccurrences, span } from "./diff.js";
 import { warn } from "./logger.js";
-import { parseMemoryUnits, resolveMemoryPath } from "./memory.js";
+import { parseMemoryUnits, readOnlyResolvedPath, resolveMemoryPath } from "./memory.js";
 import { isDirectoryEntry, parseFrontmatter, skillBody } from "./skills.js";
 import { sha256 } from "./state.js";
 
@@ -87,6 +87,13 @@ export function prepareWorkspace({
       const owner = identity && stagedIdentities.get(identity);
       if (owner) {
         unstageable.push({ path: logical, reason: `the same file is already staged as ${owner}` });
+        continue;
+      }
+      // Outside a repository a link can land in a store nothing may write - the layout
+      // this whole change exists to follow. Apply refuses such a path and that refusal
+      // drops the round, so staging declares it read-only instead of offering the edit.
+      if (allowExternal && readOnlyResolvedPath(from)) {
+        unstageable.push({ path: logical, reason: READ_ONLY_UNWRITABLE });
         continue;
       }
       const staged = path.posix.join(stagedDir, relative);
@@ -226,6 +233,7 @@ function walkFiles(dir, prefix = "", confineTo = null, confined = [], ancestors 
 /** Why a loaded skill is absent from the staging copy: the skill index must say which. */
 const READ_ONLY_OUTSIDE_REPO = "resolves outside the repository";
 const READ_ONLY_UNREADABLE = "could not be read when the staging copy was built";
+const READ_ONLY_UNWRITABLE = "resolves to a location that cannot be written";
 
 /** Why measurement dropped a file the model wrote: the note the human reads must say which. */
 export const STRAY_OUTSIDE_SURFACE = "synthesis wrote it outside the memory file and skills";

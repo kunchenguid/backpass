@@ -3204,6 +3204,66 @@ test("a skill linked out of the repo behind an in-repo library never reaches app
   assert.equal(fs.readFileSync(path.join(outside, "SKILL.md"), "utf8"), skill, "nothing outside the repository moved");
 });
 
+test("a skill in a read-only store never joins a user-scope apply round, so the round still lands", () => {
+  const skill = "---\nname: db\ndescription: old trigger\n---\n\nbody\n";
+  const store = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-store-apply-")));
+  fs.mkdirSync(path.join(store, "db"));
+  fs.writeFileSync(path.join(store, "db", "SKILL.md"), skill);
+
+  const repo = makeRepo({ "AGENTS.md": MEMORY_TEXT });
+  const loaded = path.join(repo.root, ".agents", "skills");
+  fs.mkdirSync(loaded, { recursive: true });
+  fs.symlinkSync(path.join(store, "db"), path.join(loaded, "db"));
+  fs.chmodSync(path.join(store, "db"), 0o555);
+  fs.chmodSync(store, 0o555);
+
+  try {
+    const staged = stageAndMeasure({
+      repo,
+      allowExternal: true,
+      edit: (root) => {
+        writeIn(root, "AGENTS.md", (text) =>
+          text.replace("- Whenever a PR is mentioned, include its URL.", "- Always include the full PR URL."),
+        );
+        const copy = path.join(root, ".agents/skills/db/SKILL.md");
+        if (fs.existsSync(copy)) fs.writeFileSync(copy, skill.replace("old trigger", "new trigger"));
+      },
+    });
+    assert.deepEqual(
+      staged.measured.changes.map((change) => change.file),
+      ["AGENTS.md"],
+      "the store-backed skill was never staged, so it cannot become an edit",
+    );
+
+    const built = buildProposal(
+      { edits: staged.measured.changes.map((change) => claim([change.id])) },
+      {
+        memoryFile: staged.memoryFile,
+        config: config(),
+        repo,
+        summary: aliasSummary(),
+        measured: staged.measured,
+      },
+    );
+    assert.deepEqual(built.violations, []);
+
+    const results = applyDecisions({
+      proposal: { ...built.proposal, scope: "user" },
+      decisions: Object.fromEntries(built.proposal.edits.map((edit) => [edit.id, "accepted"])),
+      repo,
+      state: staged.state,
+      config: { budgetTokens: 5000 },
+    });
+
+    assert.deepEqual(results.failed, []);
+    assert.match(fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8"), /Always include the full PR URL/);
+    assert.equal(fs.readFileSync(path.join(store, "db", "SKILL.md"), "utf8"), skill, "the store is untouched");
+  } finally {
+    fs.chmodSync(store, 0o755);
+    fs.chmodSync(path.join(store, "db"), 0o755);
+  }
+});
+
 test("a file written at the unstaged alias becomes stray, so the round is not dropped", () => {
   const skill = "---\nname: db\ndescription: old trigger\n---\n\nbody\n";
   const repo = makeRepo({ "AGENTS.md": MEMORY_TEXT, "library/db/SKILL.md": skill });
