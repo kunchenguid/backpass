@@ -84,10 +84,10 @@ export function resolveTarget(spec, scope) {
         "project scope can read and bill that skill but never write it; edit it where it really lives, or run `--scope user`",
       );
     }
-    const aliases = aliased ? skillMatches.slice(1).map((other) => other.path) : [];
-    return aliases.length
-      ? { kind: "skill", path: skill.path, name: skill.name, aliases }
-      : { kind: "skill", path: skill.path, name: skill.name };
+    if (aliased) {
+      info(`${spec} is one file under ${skillMatches.length} links; targeting it as ${skill.path}`);
+    }
+    return { kind: "skill", path: skill.path, name: skill.name };
   }
   const memoryList = scope.memoryFiles.length ? scope.memoryFiles.join(", ") : "(none configured)";
   const skillList = skills.length ? skills.map((skill) => skill.name).join(", ") : "(none)";
@@ -119,7 +119,4 @@ export function printTargetNote(target) {
   if (!target || target.kind === "surface") return;
   const rest = target.kind === "skill" ? "the memory file and other skills" : "existing skills";
   info(`targeting ${describeTarget(target)}; ${rest} are read-only this run`);
-  if (target.aliases?.length) {
-    info(`${target.name} is one file under ${target.aliases.length + 1} links; editing it as ${target.path}`);
-  }
 }

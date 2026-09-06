@@ -4,7 +4,7 @@ import path from "node:path";
 import { extractJson, openSession, usageRecord } from "./acpx.js";
 import { userClaudeSkillsDir } from "./config.js";
 import { renderEvidenceForPrompt } from "./fold.js";
-import { renderInstructionIndex } from "./memory.js";
+import { renderInstructionIndex, resolveMemoryPath } from "./memory.js";
 import { renderPrompt, render, loadPrompt } from "./prompts.js";
 import { buildProposal, effectiveMaxEdits, ProposalViolation, renderChangesForPrompt } from "./proposal.js";
 import {
@@ -135,15 +135,45 @@ function harnessCountsOf(transcripts) {
   return counts;
 }
 
-/** The repo must be exactly as fingerprinted; the staging copy is the only place to write. */
+/**
+ * The repo must be exactly as fingerprinted; the staging copy is the only place to write.
+ *
+ * A skill symlinked out of the repository is fingerprinted too - the synthesis agent
+ * writing through that link is the betrayal this guard exists to catch. But such a path
+ * is not in the repository and the writer may have been another process, so it is
+ * reported for what it is rather than as a direct repository edit.
+ */
 function assertRepoUntouched(repo, before, workspaceRoot) {
   const after = repoFingerprint(repo, Object.keys(before));
   const moved = Object.keys(before).filter((file) => before[file] !== after[file]);
   if (!moved.length) return;
+  const insideRepo = (file) => {
+    try {
+      resolveMemoryPath(repo.root, file);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const inside = moved.filter(insideRepo);
+  const outside = moved.filter((file) => !inside.includes(file));
+  const claims = [];
+  if (inside.length) {
+    claims.push(
+      `synthesis changed ${inside.join(", ")} in the repository directly instead of the staging copy (${workspaceRoot})`,
+    );
+  }
+  if (outside.length) {
+    claims.push(
+      `${outside.join(", ")} changed during synthesis; ` +
+        `${outside.length > 1 ? "those paths resolve" : "that path resolves"} outside the repository`,
+    );
+  }
   throw new UserError(
-    `synthesis changed ${moved.join(", ")} in the repository directly instead of the staging copy ` +
-      `(${workspaceRoot}); nothing was proposed`,
-    `inspect the change with \`git diff\`, restore the file, and re-run - a harness that edits outside its cwd cannot be trusted with the synthesis role`,
+    `${claims.join("; also ")}; nothing was proposed`,
+    inside.length
+      ? `inspect the change with \`git diff\`, restore the file, and re-run - a harness that edits outside its cwd cannot be trusted with the synthesis role`
+      : `inspect the file and re-run - either the synthesis harness wrote through the link to a skill it was told is read-only, or another process changed the shared library mid-run`,
   );
 }
 

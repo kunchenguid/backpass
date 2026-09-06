@@ -685,3 +685,35 @@ test("a skill target stages that skill alone; a staged write to AGENTS.md is ref
   );
   await assert.rejects(direct.run(), /synthesis changed AGENTS\.md in the repository directly/);
 });
+
+test("a fingerprinted skill that resolves outside the repository is reported as such, not as a direct repo edit", async () => {
+  const library = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-fingerprint-library-")));
+  fs.mkdirSync(path.join(library, "beads"));
+  const skill = "---\nname: beads\ndescription: Load before tracking project work.\n---\n\n- Track it.\n";
+  fs.writeFileSync(path.join(library, "beads", "SKILL.md"), skill);
+
+  const outside = setup({ edit: {} });
+  fs.mkdirSync(path.join(outside.repo.root, ".agents/skills"), { recursive: true });
+  fs.symlinkSync(path.join(library, "beads"), path.join(outside.repo.root, ".agents/skills/beads"));
+  // The guard still fires - writing through the link to a skill declared read-only is
+  // exactly what it is for - but the file is not in the repository and the claim must
+  // not say it is.
+  fs.writeFileSync(
+    process.env.FAKE_ACPX_SCRIPT,
+    JSON.stringify({
+      edit: { [path.join(library, "beads", "SKILL.md")]: { replace: [["Track it.", "Track it in beads."]] } },
+      annotations: [{ reply: { edits: [] } }],
+    }),
+  );
+
+  await assert.rejects(outside.run(), (err) => {
+    assert.ok(err instanceof UserError);
+    assert.match(
+      err.message,
+      /\.agents\/skills\/beads\/SKILL\.md changed during synthesis; that path resolves outside the repository/,
+    );
+    assert.doesNotMatch(err.message, /in the repository directly/);
+    assert.match(err.hint, /another process changed the shared library mid-run/);
+    return true;
+  });
+});

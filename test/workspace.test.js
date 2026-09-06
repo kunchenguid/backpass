@@ -335,6 +335,42 @@ test("a skill file linked out of the repo through an in-repo library is never st
   assert.equal(external.originals.get(".agents/skills/db/SKILL.md"), SKILL);
 });
 
+test("a skill in a store this user cannot read is skipped and named, not thrown", () => {
+  const store = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-locked-store-")));
+  fs.mkdirSync(path.join(store, "locked"));
+  const unreadable = path.join(store, "locked", "SKILL.md");
+  fs.writeFileSync(unreadable, SKILL);
+  fs.chmodSync(unreadable, 0o000);
+
+  const repo = makeRepo({ "AGENTS.md": AGENTS, ".agents/skills/db/SKILL.md": SKILL });
+  const loaded = path.join(repo.root, ".agents", "skills");
+  fs.symlinkSync(path.join(store, "locked"), path.join(loaded, "locked"));
+
+  try {
+    const state = new State(repo.root).ensure();
+    const memoryFile = readMemoryFile(repo.root, "AGENTS.md");
+    // User scope, where an out-of-repo store is legitimately stageable - so nothing but
+    // the read failure itself can keep this file out.
+    const workspace = prepareWorkspace({
+      state,
+      repo,
+      memoryFile,
+      skillsDir: ".agents/skills",
+      allowExternal: true,
+    });
+
+    assert.deepEqual([...workspace.originals.keys()], ["AGENTS.md", ".agents/skills/db/SKILL.md"]);
+    assert.deepEqual(walkStaged(path.join(workspace.root, ".agents/skills")), ["db/SKILL.md"]);
+    assert.deepEqual(workspace.unstageable, [
+      { path: ".agents/skills/locked/SKILL.md", reason: "could not be read when the staging copy was built" },
+    ]);
+    // The readable skill beside it still measures normally.
+    assert.deepEqual(measureWorkspace(workspace).changes, []);
+  } finally {
+    fs.chmodSync(unreadable, 0o644);
+  }
+});
+
 test("a link to a whole repository stages only the skill file, never the tree behind it", () => {
   const repo = makeRepo({ "AGENTS.md": AGENTS });
   // The layout the finding names: a plugin repository linked in as a skill.

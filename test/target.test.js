@@ -101,7 +101,6 @@ test("one library under two links resolves to the first name; two distinct files
     kind: "skill",
     path: ".agents/skills/database/SKILL.md",
     name: "db",
-    aliases: [".agents/skills/db/SKILL.md"],
   });
 
   // Two genuinely different files under one frontmatter name: renaming is the fix.

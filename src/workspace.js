@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { anchoredHunks, countOccurrences, span } from "./diff.js";
+import { warn } from "./logger.js";
 import { parseMemoryUnits, resolveMemoryPath } from "./memory.js";
 import { isDirectoryEntry, parseFrontmatter, skillBody } from "./skills.js";
 import { sha256 } from "./state.js";
@@ -88,12 +89,23 @@ export function prepareWorkspace({
         unstageable.push({ path: logical, reason: `the same file is already staged as ${owner}` });
         continue;
       }
-      if (identity) stagedIdentities.set(identity, logical);
       const staged = path.posix.join(stagedDir, relative);
       const to = path.join(root, staged);
-      fs.mkdirSync(path.dirname(to), { recursive: true });
-      fs.copyFileSync(from, to);
-      originals.set(logical, fs.readFileSync(from, "utf8"));
+      // Following links means `from` can be any file in a foreign store, so a store this
+      // user cannot read is skipped and named the way `loadSkills` skips one - never an
+      // errno thrown out of workspace preparation.
+      try {
+        fs.mkdirSync(path.dirname(to), { recursive: true });
+        fs.copyFileSync(from, to);
+        originals.set(logical, fs.readFileSync(from, "utf8"));
+      } catch (err) {
+        fs.rmSync(to, { force: true });
+        originals.delete(logical);
+        unstageable.push({ path: logical, reason: READ_ONLY_UNREADABLE });
+        warn(`${logical} could not be read (${err.message}); it stays out of the staging copy`);
+        continue;
+      }
+      if (identity) stagedIdentities.set(identity, logical);
       stagedPaths.set(logical, staged);
     }
     unstageable.push(...confined.map((relative) => ({ path: toLogical(relative), reason: READ_ONLY_OUTSIDE_REPO })));
@@ -213,6 +225,7 @@ function walkFiles(dir, prefix = "", confineTo = null, confined = [], ancestors 
 
 /** Why a loaded skill is absent from the staging copy: the skill index must say which. */
 const READ_ONLY_OUTSIDE_REPO = "resolves outside the repository";
+const READ_ONLY_UNREADABLE = "could not be read when the staging copy was built";
 
 /** Why measurement dropped a file the model wrote: the note the human reads must say which. */
 export const STRAY_OUTSIDE_SURFACE = "synthesis wrote it outside the memory file and skills";
