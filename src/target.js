@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { userClaudeSkillsDir } from "./config.js";
 import { UserError, info } from "./logger.js";
-import { pointerImportPath, resolveMemoryFiles } from "./memory.js";
+import { pointerImportPath, resolveMemoryFiles, resolveMemoryPath } from "./memory.js";
 import { pathInRoot, resolveInRoot } from "./scope.js";
 import { loadProjectSkills, resolveOverflowTarget } from "./skills.js";
 
@@ -68,6 +68,17 @@ export function resolveTarget(spec, scope) {
   }
   if (skillMatches.length) {
     const skill = skillMatches[0];
+    // The same path gate apply applies: a skill reached through a symlink out of the repo
+    // is loaded and billed, but project scope can never write it - say so here rather than
+    // staging nothing and failing the synthesis turn with an unrelated hint.
+    try {
+      resolveMemoryPath(root, skill.path, { allowExternal: user });
+    } catch {
+      throw new UserError(
+        `--target ${spec} is at ${skill.path}, which resolves outside the repository`,
+        "project scope can read and bill that skill but never write it; edit it where it really lives, or run `--scope user`",
+      );
+    }
     return { kind: "skill", path: skill.path, name: skill.name };
   }
   const memoryList = scope.memoryFiles.length ? scope.memoryFiles.join(", ") : "(none configured)";

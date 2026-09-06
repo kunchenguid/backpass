@@ -22,6 +22,7 @@ import { applyDecisions } from "../src/apply/writer.js";
 import { injectPayload, parseDecisions, renderApplySurface } from "../src/apply/lavish.js";
 import { renderEdit } from "../src/apply/terminal.js";
 import { extractJson, parseTokenLine, stripAcpxNoise } from "../src/acpx.js";
+import { STRAY_OUTSIDE_REPO, STRAY_OUTSIDE_SURFACE } from "../src/workspace.js";
 import { makeRepo, stageAndMeasure, writeIn } from "./helpers/staging.js";
 
 const MEMORY_TEXT = [
@@ -1536,7 +1537,7 @@ test("a skill's description can be rewritten in place; deletions and stray files
     annotation: { edits: [claim(["H1"])] },
   });
   assert.deepEqual(stray.violations, []);
-  assert.ok(stray.proposal.notes.some((n) => /ignored notes\.md/.test(n)));
+  assert.ok(stray.proposal.notes.some((n) => n === `ignored notes.md: ${STRAY_OUTSIDE_SURFACE}`));
 });
 
 test("a previously rejected edit is suppressed until new evidence arrives", () => {
@@ -3152,7 +3153,7 @@ test("a skill symlinked out of the repo never joins a project apply round, so it
     ["AGENTS.md"],
     "the out-of-repo skill is neither staged nor measurable as a created file",
   );
-  assert.deepEqual(staged.measured.stray, [".agents/skills/db/SKILL.md"]);
+  assert.deepEqual(staged.measured.stray, [{ file: ".agents/skills/db/SKILL.md", reason: STRAY_OUTSIDE_REPO }]);
 
   const built = buildProposal(
     { edits: staged.measured.changes.map((change) => claim([change.id])) },
@@ -3177,6 +3178,10 @@ test("a skill symlinked out of the repo never joins a project apply round, so it
     },
   );
   assert.deepEqual(built.violations, []);
+  assert.ok(
+    built.proposal.notes.some((note) => note === `ignored .agents/skills/db/SKILL.md: ${STRAY_OUTSIDE_REPO}`),
+    `the note must name the real cause: ${built.proposal.notes.join(" | ")}`,
+  );
 
   const results = applyDecisions({
     proposal: built.proposal,

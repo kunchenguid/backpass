@@ -147,7 +147,7 @@ function assertRepoUntouched(repo, before, workspaceRoot) {
   );
 }
 
-function targetRule(target, memoryPath, skillsDir, stagedTargetPath = null) {
+function targetRule(target, memoryPath, skillsDir, stagedTargetPath = null, unstageable = []) {
   if (target.kind === "skill") {
     return (
       `0. **This run targets \`./${stagedTargetPath || workspacePathFor(target.path)}\` only.** It is the one staged file. ` +
@@ -158,6 +158,14 @@ function targetRule(target, memoryPath, skillsDir, stagedTargetPath = null) {
     return (
       `0. **This run targets \`./${memoryPath}\` only.** The skills listed above live in the repository and are ` +
       `read-only: do not edit them. You may still extract a NEW skill under \`./${skillsDir}/\`.\n`
+    );
+  }
+  if (unstageable.length) {
+    return (
+      `0. **The skills marked \`read-only\` above resolve outside this repository**, so they are not in ` +
+      `your staging copy and backpass cannot write them. Read them for grounding and treat what they ` +
+      `already cover as covered - do not edit them, re-create them, or copy their content into ` +
+      `\`./${memoryPath}\`.\n`
     );
   }
   return "";
@@ -464,10 +472,14 @@ export async function synthesizeProposal({
     workspace.skillMappings.find((mapping) => mapping.logical === overflow.dir)?.staged ||
     workspacePathFor(overflow.dir);
   // Unstaged skills keep their repository paths in the index: the model may read them
-  // there for grounding, and the target rule says they are not writable.
+  // there for grounding, and the target rule says they are not writable. The ones staging
+  // confined out are also marked, so a run that narrows nothing still says so.
+  const isUnstageable = (file) =>
+    workspace.unstageable.some((prefix) => file === prefix || file.startsWith(`${prefix}/`));
   const stagedSkillFiles = skillFiles.map((skill) => ({
     ...skill,
     path: workspace.stagedPaths.get(skill.path) || skill.path,
+    readOnly: isUnstageable(skill.path),
   }));
 
   const editValues = {
@@ -477,6 +489,7 @@ export async function synthesizeProposal({
       workspace.memoryWorkspacePath,
       stagedSkillsDir,
       target.kind === "skill" ? workspace.stagedPaths.get(target.path) || workspacePathFor(target.path) : null,
+      stagedSkillFiles.filter((skill) => skill.readOnly),
     ),
     REPO_NAME: repo.name,
     REPO_ROOT: repo.root,

@@ -747,8 +747,7 @@ export function buildProposal(rawResult, context) {
     );
   }
 
-  for (const file of measured.stray || [])
-    notes.push(`ignored ${file}: synthesis wrote it outside the memory file and skills`);
+  for (const { file, reason } of measured.stray || []) notes.push(`ignored ${file}: ${reason}`);
 
   // Every non-memory file an accepted edit targets, with the fingerprint of the exact
   // image its hunks were cut from. The writer re-checks these before composing, the

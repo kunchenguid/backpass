@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { applyDecisions, readOnlySymlinkMessage } from "../src/apply/writer.js";
+import { applyDecisions, readOnlySymlinkMessage, readOnlyTargetMessage } from "../src/apply/writer.js";
 import { cmdApply } from "../src/commands/apply.js";
 import { cmdInit } from "../src/commands/init.js";
 import { loadConfig } from "../src/config.js";
@@ -141,10 +141,13 @@ test("apply names the read-only store when the symlink is a directory on the way
     });
 
     assert.equal(results.written.length, 0);
+    // The leaf is a plain file, so the refusal names the resolved path rather than
+    // asserting a symlink that is not there.
     assert.equal(
       results.failed[0].error,
-      readOnlySymlinkMessage(path.join(home, ".agents", "AGENTS.md"), fs.realpathSync(source)),
+      readOnlyTargetMessage(path.join(home, ".agents", "AGENTS.md"), fs.realpathSync(source)),
     );
+    assert.doesNotMatch(results.failed[0].error, /is a symlink to/);
     assert.equal(fs.readFileSync(source, "utf8"), text);
   } finally {
     fs.chmodSync(store, 0o755);

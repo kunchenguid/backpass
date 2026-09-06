@@ -62,16 +62,18 @@ export function prepareWorkspace({
   // project scope cannot write it - `resolveMemoryPath` refuses the path at apply, and a
   // refusal there drops the whole round. Leaving it out of staging is what makes it
   // impossible for such a file to become an edit at all.
-  const confineTo = allowExternal ? null : repo.realRoot || realPath(repo.root) || path.resolve(repo.root);
+  const confineTo = allowExternal ? null : realPath(repo.root) || path.resolve(repo.root);
   const skillMappings = skillDirs.map((logical) => ({ logical, staged: workspacePathFor(logical) }));
+  const unstageable = [];
   for (const { logical: sourceDir, staged: stagedDir } of skillMappings) {
     const skillsSource = path.isAbsolute(sourceDir) ? sourceDir : path.join(repo.root, sourceDir);
     if (!fs.existsSync(skillsSource) || !fs.statSync(skillsSource).isDirectory()) continue;
-    for (const relative of walkFiles(skillsSource, "", confineTo)) {
+    const confined = [];
+    const toLogical = (relative) =>
+      path.isAbsolute(sourceDir) ? path.join(sourceDir, relative) : path.posix.join(sourceDir, relative);
+    for (const relative of walkFiles(skillsSource, "", confineTo, confined)) {
       const from = path.join(skillsSource, relative);
-      const logical = path.isAbsolute(sourceDir)
-        ? path.join(sourceDir, relative)
-        : path.posix.join(sourceDir, relative);
+      const logical = toLogical(relative);
       if (stagedSkills && !stagedSkills.includes(logical)) continue;
       const staged = path.posix.join(stagedDir, relative);
       const to = path.join(root, staged);
@@ -80,6 +82,7 @@ export function prepareWorkspace({
       originals.set(logical, fs.readFileSync(from, "utf8"));
       stagedPaths.set(logical, staged);
     }
+    unstageable.push(...confined.map(toLogical));
   }
   fs.mkdirSync(path.join(root, workspacePathFor(skillsDir)), { recursive: true });
 
@@ -93,6 +96,7 @@ export function prepareWorkspace({
     stagedPaths,
     originals,
     confineTo,
+    unstageable,
   };
 }
 
@@ -137,7 +141,7 @@ function withinRoot(root, resolved) {
   return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
 }
 
-function walkFiles(dir, prefix = "", confineTo = null, ancestors = null) {
+function walkFiles(dir, prefix = "", confineTo = null, confined = [], ancestors = null) {
   const out = [];
   let entries;
   try {
@@ -159,14 +163,25 @@ function walkFiles(dir, prefix = "", confineTo = null, ancestors = null) {
     if (target === "dir") {
       const child = path.join(dir, entry.name);
       const identity = realPath(child);
-      if (!identity || chain.has(identity) || !withinRoot(confineTo, identity)) continue;
-      out.push(...walkFiles(child, relative, confineTo, new Set(chain).add(identity)));
+      if (!identity || chain.has(identity)) continue;
+      // Pruned here, but named: the caller tells the model these are read-only rather
+      // than letting a proposed edit to one be discarded without a reason.
+      if (!withinRoot(confineTo, identity)) {
+        confined.push(relative);
+        continue;
+      }
+      out.push(...walkFiles(child, relative, confineTo, confined, new Set(chain).add(identity)));
     } else if (target === "file") {
       if (!confineTo || withinRoot(confineTo, realPath(path.join(dir, entry.name)))) out.push(relative);
+      else confined.push(relative);
     }
   }
   return out;
 }
+
+/** Why measurement dropped a file the model wrote: the note the human reads must say which. */
+export const STRAY_OUTSIDE_SURFACE = "synthesis wrote it outside the memory file and skills";
+export const STRAY_OUTSIDE_REPO = "it resolves outside the repository, which project scope cannot write";
 
 /** A created file counts as a skill only in the layouts `loadSkills` reads. */
 export function isSkillFilePath(relative, skillsDir) {
@@ -352,7 +367,7 @@ export function measureWorkspace(workspace) {
     if (knownStaged.has(staged)) continue;
     const mapping = skillMappings.find(({ staged: dir }) => staged === dir || staged.startsWith(`${dir}/`));
     if (!mapping) {
-      stray.push(staged);
+      stray.push({ file: staged, reason: STRAY_OUTSIDE_SURFACE });
       continue;
     }
     const inside = staged.slice(mapping.staged.length).replace(/^\//, "");
@@ -360,13 +375,13 @@ export function measureWorkspace(workspace) {
       ? path.join(mapping.logical, inside)
       : path.posix.join(mapping.logical, inside);
     if (!isSkillFilePath(logical, skillDirs)) {
-      stray.push(staged);
+      stray.push({ file: staged, reason: STRAY_OUTSIDE_SURFACE });
       continue;
     }
     // Staging leaves out a skill that resolves outside the repository; measurement must
     // not carry one back in as a created file, which apply could never write either.
     if (confineTo && !withinRoot(confineTo, resolvedTarget(confineTo, logical))) {
-      stray.push(staged);
+      stray.push({ file: logical, reason: STRAY_OUTSIDE_REPO });
       continue;
     }
     const text = fs.readFileSync(path.join(root, staged), "utf8");

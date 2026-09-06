@@ -586,6 +586,41 @@ test("a memory-file target never stages existing skills, and the run proposes on
   assert.match(prompt, /This run targets `\.\/AGENTS\.md` only/);
 });
 
+test("a skill symlinked out of the repo is listed read-only, never offered as a writable path", async () => {
+  const { repo, config, run } = setup({
+    edit: { "AGENTS.md": { replace: [["- Keep this file short.\n", "- Keep this file short; point at files.\n"]] } },
+    annotations: [{ reply: { edits: [tighten(["H1"])] } }],
+  });
+  const library = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-synth-library-")));
+  fs.mkdirSync(path.join(library, "beads"));
+  fs.writeFileSync(
+    path.join(library, "beads", "SKILL.md"),
+    "---\nname: beads\ndescription: Load before tracking project work.\n---\n\n- Track it in beads.\n",
+  );
+  fs.mkdirSync(path.join(repo.root, ".agents/skills/db"), { recursive: true });
+  fs.writeFileSync(path.join(repo.root, ".agents/skills/db/SKILL.md"), DB_SKILL);
+  fs.symlinkSync(path.join(library, "beads"), path.join(repo.root, ".agents/skills/beads"));
+
+  const { violations } = await run();
+  assert.deepEqual(violations, []);
+
+  const prompt = fs.readFileSync(path.join(config.state.root, "prompts/synthesis-edit.md"), "utf8");
+  // Present with its token costs - the coverage signal has to survive - but declared
+  // read-only with the reason, so nothing invites an edit that would be discarded.
+  assert.match(
+    prompt,
+    /- beads \(\.agents\/skills\/beads\/SKILL\.md; \d+ tok body, \d+ tok description; read-only, resolves outside the repository\) :: Load before tracking project work\./,
+  );
+  assert.match(prompt, /skills marked `read-only` above resolve outside this repository/);
+  assert.match(
+    prompt,
+    /- db \(\.agents\/skills\/db\/SKILL\.md; \d+ tok body, \d+ tok description\) :: Load for database work\./,
+    "an in-repo skill is still writable and carries no marker",
+  );
+  assert.equal(fs.existsSync(path.join(config.state.root, "synthesis/.agents/skills/db/SKILL.md")), true);
+  assert.equal(fs.existsSync(path.join(config.state.root, "synthesis/.agents/skills/beads/SKILL.md")), false);
+});
+
 test("a skill target in an absolute in-repo skills directory is staged under its repo-relative path", async () => {
   const targeted = setup({
     edit: {

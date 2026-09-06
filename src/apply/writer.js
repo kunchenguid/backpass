@@ -35,6 +35,11 @@ export function readOnlySymlinkMessage(absolute, realPath) {
   return `${absolute} is a symlink to ${realPath}, which is not writable; edit the source that generates it`;
 }
 
+/** The same refusal when a directory on the way to the target is the link, not the target. */
+export function readOnlyTargetMessage(absolute, realPath) {
+  return `${absolute} resolves to ${realPath}, which is not writable; edit the source that generates it`;
+}
+
 /**
  * The link is as often a directory on the way to the file (`~/.claude/skills/foo` pointing
  * into a nix store) as the file itself, so the whole path is resolved rather than the leaf
@@ -53,7 +58,15 @@ function refuseReadOnlySymlink(absolute) {
     fs.accessSync(path.dirname(real), fs.constants.W_OK | fs.constants.X_OK);
     return null;
   } catch {
-    return readOnlySymlinkMessage(absolute, real);
+    return isSymbolicLink(absolute) ? readOnlySymlinkMessage(absolute, real) : readOnlyTargetMessage(absolute, real);
+  }
+}
+
+function isSymbolicLink(absolute) {
+  try {
+    return fs.lstatSync(absolute).isSymbolicLink();
+  } catch {
+    return false;
   }
 }
 

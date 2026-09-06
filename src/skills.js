@@ -221,7 +221,9 @@ export function renderSkillIndex(skills) {
   return skills
     .map(
       (s) =>
-        `- ${s.name} (${s.path}; ${s.bodyTokens} tok body, ${s.descriptionTokens} tok description) :: ${s.description || "(no description)"}`,
+        `- ${s.name} (${s.path}; ${s.bodyTokens} tok body, ${s.descriptionTokens} tok description` +
+        `${s.readOnly ? "; read-only, resolves outside the repository" : ""})` +
+        ` :: ${s.description || "(no description)"}`,
     )
     .join("\n");
 }
