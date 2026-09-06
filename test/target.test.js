@@ -84,6 +84,39 @@ test("a target validates every configured project memory path before narrowing",
   assert.throws(() => resolveTarget("AGENTS.md", scope), /private\.txt resolves outside the project root/);
 });
 
+test("one library under two links resolves to the first name; two distinct files still refuse", () => {
+  const { repo, scope } = projectScope();
+  const library = path.join(repo.root, "library", "db");
+  fs.mkdirSync(library, { recursive: true });
+  fs.writeFileSync(path.join(library, "SKILL.md"), DB);
+  fs.rmSync(path.join(repo.root, ".agents/skills/db"), { recursive: true });
+  const loaded = path.join(repo.root, ".agents", "skills");
+  fs.symlinkSync(library, path.join(loaded, "db"));
+  fs.symlinkSync(library, path.join(loaded, "database"));
+
+  // Both names are loaded and billed, so both match - but they are one file, and staging
+  // already gives the first name the write. Refusing here would contradict that.
+  assert.equal(loadProjectSkills(repo.root, ".agents/skills", []).filter((s) => s.name === "db").length, 2);
+  assert.deepEqual(resolveTarget("db", scope), {
+    kind: "skill",
+    path: ".agents/skills/database/SKILL.md",
+    name: "db",
+    aliases: [".agents/skills/db/SKILL.md"],
+  });
+
+  // Two genuinely different files under one frontmatter name: renaming is the fix.
+  const distinct = projectScope({ ".agents/skills/other/SKILL.md": DB.replace("transaction.", "transaction!") });
+  assert.throws(
+    () => resolveTarget("db", distinct.scope),
+    (err) =>
+      err instanceof UserError &&
+      /is ambiguous: it names \.agents\/skills\/db\/SKILL\.md and \.agents\/skills\/other\/SKILL\.md/.test(
+        err.message,
+      ) &&
+      /rename the skill so one name means one file/.test(err.hint),
+  );
+});
+
 test("a name that is both a skill and a memory file is refused, never picked", () => {
   const { scope } = projectScope({ ".agents/skills/agents/SKILL.md": DB.replace("name: db", "name: AGENTS.md") });
   assert.throws(() => resolveTarget("AGENTS.md", scope), /ambiguous: it names AGENTS\.md and \.agents\/skills\/agents/);

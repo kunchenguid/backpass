@@ -299,6 +299,40 @@ test("two links to one shared library are both billed, and exactly one of them i
   ]);
 });
 
+test("a skill file linked out of the repo through an in-repo library is never staged", () => {
+  const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-outside-store-")));
+  fs.writeFileSync(path.join(outside, "SKILL.md"), SKILL);
+
+  const repo = makeRepo({ "AGENTS.md": AGENTS });
+  // The library is inside the repository, so the directory link itself passes
+  // containment - but the file it holds is a link to something the repo does not own.
+  fs.mkdirSync(path.join(repo.root, "library", "db"), { recursive: true });
+  fs.symlinkSync(path.join(outside, "SKILL.md"), path.join(repo.root, "library", "db", "SKILL.md"));
+  const loaded = path.join(repo.root, ".agents", "skills");
+  fs.mkdirSync(loaded, { recursive: true });
+  fs.symlinkSync(path.join(repo.root, "library", "db"), path.join(loaded, "db"));
+
+  const state = new State(repo.root).ensure();
+  const memoryFile = readMemoryFile(repo.root, "AGENTS.md");
+  const workspace = prepareWorkspace({ state, repo, memoryFile, skillsDir: ".agents/skills" });
+
+  assert.deepEqual([...workspace.originals.keys()], ["AGENTS.md"]);
+  assert.deepEqual(walkStaged(path.join(workspace.root, ".agents/skills")), []);
+  assert.deepEqual(workspace.unstageable, [
+    { path: ".agents/skills/db/SKILL.md", reason: "resolves outside the repository" },
+  ]);
+
+  // User scope owns files outside any repository, so there the same layout still stages.
+  const external = prepareWorkspace({
+    state,
+    repo,
+    memoryFile,
+    skillsDir: ".agents/skills",
+    allowExternal: true,
+  });
+  assert.equal(external.originals.get(".agents/skills/db/SKILL.md"), SKILL);
+});
+
 test("a link to a whole repository stages only the skill file, never the tree behind it", () => {
   const repo = makeRepo({ "AGENTS.md": AGENTS });
   // The layout the finding names: a plugin repository linked in as a skill.

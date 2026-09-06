@@ -163,6 +163,13 @@ function walkFiles(dir, prefix = "", confineTo = null, confined = [], ancestors 
   // global visited set - two separate links to one shared library are two directories
   // the harness really loads, and each must still be walked and billed.
   const chain = ancestors || new Set([realPath(dir)].filter(Boolean));
+  // One rule for taking a file, wherever the walk reaches it: a path that resolves
+  // outside the root is named for the caller instead of staged, so the containment
+  // invariant cannot hold on one branch and not its sibling.
+  const take = (absolute, relativePath) => {
+    if (!confineTo || withinRoot(confineTo, realPath(absolute))) out.push(relativePath);
+    else confined.push(relativePath);
+  };
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
     const relative = prefix ? path.posix.join(prefix, entry.name) : entry.name;
     // Follow symlinks: a skills directory is commonly a set of links into a shared
@@ -183,15 +190,13 @@ function walkFiles(dir, prefix = "", confineTo = null, confined = [], ancestors 
       // all, a whole plugin repository. Only the file the skill layout loads is taken,
       // so the target's subtree is never walked, copied, or read.
       if (entry.isSymbolicLink()) {
-        if (prefix === "" && isFile(path.join(child, SKILL_FILENAME))) {
-          out.push(path.posix.join(relative, SKILL_FILENAME));
-        }
+        const leaf = path.join(child, SKILL_FILENAME);
+        if (prefix === "" && isFile(leaf)) take(leaf, path.posix.join(relative, SKILL_FILENAME));
         continue;
       }
       out.push(...walkFiles(child, relative, confineTo, confined, new Set(chain).add(identity)));
     } else if (target === "file") {
-      if (!confineTo || withinRoot(confineTo, realPath(path.join(dir, entry.name)))) out.push(relative);
-      else confined.push(relative);
+      take(path.join(dir, entry.name), relative);
     }
   }
   return out;

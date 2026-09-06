@@ -41,8 +41,13 @@ export function resolveTarget(spec, scope) {
   const normalized = pathInRoot(spec, root);
   const memoryMatches = scope.memoryFiles.filter((entry) => pathInRoot(entry, root) === normalized);
   const skillMatches = skills.filter((skill) => skill.name === spec);
+  // Several links to one library are several names for one file, and staging already
+  // resolves that layout by giving the first name the write. Only distinct files sharing
+  // a name are genuinely ambiguous - there, renaming really is the fix.
+  const aliased = skillMatches.length > 1 && sameFile(root, skillMatches);
+  const selected = aliased ? [skillMatches[0]] : skillMatches;
 
-  const found = memoryMatches.length + skillMatches.length;
+  const found = memoryMatches.length + selected.length;
   if (found > 1) {
     const names = [...memoryMatches, ...skillMatches.map((skill) => skill.path)];
     throw new UserError(
@@ -66,8 +71,8 @@ export function resolveTarget(spec, scope) {
     }
     return { kind: "memory", path: entry };
   }
-  if (skillMatches.length) {
-    const skill = skillMatches[0];
+  if (selected.length) {
+    const skill = selected[0];
     // The same path gate apply applies: a skill reached through a symlink out of the repo
     // is loaded and billed, but project scope can never write it - say so here rather than
     // staging nothing and failing the synthesis turn with an unrelated hint.
@@ -79,7 +84,10 @@ export function resolveTarget(spec, scope) {
         "project scope can read and bill that skill but never write it; edit it where it really lives, or run `--scope user`",
       );
     }
-    return { kind: "skill", path: skill.path, name: skill.name };
+    const aliases = aliased ? skillMatches.slice(1).map((other) => other.path) : [];
+    return aliases.length
+      ? { kind: "skill", path: skill.path, name: skill.name, aliases }
+      : { kind: "skill", path: skill.path, name: skill.name };
   }
   const memoryList = scope.memoryFiles.length ? scope.memoryFiles.join(", ") : "(none configured)";
   const skillList = skills.length ? skills.map((skill) => skill.name).join(", ") : "(none)";
@@ -87,6 +95,19 @@ export function resolveTarget(spec, scope) {
     `--target "${spec}" is not a configured memory file or a loaded skill in this ${user ? "user scope" : "repo"}`,
     `memory files: ${memoryList} · skills: ${skillList}`,
   );
+}
+
+/** True when every match is the same file on disk, reached under different names. */
+function sameFile(root, matches) {
+  const identity = (skill) => {
+    try {
+      return fs.realpathSync(resolveInRoot(root, skill.path));
+    } catch {
+      return null;
+    }
+  };
+  const first = identity(matches[0]);
+  return first !== null && matches.every((skill) => identity(skill) === first);
 }
 
 export function describeTarget(target) {
@@ -98,4 +119,7 @@ export function printTargetNote(target) {
   if (!target || target.kind === "surface") return;
   const rest = target.kind === "skill" ? "the memory file and other skills" : "existing skills";
   info(`targeting ${describeTarget(target)}; ${rest} are read-only this run`);
+  if (target.aliases?.length) {
+    info(`${target.name} is one file under ${target.aliases.length + 1} links; editing it as ${target.path}`);
+  }
 }
