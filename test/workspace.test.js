@@ -212,3 +212,53 @@ test("a symlinked skill is staged and measured, so a run can edit what the harne
   assert.equal(hunks[0].kind, "hunk");
   assert.equal(fs.readFileSync(path.join(library, "SKILL.md"), "utf8"), SKILL, "the library is untouched");
 });
+
+test("a cyclic skill symlink terminates instead of overflowing the traversal stack", () => {
+  const repo = makeRepo({ "AGENTS.md": AGENTS });
+  const loaded = path.join(repo.root, ".agents", "skills");
+  const real = path.join(loaded, "db");
+  fs.mkdirSync(real, { recursive: true });
+  fs.writeFileSync(path.join(real, "SKILL.md"), SKILL);
+  // The three shapes a followed directory link can take: a self link, a link back to an
+  // ancestor, and a mutual pair. Each one revisits a directory the walk has already seen.
+  fs.symlinkSync(real, path.join(real, "self"));
+  fs.symlinkSync(loaded, path.join(real, "up"));
+  const a = path.join(loaded, "a");
+  const b = path.join(loaded, "b");
+  fs.mkdirSync(a);
+  fs.mkdirSync(b);
+  fs.symlinkSync(b, path.join(a, "to-b"));
+  fs.symlinkSync(a, path.join(b, "to-a"));
+
+  const state = new State(repo.root).ensure();
+  const memoryFile = readMemoryFile(repo.root, "AGENTS.md");
+  const workspace = prepareWorkspace({ state, repo, memoryFile, skillsDir: ".agents/skills" });
+
+  const staged = ".agents/skills/db/SKILL.md";
+  assert.ok(workspace.originals.has(staged), "the real skill behind the cycle is still staged");
+  assert.equal(workspace.originals.get(staged), SKILL);
+  // The cycle is pruned, not walked: no staged path may repeat a directory segment.
+  for (const p of workspace.originals.keys()) {
+    const segments = p.split("/").slice(0, -1);
+    assert.equal(new Set(segments).size, segments.length, `${p} revisits a directory`);
+  }
+});
+
+test("two links to one shared library are both staged: the guard is ancestry, not identity", () => {
+  const repo = makeRepo({ "AGENTS.md": AGENTS });
+  const library = path.join(repo.root, "library", "db");
+  fs.mkdirSync(library, { recursive: true });
+  fs.writeFileSync(path.join(library, "SKILL.md"), SKILL);
+  const loaded = path.join(repo.root, ".agents", "skills");
+  fs.mkdirSync(loaded, { recursive: true });
+  // The harness loads both names, so both cost description tokens and both must stage.
+  fs.symlinkSync(library, path.join(loaded, "db"));
+  fs.symlinkSync(library, path.join(loaded, "database"));
+
+  const state = new State(repo.root).ensure();
+  const memoryFile = readMemoryFile(repo.root, "AGENTS.md");
+  const workspace = prepareWorkspace({ state, repo, memoryFile, skillsDir: ".agents/skills" });
+
+  assert.ok(workspace.originals.has(".agents/skills/db/SKILL.md"));
+  assert.ok(workspace.originals.has(".agents/skills/database/SKILL.md"));
+});

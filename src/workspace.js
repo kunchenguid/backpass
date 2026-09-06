@@ -83,6 +83,15 @@ export function prepareWorkspace({ state, repo, memoryFile, skillsDir, skillDirs
 }
 
 /** "dir", "file", or null once symlinks are followed; a broken link is null, never a throw. */
+/** Resolved identity of a directory, or null when it cannot be resolved (broken link). */
+function realDirectory(dir) {
+  try {
+    return fs.realpathSync(dir);
+  } catch {
+    return null;
+  }
+}
+
 function entryKind(dir, entry) {
   if (entry.isDirectory()) return "dir";
   if (entry.isFile()) return "file";
@@ -95,7 +104,7 @@ function entryKind(dir, entry) {
   }
 }
 
-function walkFiles(dir, prefix = "") {
+function walkFiles(dir, prefix = "", ancestors = null) {
   const out = [];
   let entries;
   try {
@@ -103,14 +112,23 @@ function walkFiles(dir, prefix = "") {
   } catch {
     return out;
   }
+  // Following directory links hands the walk cycles it must not recurse into: a self
+  // link, a link back to an ancestor, or a mutual pair. The guard is ancestry, not a
+  // global visited set - two separate links to one shared library are two directories
+  // the harness really loads, and each must still be walked and billed.
+  const chain = ancestors || new Set([realDirectory(dir)].filter(Boolean));
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
     const relative = prefix ? path.posix.join(prefix, entry.name) : entry.name;
     // Follow symlinks: a skills directory is commonly a set of links into a shared
     // library, and those are the files the harness loads. Staging copies what it finds,
     // so an edit lands in the staging copy and never writes through a link.
     const target = entryKind(dir, entry);
-    if (target === "dir") out.push(...walkFiles(path.join(dir, entry.name), relative));
-    else if (target === "file") out.push(relative);
+    if (target === "dir") {
+      const child = path.join(dir, entry.name);
+      const identity = realDirectory(child);
+      if (!identity || chain.has(identity)) continue;
+      out.push(...walkFiles(child, relative, new Set(chain).add(identity)));
+    } else if (target === "file") out.push(relative);
   }
   return out;
 }
