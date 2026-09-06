@@ -3123,6 +3123,71 @@ test("a skill-only shrink reports the remaining always-loaded overage", () => {
   assert.match(results.warnings[0], /always-loaded surface \(AGENTS\.md \+ skill descriptions\)/);
 });
 
+test("two links to one library leave one writable copy, so an apply round is not refused for colliding targets", () => {
+  const skill = "---\nname: db\ndescription: old trigger\n---\n\nbody\n";
+  const repo = makeRepo({ "AGENTS.md": MEMORY_TEXT, "library/db/SKILL.md": skill });
+  const loaded = path.join(repo.root, ".agents", "skills");
+  fs.mkdirSync(loaded, { recursive: true });
+  fs.symlinkSync(path.join(repo.root, "library", "db"), path.join(loaded, "db"));
+  fs.symlinkSync(path.join(repo.root, "library", "db"), path.join(loaded, "database"));
+
+  // The agent edits every skill copy its staging cwd holds, alongside the memory file.
+  const staged = stageAndMeasure({
+    repo,
+    edit: (root) => {
+      writeIn(root, "AGENTS.md", (text) =>
+        text.replace("- Whenever a PR is mentioned, include its URL.", "- Always include the full PR URL."),
+      );
+      for (const name of ["db", "database"]) {
+        const copy = path.join(root, ".agents/skills", name, "SKILL.md");
+        if (fs.existsSync(copy)) fs.writeFileSync(copy, skill.replace("old trigger", "new trigger"));
+      }
+    },
+  });
+  assert.deepEqual(
+    [...new Set(staged.measured.changes.map((change) => change.file))],
+    ["AGENTS.md", ".agents/skills/database/SKILL.md"],
+    "one library file yields one editable path, whatever the harness calls it",
+  );
+
+  const built = buildProposal(
+    { edits: staged.measured.changes.map((change) => claim([change.id])) },
+    {
+      memoryFile: staged.memoryFile,
+      config: config(),
+      repo,
+      summary: {
+        analyzedSessions: 4,
+        totals: { positive: 3, negative: 2, gapClusters: 1 },
+        instructions: Array.from({ length: 20 }, (_, i) => ({
+          instruction: `AG-${String(i + 1).padStart(3, "0")}`,
+          positive: 0,
+          negative: 4,
+          harmSessions: 4,
+          sessions: 4,
+          relevance: 1,
+          quotes: [],
+        })),
+      },
+      measured: staged.measured,
+    },
+  );
+  assert.deepEqual(built.violations, []);
+
+  const results = applyDecisions({
+    proposal: built.proposal,
+    decisions: Object.fromEntries(built.proposal.edits.map((edit) => [edit.id, "accepted"])),
+    repo,
+    state: staged.state,
+    config: { budgetTokens: 5000 },
+  });
+
+  assert.deepEqual(results.failed, []);
+  assert.ok(results.written.some((entry) => entry.file === "AGENTS.md"));
+  assert.match(fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8"), /Always include the full PR URL/);
+  assert.match(fs.readFileSync(path.join(repo.root, "library/db/SKILL.md"), "utf8"), /new trigger/);
+});
+
 test("a skill symlinked out of the repo never joins a project apply round, so it cannot abort one", () => {
   const skill = "---\nname: db\ndescription: old trigger\n---\n\nbody\n";
   const library = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-shared-skills-")));

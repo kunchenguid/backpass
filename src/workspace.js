@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { anchoredHunks, countOccurrences, span } from "./diff.js";
-import { parseMemoryUnits } from "./memory.js";
+import { parseMemoryUnits, resolveMemoryPath } from "./memory.js";
 import { isDirectoryEntry, parseFrontmatter, skillBody } from "./skills.js";
 import { sha256 } from "./state.js";
 
@@ -65,6 +65,7 @@ export function prepareWorkspace({
   const confineTo = allowExternal ? null : realPath(repo.root) || path.resolve(repo.root);
   const skillMappings = skillDirs.map((logical) => ({ logical, staged: workspacePathFor(logical) }));
   const unstageable = [];
+  const stagedIdentities = new Map();
   for (const { logical: sourceDir, staged: stagedDir } of skillMappings) {
     const skillsSource = path.isAbsolute(sourceDir) ? sourceDir : path.join(repo.root, sourceDir);
     if (!fs.existsSync(skillsSource) || !fs.statSync(skillsSource).isDirectory()) continue;
@@ -75,6 +76,16 @@ export function prepareWorkspace({
       const from = path.join(skillsSource, relative);
       const logical = toLogical(relative);
       if (stagedSkills && !stagedSkills.includes(logical)) continue;
+      // Two links to one library are two names the harness loads, so both are walked and
+      // both are billed - but one file cannot be two independently editable copies, and
+      // apply refuses a round whose targets collide. The first name owns the write.
+      const identity = realPath(from);
+      const owner = identity && stagedIdentities.get(identity);
+      if (owner) {
+        unstageable.push({ path: logical, reason: `the same file is already staged as ${owner}` });
+        continue;
+      }
+      if (identity) stagedIdentities.set(identity, logical);
       const staged = path.posix.join(stagedDir, relative);
       const to = path.join(root, staged);
       fs.mkdirSync(path.dirname(to), { recursive: true });
@@ -82,7 +93,7 @@ export function prepareWorkspace({
       originals.set(logical, fs.readFileSync(from, "utf8"));
       stagedPaths.set(logical, staged);
     }
-    unstageable.push(...confined.map(toLogical));
+    unstageable.push(...confined.map((relative) => ({ path: toLogical(relative), reason: READ_ONLY_OUTSIDE_REPO })));
   }
   fs.mkdirSync(path.join(root, workspacePathFor(skillsDir)), { recursive: true });
 
@@ -109,18 +120,6 @@ function realPath(file) {
   }
 }
 
-/**
- * Where a repo-relative target actually lands, following links on the part of it that
- * already exists - the question apply asks before it writes a file that is not there yet.
- */
-function resolvedTarget(root, logical) {
-  const absolute = path.isAbsolute(logical) ? logical : path.resolve(root, logical);
-  let existing = absolute;
-  while (!fs.existsSync(existing) && path.dirname(existing) !== existing) existing = path.dirname(existing);
-  const real = realPath(existing);
-  return real ? path.resolve(real, path.relative(existing, absolute)) : null;
-}
-
 /** "dir", "file", or null once symlinks are followed; a broken link is null, never a throw. */
 function entryKind(dir, entry) {
   if (isDirectoryEntry(dir, entry)) return "dir";
@@ -130,6 +129,16 @@ function entryKind(dir, entry) {
     return fs.statSync(path.join(dir, entry.name)).isFile() ? "file" : null;
   } catch {
     return null;
+  }
+}
+
+const SKILL_FILENAME = "SKILL.md";
+
+function isFile(file) {
+  try {
+    return fs.statSync(file).isFile();
+  } catch {
+    return false;
   }
 }
 
@@ -170,6 +179,15 @@ function walkFiles(dir, prefix = "", confineTo = null, confined = [], ancestors 
         confined.push(relative);
         continue;
       }
+      // A link may point at anything - in the layout that motivated following links at
+      // all, a whole plugin repository. Only the file the skill layout loads is taken,
+      // so the target's subtree is never walked, copied, or read.
+      if (entry.isSymbolicLink()) {
+        if (prefix === "" && isFile(path.join(child, SKILL_FILENAME))) {
+          out.push(path.posix.join(relative, SKILL_FILENAME));
+        }
+        continue;
+      }
       out.push(...walkFiles(child, relative, confineTo, confined, new Set(chain).add(identity)));
     } else if (target === "file") {
       if (!confineTo || withinRoot(confineTo, realPath(path.join(dir, entry.name)))) out.push(relative);
@@ -178,6 +196,9 @@ function walkFiles(dir, prefix = "", confineTo = null, confined = [], ancestors 
   }
   return out;
 }
+
+/** Why a loaded skill is absent from the staging copy: the skill index must say which. */
+const READ_ONLY_OUTSIDE_REPO = "resolves outside the repository";
 
 /** Why measurement dropped a file the model wrote: the note the human reads must say which. */
 export const STRAY_OUTSIDE_SURFACE = "synthesis wrote it outside the memory file and skills";
@@ -380,9 +401,14 @@ export function measureWorkspace(workspace) {
     }
     // Staging leaves out a skill that resolves outside the repository; measurement must
     // not carry one back in as a created file, which apply could never write either.
-    if (confineTo && !withinRoot(confineTo, resolvedTarget(confineTo, logical))) {
-      stray.push({ file: logical, reason: STRAY_OUTSIDE_REPO });
-      continue;
+    // The gate is apply's own, so the two can never disagree about what is reachable.
+    if (confineTo) {
+      try {
+        resolveMemoryPath(confineTo, logical);
+      } catch {
+        stray.push({ file: logical, reason: STRAY_OUTSIDE_REPO });
+        continue;
+      }
     }
     const text = fs.readFileSync(path.join(root, staged), "utf8");
     texts.set(logical, text);

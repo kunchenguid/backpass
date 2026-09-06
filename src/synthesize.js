@@ -162,8 +162,8 @@ function targetRule(target, memoryPath, skillsDir, stagedTargetPath = null, unst
   }
   if (unstageable.length) {
     return (
-      `0. **The skills marked \`read-only\` above resolve outside this repository**, so they are not in ` +
-      `your staging copy and backpass cannot write them. Read them for grounding and treat what they ` +
+      `0. **The skills marked \`read-only\` above are not in your staging copy**, for the reason each row ` +
+      `gives, and backpass cannot write them at that path. Read them for grounding and treat what they ` +
       `already cover as covered - do not edit them, re-create them, or copy their content into ` +
       `\`./${memoryPath}\`.\n`
     );
@@ -474,12 +474,12 @@ export async function synthesizeProposal({
   // Unstaged skills keep their repository paths in the index: the model may read them
   // there for grounding, and the target rule says they are not writable. The ones staging
   // confined out are also marked, so a run that narrows nothing still says so.
-  const isUnstageable = (file) =>
-    workspace.unstageable.some((prefix) => file === prefix || file.startsWith(`${prefix}/`));
+  const readOnlyReason = (file) =>
+    workspace.unstageable.find((entry) => file === entry.path || file.startsWith(`${entry.path}/`))?.reason || null;
   const stagedSkillFiles = skillFiles.map((skill) => ({
     ...skill,
     path: workspace.stagedPaths.get(skill.path) || skill.path,
-    readOnly: isUnstageable(skill.path),
+    readOnly: readOnlyReason(skill.path),
   }));
 
   const editValues = {

@@ -222,7 +222,7 @@ export function renderSkillIndex(skills) {
     .map(
       (s) =>
         `- ${s.name} (${s.path}; ${s.bodyTokens} tok body, ${s.descriptionTokens} tok description` +
-        `${s.readOnly ? "; read-only, resolves outside the repository" : ""})` +
+        `${s.readOnly ? `; read-only, ${s.readOnly}` : ""})` +
         ` :: ${s.description || "(no description)"}`,
     )
     .join("\n");

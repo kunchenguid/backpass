@@ -611,7 +611,7 @@ test("a skill symlinked out of the repo is listed read-only, never offered as a 
     prompt,
     /- beads \(\.agents\/skills\/beads\/SKILL\.md; \d+ tok body, \d+ tok description; read-only, resolves outside the repository\) :: Load before tracking project work\./,
   );
-  assert.match(prompt, /skills marked `read-only` above resolve outside this repository/);
+  assert.match(prompt, /skills marked `read-only` above are not in your staging copy/);
   assert.match(
     prompt,
     /- db \(\.agents\/skills\/db\/SKILL\.md; \d+ tok body, \d+ tok description\) :: Load for database work\./,

@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { readMemoryFile } from "../src/memory.js";
-import { loadSkills } from "../src/skills.js";
+import { loadSkills, skillDescriptionTokens } from "../src/skills.js";
 import { State } from "../src/state.js";
 import {
   isSkillFilePath,
@@ -19,6 +19,19 @@ import { makeRepo, stageAndMeasure, writeIn } from "./helpers/staging.js";
 
 const AGENTS = "# M\n\n- one\n- two\n";
 const SKILL = "---\nname: db\ndescription: Load before touching the database.\n---\n\n## Body\n";
+
+/** Every file actually present under a staging directory, relative to it. */
+function walkStaged(dir, prefix = "") {
+  if (!fs.existsSync(dir)) return [];
+  return fs
+    .readdirSync(dir, { withFileTypes: true })
+    .flatMap((entry) =>
+      entry.isDirectory()
+        ? walkStaged(path.join(dir, entry.name), path.posix.join(prefix, entry.name))
+        : [path.posix.join(prefix, entry.name)],
+    )
+    .sort();
+}
 
 function stage(files = {}) {
   const repo = makeRepo({ "AGENTS.md": AGENTS, ...files });
@@ -247,23 +260,72 @@ test("a cyclic skill symlink terminates instead of overflowing the traversal sta
   }
 });
 
-test("two links to one shared library are both staged: the guard is ancestry, not identity", () => {
+test("two links to one shared library are both billed, and exactly one of them is writable", () => {
   const repo = makeRepo({ "AGENTS.md": AGENTS });
   const library = path.join(repo.root, "library", "db");
   fs.mkdirSync(library, { recursive: true });
   fs.writeFileSync(path.join(library, "SKILL.md"), SKILL);
   const loaded = path.join(repo.root, ".agents", "skills");
   fs.mkdirSync(loaded, { recursive: true });
-  // The harness loads both names, so both cost description tokens and both must stage.
+  // The harness loads both names, so both cost description tokens.
   fs.symlinkSync(library, path.join(loaded, "db"));
   fs.symlinkSync(library, path.join(loaded, "database"));
+
+  const loadedSkills = loadSkills(repo.root, ".agents/skills");
+  assert.deepEqual(
+    loadedSkills.map((skill) => skill.path),
+    [".agents/skills/database/SKILL.md", ".agents/skills/db/SKILL.md"],
+    "both names are walked and loaded",
+  );
+  assert.equal(
+    skillDescriptionTokens(loadedSkills),
+    2 * loadedSkills[0].descriptionTokens,
+    "both descriptions are billed against the always-loaded budget",
+  );
 
   const state = new State(repo.root).ensure();
   const memoryFile = readMemoryFile(repo.root, "AGENTS.md");
   const workspace = prepareWorkspace({ state, repo, memoryFile, skillsDir: ".agents/skills" });
 
-  assert.ok(workspace.originals.has(".agents/skills/db/SKILL.md"));
-  assert.ok(workspace.originals.has(".agents/skills/database/SKILL.md"));
+  // One file cannot be two independently editable copies: apply refuses a round whose
+  // accepted targets resolve to the same path, and that refusal drops every other edit.
+  assert.deepEqual([...workspace.originals.keys()], ["AGENTS.md", ".agents/skills/database/SKILL.md"]);
+  assert.equal(fs.existsSync(path.join(workspace.root, ".agents/skills/db/SKILL.md")), false);
+  assert.deepEqual(workspace.unstageable, [
+    {
+      path: ".agents/skills/db/SKILL.md",
+      reason: "the same file is already staged as .agents/skills/database/SKILL.md",
+    },
+  ]);
+});
+
+test("a link to a whole repository stages only the skill file, never the tree behind it", () => {
+  const repo = makeRepo({ "AGENTS.md": AGENTS });
+  // The layout the finding names: a plugin repository linked in as a skill.
+  const plugin = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-plugin-repo-")));
+  fs.writeFileSync(path.join(plugin, "SKILL.md"), SKILL);
+  fs.writeFileSync(path.join(plugin, "README.md"), "# Plugin\n");
+  fs.mkdirSync(path.join(plugin, ".git", "objects"), { recursive: true });
+  fs.writeFileSync(path.join(plugin, ".git", "objects", "pack"), "binary");
+  fs.mkdirSync(path.join(plugin, "node_modules", "left-pad"), { recursive: true });
+  fs.writeFileSync(path.join(plugin, "node_modules", "left-pad", "index.js"), "module.exports = 1;\n");
+  const loaded = path.join(repo.root, ".agents", "skills");
+  fs.mkdirSync(loaded, { recursive: true });
+  fs.symlinkSync(plugin, path.join(loaded, "superpowers"));
+
+  const state = new State(repo.root).ensure();
+  const memoryFile = readMemoryFile(repo.root, "AGENTS.md");
+  // User scope: nothing confines the walk, so only the layout itself bounds what is taken.
+  const workspace = prepareWorkspace({
+    state,
+    repo,
+    memoryFile,
+    skillsDir: ".agents/skills",
+    allowExternal: true,
+  });
+
+  assert.deepEqual([...workspace.originals.keys()], ["AGENTS.md", ".agents/skills/superpowers/SKILL.md"]);
+  assert.deepEqual(walkStaged(path.join(workspace.root, ".agents/skills")), ["superpowers/SKILL.md"]);
 });
 
 test("project scope bills a skill symlinked out of the repo but never stages it", () => {
