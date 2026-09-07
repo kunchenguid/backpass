@@ -126,6 +126,58 @@ test("a name that is both a skill and a memory file is refused, never picked", (
   assert.throws(() => resolveTarget("AGENTS.md", scope), /ambiguous: it names AGENTS\.md and \.agents\/skills\/agents/);
 });
 
+test("--target refuses a skill staging will withhold, naming staging's own reason", () => {
+  const library = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-target-library-")));
+  fs.mkdirSync(path.join(library, "beads"));
+  fs.writeFileSync(
+    path.join(library, "beads", "SKILL.md"),
+    "---\nname: beads\ndescription: Load before tracking work.\n---\n\n- Track it.\n",
+  );
+  const { repo, scope } = projectScope();
+  fs.symlinkSync(path.join(library, "beads"), path.join(repo.root, ".agents", "skills", "beads"));
+
+  // It is loaded and billed, so it is a name the user can plausibly type - but a targeted
+  // run on it could only end in zero edits, so it is refused before the synthesis turn.
+  const skills = loadProjectSkills(repo.root, ".agents/skills", []);
+  assert.ok(skills.some((skill) => skill.name === "beads" && skill.path === ".agents/skills/beads/SKILL.md"));
+  assert.throws(
+    () => resolveTarget("beads", scope),
+    (err) =>
+      err instanceof UserError &&
+      /--target beads is at \.agents\/skills\/beads\/SKILL\.md, which resolves outside the repository/.test(
+        err.message,
+      ) &&
+      /cannot write it there/.test(err.hint),
+  );
+
+  // The layout this change exists to support stays targetable: a link inside the repo.
+  fs.mkdirSync(path.join(repo.root, "library", "review"), { recursive: true });
+  fs.writeFileSync(path.join(repo.root, "library", "review", "SKILL.md"), REVIEW);
+  fs.symlinkSync(path.join(repo.root, "library", "review"), path.join(repo.root, ".agents", "skills", "review"));
+  assert.deepEqual(resolveTarget("review", scope), {
+    kind: "skill",
+    path: ".agents/skills/review/SKILL.md",
+    name: "review",
+  });
+  assert.deepEqual(resolveTarget("db", scope), { kind: "skill", path: ".agents/skills/db/SKILL.md", name: "db" });
+});
+
+test("--target refuses a skill that resolves into a directory nothing may write", () => {
+  const { repo, scope } = projectScope({ "vendor/beads/SKILL.md": REVIEW.replace("review", "beads") });
+  const vendor = path.join(repo.root, "vendor");
+  fs.symlinkSync(path.join(vendor, "beads"), path.join(repo.root, ".agents", "skills", "beads"));
+  fs.chmodSync(path.join(vendor, "beads"), 0o555);
+
+  try {
+    assert.throws(
+      () => resolveTarget("beads", scope),
+      /--target beads is at \.agents\/skills\/beads\/SKILL\.md, which resolves to a location that cannot be written/,
+    );
+  } finally {
+    fs.chmodSync(path.join(vendor, "beads"), 0o755);
+  }
+});
+
 test("user scope resolves against the user-level memory files and skill dirs", () => {
   const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-target-home-")));
   writeIn(home, ".agents/AGENTS.md", AGENTS);

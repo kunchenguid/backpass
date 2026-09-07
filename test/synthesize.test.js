@@ -686,6 +686,32 @@ test("a skill target stages that skill alone; a staged write to AGENTS.md is ref
   await assert.rejects(direct.run(), /synthesis changed AGENTS\.md in the repository directly/);
 });
 
+test("an ordinary in-repo skill stays fingerprinted, whether or not the run narrows to it", async () => {
+  for (const target of [undefined, { kind: "memory", path: "AGENTS.md" }]) {
+    const guarded = setup({ edit: {} });
+    fs.mkdirSync(path.join(guarded.repo.root, ".agents/skills/db"), { recursive: true });
+    fs.writeFileSync(path.join(guarded.repo.root, ".agents/skills/db/SKILL.md"), DB_SKILL);
+    if (target) guarded.config.target = target;
+    fs.writeFileSync(
+      process.env.FAKE_ACPX_SCRIPT,
+      JSON.stringify({
+        edit: {
+          [path.join(guarded.repo.root, ".agents/skills/db/SKILL.md")]: {
+            replace: [["Keep transactions short.", "Keep every transaction short."]],
+          },
+        },
+        annotations: [{ reply: { edits: [] } }],
+      }),
+    );
+
+    await assert.rejects(guarded.run(), (err) => {
+      assert.ok(err instanceof UserError, `${target ? "targeted" : "surface"} run: ${err}`);
+      assert.match(err.message, /synthesis changed \.agents\/skills\/db\/SKILL\.md in the repository directly/);
+      return true;
+    });
+  }
+});
+
 test("a staged skill that resolves outside the repository is reported as such, not as a direct repo edit", async () => {
   const outside = setup({ edit: {} }, { scope: { kind: "user" }, externalSkills: true });
   const skillPath = path.join(outside.externalSkillsDir, "db/SKILL.md");

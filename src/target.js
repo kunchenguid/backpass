@@ -6,6 +6,7 @@ import { UserError, info } from "./logger.js";
 import { pointerImportPath, resolveMemoryFiles } from "./memory.js";
 import { pathInRoot, resolveInRoot } from "./scope.js";
 import { loadProjectSkills, resolveOverflowTarget } from "./skills.js";
+import { skillStagingRefusal } from "./workspace.js";
 
 /**
  * `--target`: one memory file or one skill instead of the whole surface.
@@ -68,6 +69,15 @@ export function resolveTarget(spec, scope) {
   }
   if (skillMatches.length) {
     const skill = skillMatches[0];
+    // A targeted run writes exactly one file, and staging is what decides whether that
+    // file can be in the copy at all. Ask it here so the refusal names its own cause.
+    const refusal = skillStagingRefusal(root, skill.path, { allowExternal: user });
+    if (refusal) {
+      throw new UserError(
+        `--target ${spec} is at ${skill.path}, which ${refusal}`,
+        "backpass loads and bills that skill but cannot write it there; edit it where it really lives, or point the link at a copy backpass can write",
+      );
+    }
     return { kind: "skill", path: skill.path, name: skill.name };
   }
   const memoryList = scope.memoryFiles.length ? scope.memoryFiles.join(", ") : "(none configured)";

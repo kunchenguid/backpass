@@ -138,11 +138,12 @@ function harnessCountsOf(transcripts) {
 /**
  * The repo must be exactly as fingerprinted; the staging copy is the only place to write.
  *
- * Only the files staging actually staged are fingerprinted. A skill backpass withheld is
- * one it has guaranteed it will never write, and aborting a run over a third party's edit
- * to such a file would discard measured work for nothing. A staged path can still resolve
- * outside the repository - that is the ordinary user-scope layout - so a change there is
- * reported for what it is rather than as a direct repository edit.
+ * Only skills staging withheld are left out. Such a file is one backpass has guaranteed it
+ * will never write, so aborting a run over a third party's edit to it would discard
+ * measured work for nothing; an ordinary repository skill stays fingerprinted whether or
+ * not this run narrows to it. A fingerprinted path can still resolve outside the
+ * repository - that is the ordinary user-scope layout - so a change there is reported for
+ * what it is rather than as a direct repository edit.
  */
 function assertRepoUntouched(repo, before, workspaceRoot) {
   const after = repoFingerprint(repo, Object.keys(before));
@@ -545,7 +546,7 @@ export async function synthesizeProposal({
 
   const fingerprint = repoFingerprint(repo, [
     memoryFile.path,
-    ...skillFiles.filter((skill) => workspace.stagedPaths.has(skill.path)).map((skill) => skill.path),
+    ...skillFiles.filter((skill) => !readOnlyReason(skill.path)).map((skill) => skill.path),
   ]);
   const sessionName = `backpass-synth-${process.pid}`;
   const timeoutSeconds = Math.max(config.timeoutSeconds, 900);

@@ -63,7 +63,7 @@ export function prepareWorkspace({
   // project scope cannot write it - `resolveMemoryPath` refuses the path at apply, and a
   // refusal there drops the whole round. Leaving it out of staging is what makes it
   // impossible for such a file to become an edit at all.
-  const confineTo = allowExternal ? null : realPath(repo.root) || path.resolve(repo.root);
+  const confineTo = confinementRoot(repo.root, allowExternal);
   const skillMappings = skillDirs.map((logical) => ({
     logical,
     staged: workspacePathFor(logical),
@@ -93,8 +93,9 @@ export function prepareWorkspace({
       // exists to follow - and that is true of a vendored directory inside the repository
       // as much as of a nix store outside it. Apply refuses such a path and that refusal
       // drops the round, so staging declares it read-only instead of offering the edit.
-      if (readOnlyResolvedPath(from)) {
-        unstageable.push({ path: logical, reason: READ_ONLY_UNWRITABLE, identity });
+      const refusal = stagingRefusal(from, confineTo);
+      if (refusal) {
+        unstageable.push({ path: logical, reason: refusal, identity });
         continue;
       }
       const staged = path.posix.join(stagedDir, relative);
@@ -235,6 +236,27 @@ function walkFiles(dir, prefix = "", confineTo = null, confined = [], ancestors 
 const READ_ONLY_OUTSIDE_REPO = "resolves outside the repository";
 const READ_ONLY_UNREADABLE = "could not be read when the staging copy was built";
 const READ_ONLY_UNWRITABLE = "resolves to a location that cannot be written";
+
+/** The root a project-scope walk may not leave; user scope owns files anywhere. */
+function confinementRoot(repoRoot, allowExternal) {
+  return allowExternal ? null : realPath(repoRoot) || path.resolve(repoRoot);
+}
+
+/** Why staging withholds a skill file from the copy, or null when it can stage it. */
+function stagingRefusal(absolute, confineTo) {
+  if (!withinRoot(confineTo, realPath(absolute))) return READ_ONLY_OUTSIDE_REPO;
+  return readOnlyResolvedPath(absolute) ? READ_ONLY_UNWRITABLE : null;
+}
+
+/**
+ * The one place outside staging that may ask staging's question: a run targeting a skill
+ * the copy will not hold could never emit an edit for it, so it is refused by name here
+ * rather than after a synthesis turn that was told the file is the one it may write.
+ */
+export function skillStagingRefusal(repoRoot, skillPath, { allowExternal = false } = {}) {
+  const absolute = path.isAbsolute(skillPath) ? skillPath : path.join(repoRoot, skillPath);
+  return stagingRefusal(absolute, confinementRoot(repoRoot, allowExternal));
+}
 
 /** Why measurement dropped a file the model wrote: the note the human reads must say which. */
 export const STRAY_OUTSIDE_SURFACE = "synthesis wrote it outside the memory file and skills";
