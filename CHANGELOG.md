@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.19](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.18...backpass-v0.1.19) (2026-09-07)
+
+
+### Bug Fixes
+
+* **skills:** see and stage skills that are symlinked into the loaded directory ([#113](https://github.com/kunchenguid/backpass/issues/113)) ([4e67dcd](https://github.com/kunchenguid/backpass/commit/4e67dcd7e3d5e17f9fb84deee45d65d4763de954))
+
 ## [0.1.18](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.17...backpass-v0.1.18) (2026-09-04)
 
 
