@@ -84,7 +84,7 @@ test("a target validates every configured project memory path before narrowing",
   assert.throws(() => resolveTarget("AGENTS.md", scope), /private\.txt resolves outside the project root/);
 });
 
-test("one library under two links resolves to the first name; two distinct files still refuse", () => {
+test("--target refuses one name that names more than one file, however it got there", () => {
   const { repo, scope } = projectScope();
   const library = path.join(repo.root, "library", "db");
   fs.mkdirSync(library, { recursive: true });
@@ -94,18 +94,21 @@ test("one library under two links resolves to the first name; two distinct files
   fs.symlinkSync(library, path.join(loaded, "db"));
   fs.symlinkSync(library, path.join(loaded, "database"));
 
-  // Both names are loaded and billed, so both match - but they are one file, and staging
-  // already gives one name the write. Refusing here would contradict that. Each site picks
-  // deterministically from its own order - staging by directory-entry name, this by sorted
-  // path - and a targeted run stages only the name resolved here, so it owns its own write.
+  // Both names are loaded and billed, so both match. --target resolves exactly one file,
+  // and the hint must not tell someone to rename a file that already has only one name.
   assert.equal(loadProjectSkills(repo.root, ".agents/skills", []).filter((s) => s.name === "db").length, 2);
-  assert.deepEqual(resolveTarget("db", scope), {
-    kind: "skill",
-    path: ".agents/skills/database/SKILL.md",
-    name: "db",
-  });
+  assert.throws(
+    () => resolveTarget("db", scope),
+    (err) =>
+      err instanceof UserError &&
+      /is ambiguous: it names \.agents\/skills\/database\/SKILL\.md and \.agents\/skills\/db\/SKILL\.md/.test(
+        err.message,
+      ) &&
+      /one file under several links, or genuinely different files/.test(err.hint) &&
+      /needs a name that identifies exactly one file/.test(err.hint),
+  );
 
-  // Two genuinely different files under one frontmatter name: renaming is the fix.
+  // Two genuinely different files under one frontmatter name refuse the same way.
   const distinct = projectScope({ ".agents/skills/other/SKILL.md": DB.replace("transaction.", "transaction!") });
   assert.throws(
     () => resolveTarget("db", distinct.scope),
@@ -114,61 +117,13 @@ test("one library under two links resolves to the first name; two distinct files
       /is ambiguous: it names \.agents\/skills\/db\/SKILL\.md and \.agents\/skills\/other\/SKILL\.md/.test(
         err.message,
       ) &&
-      /rename the skill so one name means one file/.test(err.hint),
+      /needs a name that identifies exactly one file/.test(err.hint),
   );
 });
 
 test("a name that is both a skill and a memory file is refused, never picked", () => {
   const { scope } = projectScope({ ".agents/skills/agents/SKILL.md": DB.replace("name: db", "name: AGENTS.md") });
   assert.throws(() => resolveTarget("AGENTS.md", scope), /ambiguous: it names AGENTS\.md and \.agents\/skills\/agents/);
-});
-
-test("a skill symlinked out of the repo is refused as a project target, by the real cause", () => {
-  const library = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-target-library-")));
-  fs.mkdirSync(path.join(library, "beads"));
-  fs.writeFileSync(
-    path.join(library, "beads", "SKILL.md"),
-    "---\nname: beads\ndescription: Load before tracking work.\n---\n\n- Track it.\n",
-  );
-  const { repo, scope } = projectScope();
-  fs.symlinkSync(path.join(library, "beads"), path.join(repo.root, ".agents", "skills", "beads"));
-
-  // It is loaded and billed, so it is a name the user can plausibly type.
-  const skills = loadProjectSkills(repo.root, ".agents/skills", []);
-  assert.ok(skills.some((skill) => skill.name === "beads" && skill.path === ".agents/skills/beads/SKILL.md"));
-
-  assert.throws(
-    () => resolveTarget("beads", scope),
-    (err) =>
-      err instanceof UserError &&
-      /--target beads is at \.agents\/skills\/beads\/SKILL\.md, which resolves outside the repository/.test(
-        err.message,
-      ) &&
-      /never write it/.test(err.hint),
-  );
-  // An in-repo skill in the same directory still resolves.
-  assert.deepEqual(resolveTarget("db", scope), { kind: "skill", path: ".agents/skills/db/SKILL.md", name: "db" });
-});
-
-test("a read-only skill file is still a target, because apply replaces it by rename", () => {
-  const { repo, scope } = projectScope({ "vendor/beads/SKILL.md": REVIEW.replace("review", "beads") });
-  const vendor = path.join(repo.root, "vendor");
-  fs.symlinkSync(path.join(vendor, "beads"), path.join(repo.root, ".agents", "skills", "beads"));
-  fs.chmodSync(path.join(vendor, "beads", "SKILL.md"), 0o444);
-
-  assert.deepEqual(resolveTarget("beads", scope), {
-    kind: "skill",
-    path: ".agents/skills/beads/SKILL.md",
-    name: "beads",
-  });
-
-  // The directory that receives the rename is what decides.
-  fs.chmodSync(path.join(vendor, "beads"), 0o555);
-  try {
-    assert.throws(() => resolveTarget("beads", scope), /resolves to .+ and cannot be written/);
-  } finally {
-    fs.chmodSync(path.join(vendor, "beads"), 0o755);
-  }
 });
 
 test("user scope resolves against the user-level memory files and skill dirs", () => {

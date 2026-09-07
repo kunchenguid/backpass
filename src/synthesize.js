@@ -138,9 +138,10 @@ function harnessCountsOf(transcripts) {
 /**
  * The repo must be exactly as fingerprinted; the staging copy is the only place to write.
  *
- * A skill symlinked out of the repository is fingerprinted too - the synthesis agent
- * writing through that link is the betrayal this guard exists to catch. But such a path
- * is not in the repository and the writer may have been another process, so it is
+ * Only the files staging actually staged are fingerprinted. A skill backpass withheld is
+ * one it has guaranteed it will never write, and aborting a run over a third party's edit
+ * to such a file would discard measured work for nothing. A staged path can still resolve
+ * outside the repository - that is the ordinary user-scope layout - so a change there is
  * reported for what it is rather than as a direct repository edit.
  */
 function assertRepoUntouched(repo, before, workspaceRoot) {
@@ -542,7 +543,10 @@ export async function synthesizeProposal({
   const editPromptFile = path.join(promptDir, "synthesis-edit.md");
   fs.writeFileSync(editPromptFile, renderPrompt("synthesis", editValues));
 
-  const fingerprint = repoFingerprint(repo, [memoryFile.path, ...skillFiles.map((s) => s.path)]);
+  const fingerprint = repoFingerprint(repo, [
+    memoryFile.path,
+    ...skillFiles.filter((skill) => workspace.stagedPaths.has(skill.path)).map((skill) => skill.path),
+  ]);
   const sessionName = `backpass-synth-${process.pid}`;
   const timeoutSeconds = Math.max(config.timeoutSeconds, 900);
   const usage = [];

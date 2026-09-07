@@ -325,9 +325,13 @@ export function resolveMemoryPath(repoRoot, configuredPath, { allowExternal = fa
 
 /**
  * Where a write to `absolute` would really land when that is somewhere else and cannot be
- * written - a skill linked into a nix or home-manager store, typically. The probe is what
- * `atomicReplace` needs and nothing more: the directory that receives the rename. The
- * resolved file's own mode never decides, because no write path opens it for writing.
+ * written - a skill linked into a nix or home-manager store, typically. The probe refuses
+ * when the directory the resolved location sits in is unwritable, whether the link is a
+ * directory on the way to the file or the file itself. For a leaf link that is stricter
+ * than `atomicReplace` strictly needs - it renames into the link's own parent, which may
+ * be writable - and deliberately so: that rename would swap the link for a private copy
+ * and leave the store source behind, silently unlinking the file from what generates it.
+ * The resolved file's own mode never decides, because no write path opens it for writing.
  *
  * `null` means the write can land, and deliberately covers the undecidable cases too - an
  * unresolvable path, a broken link, a racing rename. A probe that cannot establish that a

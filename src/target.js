@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { userClaudeSkillsDir } from "./config.js";
 import { UserError, info } from "./logger.js";
-import { pointerImportPath, readOnlyResolvedPath, resolveMemoryFiles, resolveMemoryPath } from "./memory.js";
+import { pointerImportPath, resolveMemoryFiles } from "./memory.js";
 import { pathInRoot, resolveInRoot } from "./scope.js";
 import { loadProjectSkills, resolveOverflowTarget } from "./skills.js";
 
@@ -41,18 +41,13 @@ export function resolveTarget(spec, scope) {
   const normalized = pathInRoot(spec, root);
   const memoryMatches = scope.memoryFiles.filter((entry) => pathInRoot(entry, root) === normalized);
   const skillMatches = skills.filter((skill) => skill.name === spec);
-  // Several links to one library are several names for one file, and staging already
-  // resolves that layout by giving the first name the write. Only distinct files sharing
-  // a name are genuinely ambiguous - there, renaming really is the fix.
-  const aliased = skillMatches.length > 1 && sameFile(root, skillMatches);
-  const selected = aliased ? [skillMatches[0]] : skillMatches;
 
-  const found = memoryMatches.length + selected.length;
+  const found = memoryMatches.length + skillMatches.length;
   if (found > 1) {
     const names = [...memoryMatches, ...skillMatches.map((skill) => skill.path)];
     throw new UserError(
       `--target "${spec}" is ambiguous: it names ${names.join(" and ")}`,
-      "rename the skill so one name means one file",
+      "those may be one file under several links, or genuinely different files; --target needs a name that identifies exactly one file",
     );
   }
   if (memoryMatches.length) {
@@ -71,31 +66,8 @@ export function resolveTarget(spec, scope) {
     }
     return { kind: "memory", path: entry };
   }
-  if (selected.length) {
-    const skill = selected[0];
-    // The same path gate apply applies: a skill reached through a symlink out of the repo
-    // is loaded and billed, but project scope can never write it - say so here rather than
-    // staging nothing and failing the synthesis turn with an unrelated hint.
-    try {
-      resolveMemoryPath(root, skill.path, { allowExternal: user });
-    } catch {
-      throw new UserError(
-        `--target ${spec} is at ${skill.path}, which resolves outside the repository`,
-        "project scope can read and bill that skill but never write it; edit it where it really lives, or run `--scope user`",
-      );
-    }
-    // The same probe staging and apply use: a skill that resolves into a store nothing may
-    // write is loaded and billed, but a run targeting it could only end in a refusal.
-    const unwritable = readOnlyResolvedPath(resolveInRoot(root, skill.path));
-    if (unwritable) {
-      throw new UserError(
-        `--target ${spec} is at ${skill.path}, which resolves to ${unwritable} and cannot be written`,
-        "edit the source that generates it, or point the link at a writable copy",
-      );
-    }
-    if (aliased) {
-      info(`${spec} is one file under ${skillMatches.length} links; targeting it as ${skill.path}`);
-    }
+  if (skillMatches.length) {
+    const skill = skillMatches[0];
     return { kind: "skill", path: skill.path, name: skill.name };
   }
   const memoryList = scope.memoryFiles.length ? scope.memoryFiles.join(", ") : "(none configured)";
@@ -104,19 +76,6 @@ export function resolveTarget(spec, scope) {
     `--target "${spec}" is not a configured memory file or a loaded skill in this ${user ? "user scope" : "repo"}`,
     `memory files: ${memoryList} · skills: ${skillList}`,
   );
-}
-
-/** True when every match is the same file on disk, reached under different names. */
-function sameFile(root, matches) {
-  const identity = (skill) => {
-    try {
-      return fs.realpathSync(resolveInRoot(root, skill.path));
-    } catch {
-      return null;
-    }
-  };
-  const first = identity(matches[0]);
-  return first !== null && matches.every((skill) => identity(skill) === first);
 }
 
 export function describeTarget(target) {

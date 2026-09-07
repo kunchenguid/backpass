@@ -3237,17 +3237,9 @@ test("re-creating a withheld unwritable skill is stray, so the round is not drop
       "the withheld skill is not carried back in as a created file",
     );
 
-    // An extract while the created file survives, a plain removal once it does not.
     const ids = staged.measured.changes.map((change) => change.id);
-    const created = staged.measured.changes.some((change) => change.kind === "created");
     const built = buildProposal(
-      {
-        edits: [
-          created
-            ? claim(ids, { kind: "extract", title: "extract the node pin" })
-            : claim(ids, { kind: "remove", title: "drop the node pin" }),
-        ],
-      },
+      { edits: [claim(ids, { kind: "remove", title: "drop the node pin" })] },
       {
         memoryFile: staged.memoryFile,
         config: config(),
@@ -3363,18 +3355,9 @@ test("a file written at the unstaged alias becomes stray, so the round is not dr
     "the alias is not carried back in as a created file",
   );
 
-  // Whatever measurement carried, the annotation claims it: an extract while the created
-  // alias survives, a plain removal once it does not.
   const ids = staged.measured.changes.map((change) => change.id);
-  const created = staged.measured.changes.some((change) => change.kind === "created");
   const built = buildProposal(
-    {
-      edits: [
-        created
-          ? claim(ids, { kind: "extract", title: "extract the node pin" })
-          : claim(ids, { kind: "remove", title: "drop the node pin" }),
-      ],
-    },
+    { edits: [claim(ids, { kind: "remove", title: "drop the node pin" })] },
     {
       memoryFile: staged.memoryFile,
       config: config(),
