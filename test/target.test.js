@@ -95,7 +95,8 @@ test("one library under two links resolves to the first name; two distinct files
   fs.symlinkSync(library, path.join(loaded, "database"));
 
   // Both names are loaded and billed, so both match - but they are one file, and staging
-  // already gives the first name the write. Refusing here would contradict that.
+  // already gives the first name the write. Refusing here would contradict that. "First"
+  // is the path-sorted first at both sites, so the pick is the same on every filesystem.
   assert.equal(loadProjectSkills(repo.root, ".agents/skills", []).filter((s) => s.name === "db").length, 2);
   assert.deepEqual(resolveTarget("db", scope), {
     kind: "skill",

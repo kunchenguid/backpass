@@ -5,10 +5,12 @@ import os from "node:os";
 import path from "node:path";
 
 import { readMemoryFile } from "../src/memory.js";
-import { loadSkills, skillDescriptionTokens } from "../src/skills.js";
+import { loadProjectSkills, loadSkills, skillDescriptionTokens } from "../src/skills.js";
+import { estimateTokens } from "../src/tokens.js";
 import { State } from "../src/state.js";
 import {
   isSkillFilePath,
+  STRAY_OUTSIDE_SURFACE,
   measureWorkspace,
   parseSkillFile,
   prepareWorkspace,
@@ -90,6 +92,29 @@ test("an untouched workspace measures as no change, and ids are stable across re
   assert.equal(a.signature, b.signature);
   assert.equal(a.changes[1].skill.name, "new");
   assert.notEqual(first.signature, a.signature);
+});
+
+test("an ignored file in an external skills directory is named by the path the user knows", () => {
+  const repo = makeRepo({ "AGENTS.md": AGENTS });
+  const skillsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-external-stray-")));
+  fs.mkdirSync(path.join(skillsDir, "db"));
+  fs.writeFileSync(path.join(skillsDir, "db/SKILL.md"), SKILL);
+
+  const workspace = prepareWorkspace({
+    state: new State(repo.root).ensure(),
+    repo,
+    memoryFile: readMemoryFile(repo.root, "AGENTS.md"),
+    skillsDir,
+    skillDirs: [skillsDir],
+    allowExternal: true,
+  });
+  writeIn(path.join(workspace.root, workspacePathFor(skillsDir)), "notes.txt", "scratch");
+
+  // Staging hashes an absolute skills directory into `.external/<hash>/`, which tells the
+  // reader nothing about which file was ignored.
+  assert.deepEqual(measureWorkspace(workspace).stray, [
+    { file: path.join(skillsDir, "notes.txt"), reason: STRAY_OUTSIDE_SURFACE },
+  ]);
 });
 
 test("external user memory and skills use workspace-relative staging paths", () => {
@@ -262,6 +287,31 @@ test("a symlinked skill directory is never recursed, so no cycle can be walked",
   }
 });
 
+test("identity-based dedupe must never reach the always-loaded token count", () => {
+  // The bug this whole change exists to fix is an under-counted budget: half the real
+  // skill layer was invisible, so its description lines were never billed. A library
+  // reached through k links is k things the harness loads and k description lines it
+  // pays for every turn. Staging may pick one owner - that is a separate decision, pinned
+  // separately below - but no dedupe may ever reach this count.
+  const repo = makeRepo({ "AGENTS.md": AGENTS });
+  const library = path.join(repo.root, "library", "db");
+  fs.mkdirSync(library, { recursive: true });
+  fs.writeFileSync(path.join(library, "SKILL.md"), SKILL);
+  const loaded = path.join(repo.root, ".agents", "skills");
+  fs.mkdirSync(loaded, { recursive: true });
+  for (const name of ["db", "database", "sql"]) fs.symlinkSync(library, path.join(loaded, name));
+
+  const one = estimateTokens("Load before touching the database.");
+  for (const skills of [loadSkills(repo.root, ".agents/skills"), loadProjectSkills(repo.root, ".agents/skills", [])]) {
+    assert.deepEqual(
+      skills.map((skill) => skill.path),
+      [".agents/skills/database/SKILL.md", ".agents/skills/db/SKILL.md", ".agents/skills/sql/SKILL.md"],
+      "every link is walked and loaded, and the order is by path rather than by readdir",
+    );
+    assert.equal(skillDescriptionTokens(skills), 3 * one, "three links cost three description lines");
+  }
+});
+
 test("two links to one shared library are both billed, and exactly one of them is writable", () => {
   const repo = makeRepo({ "AGENTS.md": AGENTS });
   const library = path.join(repo.root, "library", "db");
@@ -277,7 +327,7 @@ test("two links to one shared library are both billed, and exactly one of them i
   assert.deepEqual(
     loadedSkills.map((skill) => skill.path),
     [".agents/skills/database/SKILL.md", ".agents/skills/db/SKILL.md"],
-    "both names are walked and loaded",
+    "both names are walked and loaded, in path order on every filesystem",
   );
   assert.equal(
     skillDescriptionTokens(loadedSkills),

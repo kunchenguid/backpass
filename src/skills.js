@@ -91,7 +91,7 @@ export function loadSkills(repoRoot, skillsDir) {
     });
   }
 
-  return skills.sort((a, b) => a.name.localeCompare(b.name));
+  return skills.sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path));
 }
 
 /**

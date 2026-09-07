@@ -432,11 +432,13 @@ export function measureWorkspace(workspace) {
       continue;
     }
     const inside = staged.slice(mapping.staged.length).replace(/^\//, "");
+    // Every note names the path the reader knows - the repository path, or the real one a
+    // user-scope entry resolves to - never the `.external/<hash>` the staging copy uses.
     const logical = path.isAbsolute(mapping.logical)
       ? path.join(mapping.logical, inside)
       : path.posix.join(mapping.logical, inside);
     if (!isSkillFilePath(logical, skillDirs)) {
-      stray.push({ file: staged, reason: STRAY_OUTSIDE_SURFACE });
+      stray.push({ file: logical, reason: STRAY_OUTSIDE_SURFACE });
       continue;
     }
     // Staging leaves out a skill that resolves outside the repository; measurement must
