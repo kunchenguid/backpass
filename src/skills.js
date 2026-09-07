@@ -30,6 +30,23 @@ function logicalSkillDir(repoRoot, skillsDir) {
   return relative.split(path.sep).join("/");
 }
 
+/**
+ * True when a directory entry is a directory once symlinks are followed. A broken or
+ * cyclic link is not, and never throws.
+ *
+ * @param {string} root
+ * @param {import("node:fs").Dirent} entry
+ */
+export function isDirectoryEntry(root, entry) {
+  if (entry.isDirectory()) return true;
+  if (!entry.isSymbolicLink()) return false;
+  try {
+    return fs.statSync(path.join(root, entry.name)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 /** Read the existing skills so synthesis can tune a description instead of duplicating it. */
 export function loadSkills(repoRoot, skillsDir) {
   const root = path.isAbsolute(skillsDir) ? skillsDir : path.join(repoRoot, skillsDir);
@@ -44,7 +61,11 @@ export function loadSkills(repoRoot, skillsDir) {
   }
 
   for (const entry of entries) {
-    const file = entry.isDirectory()
+    // A harness loads what the path resolves to, so a symlinked skill directory is a skill.
+    // `readdir` reports the link itself, never its target, so the type has to be stat'd -
+    // otherwise a library-plus-symlinks layout (the common way to share skills across
+    // harnesses) is invisible here and its always-loaded descriptions go unbilled.
+    const file = isDirectoryEntry(root, entry)
       ? path.join(root, entry.name, "SKILL.md")
       : entry.name.endsWith(".md")
         ? path.join(root, entry.name)
@@ -70,7 +91,7 @@ export function loadSkills(repoRoot, skillsDir) {
     });
   }
 
-  return skills.sort((a, b) => a.name.localeCompare(b.name));
+  return skills.sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path));
 }
 
 /**
@@ -129,6 +150,24 @@ export function skillBody(text) {
  */
 export function skillDescriptionTokens(skills) {
   return (skills || []).reduce((sum, s) => sum + (s.descriptionTokens ?? estimateTokens(s.description || "")), 0);
+}
+
+/**
+ * How many loaded entries are the same file as `file`. One library reached through k links
+ * is loaded k times and billed k times (`skillDescriptionTokens` sums every entry), so a
+ * change to its description line costs k times that delta on the always-loaded surface.
+ */
+export function loadedCopies(repoRoot, skills, file) {
+  const identity = (p) => {
+    try {
+      return fs.realpathSync(path.isAbsolute(p) ? p : path.join(repoRoot, p));
+    } catch {
+      return null;
+    }
+  };
+  const target = identity(file);
+  if (!target) return 1;
+  return Math.max(1, (skills || []).filter((skill) => identity(skill.path) === target).length);
 }
 
 /** Minimal YAML frontmatter reader for plain values and `>` / `|` multi-line values. */
@@ -200,7 +239,9 @@ export function renderSkillIndex(skills) {
   return skills
     .map(
       (s) =>
-        `- ${s.name} (${s.path}; ${s.bodyTokens} tok body, ${s.descriptionTokens} tok description) :: ${s.description || "(no description)"}`,
+        `- ${s.name} (${s.path}; ${s.bodyTokens} tok body, ${s.descriptionTokens} tok description` +
+        `${s.readOnly ? `; read-only, ${s.readOnly}` : ""})` +
+        ` :: ${s.description || "(no description)"}`,
     )
     .join("\n");
 }

@@ -32,12 +32,18 @@ export function writeIn(root, relative, textOrFn) {
 }
 
 /**
- * @param {{ repo: any, memoryPath?: string, skillsDir?: string, edit: (workspaceRoot: string) => void }} options
+ * @param {{ repo: any, memoryPath?: string, skillsDir?: string, allowExternal?: boolean, edit: (workspaceRoot: string) => void }} options
  */
-export function stageAndMeasure({ repo, memoryPath = "AGENTS.md", skillsDir = ".agents/skills", edit }) {
+export function stageAndMeasure({
+  repo,
+  memoryPath = "AGENTS.md",
+  skillsDir = ".agents/skills",
+  allowExternal = false,
+  edit,
+}) {
   const memoryFile = readMemoryFile(repo.root, memoryPath);
   const state = new State(repo.root).ensure();
-  const workspace = prepareWorkspace({ state, repo, memoryFile, skillsDir });
+  const workspace = prepareWorkspace({ state, repo, memoryFile, skillsDir, allowExternal });
   edit(workspace.root);
   return { memoryFile, state, workspace, measured: measureWorkspace(workspace) };
 }

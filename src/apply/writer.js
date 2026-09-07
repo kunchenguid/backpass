@@ -3,7 +3,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 
 import { applyEdit, filesOfEdit, sliceEditForFile } from "../proposal.js";
-import { memoryTextHash, resolveMemoryPath } from "../memory.js";
+import { memoryTextHash, readOnlyResolvedPath, resolveMemoryPath } from "../memory.js";
 import { userClaudeSkillsDir } from "../config.js";
 import { budgetGateKind, budgetStatus, estimateTokens, formatTokens } from "../tokens.js";
 import { recordRejection } from "../state.js";
@@ -13,6 +13,7 @@ import {
   editSkills,
   ensureSkillsLayout,
   loadProjectSkills,
+  loadedCopies,
   parseFrontmatter,
   removeOwnedSkillPaths,
   resolveOverflowTarget,
@@ -30,31 +31,32 @@ function resolveTarget(root, relative) {
   return path.isAbsolute(relative) ? relative : path.join(root, relative);
 }
 
-/** Named refusal when a user-level target is a symlink into a read-only store. */
+/** Named refusal when a target is a symlink into a read-only store. */
 export function readOnlySymlinkMessage(absolute, realPath) {
   return `${absolute} is a symlink to ${realPath}, which is not writable; edit the source that generates it`;
 }
 
+/** The same refusal when a directory on the way to the target is the link, not the target. */
+export function readOnlyTargetMessage(absolute, realPath) {
+  return `${absolute} resolves to ${realPath}, which is not writable; edit the source that generates it`;
+}
+
+/**
+ * The link is as often a directory on the way to the file (`~/.claude/skills/foo` pointing
+ * into a nix store) as the file itself, so the whole path is resolved rather than the leaf
+ * lstat'd: an lstat of the leaf sees a plain file and hands the user a raw EROFS instead.
+ */
 function refuseReadOnlySymlink(absolute) {
-  let lstat;
+  const real = readOnlyResolvedPath(absolute);
+  if (!real) return null;
+  return isSymbolicLink(absolute) ? readOnlySymlinkMessage(absolute, real) : readOnlyTargetMessage(absolute, real);
+}
+
+function isSymbolicLink(absolute) {
   try {
-    lstat = fs.lstatSync(absolute);
+    return fs.lstatSync(absolute).isSymbolicLink();
   } catch {
-    return null;
-  }
-  if (!lstat.isSymbolicLink()) return null;
-  let real;
-  try {
-    real = fs.realpathSync(absolute);
-  } catch {
-    return null;
-  }
-  try {
-    fs.accessSync(real, fs.constants.W_OK);
-    fs.accessSync(path.dirname(real), fs.constants.W_OK | fs.constants.X_OK);
-    return null;
-  } catch {
-    return readOnlySymlinkMessage(absolute, real);
+    return false;
   }
 }
 
@@ -439,7 +441,9 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
   let descriptionTokensProjected = descriptionTokensNow;
   for (const item of resolvedPlanned) {
     if (!existingSkillPaths.has(item.relative)) continue;
-    descriptionTokensProjected += descriptionTokensIn(item.text) - descriptionTokensIn(item.before);
+    descriptionTokensProjected +=
+      (descriptionTokensIn(item.text) - descriptionTokensIn(item.before)) *
+      loadedCopies(repo.root, skillsNow, item.relative);
   }
   descriptionTokensProjected += plannedSkills.reduce(
     (sum, { skill }) => sum + estimateTokens(skill.description || ""),

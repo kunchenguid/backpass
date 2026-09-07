@@ -323,6 +323,36 @@ export function resolveMemoryPath(repoRoot, configuredPath, { allowExternal = fa
   return absolute;
 }
 
+/**
+ * Where a write to `absolute` would really land when that is somewhere else and cannot be
+ * written - a skill linked into a nix or home-manager store, typically. The probe refuses
+ * when the directory the resolved location sits in is unwritable, whether the link is a
+ * directory on the way to the file or the file itself. For a leaf link that is stricter
+ * than `atomicReplace` strictly needs - it renames into the link's own parent, which may
+ * be writable - and deliberately so: that rename would swap the link for a private copy
+ * and leave the store source behind, silently unlinking the file from what generates it.
+ * The resolved file's own mode never decides, because no write path opens it for writing.
+ *
+ * `null` means the write can land, and deliberately covers the undecidable cases too - an
+ * unresolvable path, a broken link, a racing rename. A probe that cannot establish that a
+ * file is unwritable never decides against it; the apply gate remains the backstop.
+ */
+export function readOnlyResolvedPath(absolute) {
+  let real;
+  try {
+    real = fs.realpathSync(absolute);
+  } catch {
+    return null;
+  }
+  if (real === path.resolve(absolute)) return null;
+  try {
+    fs.accessSync(path.dirname(real), fs.constants.W_OK | fs.constants.X_OK);
+    return null;
+  } catch {
+    return real;
+  }
+}
+
 export function readMemoryFile(repoRoot, relativePath, options = {}) {
   const absolute = resolveMemoryPath(repoRoot, relativePath, options);
   if (!fs.existsSync(absolute)) return null;

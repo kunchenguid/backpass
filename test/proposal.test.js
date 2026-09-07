@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import vm from "node:vm";
 
@@ -15,12 +16,14 @@ import {
 } from "../src/proposal.js";
 import { foldEvidence, renderEvidenceForPrompt, renderEvidenceReport } from "../src/fold.js";
 import { estimateTokens } from "../src/tokens.js";
+import { loadProjectSkills, skillDescriptionTokens } from "../src/skills.js";
 import { parseMemoryUnits } from "../src/memory.js";
 import { isSuppressedByRejection, recordRejection, State } from "../src/state.js";
 import { applyDecisions } from "../src/apply/writer.js";
 import { injectPayload, parseDecisions, renderApplySurface } from "../src/apply/lavish.js";
 import { renderEdit } from "../src/apply/terminal.js";
 import { extractJson, parseTokenLine, stripAcpxNoise } from "../src/acpx.js";
+import { STRAY_OUTSIDE_REPO, STRAY_OUTSIDE_SURFACE, STRAY_UNWRITABLE, strayAliasReason } from "../src/workspace.js";
 import { makeRepo, stageAndMeasure, writeIn } from "./helpers/staging.js";
 
 const MEMORY_TEXT = [
@@ -87,6 +90,21 @@ function gate({ text = MEMORY_TEXT, files = {}, edit, annotation, config: cfg = 
   });
   return { ...result, ...staged, repo };
 }
+
+/** Every instruction corroborated by enough harm-class sessions to clear the floors. */
+const aliasSummary = () => ({
+  analyzedSessions: 4,
+  totals: { positive: 3, negative: 2, gapClusters: 1 },
+  instructions: Array.from({ length: 20 }, (_, i) => ({
+    instruction: `AG-${String(i + 1).padStart(3, "0")}`,
+    positive: 0,
+    negative: 4,
+    harmSessions: 4,
+    sessions: 4,
+    relevance: 1,
+    quotes: [],
+  })),
+});
 
 const memoryEdit = (fn) => (root) => writeIn(root, "AGENTS.md", fn);
 const claim = (changes, extra = {}) => ({
@@ -1535,7 +1553,7 @@ test("a skill's description can be rewritten in place; deletions and stray files
     annotation: { edits: [claim(["H1"])] },
   });
   assert.deepEqual(stray.violations, []);
-  assert.ok(stray.proposal.notes.some((n) => /ignored notes\.md/.test(n)));
+  assert.ok(stray.proposal.notes.some((n) => n === `ignored notes.md: ${STRAY_OUTSIDE_SURFACE}`));
 });
 
 test("a previously rejected edit is suppressed until new evidence arrives", () => {
@@ -3119,6 +3137,450 @@ test("a skill-only shrink reports the remaining always-loaded overage", () => {
   assert.ok(results.written[0].budget.delta < 0);
   assert.ok(results.written[0].budget.projected > 100);
   assert.match(results.warnings[0], /always-loaded surface \(AGENTS\.md \+ skill descriptions\)/);
+});
+
+test("a skill linked out of the repo behind an in-repo library never reaches apply, and nothing outside is written", () => {
+  const skill = "---\nname: db\ndescription: old trigger\n---\n\nbody\n";
+  const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-outside-apply-")));
+  fs.writeFileSync(path.join(outside, "SKILL.md"), skill);
+
+  const repo = makeRepo({ "AGENTS.md": MEMORY_TEXT });
+  fs.mkdirSync(path.join(repo.root, "library", "db"), { recursive: true });
+  fs.symlinkSync(path.join(outside, "SKILL.md"), path.join(repo.root, "library", "db", "SKILL.md"));
+  const loaded = path.join(repo.root, ".agents", "skills");
+  fs.mkdirSync(loaded, { recursive: true });
+  fs.symlinkSync(path.join(repo.root, "library", "db"), path.join(loaded, "db"));
+
+  const staged = stageAndMeasure({
+    repo,
+    edit: (root) => {
+      writeIn(root, "AGENTS.md", (text) =>
+        text.replace("- Whenever a PR is mentioned, include its URL.", "- Always include the full PR URL."),
+      );
+      const copy = path.join(root, ".agents/skills/db/SKILL.md");
+      if (fs.existsSync(copy)) fs.writeFileSync(copy, skill.replace("old trigger", "new trigger"));
+    },
+  });
+  assert.deepEqual(
+    staged.measured.changes.map((change) => change.file),
+    ["AGENTS.md"],
+    "the out-of-repo skill file was never staged, so it cannot become an edit",
+  );
+
+  const built = buildProposal(
+    { edits: staged.measured.changes.map((change) => claim([change.id])) },
+    {
+      memoryFile: staged.memoryFile,
+      config: config(),
+      repo,
+      summary: {
+        analyzedSessions: 4,
+        totals: { positive: 3, negative: 2, gapClusters: 1 },
+        instructions: Array.from({ length: 20 }, (_, i) => ({
+          instruction: `AG-${String(i + 1).padStart(3, "0")}`,
+          positive: 0,
+          negative: 4,
+          harmSessions: 4,
+          sessions: 4,
+          relevance: 1,
+          quotes: [],
+        })),
+      },
+      measured: staged.measured,
+    },
+  );
+  assert.deepEqual(built.violations, []);
+
+  const results = applyDecisions({
+    proposal: built.proposal,
+    decisions: Object.fromEntries(built.proposal.edits.map((edit) => [edit.id, "accepted"])),
+    repo,
+    state: staged.state,
+    config: { budgetTokens: 5000 },
+  });
+
+  assert.deepEqual(results.failed, []);
+  assert.match(fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8"), /Always include the full PR URL/);
+  assert.equal(fs.readFileSync(path.join(outside, "SKILL.md"), "utf8"), skill, "nothing outside the repository moved");
+});
+
+test("re-creating a withheld unwritable skill is stray, so the round is not dropped", () => {
+  const skill = "---\nname: db\ndescription: old trigger\n---\n\nbody\n";
+  const store = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-store-recreate-")));
+  fs.mkdirSync(path.join(store, "db"));
+  fs.writeFileSync(path.join(store, "db", "SKILL.md"), skill);
+
+  const repo = makeRepo({ "AGENTS.md": MEMORY_TEXT });
+  const loaded = path.join(repo.root, ".agents", "skills");
+  fs.mkdirSync(loaded, { recursive: true });
+  fs.symlinkSync(path.join(store, "db"), path.join(loaded, "db"));
+  fs.chmodSync(path.join(store, "db"), 0o555);
+  fs.chmodSync(store, 0o555);
+
+  try {
+    const extracted =
+      "---\nname: db\ndescription: Load before node work.\n---\n\n- Use Node 18 via nvm before running any script.\n";
+    const staged = stageAndMeasure({
+      repo,
+      allowExternal: true,
+      edit: (root) => {
+        writeIn(root, "AGENTS.md", (text) => text.replace("- Use Node 18 via nvm before running any script.\n", ""));
+        // The index shows `db` read-only, but the model still has its path and the
+        // extraction rule points at the skill that already covers the lines.
+        writeIn(root, ".agents/skills/db/SKILL.md", extracted);
+      },
+    });
+    assert.deepEqual(staged.measured.stray, [{ file: ".agents/skills/db/SKILL.md", reason: STRAY_UNWRITABLE }]);
+    assert.deepEqual(
+      staged.measured.changes.map((change) => change.file),
+      ["AGENTS.md"],
+      "the withheld skill is not carried back in as a created file",
+    );
+
+    const ids = staged.measured.changes.map((change) => change.id);
+    const built = buildProposal(
+      { edits: [claim(ids, { kind: "remove", title: "drop the node pin" })] },
+      {
+        memoryFile: staged.memoryFile,
+        config: config(),
+        repo,
+        summary: aliasSummary(),
+        measured: staged.measured,
+      },
+    );
+    assert.deepEqual(built.violations, []);
+
+    const results = applyDecisions({
+      proposal: { ...built.proposal, scope: "user" },
+      decisions: Object.fromEntries(built.proposal.edits.map((edit) => [edit.id, "accepted"])),
+      repo,
+      state: staged.state,
+      config: { budgetTokens: 5000 },
+    });
+
+    assert.deepEqual(results.failed, []);
+    const written = fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8");
+    assert.ok(!written.includes("Node 18"), "the accepted memory edit still landed");
+    assert.equal(fs.readFileSync(path.join(store, "db", "SKILL.md"), "utf8"), skill, "the store is untouched");
+  } finally {
+    fs.chmodSync(store, 0o755);
+    fs.chmodSync(path.join(store, "db"), 0o755);
+  }
+});
+
+test("a skill in a read-only store never joins a user-scope apply round, so the round still lands", () => {
+  const skill = "---\nname: db\ndescription: old trigger\n---\n\nbody\n";
+  const store = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-store-apply-")));
+  fs.mkdirSync(path.join(store, "db"));
+  fs.writeFileSync(path.join(store, "db", "SKILL.md"), skill);
+
+  const repo = makeRepo({ "AGENTS.md": MEMORY_TEXT });
+  const loaded = path.join(repo.root, ".agents", "skills");
+  fs.mkdirSync(loaded, { recursive: true });
+  fs.symlinkSync(path.join(store, "db"), path.join(loaded, "db"));
+  fs.chmodSync(path.join(store, "db"), 0o555);
+  fs.chmodSync(store, 0o555);
+
+  try {
+    const staged = stageAndMeasure({
+      repo,
+      allowExternal: true,
+      edit: (root) => {
+        writeIn(root, "AGENTS.md", (text) =>
+          text.replace("- Whenever a PR is mentioned, include its URL.", "- Always include the full PR URL."),
+        );
+        const copy = path.join(root, ".agents/skills/db/SKILL.md");
+        if (fs.existsSync(copy)) fs.writeFileSync(copy, skill.replace("old trigger", "new trigger"));
+      },
+    });
+    assert.deepEqual(
+      staged.measured.changes.map((change) => change.file),
+      ["AGENTS.md"],
+      "the store-backed skill was never staged, so it cannot become an edit",
+    );
+
+    const built = buildProposal(
+      { edits: staged.measured.changes.map((change) => claim([change.id])) },
+      {
+        memoryFile: staged.memoryFile,
+        config: config(),
+        repo,
+        summary: aliasSummary(),
+        measured: staged.measured,
+      },
+    );
+    assert.deepEqual(built.violations, []);
+
+    const results = applyDecisions({
+      proposal: { ...built.proposal, scope: "user" },
+      decisions: Object.fromEntries(built.proposal.edits.map((edit) => [edit.id, "accepted"])),
+      repo,
+      state: staged.state,
+      config: { budgetTokens: 5000 },
+    });
+
+    assert.deepEqual(results.failed, []);
+    assert.match(fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8"), /Always include the full PR URL/);
+    assert.equal(fs.readFileSync(path.join(store, "db", "SKILL.md"), "utf8"), skill, "the store is untouched");
+  } finally {
+    fs.chmodSync(store, 0o755);
+    fs.chmodSync(path.join(store, "db"), 0o755);
+  }
+});
+
+test("a file written at the unstaged alias becomes stray, so the round is not dropped", () => {
+  const skill = "---\nname: db\ndescription: old trigger\n---\n\nbody\n";
+  const repo = makeRepo({ "AGENTS.md": MEMORY_TEXT, "library/db/SKILL.md": skill });
+  const loaded = path.join(repo.root, ".agents", "skills");
+  fs.mkdirSync(loaded, { recursive: true });
+  fs.symlinkSync(path.join(repo.root, "library", "db"), path.join(loaded, "db"));
+  fs.symlinkSync(path.join(repo.root, "library", "db"), path.join(loaded, "database"));
+
+  const extracted =
+    "---\nname: db\ndescription: Load before node work.\n---\n\n- Use Node 18 via nvm before running any script.\n";
+  const staged = stageAndMeasure({
+    repo,
+    edit: (root) => {
+      writeIn(root, "AGENTS.md", (text) => text.replace("- Use Node 18 via nvm before running any script.\n", ""));
+      // The index marks `db` read-only, but its path is the one the model was shown.
+      writeIn(root, ".agents/skills/db/SKILL.md", extracted);
+    },
+  });
+  assert.deepEqual(staged.measured.stray, [
+    { file: ".agents/skills/db/SKILL.md", reason: strayAliasReason(".agents/skills/database/SKILL.md") },
+  ]);
+  assert.deepEqual(
+    staged.measured.changes.map((change) => change.file),
+    ["AGENTS.md"],
+    "the alias is not carried back in as a created file",
+  );
+
+  const ids = staged.measured.changes.map((change) => change.id);
+  const built = buildProposal(
+    { edits: [claim(ids, { kind: "remove", title: "drop the node pin" })] },
+    {
+      memoryFile: staged.memoryFile,
+      config: config(),
+      repo,
+      summary: aliasSummary(),
+      measured: staged.measured,
+    },
+  );
+  assert.deepEqual(built.violations, []);
+
+  const results = applyDecisions({
+    proposal: built.proposal,
+    decisions: Object.fromEntries(built.proposal.edits.map((edit) => [edit.id, "accepted"])),
+    repo,
+    state: staged.state,
+    config: { budgetTokens: 5000 },
+  });
+
+  assert.deepEqual(results.failed, []);
+  const written = fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8");
+  assert.ok(!written.includes("Node 18"), "the accepted memory edit still landed");
+  assert.equal(fs.readFileSync(path.join(repo.root, "library/db/SKILL.md"), "utf8"), skill);
+});
+
+test("a k-linked skill projects its description delta k times, matching the post-apply surface", () => {
+  const oldDescription = "old trigger";
+  const newDescription = "Load before touching the database or writing a migration";
+  const skill = `---\nname: db\ndescription: ${oldDescription}\n---\n\nbody\n`;
+  const repo = makeRepo({ "AGENTS.md": MEMORY_TEXT, "library/db/SKILL.md": skill });
+  const loaded = path.join(repo.root, ".agents", "skills");
+  fs.mkdirSync(loaded, { recursive: true });
+  // Three names for one file: the harness loads three description lines, so an edit to
+  // that line moves the always-loaded surface by three times its delta.
+  for (const name of ["db", "database", "sql"]) {
+    fs.symlinkSync(path.join(repo.root, "library", "db"), path.join(loaded, name));
+  }
+
+  const staged = stageAndMeasure({
+    repo,
+    edit: (root) => {
+      for (const name of ["db", "database", "sql"]) {
+        const copy = path.join(root, ".agents/skills", name, "SKILL.md");
+        if (fs.existsSync(copy)) fs.writeFileSync(copy, skill.replace(oldDescription, newDescription));
+      }
+    },
+  });
+  const built = buildProposal(
+    {
+      edits: [
+        claim(
+          staged.measured.changes.map((change) => change.id),
+          { title: "sharpen the trigger" },
+        ),
+      ],
+    },
+    {
+      memoryFile: staged.memoryFile,
+      config: config(),
+      repo,
+      summary: aliasSummary(),
+      measured: staged.measured,
+      skillFiles: loadProjectSkills(repo.root, ".agents/skills", []),
+    },
+  );
+  assert.deepEqual(built.violations, []);
+
+  const results = applyDecisions({
+    proposal: built.proposal,
+    decisions: Object.fromEntries(built.proposal.edits.map((edit) => [edit.id, "accepted"])),
+    repo,
+    state: staged.state,
+    config: { budgetTokens: 5000 },
+  });
+  assert.deepEqual(results.failed, []);
+
+  // The projection the gate enforced must equal what a fresh measurement now reports.
+  const after =
+    estimateTokens(fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8")) +
+    skillDescriptionTokens(loadProjectSkills(repo.root, ".agents/skills", []));
+  assert.equal(built.proposal.budget.projected, after);
+  assert.equal(built.proposal.budget.delta, 3 * (estimateTokens(newDescription) - estimateTokens(oldDescription)));
+});
+
+test("two links to one library leave one writable copy, so an apply round is not refused for colliding targets", () => {
+  const skill = "---\nname: db\ndescription: old trigger\n---\n\nbody\n";
+  const repo = makeRepo({ "AGENTS.md": MEMORY_TEXT, "library/db/SKILL.md": skill });
+  const loaded = path.join(repo.root, ".agents", "skills");
+  fs.mkdirSync(loaded, { recursive: true });
+  fs.symlinkSync(path.join(repo.root, "library", "db"), path.join(loaded, "db"));
+  fs.symlinkSync(path.join(repo.root, "library", "db"), path.join(loaded, "database"));
+
+  // The agent edits every skill copy its staging cwd holds, alongside the memory file.
+  const staged = stageAndMeasure({
+    repo,
+    edit: (root) => {
+      writeIn(root, "AGENTS.md", (text) =>
+        text.replace("- Whenever a PR is mentioned, include its URL.", "- Always include the full PR URL."),
+      );
+      for (const name of ["db", "database"]) {
+        const copy = path.join(root, ".agents/skills", name, "SKILL.md");
+        if (fs.existsSync(copy)) fs.writeFileSync(copy, skill.replace("old trigger", "new trigger"));
+      }
+    },
+  });
+  assert.deepEqual(
+    [...new Set(staged.measured.changes.map((change) => change.file))],
+    ["AGENTS.md", ".agents/skills/database/SKILL.md"],
+    "one library file yields one editable path, whatever the harness calls it",
+  );
+
+  const built = buildProposal(
+    { edits: staged.measured.changes.map((change) => claim([change.id])) },
+    {
+      memoryFile: staged.memoryFile,
+      config: config(),
+      repo,
+      summary: {
+        analyzedSessions: 4,
+        totals: { positive: 3, negative: 2, gapClusters: 1 },
+        instructions: Array.from({ length: 20 }, (_, i) => ({
+          instruction: `AG-${String(i + 1).padStart(3, "0")}`,
+          positive: 0,
+          negative: 4,
+          harmSessions: 4,
+          sessions: 4,
+          relevance: 1,
+          quotes: [],
+        })),
+      },
+      measured: staged.measured,
+    },
+  );
+  assert.deepEqual(built.violations, []);
+
+  const results = applyDecisions({
+    proposal: built.proposal,
+    decisions: Object.fromEntries(built.proposal.edits.map((edit) => [edit.id, "accepted"])),
+    repo,
+    state: staged.state,
+    config: { budgetTokens: 5000 },
+  });
+
+  assert.deepEqual(results.failed, []);
+  assert.ok(results.written.some((entry) => entry.file === "AGENTS.md"));
+  assert.match(fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8"), /Always include the full PR URL/);
+  assert.match(fs.readFileSync(path.join(repo.root, "library/db/SKILL.md"), "utf8"), /new trigger/);
+});
+
+test("a skill symlinked out of the repo never joins a project apply round, so it cannot abort one", () => {
+  const skill = "---\nname: db\ndescription: old trigger\n---\n\nbody\n";
+  const library = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-shared-skills-")));
+  fs.mkdirSync(path.join(library, "db"));
+  fs.writeFileSync(path.join(library, "db", "SKILL.md"), skill);
+
+  const repo = makeRepo({ "AGENTS.md": MEMORY_TEXT });
+  const loaded = path.join(repo.root, ".agents", "skills");
+  fs.mkdirSync(loaded, { recursive: true });
+  fs.symlinkSync(path.join(library, "db"), path.join(loaded, "db"));
+
+  // The synthesis agent edits whatever is in its staging cwd, so anything staged can
+  // become an accepted edit - and project scope cannot write a path that resolves
+  // outside the repository, which would drop the memory-file edits with it.
+  const staged = stageAndMeasure({
+    repo,
+    edit: (root) => {
+      writeIn(root, "AGENTS.md", (text) =>
+        text.replace("- Whenever a PR is mentioned, include its URL.", "- Always include the full PR URL."),
+      );
+      // Whether it edits the staged copy or writes the path fresh, the model reaches the
+      // same repository file - one apply could not write without dropping the round.
+      writeIn(root, ".agents/skills/db/SKILL.md", skill.replace("old trigger", "new trigger"));
+    },
+  });
+  assert.deepEqual(
+    staged.measured.changes.map((change) => change.file),
+    ["AGENTS.md"],
+    "the out-of-repo skill is neither staged nor measurable as a created file",
+  );
+  assert.deepEqual(staged.measured.stray, [{ file: ".agents/skills/db/SKILL.md", reason: STRAY_OUTSIDE_REPO }]);
+
+  const built = buildProposal(
+    { edits: staged.measured.changes.map((change) => claim([change.id])) },
+    {
+      memoryFile: staged.memoryFile,
+      config: config(),
+      repo,
+      summary: {
+        analyzedSessions: 4,
+        totals: { positive: 3, negative: 2, gapClusters: 1 },
+        instructions: Array.from({ length: 20 }, (_, i) => ({
+          instruction: `AG-${String(i + 1).padStart(3, "0")}`,
+          positive: 0,
+          negative: 4,
+          harmSessions: 4,
+          sessions: 4,
+          relevance: 1,
+          quotes: [],
+        })),
+      },
+      measured: staged.measured,
+    },
+  );
+  assert.deepEqual(built.violations, []);
+  assert.ok(
+    built.proposal.notes.some((note) => note === `ignored .agents/skills/db/SKILL.md: ${STRAY_OUTSIDE_REPO}`),
+    `the note must name the real cause: ${built.proposal.notes.join(" | ")}`,
+  );
+
+  const results = applyDecisions({
+    proposal: built.proposal,
+    decisions: Object.fromEntries(built.proposal.edits.map((edit) => [edit.id, "accepted"])),
+    repo,
+    state: staged.state,
+    config: { budgetTokens: 5000 },
+  });
+
+  assert.deepEqual(results.failed, []);
+  assert.deepEqual(
+    results.written.map((entry) => entry.file),
+    ["AGENTS.md"],
+  );
+  assert.match(fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8"), /Always include the full PR URL/);
+  assert.equal(fs.readFileSync(path.join(library, "db", "SKILL.md"), "utf8"), skill, "the shared library is untouched");
 });
 
 test("a skill file that changed after the proposal refuses the apply; unchanged, the edit lands", () => {

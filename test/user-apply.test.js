@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { applyDecisions, readOnlySymlinkMessage } from "../src/apply/writer.js";
+import { applyDecisions, readOnlySymlinkMessage, readOnlyTargetMessage } from "../src/apply/writer.js";
 import { cmdApply } from "../src/commands/apply.js";
 import { cmdInit } from "../src/commands/init.js";
 import { loadConfig } from "../src/config.js";
@@ -33,42 +33,6 @@ test("user state creation tightens an existing directory to mode 0700", () => {
   new State(home, { stateDir, mode: 0o700, exclude: false }).ensure();
 
   assert.equal(fs.statSync(stateDir).mode & 0o777, 0o700);
-});
-
-test("apply refuses a user-level memory file that is a symlink to a read-only path", () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-uapply-home-"));
-  const source = path.join(home, "dotfiles", "AGENTS.md");
-  const link = path.join(home, ".agents", "AGENTS.md");
-  const text = "# User memory\n\n- Keep secrets out of prompts.\n";
-  fs.mkdirSync(path.dirname(source), { recursive: true });
-  fs.mkdirSync(path.dirname(link), { recursive: true });
-  fs.writeFileSync(source, text);
-  fs.chmodSync(source, 0o444);
-  fs.symlinkSync(source, link);
-
-  const state = new State(home, {
-    stateDir: path.join(home, ".config", "backpass", "user"),
-    mode: 0o700,
-    exclude: false,
-  }).ensure();
-  const results = applyDecisions({
-    proposal: {
-      memoryFile: { path: ".agents/AGENTS.md", hash: memoryTextHash(text), tokens: 20 },
-      edits: [{ id: "e1", kind: "rewrite", file: ".agents/AGENTS.md" }],
-      config: { budgetTokens: 5000, skillsDir: ".agents/skills" },
-    },
-    decisions: { e1: "accepted" },
-    repo: { root: home, name: "user" },
-    state,
-    config: { budgetTokens: 5000, skillsDir: ".agents/skills" },
-  });
-
-  assert.equal(results.written.length, 0);
-  assert.equal(results.rejectionsRecorded, false);
-  assert.equal(results.failed[0].error, readOnlySymlinkMessage(link, fs.realpathSync(source)));
-  assert.match(results.failed[0].error, /is a symlink to .+ which is not writable; edit the source that generates it/);
-  assert.equal(fs.readFileSync(source, "utf8"), text);
-  assert.equal(fs.readlinkSync(link), source);
 });
 
 test("apply names a symlink whose writable file is in a read-only store", () => {
@@ -102,7 +66,58 @@ test("apply names a symlink whose writable file is in a read-only store", () => 
     });
 
     assert.equal(results.written.length, 0);
+    assert.equal(results.rejectionsRecorded, false);
     assert.equal(results.failed[0].error, readOnlySymlinkMessage(link, fs.realpathSync(source)));
+    assert.match(
+      results.failed[0].error,
+      /is a symlink to .+ which is not writable; edit the source that generates it/,
+    );
+    assert.equal(fs.readFileSync(source, "utf8"), text);
+    assert.equal(fs.readlinkSync(link), source);
+  } finally {
+    fs.chmodSync(store, 0o755);
+  }
+});
+
+test("apply names the read-only store when the symlink is a directory on the way to the file", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-uapply-dirlink-"));
+  const store = path.join(home, "readonly-store");
+  const source = path.join(store, "AGENTS.md");
+  // Nothing on the path lstats as a symlink except a directory, which is how a
+  // home-manager or nix layout generates the loaded tree.
+  const link = path.join(home, ".agents");
+  const text = "# User memory\n\n- Keep secrets out of prompts.\n";
+  fs.mkdirSync(store, { recursive: true });
+  fs.writeFileSync(source, text, { mode: 0o644 });
+  fs.symlinkSync(store, link, "dir");
+  fs.chmodSync(store, 0o555);
+
+  try {
+    const state = new State(home, {
+      stateDir: path.join(home, ".config", "backpass", "user"),
+      mode: 0o700,
+      exclude: false,
+    }).ensure();
+    const results = applyDecisions({
+      proposal: {
+        memoryFile: { path: ".agents/AGENTS.md", hash: memoryTextHash(text), tokens: 20 },
+        edits: [{ id: "e1", kind: "rewrite", file: ".agents/AGENTS.md" }],
+        config: { budgetTokens: 5000, skillsDir: ".agents/skills" },
+      },
+      decisions: { e1: "accepted" },
+      repo: { root: home, name: "user" },
+      state,
+      config: { budgetTokens: 5000, skillsDir: ".agents/skills" },
+    });
+
+    assert.equal(results.written.length, 0);
+    // The leaf is a plain file, so the refusal names the resolved path rather than
+    // asserting a symlink that is not there.
+    assert.equal(
+      results.failed[0].error,
+      readOnlyTargetMessage(path.join(home, ".agents", "AGENTS.md"), fs.realpathSync(source)),
+    );
+    assert.doesNotMatch(results.failed[0].error, /is a symlink to/);
     assert.equal(fs.readFileSync(source, "utf8"), text);
   } finally {
     fs.chmodSync(store, 0o755);

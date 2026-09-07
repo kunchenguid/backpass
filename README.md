@@ -106,8 +106,12 @@ Harness load paths, verified for v1:
 - **Codex** loads `AGENTS.md` from `CODEX_HOME` (default `~/.codex`). It follows the
   AGENTS.md convention; `@` import is not assumed.
 
-A target that is a symlink into a read-only store (dotfiles, nix) is refused with
-`<path> is a symlink to <real>, which is not writable; edit the source that generates it`.
+A target that resolves into a read-only store (nix, home-manager) is refused by name
+rather than written. The whole path is resolved, so the link may be the file itself
+(`<path> is a symlink to <real>, which is not writable; edit the source that generates
+it`) or a directory on the way to it (`<path> resolves to <real>, which is not
+writable; ...`). The test is whether the directory holding the resolved location can be
+written; both messages name that resolved location, so you know which source to edit.
 
 ```sh
 backpass init --scope user
@@ -123,7 +127,10 @@ directory, a path to a SKILL.md, or an existing file the config does not name - 
 unknown name fails, listing the valid ones, instead of falling back to the whole surface. A
 configured file that contains only an `@` import is rejected rather than rewritten or silently
 mapped to its import; the error names the imported memory file, which must itself be configured
-to be targeted.
+to be targeted. A correctly named skill whose file backpass cannot write - one resolving into a
+location nothing may write, or in project scope one resolving outside the repository - is refused
+by name too: backpass loads and bills that skill, but a targeted run against it could only end in
+a refused write.
 
 ```sh
 backpass --target AGENTS.md          # this memory file; existing skills are read-only
@@ -407,8 +414,11 @@ The estimator is bytes/4 - harness-neutral, ±15%.
 
 The gated number is the **memory file plus every skill's `description:` line** - that is
 what an agent actually pays on every session. Skill bodies stay free until triggered and
-never compete for this budget. (A repo that already carries many skills may find itself
-over budget with no file having changed when upgrading to this accounting - that is the
+never compete for this budget. Every entry the harness loads counts, including one that is
+a symlink into a shared library: a harness loads what the path resolves to, so one library
+reached through several links is loaded - and billed - once per link, and an edit to its
+description line costs that many times its delta. (A repo that already carries many skills
+may find itself over budget with no file having changed when upgrading to this accounting - that is the
 one-time re-tune of `budgetTokens`, not a regression.)
 
 ```

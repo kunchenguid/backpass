@@ -84,9 +84,98 @@ test("a target validates every configured project memory path before narrowing",
   assert.throws(() => resolveTarget("AGENTS.md", scope), /private\.txt resolves outside the project root/);
 });
 
+test("--target refuses one name that names more than one file, however it got there", () => {
+  const { repo, scope } = projectScope();
+  const library = path.join(repo.root, "library", "db");
+  fs.mkdirSync(library, { recursive: true });
+  fs.writeFileSync(path.join(library, "SKILL.md"), DB);
+  fs.rmSync(path.join(repo.root, ".agents/skills/db"), { recursive: true });
+  const loaded = path.join(repo.root, ".agents", "skills");
+  fs.symlinkSync(library, path.join(loaded, "db"));
+  fs.symlinkSync(library, path.join(loaded, "database"));
+
+  // Both names are loaded and billed, so both match. --target resolves exactly one file,
+  // and the hint must not tell someone to rename a file that already has only one name.
+  assert.equal(loadProjectSkills(repo.root, ".agents/skills", []).filter((s) => s.name === "db").length, 2);
+  assert.throws(
+    () => resolveTarget("db", scope),
+    (err) =>
+      err instanceof UserError &&
+      /is ambiguous: it names \.agents\/skills\/database\/SKILL\.md and \.agents\/skills\/db\/SKILL\.md/.test(
+        err.message,
+      ) &&
+      /one file under several links, or genuinely different files/.test(err.hint) &&
+      /needs a name that identifies exactly one file/.test(err.hint),
+  );
+
+  // Two genuinely different files under one frontmatter name refuse the same way.
+  const distinct = projectScope({ ".agents/skills/other/SKILL.md": DB.replace("transaction.", "transaction!") });
+  assert.throws(
+    () => resolveTarget("db", distinct.scope),
+    (err) =>
+      err instanceof UserError &&
+      /is ambiguous: it names \.agents\/skills\/db\/SKILL\.md and \.agents\/skills\/other\/SKILL\.md/.test(
+        err.message,
+      ) &&
+      /needs a name that identifies exactly one file/.test(err.hint),
+  );
+});
+
 test("a name that is both a skill and a memory file is refused, never picked", () => {
   const { scope } = projectScope({ ".agents/skills/agents/SKILL.md": DB.replace("name: db", "name: AGENTS.md") });
   assert.throws(() => resolveTarget("AGENTS.md", scope), /ambiguous: it names AGENTS\.md and \.agents\/skills\/agents/);
+});
+
+test("--target refuses a skill staging will withhold, naming staging's own reason", () => {
+  const library = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-target-library-")));
+  fs.mkdirSync(path.join(library, "beads"));
+  fs.writeFileSync(
+    path.join(library, "beads", "SKILL.md"),
+    "---\nname: beads\ndescription: Load before tracking work.\n---\n\n- Track it.\n",
+  );
+  const { repo, scope } = projectScope();
+  fs.symlinkSync(path.join(library, "beads"), path.join(repo.root, ".agents", "skills", "beads"));
+
+  // It is loaded and billed, so it is a name the user can plausibly type - but a targeted
+  // run on it could only end in zero edits, so it is refused before the synthesis turn.
+  const skills = loadProjectSkills(repo.root, ".agents/skills", []);
+  assert.ok(skills.some((skill) => skill.name === "beads" && skill.path === ".agents/skills/beads/SKILL.md"));
+  assert.throws(
+    () => resolveTarget("beads", scope),
+    (err) =>
+      err instanceof UserError &&
+      /--target beads is at \.agents\/skills\/beads\/SKILL\.md, which resolves outside the repository/.test(
+        err.message,
+      ) &&
+      /cannot write it there/.test(err.hint),
+  );
+
+  // The layout this change exists to support stays targetable: a link inside the repo.
+  fs.mkdirSync(path.join(repo.root, "library", "review"), { recursive: true });
+  fs.writeFileSync(path.join(repo.root, "library", "review", "SKILL.md"), REVIEW);
+  fs.symlinkSync(path.join(repo.root, "library", "review"), path.join(repo.root, ".agents", "skills", "review"));
+  assert.deepEqual(resolveTarget("review", scope), {
+    kind: "skill",
+    path: ".agents/skills/review/SKILL.md",
+    name: "review",
+  });
+  assert.deepEqual(resolveTarget("db", scope), { kind: "skill", path: ".agents/skills/db/SKILL.md", name: "db" });
+});
+
+test("--target refuses a skill that resolves into a directory nothing may write", () => {
+  const { repo, scope } = projectScope({ "vendor/beads/SKILL.md": REVIEW.replace("review", "beads") });
+  const vendor = path.join(repo.root, "vendor");
+  fs.symlinkSync(path.join(vendor, "beads"), path.join(repo.root, ".agents", "skills", "beads"));
+  fs.chmodSync(path.join(vendor, "beads"), 0o555);
+
+  try {
+    assert.throws(
+      () => resolveTarget("beads", scope),
+      /--target beads is at \.agents\/skills\/beads\/SKILL\.md, which resolves to a location that cannot be written/,
+    );
+  } finally {
+    fs.chmodSync(path.join(vendor, "beads"), 0o755);
+  }
 });
 
 test("user scope resolves against the user-level memory files and skill dirs", () => {

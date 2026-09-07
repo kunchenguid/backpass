@@ -4,7 +4,7 @@ import path from "node:path";
 import { extractJson, openSession, usageRecord } from "./acpx.js";
 import { userClaudeSkillsDir } from "./config.js";
 import { renderEvidenceForPrompt } from "./fold.js";
-import { renderInstructionIndex } from "./memory.js";
+import { renderInstructionIndex, resolveMemoryPath } from "./memory.js";
 import { renderPrompt, render, loadPrompt } from "./prompts.js";
 import { buildProposal, effectiveMaxEdits, ProposalViolation, renderChangesForPrompt } from "./proposal.js";
 import {
@@ -135,19 +135,55 @@ function harnessCountsOf(transcripts) {
   return counts;
 }
 
-/** The repo must be exactly as fingerprinted; the staging copy is the only place to write. */
+/**
+ * The repo must be exactly as fingerprinted; the staging copy is the only place to write.
+ *
+ * Skills staging withheld are left out: such a file is one backpass has guaranteed it will
+ * never write, so aborting a run over a third party's edit to it would discard measured
+ * work for nothing. That holds on every run for the two reasons staging settles before it
+ * narrows - the path resolves outside the repository, or into a location nothing may
+ * write. It does not hold for the one reason it settles after: a skill withheld only as a
+ * duplicate of a name already staged is still fingerprinted on a narrowed run, which never
+ * reaches that decision. An ordinary repository skill stays fingerprinted either way. A
+ * fingerprinted path can still resolve outside the repository - that is the ordinary
+ * user-scope layout - so a change there is reported for what it is rather than as a direct
+ * repository edit.
+ */
 function assertRepoUntouched(repo, before, workspaceRoot) {
   const after = repoFingerprint(repo, Object.keys(before));
   const moved = Object.keys(before).filter((file) => before[file] !== after[file]);
   if (!moved.length) return;
+  const insideRepo = (file) => {
+    try {
+      resolveMemoryPath(repo.root, file);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const inside = moved.filter(insideRepo);
+  const outside = moved.filter((file) => !inside.includes(file));
+  const claims = [];
+  if (inside.length) {
+    claims.push(
+      `synthesis changed ${inside.join(", ")} in the repository directly instead of the staging copy (${workspaceRoot})`,
+    );
+  }
+  if (outside.length) {
+    claims.push(
+      `${outside.join(", ")} changed during synthesis; ` +
+        `${outside.length > 1 ? "those paths resolve" : "that path resolves"} outside the repository`,
+    );
+  }
   throw new UserError(
-    `synthesis changed ${moved.join(", ")} in the repository directly instead of the staging copy ` +
-      `(${workspaceRoot}); nothing was proposed`,
-    `inspect the change with \`git diff\`, restore the file, and re-run - a harness that edits outside its cwd cannot be trusted with the synthesis role`,
+    `${claims.join("; also ")}; nothing was proposed`,
+    inside.length
+      ? `inspect the change with \`git diff\`, restore the file, and re-run - a harness that edits outside its cwd cannot be trusted with the synthesis role`
+      : `inspect the file and re-run - either the synthesis harness wrote through the link to a skill it was told is read-only, or another process changed the shared library mid-run`,
   );
 }
 
-function targetRule(target, memoryPath, skillsDir, stagedTargetPath = null) {
+function targetRule(target, memoryPath, skillsDir, stagedTargetPath = null, unstageable = []) {
   if (target.kind === "skill") {
     return (
       `0. **This run targets \`./${stagedTargetPath || workspacePathFor(target.path)}\` only.** It is the one staged file. ` +
@@ -158,6 +194,14 @@ function targetRule(target, memoryPath, skillsDir, stagedTargetPath = null) {
     return (
       `0. **This run targets \`./${memoryPath}\` only.** The skills listed above live in the repository and are ` +
       `read-only: do not edit them. You may still extract a NEW skill under \`./${skillsDir}/\`.\n`
+    );
+  }
+  if (unstageable.length) {
+    return (
+      `0. **The skills marked \`read-only\` above are not in your staging copy**, for the reason each row ` +
+      `gives, and backpass cannot write them at that path. Read them for grounding and treat what they ` +
+      `already cover as covered - do not edit them, re-create them, or copy their content into ` +
+      `\`./${memoryPath}\`.\n`
     );
   }
   return "";
@@ -450,16 +494,28 @@ export async function synthesizeProposal({
   // Staging holds only the write surface: every skill on a surface run, none of them on
   // a memory-file target (new extracts are still measured), just the one on a skill target.
   const stagedSkills = target.kind === "surface" ? null : target.kind === "skill" ? [target.path] : [];
-  const workspaceOptions = { state, repo, memoryFile, skillsDir: overflow.dir, skillDirs, stagedSkills };
+  const workspaceOptions = {
+    state,
+    repo,
+    memoryFile,
+    skillsDir: overflow.dir,
+    skillDirs,
+    stagedSkills,
+    allowExternal: scope?.kind === "user",
+  };
   let workspace = prepareWorkspace(workspaceOptions);
   const stagedSkillsDir =
     workspace.skillMappings.find((mapping) => mapping.logical === overflow.dir)?.staged ||
     workspacePathFor(overflow.dir);
   // Unstaged skills keep their repository paths in the index: the model may read them
-  // there for grounding, and the target rule says they are not writable.
+  // there for grounding, and the target rule says they are not writable. The ones staging
+  // confined out are also marked, so a run that narrows nothing still says so.
+  const readOnlyReason = (file) =>
+    workspace.unstageable.find((entry) => file === entry.path || file.startsWith(`${entry.path}/`))?.reason || null;
   const stagedSkillFiles = skillFiles.map((skill) => ({
     ...skill,
     path: workspace.stagedPaths.get(skill.path) || skill.path,
+    readOnly: readOnlyReason(skill.path),
   }));
 
   const editValues = {
@@ -469,6 +525,7 @@ export async function synthesizeProposal({
       workspace.memoryWorkspacePath,
       stagedSkillsDir,
       target.kind === "skill" ? workspace.stagedPaths.get(target.path) || workspacePathFor(target.path) : null,
+      stagedSkillFiles.filter((skill) => skill.readOnly),
     ),
     REPO_NAME: repo.name,
     REPO_ROOT: repo.root,
@@ -491,7 +548,10 @@ export async function synthesizeProposal({
   const editPromptFile = path.join(promptDir, "synthesis-edit.md");
   fs.writeFileSync(editPromptFile, renderPrompt("synthesis", editValues));
 
-  const fingerprint = repoFingerprint(repo, [memoryFile.path, ...skillFiles.map((s) => s.path)]);
+  const fingerprint = repoFingerprint(repo, [
+    memoryFile.path,
+    ...skillFiles.filter((skill) => !readOnlyReason(skill.path)).map((skill) => skill.path),
+  ]);
   const sessionName = `backpass-synth-${process.pid}`;
   const timeoutSeconds = Math.max(config.timeoutSeconds, 900);
   const usage = [];

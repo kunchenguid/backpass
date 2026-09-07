@@ -2,8 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { anchoredHunks, countOccurrences, span } from "./diff.js";
-import { parseMemoryUnits } from "./memory.js";
-import { parseFrontmatter, skillBody } from "./skills.js";
+import { warn } from "./logger.js";
+import { parseMemoryUnits, readOnlyResolvedPath, resolveMemoryPath } from "./memory.js";
+import { isDirectoryEntry, parseFrontmatter, skillBody } from "./skills.js";
 import { sha256 } from "./state.js";
 
 /**
@@ -36,7 +37,15 @@ export function workspacePathFor(file) {
  * narrows which existing skill files are copied (a targeted run stages only its write
  * surface); the skill-dir mappings stay, so a created SKILL.md is still measured.
  */
-export function prepareWorkspace({ state, repo, memoryFile, skillsDir, skillDirs = [skillsDir], stagedSkills = null }) {
+export function prepareWorkspace({
+  state,
+  repo,
+  memoryFile,
+  skillsDir,
+  skillDirs = [skillsDir],
+  stagedSkills = null,
+  allowExternal = false,
+}) {
   const root = workspaceRoot(state);
   fs.rmSync(root, { recursive: true, force: true });
   fs.mkdirSync(root, { recursive: true });
@@ -50,23 +59,73 @@ export function prepareWorkspace({ state, repo, memoryFile, skillsDir, skillDirs
   originals.set(memoryFile.path, memoryFile.text);
   stagedPaths.set(memoryFile.path, memoryWorkspacePath);
 
-  const skillMappings = skillDirs.map((logical) => ({ logical, staged: workspacePathFor(logical) }));
-  for (const { logical: sourceDir, staged: stagedDir } of skillMappings) {
-    const skillsSource = path.isAbsolute(sourceDir) ? sourceDir : path.join(repo.root, sourceDir);
+  // A skill that resolves outside the repository is still loaded and still billed, but
+  // project scope cannot write it - `resolveMemoryPath` refuses the path at apply, and a
+  // refusal there drops the whole round. Leaving it out of staging is what makes it
+  // impossible for such a file to become an edit at all.
+  const confineTo = confinementRoot(repo.root, allowExternal);
+  const skillMappings = skillDirs.map((logical) => ({
+    logical,
+    staged: workspacePathFor(logical),
+    source: path.isAbsolute(logical) ? logical : path.join(repo.root, logical),
+  }));
+  const unstageable = [];
+  const stagedIdentities = new Map();
+  for (const { logical: sourceDir, staged: stagedDir, source: skillsSource } of skillMappings) {
     if (!fs.existsSync(skillsSource) || !fs.statSync(skillsSource).isDirectory()) continue;
-    for (const relative of walkFiles(skillsSource)) {
+    const confined = [];
+    const toLogical = (relative) =>
+      path.isAbsolute(sourceDir) ? path.join(sourceDir, relative) : path.posix.join(sourceDir, relative);
+    for (const relative of walkFiles(skillsSource, "", confineTo, confined)) {
       const from = path.join(skillsSource, relative);
-      const logical = path.isAbsolute(sourceDir)
-        ? path.join(sourceDir, relative)
-        : path.posix.join(sourceDir, relative);
+      const logical = toLogical(relative);
+      const identity = realPath(from);
+      // A link can land in a store nothing may write - the layout this whole change
+      // exists to follow - and that is true of a vendored directory inside the repository
+      // as much as of a nix store outside it. Apply refuses such a path and that refusal
+      // drops the round, so staging declares it read-only instead of offering the edit.
+      // It is decided for every loaded skill, before a narrowed run drops the ones it does
+      // not write, so "backpass will never write this file" means the same thing on both.
+      const refusal = stagingRefusal(from, confineTo);
+      if (refusal) {
+        unstageable.push({ path: logical, reason: refusal, identity });
+        continue;
+      }
       if (stagedSkills && !stagedSkills.includes(logical)) continue;
+      // Two links to one library are two names the harness loads, so both are walked and
+      // both are billed - but one file cannot be two independently editable copies, and
+      // apply refuses a round whose targets collide. The first name owns the write. This
+      // one stays behind the narrowing: only a staged name can own anything.
+      const owner = identity && stagedIdentities.get(identity);
+      if (owner) {
+        unstageable.push({ path: logical, reason: `the same file is already staged as ${owner}` });
+        continue;
+      }
       const staged = path.posix.join(stagedDir, relative);
       const to = path.join(root, staged);
-      fs.mkdirSync(path.dirname(to), { recursive: true });
-      fs.copyFileSync(from, to);
-      originals.set(logical, fs.readFileSync(from, "utf8"));
+      // Following links means `from` can be any file in a foreign store, so a store this
+      // user cannot read is skipped and named the way `loadSkills` skips one - never an
+      // errno thrown out of workspace preparation.
+      try {
+        fs.mkdirSync(path.dirname(to), { recursive: true });
+        fs.copyFileSync(from, to);
+        // The agent edits this copy in place, so it must be writable whatever the source's
+        // mode is - a store-managed library is commonly read-only. Only the copy is
+        // touched; the source keeps its own mode, and apply takes the mode it writes from
+        // the repository file rather than from here.
+        fs.chmodSync(to, (fs.statSync(from).mode & 0o777) | 0o600);
+        originals.set(logical, fs.readFileSync(from, "utf8"));
+      } catch (err) {
+        fs.rmSync(to, { force: true });
+        originals.delete(logical);
+        unstageable.push({ path: logical, reason: READ_ONLY_UNREADABLE });
+        warn(`${logical} could not be read (${err.message}); it stays out of the staging copy`);
+        continue;
+      }
+      if (identity) stagedIdentities.set(identity, logical);
       stagedPaths.set(logical, staged);
     }
+    unstageable.push(...confined.map((relative) => ({ path: toLogical(relative), reason: READ_ONLY_OUTSIDE_REPO })));
   }
   fs.mkdirSync(path.join(root, workspacePathFor(skillsDir)), { recursive: true });
 
@@ -79,10 +138,52 @@ export function prepareWorkspace({ state, repo, memoryFile, skillsDir, skillDirs
     skillMappings,
     stagedPaths,
     originals,
+    confineTo,
+    unstageable,
+    stagedIdentities,
   };
 }
 
-function walkFiles(dir, prefix = "") {
+/** Resolved identity of a path, or null when it cannot be resolved (broken link). */
+function realPath(file) {
+  try {
+    return fs.realpathSync(file);
+  } catch {
+    return null;
+  }
+}
+
+/** "dir", "file", or null once symlinks are followed; a broken link is null, never a throw. */
+function entryKind(dir, entry) {
+  if (isDirectoryEntry(dir, entry)) return "dir";
+  if (entry.isFile()) return "file";
+  if (!entry.isSymbolicLink()) return null;
+  try {
+    return fs.statSync(path.join(dir, entry.name)).isFile() ? "file" : null;
+  } catch {
+    return null;
+  }
+}
+
+const SKILL_FILENAME = "SKILL.md";
+
+function isFile(file) {
+  try {
+    return fs.statSync(file).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** True when an already-resolved path lies strictly inside `root`; a null root confines nothing. */
+function withinRoot(root, resolved) {
+  if (!root) return true;
+  if (!resolved) return false;
+  const relative = path.relative(root, resolved);
+  return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
+function walkFiles(dir, prefix = "", confineTo = null, confined = []) {
   const out = [];
   let entries;
   try {
@@ -90,13 +191,84 @@ function walkFiles(dir, prefix = "") {
   } catch {
     return out;
   }
+  // One rule for taking a file, wherever the walk reaches it: a path that resolves
+  // outside the root is named for the caller instead of staged, so the containment
+  // invariant cannot hold on one branch and not its sibling.
+  const take = (absolute, relativePath) => {
+    if (!confineTo || withinRoot(confineTo, realPath(absolute))) out.push(relativePath);
+    else confined.push(relativePath);
+  };
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
     const relative = prefix ? path.posix.join(prefix, entry.name) : entry.name;
-    if (entry.isDirectory()) out.push(...walkFiles(path.join(dir, entry.name), relative));
-    else if (entry.isFile()) out.push(relative);
+    // Follow symlinks: a skills directory is commonly a set of links into a shared
+    // library, and those are the files the harness loads. Staging copies what it finds,
+    // so an edit lands in the staging copy and never writes through a link.
+    const target = entryKind(dir, entry);
+    if (target === "dir") {
+      const child = path.join(dir, entry.name);
+      const identity = realPath(child);
+      if (!identity) continue;
+      // Pruned here, but named: the caller tells the model these are read-only rather
+      // than letting a proposed edit to one be discarded without a reason.
+      if (!withinRoot(confineTo, identity)) {
+        confined.push(relative);
+        continue;
+      }
+      // A link may point at anything - in the layout that motivated following links at
+      // all, a whole plugin repository. Only the file the skill layout loads is taken,
+      // so the target's subtree is never walked, copied, or read.
+      //
+      // This is also the whole reason a cycle cannot be walked. A self link, a link back
+      // to an ancestor and a mutual pair are all directory links, and none of them is
+      // descended into; a real directory is always deeper than its parents, so ordinary
+      // recursion terminates. Anyone restoring subtree walking under a symlinked directory
+      // must reinstate cycle detection in the same change, or the walk recurses until the
+      // stack blows.
+      if (entry.isSymbolicLink()) {
+        const leaf = path.join(child, SKILL_FILENAME);
+        if (prefix === "" && isFile(leaf)) take(leaf, path.posix.join(relative, SKILL_FILENAME));
+        continue;
+      }
+      out.push(...walkFiles(child, relative, confineTo, confined));
+    } else if (target === "file") {
+      take(path.join(dir, entry.name), relative);
+    }
   }
   return out;
 }
+
+/** Why a loaded skill is absent from the staging copy: the skill index must say which. */
+const READ_ONLY_OUTSIDE_REPO = "resolves outside the repository";
+const READ_ONLY_UNREADABLE = "could not be read when the staging copy was built";
+const READ_ONLY_UNWRITABLE = "resolves to a location that cannot be written";
+
+/** The root a project-scope walk may not leave; user scope owns files anywhere. */
+function confinementRoot(repoRoot, allowExternal) {
+  return allowExternal ? null : realPath(repoRoot) || path.resolve(repoRoot);
+}
+
+/** Why staging withholds a skill file from the copy, or null when it can stage it. */
+function stagingRefusal(absolute, confineTo) {
+  if (!withinRoot(confineTo, realPath(absolute))) return READ_ONLY_OUTSIDE_REPO;
+  return readOnlyResolvedPath(absolute) ? READ_ONLY_UNWRITABLE : null;
+}
+
+/**
+ * The one place outside staging that may ask staging's question: a run targeting a skill
+ * the copy will not hold could never emit an edit for it, so it is refused by name here
+ * rather than after a synthesis turn that was told the file is the one it may write.
+ */
+export function skillStagingRefusal(repoRoot, skillPath, { allowExternal = false } = {}) {
+  const absolute = path.isAbsolute(skillPath) ? skillPath : path.join(repoRoot, skillPath);
+  return stagingRefusal(absolute, confinementRoot(repoRoot, allowExternal));
+}
+
+/** Why measurement dropped a file the model wrote: the note the human reads must say which. */
+export const STRAY_OUTSIDE_SURFACE = "synthesis wrote it outside the memory file and skills";
+export const STRAY_OUTSIDE_REPO = "it resolves outside the repository, which project scope cannot write";
+export const strayAliasReason = (owner) => `it is the same file already staged as ${owner}`;
+export const STRAY_UNWRITABLE =
+  "it resolves to a location that cannot be written, so staging withheld it from the copy";
 
 /** A created file counts as a skill only in the layouts `loadSkills` reads. */
 export function isSkillFilePath(relative, skillsDir) {
@@ -253,6 +425,9 @@ export function measureWorkspace(workspace) {
     skillMappings = skillDirs.map((logical) => ({ logical, staged: workspacePathFor(logical) })),
     stagedPaths = new Map([...workspace.originals.keys()].map((file) => [file, workspacePathFor(file)])),
     originals,
+    confineTo = null,
+    stagedIdentities = new Map(),
+    unstageable = [],
   } = workspace;
   /** @type {any[]} */
   const changes = [];
@@ -276,20 +451,63 @@ export function measureWorkspace(workspace) {
     }
   }
 
+  // The memory file's own staged directory is a mapping too: an absolute memory file
+  // stages under `.external/<hash>/`, and a file written beside it must be named where
+  // the user would look for it rather than by the hash.
+  const memoryStaged = stagedPaths.get(memoryPath) || workspacePathFor(memoryPath);
+  const dirMappings = [
+    ...skillMappings,
+    { logical: path.dirname(memoryPath), staged: path.posix.dirname(memoryStaged) },
+  ];
+
   const knownStaged = new Set(stagedPaths.values());
   for (const staged of [...present].sort()) {
     if (knownStaged.has(staged)) continue;
-    const mapping = skillMappings.find(({ staged: dir }) => staged === dir || staged.startsWith(`${dir}/`));
+    const mapping = dirMappings.find(({ staged: dir }) => staged === dir || staged.startsWith(`${dir}/`));
     if (!mapping) {
-      stray.push(staged);
+      stray.push({ file: staged, reason: STRAY_OUTSIDE_SURFACE });
       continue;
     }
     const inside = staged.slice(mapping.staged.length).replace(/^\//, "");
+    // Every note names the path the reader knows - the repository path, or the real one a
+    // user-scope entry resolves to - never the `.external/<hash>` the staging copy uses.
     const logical = path.isAbsolute(mapping.logical)
       ? path.join(mapping.logical, inside)
       : path.posix.join(mapping.logical, inside);
     if (!isSkillFilePath(logical, skillDirs)) {
-      stray.push(staged);
+      stray.push({ file: logical, reason: STRAY_OUTSIDE_SURFACE });
+      continue;
+    }
+    // Staging leaves out a skill that resolves outside the repository; measurement must
+    // not carry one back in as a created file, which apply could never write either.
+    // The gate is apply's own, so the two can never disagree about what is reachable.
+    if (confineTo) {
+      try {
+        resolveMemoryPath(confineTo, logical);
+      } catch {
+        stray.push({ file: logical, reason: STRAY_OUTSIDE_REPO });
+        continue;
+      }
+    }
+    // Staging gave one name of an aliased library the write; a file written at another of
+    // its names is that same file, and apply refuses a skill whose path already exists -
+    // a refusal that drops every other accepted edit with it.
+    const repoIdentity = mapping.source ? realPath(path.join(mapping.source, inside)) : null;
+    const owner = stagedIdentities.get(repoIdentity);
+    if (owner) {
+      stray.push({ file: logical, reason: strayAliasReason(owner) });
+      continue;
+    }
+    // Staging withheld this skill because a write to it could not land, and the skill
+    // index says so - but the model still has its path. Writing there re-creates a file
+    // apply refuses for already existing, and that refusal drops every accepted edit.
+    const withheld = unstageable.some(
+      (entry) =>
+        entry.reason === READ_ONLY_UNWRITABLE &&
+        (entry.path === logical || (entry.identity && entry.identity === repoIdentity)),
+    );
+    if (withheld) {
+      stray.push({ file: logical, reason: STRAY_UNWRITABLE });
       continue;
     }
     const text = fs.readFileSync(path.join(root, staged), "utf8");
