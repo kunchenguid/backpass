@@ -11,6 +11,7 @@ import { State } from "../src/state.js";
 import {
   isSkillFilePath,
   STRAY_OUTSIDE_SURFACE,
+  STRAY_UNWRITABLE,
   measureWorkspace,
   parseSkillFile,
   prepareWorkspace,
@@ -440,13 +441,96 @@ test("a skill linked into a store nothing may write is billed but never staged w
   }
 });
 
+test("a read-only skill file in a writable directory is staged, because apply can write it", () => {
+  const store = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-readonly-file-")));
+  fs.mkdirSync(path.join(store, "foo"));
+  const foo = SKILL.replace("name: db", "name: foo");
+  const source = path.join(store, "foo", "SKILL.md");
+  fs.writeFileSync(source, foo);
+  // Apply never opens an existing target for writing: it creates a temp file in the
+  // directory and renames over it, so the file's own mode decides nothing.
+  fs.chmodSync(source, 0o444);
+
+  const repo = makeRepo({ "AGENTS.md": AGENTS, ".agents/skills/db/SKILL.md": SKILL });
+  fs.symlinkSync(path.join(store, "foo"), path.join(repo.root, ".agents", "skills", "foo"));
+
+  const workspace = prepareWorkspace({
+    state: new State(repo.root).ensure(),
+    repo,
+    memoryFile: readMemoryFile(repo.root, "AGENTS.md"),
+    skillsDir: ".agents/skills",
+    allowExternal: true,
+  });
+
+  assert.deepEqual(workspace.unstageable, []);
+  assert.equal(workspace.originals.get(".agents/skills/foo/SKILL.md"), foo);
+});
+
+test("a skill linked into an unwritable directory inside the repository is withheld too", () => {
+  const repo = makeRepo({
+    "AGENTS.md": AGENTS,
+    ".agents/skills/keep/SKILL.md": SKILL.replace("name: db", "name: keep"),
+    "vendor/db/SKILL.md": SKILL,
+  });
+  const vendor = path.join(repo.root, "vendor");
+  fs.symlinkSync(path.join(vendor, "db"), path.join(repo.root, ".agents", "skills", "db"));
+  fs.chmodSync(path.join(vendor, "db"), 0o555);
+  fs.chmodSync(vendor, 0o555);
+
+  try {
+    // Project scope, where confinement passes: the link lands inside the repository, so
+    // only writability can keep it out - and the two scopes must agree about that.
+    const { workspace, measured } = stageAndMeasure({
+      repo,
+      edit: (root) => writeIn(root, ".agents/skills/db/SKILL.md", SKILL),
+    });
+
+    assert.deepEqual(
+      workspace.unstageable.map(({ path: file, reason }) => ({ path: file, reason })),
+      [{ path: ".agents/skills/db/SKILL.md", reason: "resolves to a location that cannot be written" }],
+    );
+    assert.equal(workspace.originals.has(".agents/skills/db/SKILL.md"), false);
+    // Re-creating it is the same unwritable path, not a new skill and not an out-of-repo one.
+    assert.deepEqual(measured.stray, [{ file: ".agents/skills/db/SKILL.md", reason: STRAY_UNWRITABLE }]);
+  } finally {
+    fs.chmodSync(vendor, 0o755);
+    fs.chmodSync(path.join(vendor, "db"), 0o755);
+  }
+});
+
+test("an ignored file beside an external memory file is named by the path the user knows", () => {
+  const repo = makeRepo({});
+  const external = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-external-memory-stray-")));
+  const memoryPath = path.join(external, "CLAUDE.md");
+  const skillsDir = path.join(external, "skills");
+  fs.writeFileSync(memoryPath, AGENTS);
+  fs.mkdirSync(skillsDir);
+
+  const workspace = prepareWorkspace({
+    state: new State(repo.root).ensure(),
+    repo,
+    memoryFile: readMemoryFile(repo.root, memoryPath, { allowExternal: true }),
+    skillsDir,
+    skillDirs: [skillsDir],
+    allowExternal: true,
+  });
+  // The memory file stages under `.external/<hash>/` too, so a scratch file written beside
+  // it matches no skill directory - and naming it by that hash tells the reader nothing.
+  writeIn(path.dirname(path.join(workspace.root, workspace.memoryWorkspacePath)), "CLAUDE.md.bak", "scratch");
+
+  assert.deepEqual(measureWorkspace(workspace).stray, [
+    { file: path.join(external, "CLAUDE.md.bak"), reason: STRAY_OUTSIDE_SURFACE },
+  ]);
+});
+
 test("a skill in a store this user cannot read is skipped and named, not thrown", () => {
   const store = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-locked-store-")));
   fs.mkdirSync(path.join(store, "locked"));
   const unreadable = path.join(store, "locked", "SKILL.md");
   fs.writeFileSync(unreadable, SKILL);
-  // Write-only: the writability probe accepts it, so only the read failure keeps it out.
-  fs.chmodSync(unreadable, 0o222);
+  // The writability probe looks at the directory, never at this file, so the read failure
+  // is the only thing that can keep it out.
+  fs.chmodSync(unreadable, 0o000);
 
   const repo = makeRepo({ "AGENTS.md": AGENTS, ".agents/skills/db/SKILL.md": SKILL });
   const loaded = path.join(repo.root, ".agents", "skills");

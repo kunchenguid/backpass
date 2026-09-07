@@ -35,42 +35,6 @@ test("user state creation tightens an existing directory to mode 0700", () => {
   assert.equal(fs.statSync(stateDir).mode & 0o777, 0o700);
 });
 
-test("apply refuses a user-level memory file that is a symlink to a read-only path", () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-uapply-home-"));
-  const source = path.join(home, "dotfiles", "AGENTS.md");
-  const link = path.join(home, ".agents", "AGENTS.md");
-  const text = "# User memory\n\n- Keep secrets out of prompts.\n";
-  fs.mkdirSync(path.dirname(source), { recursive: true });
-  fs.mkdirSync(path.dirname(link), { recursive: true });
-  fs.writeFileSync(source, text);
-  fs.chmodSync(source, 0o444);
-  fs.symlinkSync(source, link);
-
-  const state = new State(home, {
-    stateDir: path.join(home, ".config", "backpass", "user"),
-    mode: 0o700,
-    exclude: false,
-  }).ensure();
-  const results = applyDecisions({
-    proposal: {
-      memoryFile: { path: ".agents/AGENTS.md", hash: memoryTextHash(text), tokens: 20 },
-      edits: [{ id: "e1", kind: "rewrite", file: ".agents/AGENTS.md" }],
-      config: { budgetTokens: 5000, skillsDir: ".agents/skills" },
-    },
-    decisions: { e1: "accepted" },
-    repo: { root: home, name: "user" },
-    state,
-    config: { budgetTokens: 5000, skillsDir: ".agents/skills" },
-  });
-
-  assert.equal(results.written.length, 0);
-  assert.equal(results.rejectionsRecorded, false);
-  assert.equal(results.failed[0].error, readOnlySymlinkMessage(link, fs.realpathSync(source)));
-  assert.match(results.failed[0].error, /is a symlink to .+ which is not writable; edit the source that generates it/);
-  assert.equal(fs.readFileSync(source, "utf8"), text);
-  assert.equal(fs.readlinkSync(link), source);
-});
-
 test("apply names a symlink whose writable file is in a read-only store", () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-uapply-store-"));
   const store = path.join(home, "readonly-store");
@@ -102,8 +66,14 @@ test("apply names a symlink whose writable file is in a read-only store", () => 
     });
 
     assert.equal(results.written.length, 0);
+    assert.equal(results.rejectionsRecorded, false);
     assert.equal(results.failed[0].error, readOnlySymlinkMessage(link, fs.realpathSync(source)));
+    assert.match(
+      results.failed[0].error,
+      /is a symlink to .+ which is not writable; edit the source that generates it/,
+    );
     assert.equal(fs.readFileSync(source, "utf8"), text);
+    assert.equal(fs.readlinkSync(link), source);
   } finally {
     fs.chmodSync(store, 0o755);
   }

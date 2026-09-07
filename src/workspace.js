@@ -89,10 +89,11 @@ export function prepareWorkspace({
         unstageable.push({ path: logical, reason: `the same file is already staged as ${owner}` });
         continue;
       }
-      // Outside a repository a link can land in a store nothing may write - the layout
-      // this whole change exists to follow. Apply refuses such a path and that refusal
+      // A link can land in a store nothing may write - the layout this whole change
+      // exists to follow - and that is true of a vendored directory inside the repository
+      // as much as of a nix store outside it. Apply refuses such a path and that refusal
       // drops the round, so staging declares it read-only instead of offering the edit.
-      if (allowExternal && readOnlyResolvedPath(from)) {
+      if (readOnlyResolvedPath(from)) {
         unstageable.push({ path: logical, reason: READ_ONLY_UNWRITABLE, identity });
         continue;
       }
@@ -423,10 +424,19 @@ export function measureWorkspace(workspace) {
     }
   }
 
+  // The memory file's own staged directory is a mapping too: an absolute memory file
+  // stages under `.external/<hash>/`, and a file written beside it must be named where
+  // the user would look for it rather than by the hash.
+  const memoryStaged = stagedPaths.get(memoryPath) || workspacePathFor(memoryPath);
+  const dirMappings = [
+    ...skillMappings,
+    { logical: path.dirname(memoryPath), staged: path.posix.dirname(memoryStaged) },
+  ];
+
   const knownStaged = new Set(stagedPaths.values());
   for (const staged of [...present].sort()) {
     if (knownStaged.has(staged)) continue;
-    const mapping = skillMappings.find(({ staged: dir }) => staged === dir || staged.startsWith(`${dir}/`));
+    const mapping = dirMappings.find(({ staged: dir }) => staged === dir || staged.startsWith(`${dir}/`));
     if (!mapping) {
       stray.push({ file: staged, reason: STRAY_OUTSIDE_SURFACE });
       continue;

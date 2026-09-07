@@ -95,8 +95,9 @@ test("one library under two links resolves to the first name; two distinct files
   fs.symlinkSync(library, path.join(loaded, "database"));
 
   // Both names are loaded and billed, so both match - but they are one file, and staging
-  // already gives the first name the write. Refusing here would contradict that. "First"
-  // is the path-sorted first at both sites, so the pick is the same on every filesystem.
+  // already gives one name the write. Refusing here would contradict that. Each site picks
+  // deterministically from its own order - staging by directory-entry name, this by sorted
+  // path - and a targeted run stages only the name resolved here, so it owns its own write.
   assert.equal(loadProjectSkills(repo.root, ".agents/skills", []).filter((s) => s.name === "db").length, 2);
   assert.deepEqual(resolveTarget("db", scope), {
     kind: "skill",
@@ -147,6 +148,27 @@ test("a skill symlinked out of the repo is refused as a project target, by the r
   );
   // An in-repo skill in the same directory still resolves.
   assert.deepEqual(resolveTarget("db", scope), { kind: "skill", path: ".agents/skills/db/SKILL.md", name: "db" });
+});
+
+test("a read-only skill file is still a target, because apply replaces it by rename", () => {
+  const { repo, scope } = projectScope({ "vendor/beads/SKILL.md": REVIEW.replace("review", "beads") });
+  const vendor = path.join(repo.root, "vendor");
+  fs.symlinkSync(path.join(vendor, "beads"), path.join(repo.root, ".agents", "skills", "beads"));
+  fs.chmodSync(path.join(vendor, "beads", "SKILL.md"), 0o444);
+
+  assert.deepEqual(resolveTarget("beads", scope), {
+    kind: "skill",
+    path: ".agents/skills/beads/SKILL.md",
+    name: "beads",
+  });
+
+  // The directory that receives the rename is what decides.
+  fs.chmodSync(path.join(vendor, "beads"), 0o555);
+  try {
+    assert.throws(() => resolveTarget("beads", scope), /resolves to .+ and cannot be written/);
+  } finally {
+    fs.chmodSync(path.join(vendor, "beads"), 0o755);
+  }
 });
 
 test("user scope resolves against the user-level memory files and skill dirs", () => {

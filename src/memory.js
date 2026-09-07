@@ -326,7 +326,8 @@ export function resolveMemoryPath(repoRoot, configuredPath, { allowExternal = fa
 /**
  * Where a write to `absolute` would really land when that is somewhere else and cannot be
  * written - a skill linked into a nix or home-manager store, typically. The probe is what
- * `atomicReplace` needs: the resolved file, and the directory that receives the rename.
+ * `atomicReplace` needs and nothing more: the directory that receives the rename. The
+ * resolved file's own mode never decides, because no write path opens it for writing.
  *
  * `null` means the write can land, and deliberately covers the undecidable cases too - an
  * unresolvable path, a broken link, a racing rename. A probe that cannot establish that a
@@ -341,7 +342,6 @@ export function readOnlyResolvedPath(absolute) {
   }
   if (real === path.resolve(absolute)) return null;
   try {
-    fs.accessSync(real, fs.constants.W_OK);
     fs.accessSync(path.dirname(real), fs.constants.W_OK | fs.constants.X_OK);
     return null;
   } catch {
