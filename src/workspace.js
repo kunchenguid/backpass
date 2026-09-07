@@ -79,23 +79,26 @@ export function prepareWorkspace({
     for (const relative of walkFiles(skillsSource, "", confineTo, confined)) {
       const from = path.join(skillsSource, relative);
       const logical = toLogical(relative);
-      if (stagedSkills && !stagedSkills.includes(logical)) continue;
-      // Two links to one library are two names the harness loads, so both are walked and
-      // both are billed - but one file cannot be two independently editable copies, and
-      // apply refuses a round whose targets collide. The first name owns the write.
       const identity = realPath(from);
-      const owner = identity && stagedIdentities.get(identity);
-      if (owner) {
-        unstageable.push({ path: logical, reason: `the same file is already staged as ${owner}` });
-        continue;
-      }
       // A link can land in a store nothing may write - the layout this whole change
       // exists to follow - and that is true of a vendored directory inside the repository
       // as much as of a nix store outside it. Apply refuses such a path and that refusal
       // drops the round, so staging declares it read-only instead of offering the edit.
+      // It is decided for every loaded skill, before a narrowed run drops the ones it does
+      // not write, so "backpass will never write this file" means the same thing on both.
       const refusal = stagingRefusal(from, confineTo);
       if (refusal) {
         unstageable.push({ path: logical, reason: refusal, identity });
+        continue;
+      }
+      if (stagedSkills && !stagedSkills.includes(logical)) continue;
+      // Two links to one library are two names the harness loads, so both are walked and
+      // both are billed - but one file cannot be two independently editable copies, and
+      // apply refuses a round whose targets collide. The first name owns the write. This
+      // one stays behind the narrowing: only a staged name can own anything.
+      const owner = identity && stagedIdentities.get(identity);
+      if (owner) {
+        unstageable.push({ path: logical, reason: `the same file is already staged as ${owner}` });
         continue;
       }
       const staged = path.posix.join(stagedDir, relative);

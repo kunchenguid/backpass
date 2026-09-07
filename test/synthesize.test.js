@@ -739,6 +739,43 @@ test("a staged skill that resolves outside the repository is reported as such, n
   });
 });
 
+test("a narrowed run does not fingerprint a skill linked into a store nothing may write", async () => {
+  const store = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-narrowed-store-")));
+  fs.mkdirSync(path.join(store, "db"));
+  const skill = "---\nname: db\ndescription: Load for database work.\n---\n\n- Keep transactions short.\n";
+  fs.writeFileSync(path.join(store, "db", "SKILL.md"), skill);
+
+  const narrowed = setup(
+    { edit: {}, annotations: [{ reply: { edits: [] } }] },
+    { scope: { kind: "user" }, externalSkills: true },
+  );
+  fs.rmSync(path.join(narrowed.externalSkillsDir, "db"), { recursive: true });
+  fs.symlinkSync(path.join(store, "db"), path.join(narrowed.externalSkillsDir, "db"));
+  fs.chmodSync(path.join(store, "db"), 0o555);
+  // Narrowing to the memory file stages no skill at all, but backpass has still guaranteed
+  // it will never write this one - so a home-manager rebuild touching it mid-run must not
+  // discard the memory-file work with a claim that the harness wrote to the repository.
+  narrowed.config.target = { kind: "memory", path: "AGENTS.md" };
+  fs.writeFileSync(
+    process.env.FAKE_ACPX_SCRIPT,
+    JSON.stringify({
+      edit: {
+        [path.join(store, "db", "SKILL.md")]: {
+          replace: [["Keep transactions short.", "Keep every transaction short."]],
+        },
+      },
+      annotations: [{ reply: { edits: [] } }],
+    }),
+  );
+
+  try {
+    const { violations } = await narrowed.run();
+    assert.deepEqual(violations, []);
+  } finally {
+    fs.chmodSync(path.join(store, "db"), 0o755);
+  }
+});
+
 test("a skill backpass withheld from staging is not fingerprinted, so a third party cannot abort the run", async () => {
   const library = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-withheld-library-")));
   fs.mkdirSync(path.join(library, "beads"));

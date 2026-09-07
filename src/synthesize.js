@@ -138,12 +138,16 @@ function harnessCountsOf(transcripts) {
 /**
  * The repo must be exactly as fingerprinted; the staging copy is the only place to write.
  *
- * Only skills staging withheld are left out. Such a file is one backpass has guaranteed it
- * will never write, so aborting a run over a third party's edit to it would discard
- * measured work for nothing; an ordinary repository skill stays fingerprinted whether or
- * not this run narrows to it. A fingerprinted path can still resolve outside the
- * repository - that is the ordinary user-scope layout - so a change there is reported for
- * what it is rather than as a direct repository edit.
+ * Skills staging withheld are left out: such a file is one backpass has guaranteed it will
+ * never write, so aborting a run over a third party's edit to it would discard measured
+ * work for nothing. That holds on every run for the two reasons staging settles before it
+ * narrows - the path resolves outside the repository, or into a location nothing may
+ * write. It does not hold for the one reason it settles after: a skill withheld only as a
+ * duplicate of a name already staged is still fingerprinted on a narrowed run, which never
+ * reaches that decision. An ordinary repository skill stays fingerprinted either way. A
+ * fingerprinted path can still resolve outside the repository - that is the ordinary
+ * user-scope layout - so a change there is reported for what it is rather than as a direct
+ * repository edit.
  */
 function assertRepoUntouched(repo, before, workspaceRoot) {
   const after = repoFingerprint(repo, Object.keys(before));
