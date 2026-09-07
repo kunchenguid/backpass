@@ -263,8 +263,8 @@ test("a symlinked skill directory is never recursed, so no cycle can be walked",
   fs.writeFileSync(path.join(real, "SKILL.md"), SKILL);
   // The three shapes a directory link can take: a self link, a link back to an ancestor,
   // and a mutual pair. Staging takes at most one leaf per link and never descends, so
-  // none of them can be entered. (The ancestry guard in walkFiles is a second line of
-  // defence for that; only the top-level self link still reaches it.)
+  // none of them can be entered - which is the only thing standing between this layout
+  // and the RangeError it used to produce.
   fs.symlinkSync(real, path.join(real, "self"));
   fs.symlinkSync(loaded, path.join(real, "up"));
   const a = path.join(loaded, "a");
@@ -441,14 +441,14 @@ test("a skill linked into a store nothing may write is billed but never staged w
   }
 });
 
-test("a read-only skill file in a writable directory is staged, because apply can write it", () => {
+test("a read-only skill file in a writable directory is staged as an editable copy", () => {
   const store = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-readonly-file-")));
   fs.mkdirSync(path.join(store, "foo"));
   const foo = SKILL.replace("name: db", "name: foo");
   const source = path.join(store, "foo", "SKILL.md");
   fs.writeFileSync(source, foo);
   // Apply never opens an existing target for writing: it creates a temp file in the
-  // directory and renames over it, so the file's own mode decides nothing.
+  // directory and renames over it, so the file's own mode decides nothing there.
   fs.chmodSync(source, 0o444);
 
   const repo = makeRepo({ "AGENTS.md": AGENTS, ".agents/skills/db/SKILL.md": SKILL });
@@ -464,6 +464,17 @@ test("a read-only skill file in a writable directory is staged, because apply ca
 
   assert.deepEqual(workspace.unstageable, []);
   assert.equal(workspace.originals.get(".agents/skills/foo/SKILL.md"), foo);
+
+  // Synthesis edits the staging copy in place, so a source mode that forbids writing must
+  // not travel with it - a skill staged unwritable can only ever measure as no change.
+  const staged = path.join(workspace.root, workspace.stagedPaths.get(".agents/skills/foo/SKILL.md"));
+  fs.writeFileSync(staged, foo.replace("Load before touching the database.", "Load before any database work."));
+  assert.deepEqual(
+    measureWorkspace(workspace).changes.map((change) => [change.kind, change.file]),
+    [["hunk", ".agents/skills/foo/SKILL.md"]],
+  );
+  assert.equal(fs.statSync(source).mode & 0o777, 0o444, "the source keeps its own mode");
+  assert.equal(fs.readFileSync(source, "utf8"), foo, "the source is never written through");
 });
 
 test("a skill linked into an unwritable directory inside the repository is withheld too", () => {

@@ -106,6 +106,11 @@ export function prepareWorkspace({
       try {
         fs.mkdirSync(path.dirname(to), { recursive: true });
         fs.copyFileSync(from, to);
+        // The agent edits this copy in place, so it must be writable whatever the source's
+        // mode is - a store-managed library is commonly read-only. Only the copy is
+        // touched; the source keeps its own mode, and apply takes the mode it writes from
+        // the repository file rather than from here.
+        fs.chmodSync(to, (fs.statSync(from).mode & 0o777) | 0o600);
         originals.set(logical, fs.readFileSync(from, "utf8"));
       } catch (err) {
         fs.rmSync(to, { force: true });
@@ -175,7 +180,7 @@ function withinRoot(root, resolved) {
   return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
 }
 
-function walkFiles(dir, prefix = "", confineTo = null, confined = [], ancestors = null) {
+function walkFiles(dir, prefix = "", confineTo = null, confined = []) {
   const out = [];
   let entries;
   try {
@@ -183,16 +188,6 @@ function walkFiles(dir, prefix = "", confineTo = null, confined = [], ancestors 
   } catch {
     return out;
   }
-  // Following directory links hands the walk cycles it must not recurse into: a self
-  // link, a link back to an ancestor, or a mutual pair. The guard is ancestry, not a
-  // global visited set - two separate links to one shared library are two directories
-  // the harness really loads, and each must still be walked and billed.
-  //
-  // Leaf-only staging (below) currently keeps this dormant: a symlinked directory is
-  // never recursed into, and a real directory is always deeper than its ancestors, so the
-  // only live effect left is skipping a top-level self-link back to the skills root. It
-  // re-arms the moment subtree walking under a symlinked directory is restored.
-  const chain = ancestors || new Set([realPath(dir)].filter(Boolean));
   // One rule for taking a file, wherever the walk reaches it: a path that resolves
   // outside the root is named for the caller instead of staged, so the containment
   // invariant cannot hold on one branch and not its sibling.
@@ -209,7 +204,7 @@ function walkFiles(dir, prefix = "", confineTo = null, confined = [], ancestors 
     if (target === "dir") {
       const child = path.join(dir, entry.name);
       const identity = realPath(child);
-      if (!identity || chain.has(identity)) continue;
+      if (!identity) continue;
       // Pruned here, but named: the caller tells the model these are read-only rather
       // than letting a proposed edit to one be discarded without a reason.
       if (!withinRoot(confineTo, identity)) {
@@ -219,12 +214,19 @@ function walkFiles(dir, prefix = "", confineTo = null, confined = [], ancestors 
       // A link may point at anything - in the layout that motivated following links at
       // all, a whole plugin repository. Only the file the skill layout loads is taken,
       // so the target's subtree is never walked, copied, or read.
+      //
+      // This is also the whole reason a cycle cannot be walked. A self link, a link back
+      // to an ancestor and a mutual pair are all directory links, and none of them is
+      // descended into; a real directory is always deeper than its parents, so ordinary
+      // recursion terminates. Anyone restoring subtree walking under a symlinked directory
+      // must reinstate cycle detection in the same change, or the walk recurses until the
+      // stack blows.
       if (entry.isSymbolicLink()) {
         const leaf = path.join(child, SKILL_FILENAME);
         if (prefix === "" && isFile(leaf)) take(leaf, path.posix.join(relative, SKILL_FILENAME));
         continue;
       }
-      out.push(...walkFiles(child, relative, confineTo, confined, new Set(chain).add(identity)));
+      out.push(...walkFiles(child, relative, confineTo, confined));
     } else if (target === "file") {
       take(path.join(dir, entry.name), relative);
     }
