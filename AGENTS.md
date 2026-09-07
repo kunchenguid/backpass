@@ -116,7 +116,11 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   file, widened until unique, so a hunk can only go stale by the file itself changing after
   the proposal, which apply refuses rather than part-applies. Never pass
   `approveAll` with the repo as `cwd`; the repo is fingerprinted and a harness that
-  writes there fails the run loudly.
+  writes there fails the run loudly. Staging withholds a loaded skill it could never write -
+  one resolving outside the repository, or into a location nothing may write - naming the
+  reason in the skill index, and the fingerprint follows staging: a withheld file is one
+  backpass has guaranteed it will never write, so a third party's edit to it must not abort
+  the run. Staging and the fingerprint must stay in step.
 - **Annotate-loop outcomes stay distinct** (`annotateLoop` in `src/synthesize.js`): a
   moved staging tree is re-measured without spending an `ANNOTATE_TURNS` attempt (bounded
   by `REMEASURE_TURNS`); no adapter text is retried once in a new session; and only a
@@ -176,7 +180,11 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   values) and `renderEvidenceForPrompt` renders the class AND the `effect` text with each
   quote. Records from before the class existed carry none, and none never counts as harm.
 - **Skill target/load-layout rules live in `src/skills.js`.** Preserve an existing configured
-  harness-loaded directory; a bare `skills/` directory is never auto-detected.
+  harness-loaded directory; a bare `skills/` directory is never auto-detected. A harness loads
+  what a path resolves to, so a symlinked directory under the loaded dir is a skill: entry types
+  are stat'd (`isDirectoryEntry`), fail-soft, and a broken or cyclic link reads as absent. One
+  library reached through k links is k loaded entries, billed k times - `loadedCopies` multiplies
+  a description-line delta by that count in both `buildProposal` and the writer's projection.
 - **Memory resolution is pointer-aware** (`resolveMemoryFiles` in `src/memory.js`): the
   first configured file is canonical, a `@AGENTS.md`-only CLAUDE.md is a pointer, and a
   second full file is warned about, never silently ignored or double-written.
