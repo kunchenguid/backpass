@@ -40,13 +40,30 @@ function noteOnce(note) {
 /** Negative evidence carries one of these classes; anything else is dropped as unjudged. */
 export const NEGATIVE_CLASSES = ["harm", "non-compliance", "irrelevant"];
 
-/** Evidence items without a verbatim quote are dropped - the rubric's central rule. */
-export function sanitizeEvidence(parsed, memoryFile = null) {
+/** Whitespace-insensitive form used to check a quote against the trace it claims to come from. */
+function foldSpace(text) {
+  return String(text).replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Evidence items without a verbatim quote are dropped - the rubric's central rule.
+ *
+ * When `trace` is supplied and the model did not open the raw transcript, a quote must
+ * also appear in that trace (whitespace folded). A quote that is long enough but not in
+ * the trace is a paraphrase, and a paraphrase is a claim without evidence. When the model
+ * reports `usedRawTranscript`, the quote may come from text the distiller truncated or
+ * elided, so the substring check is skipped rather than punishing the honest path.
+ */
+export function sanitizeEvidence(parsed, memoryFile = null, trace = null) {
   const clean = { positive: [], negative: [], gaps: [], usedRawTranscript: Boolean(parsed?.usedRawTranscript) };
   if (!parsed || typeof parsed !== "object") return clean;
 
   const validInstructions = memoryFile ? new Set(instructionUnits(memoryFile).map((unit) => unit.id)) : null;
-  const hasQuote = (item) => typeof item?.quote === "string" && item.quote.trim().length >= 8;
+  const foldedTrace = typeof trace === "string" && !clean.usedRawTranscript ? foldSpace(trace) : null;
+  const hasQuote = (item) => {
+    if (typeof item?.quote !== "string" || item.quote.trim().length < 8) return false;
+    return foldedTrace === null || foldedTrace.includes(foldSpace(item.quote));
+  };
 
   for (const key of ["positive", "negative"]) {
     for (const item of Array.isArray(parsed[key]) ? parsed[key] : []) {
@@ -195,7 +212,7 @@ async function analyzeOne({
 
   return {
     status: "ok",
-    evidence: sanitizeEvidence(parsed, memoryFile),
+    evidence: sanitizeEvidence(parsed, memoryFile, distilled.trace),
     usage: usageRecord(ranWith, result),
     distilled,
   };

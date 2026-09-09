@@ -157,6 +157,37 @@ test("split paragraphs accept only sentence-part attribution targets", () => {
   );
 });
 
+test("a quote that is not in the distilled trace is a paraphrase and is discarded", () => {
+  const trace = "turn 3\n  the agent posted the full URL\n\nturn 4\n  it used a  bare #2731\n  reference\n";
+  const clean = sanitizeEvidence(
+    {
+      positive: [
+        { instruction: "AG-001", quote: "the agent posted the full URL" },
+        { instruction: "AG-002", quote: "the agent shared the complete link" },
+      ],
+      negative: [{ instruction: "AG-004", quote: "it used a bare #2731 reference" }],
+      gaps: [{ proposedInstruction: "Post full URLs.", quote: "posted the full URL" }],
+    },
+    null,
+    trace,
+  );
+  assert.deepEqual(
+    clean.positive.map((item) => item.instruction),
+    ["AG-001"],
+  );
+  assert.equal(clean.negative.length, 1, "whitespace and line breaks fold before matching");
+  assert.equal(clean.gaps.length, 1);
+});
+
+test("the trace check is skipped when the model read the raw transcript", () => {
+  const clean = sanitizeEvidence(
+    { positive: [{ instruction: "AG-001", quote: "text the distiller elided" }], usedRawTranscript: true },
+    null,
+    "nothing here matches",
+  );
+  assert.equal(clean.positive.length, 1);
+});
+
 test("sanitizeEvidence tolerates a malformed model response", () => {
   const clean = sanitizeEvidence(null);
   assert.deepEqual(clean, { positive: [], negative: [], gaps: [], usedRawTranscript: false });
