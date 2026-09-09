@@ -47,9 +47,9 @@ if (argv.includes("config") && argv.includes("show")) {
 }
 if (argv.includes("--file")) {
   process.stdout.write(JSON.stringify({
-    positive: [{ instruction: "AG-001", moment: "start", effect: "followed it", quote: "followed the build rule exactly as written" }],
+    positive: [{ instruction: "AG-001", moment: "start", effect: "followed it", quote: "Ran make build as instructed." }],
     negative: [],
-    gaps: [{ mistake: "skipped lint", proposedInstruction: "Always run lint before pushing.", recurrenceRisk: "high", quote: "skipped lint entirely this time" }],
+    gaps: [{ mistake: "skipped lint", proposedInstruction: "Always run lint before pushing.", recurrenceRisk: "high", quote: "Now run the tests too." }],
   }) + "\\n");
   process.exit(0);
 }

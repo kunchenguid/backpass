@@ -59,13 +59,13 @@ if (argv.includes("--file")) {
         proposedInstruction: ${JSON.stringify(ORCHESTRATION_GAP)},
         recurrenceRisk: "high",
         domain: "orchestration",
-        quote: "opened a PR during a scout task",
+        quote: "Please build the project.",
       },
       {
         mistake: "skipped lint",
         proposedInstruction: ${JSON.stringify(UNLABELLED_GAP)},
         recurrenceRisk: "high",
-        quote: "skipped lint entirely this time",
+        quote: "Now run the tests too.",
       },
     ],
   }) + "\\n");
@@ -102,7 +102,7 @@ if (argv.includes("--file")) {
         proposedInstruction: ${JSON.stringify(ORCHESTRATOR_REPO_GAP)},
         recurrenceRisk: "high",
         domain: "project",
-        quote: "opened a PR during a scout task",
+        quote: "Please build the project.",
       },
     ],
   }) + "\\n");
