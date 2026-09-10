@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.20](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.19...backpass-v0.1.20) (2026-09-10)
+
+
+### Bug Fixes
+
+* **analyze:** discard evidence quotes that do not appear in the distilled trace ([#118](https://github.com/kunchenguid/backpass/issues/118)) ([7d171f7](https://github.com/kunchenguid/backpass/commit/7d171f750003fb7921824c88a652ed766aff83ce))
+
 ## [0.1.19](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.18...backpass-v0.1.19) (2026-09-07)
 
 
