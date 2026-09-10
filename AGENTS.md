@@ -179,6 +179,15 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   negative (`harm` / `non-compliance` / `irrelevant`, `sanitizeEvidence` drops other
   values) and `renderEvidenceForPrompt` renders the class AND the `effect` text with each
   quote. Records from before the class existed carry none, and none never counts as harm.
+- **A quote must be findable in the trace it claims to come from.** `sanitizeEvidence`
+  (`src/analyze.js`) drops any evidence item whose quote is not a whitespace-folded
+  substring of the distilled trace, counting the drops into `summary.quotesNotInTrace` so a
+  paraphrasing model reads as that rather than as a clean repo. Only the literal boolean
+  `usedRawTranscript === true` opts out, because then the quote may come from text the
+  distiller elided. Consequence for tests: a fake agent must quote real text from the
+  session it analyzes - invented quotes are exactly what the gate rejects. Analysis
+  semantics changed, so `ANALYSIS_INDEX_VERSION` (`src/state.js`) was bumped; bump it again
+  for any future change to what analysis accepts.
 - **Skill target/load-layout rules live in `src/skills.js`.** Preserve an existing configured
   harness-loaded directory; a bare `skills/` directory is never auto-detected. A harness loads
   what a path resolves to, so a symlinked directory under the loaded dir is a skill: entry types

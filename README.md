@@ -259,10 +259,16 @@ orchestrating tool) - and the
 analysis is shown the ledger's open gaps so it can cite an existing gap id instead of
 coining a paraphrase of it.
 
-**Every claim must carry a verbatim quote.** Quoteless items are discarded - the single
-most important defence against a model confabulating influence. Negative evidence is
-weighted highest, but its class determines what it supports: non-compliance supports
-reinforcement, while only harm supports removal.
+**Every claim must carry a verbatim quote, and the quote must be in the trace.** Quoteless
+items are discarded - the single most important defence against a model confabulating
+influence - and so are quotes that do not actually appear in the distilled trace they claim
+to come from, compared whitespace-folded so the trace's line wrapping never rejects a real
+quote. A paraphrase is a claim without evidence. The check is skipped only when the analysis
+reports `usedRawTranscript`, because then the quote may legitimately come from text the
+distiller truncated or elided. When a run discards quotes this way it says so on stderr:
+a model that paraphrases instead of copying produces fewer findings, not cleaner ones.
+Negative evidence is weighted highest, but its class determines what it supports:
+non-compliance supports reinforcement, while only harm supports removal.
 
 To avoid smearing evidence across a large prose blob, backpass splits eligible prose
 paragraphs above 120 tokens at high-confidence sentence boundaries for attribution only.
@@ -698,7 +704,8 @@ For the user-scope state location and isolation contract, see
 ## Limitations
 
 - **Causal attribution is genuinely hard.** A model can confabulate influence. The
-  mitigations are structural - mandatory verbatim quotes, the two-session rule, negative
+  mitigations are structural - mandatory verbatim quotes checked against the trace they
+  claim to come from, the two-session rule, negative
   evidence weighted highest, and a human gate - but read the evidence, not just the title.
 - **Transcript formats are undocumented** and can change without notice. Each adapter is
   pinned by a golden fixture and fails soft.
