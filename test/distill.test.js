@@ -179,6 +179,23 @@ test("a quote that is not in the distilled trace is a paraphrase and is discarde
   assert.equal(clean.gaps.length, 1);
 });
 
+test("only a literal true opts out of the trace check, and rejections are counted", () => {
+  const clean = sanitizeEvidence(
+    {
+      positive: [
+        { instruction: "AG-001", quote: "text the distiller elided" },
+        { instruction: "AG-002", quote: "another invented sentence" },
+      ],
+      usedRawTranscript: "false",
+    },
+    null,
+    "nothing here matches",
+  );
+  assert.equal(clean.usedRawTranscript, false);
+  assert.deepEqual(clean.positive, []);
+  assert.equal(clean.quotesNotInTrace, 2);
+});
+
 test("the trace check is skipped when the model read the raw transcript", () => {
   const clean = sanitizeEvidence(
     { positive: [{ instruction: "AG-001", quote: "text the distiller elided" }], usedRawTranscript: true },
@@ -190,7 +207,7 @@ test("the trace check is skipped when the model read the raw transcript", () => 
 
 test("sanitizeEvidence tolerates a malformed model response", () => {
   const clean = sanitizeEvidence(null);
-  assert.deepEqual(clean, { positive: [], negative: [], gaps: [], usedRawTranscript: false });
+  assert.deepEqual(clean, { positive: [], negative: [], gaps: [], usedRawTranscript: false, quotesNotInTrace: 0 });
   assert.deepEqual(sanitizeEvidence({ positive: "not an array" }).positive, []);
 });
 
