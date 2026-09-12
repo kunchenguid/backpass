@@ -9,6 +9,7 @@ export const CONFIG_FILENAME = ".backpassrc.json";
 export const STATE_DIRNAME = ".backpass";
 
 export const ALL_HARNESSES = ["claude", "codex", "jcode", "pi", "omp", "opencode", "grok", "cursor", "hermes"];
+export const DEFAULT_DISCOVERY_HARNESSES = ["claude", "codex", "jcode", "pi", "omp"];
 /** Cursor IDE is deferred to v1.1 and only ever runs behind --include-cursor-ide. */
 export const OPT_IN_HARNESSES = ["cursor-ide"];
 
@@ -75,7 +76,7 @@ export const DEFAULT_CONFIG = {
   autoAgent: true,
   ladders: DEFAULT_LADDERS,
   discovery: {
-    harnesses: ALL_HARNESSES,
+    harnesses: DEFAULT_DISCOVERY_HARNESSES,
     since: "30d",
     worktreeGlobs: [],
     /**
@@ -350,7 +351,7 @@ export function repoConfigPath(repoRoot) {
   return path.join(repoRoot, CONFIG_FILENAME);
 }
 
-/** The subset written by `backpass init` - defaults stay implicit so upgrades reach users. */
+/** The project profile written by `backpass init` for this fork. */
 export function initialConfig() {
   return {
     memoryFiles: ["AGENTS.md"],
@@ -359,10 +360,9 @@ export function initialConfig() {
     // maxEditsPerRun stays unset so the adaptive cap applies; set it to pin a number.
     minGapEvidence: DEFAULT_CONFIG.minGapEvidence,
     maxTranscripts: DEFAULT_CONFIG.maxTranscripts,
-    // Agents stay unset so the ladder auto-pick keeps applying to initialized repos.
-    analysis: { agent: null, model: null, effort: null },
-    synthesis: { agent: null, model: null, effort: null },
-    discovery: { harnesses: ALL_HARNESSES, since: "30d", worktreeGlobs: [], minUserTurns: 2 },
+    analysis: { agent: "codex", model: "gpt-5.6-luna", effort: "max" },
+    synthesis: { agent: "codex", model: "gpt-5.6-luna", effort: "max" },
+    discovery: { harnesses: DEFAULT_DISCOVERY_HARNESSES, since: "30d", worktreeGlobs: [], minUserTurns: 2 },
     jobs: DEFAULT_CONFIG.jobs,
   };
 }

@@ -6,6 +6,7 @@ import path from "node:path";
 
 import {
   CONFIG_FILENAME,
+  initialConfig,
   initialUserConfig,
   loadConfig,
   parseScopeKind,
@@ -30,17 +31,7 @@ test("the defaults match the approved design", () => {
   assert.equal(config.minGapEvidence, 2);
   assert.equal(config.jobs, 4);
   assert.equal(config.discovery.since, "30d");
-  assert.deepEqual(config.discovery.harnesses, [
-    "claude",
-    "codex",
-    "jcode",
-    "pi",
-    "omp",
-    "opencode",
-    "grok",
-    "cursor",
-    "hermes",
-  ]);
+  assert.deepEqual(config.discovery.harnesses, ["claude", "codex", "jcode", "pi", "omp"]);
   assert.ok(!config.discovery.harnesses.includes("cursor-ide"), "Cursor IDE is deferred to v1.1");
   assert.deepEqual(config.analysis, { agent: null, model: null, effort: null }, "agents are auto-picked by default");
   assert.deepEqual(config.synthesis, { agent: null, model: null, effort: null });
@@ -53,6 +44,13 @@ test("the defaults match the approved design", () => {
     config.ladders.synthesis.map((r) => r.model),
     ["gpt-5.6-sol", "claude-opus-5", "grok-4.6"],
   );
+});
+
+test("project initialization seeds the fork's personal model and harness profile", () => {
+  const config = initialConfig();
+  assert.deepEqual(config.analysis, { agent: "codex", model: "gpt-5.6-luna", effort: "max" });
+  assert.deepEqual(config.synthesis, { agent: "codex", model: "gpt-5.6-luna", effort: "max" });
+  assert.deepEqual(config.discovery.harnesses, ["claude", "codex", "jcode", "pi", "omp"]);
 });
 
 test("a model without an agent is rejected rather than half-auto-picked", () => {
