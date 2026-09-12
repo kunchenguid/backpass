@@ -205,6 +205,7 @@ async function analyzeOne({
       cwd: modelCwd || repo.root,
       timeoutSeconds: config.timeoutSeconds,
       promptRetries: config.promptRetries,
+      tools: pick.tools,
     };
     // Route effortful calls through a fresh per-transcript session so each harness's
     // invocation-scoped overlay or safe fallback is applied; otherwise one-shot is cheaper.

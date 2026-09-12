@@ -54,10 +54,10 @@ const SESSION_LOCAL_EFFORT_KEYS = { codex: "reasoning_effort", claude: "effort",
  */
 
 /**
- * @param {{ agent: string, model?: string | null, effort?: string | null, writeAccess?: boolean }} options
+ * @param {{ agent: string, model?: string | null, effort?: string | null, tools?: string[] | null, writeAccess?: boolean }} options
  * @returns {HarnessInvocation}
  */
-export function prepareHarnessInvocation({ agent, model = null, effort = null, writeAccess = false }) {
+export function prepareHarnessInvocation({ agent, model = null, effort = null, tools = null, writeAccess = false }) {
   const notes = [];
   const cleanups = [];
   const dispose = () => {
@@ -72,7 +72,10 @@ export function prepareHarnessInvocation({ agent, model = null, effort = null, w
 
   const requestedModel = typeof model === "string" && model.trim() ? model.trim() : null;
   const requestedEffort = typeof effort === "string" && effort.trim() ? effort.trim() : null;
-  const overlay = Boolean(requestedModel || requestedEffort);
+  const requestedTools = Array.isArray(tools)
+    ? [...new Set(tools.map((tool) => String(tool).trim()).filter(Boolean))]
+    : null;
+  const overlay = Boolean(requestedModel || requestedEffort || requestedTools?.length);
 
   if (!overlay && !writeAccess) return baseInvocation({ notes, dispose });
 
@@ -80,7 +83,7 @@ export function prepareHarnessInvocation({ agent, model = null, effort = null, w
     let invocation;
     if (agent === "pi") {
       invocation = overlay
-        ? piInvocation({ requestedModel, requestedEffort, notes, cleanups, dispose })
+        ? piInvocation({ requestedModel, requestedEffort, requestedTools, notes, cleanups, dispose })
         : baseInvocation({ notes, dispose });
     } else if (agent === "grok") {
       invocation = grokInvocation({ requestedModel, requestedEffort, writeAccess, notes, cleanups, dispose });
@@ -128,16 +131,17 @@ function describeOverride(model, effort) {
   return bits.join(" and ");
 }
 
-function piInvocation({ requestedModel, requestedEffort, notes, cleanups, dispose }) {
+function piInvocation({ requestedModel, requestedEffort, requestedTools, notes, cleanups, dispose }) {
   if (process.env.PI_ACP_PI_COMMAND) {
     throw new UserError(
-      "cannot safely apply Pi model or effort overrides when PI_ACP_PI_COMMAND replaces the proven Pi command",
-      "unset PI_ACP_PI_COMMAND or omit the model and effort override",
+      "cannot safely apply Pi model, effort, or tool overrides when PI_ACP_PI_COMMAND replaces the proven Pi command",
+      "unset PI_ACP_PI_COMMAND or omit the model, effort, or tools override",
     );
   }
   const extra = [];
   if (requestedModel) extra.push("--model", requestedModel);
   if (requestedEffort) extra.push("--thinking", requestedEffort);
+  if (requestedTools?.length) extra.push("--tools", requestedTools.join(","));
   const real = resolveOnPath("pi");
   if (!real || (process.platform === "win32" && /\.(?:cmd|bat)$/i.test(real))) {
     throw new UserError(

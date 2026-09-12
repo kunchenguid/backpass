@@ -33,8 +33,12 @@ test("the defaults match the approved design", () => {
   assert.equal(config.discovery.since, "30d");
   assert.deepEqual(config.discovery.harnesses, ["claude", "codex", "jcode", "pi", "omp"]);
   assert.ok(!config.discovery.harnesses.includes("cursor-ide"), "Cursor IDE is deferred to v1.1");
-  assert.deepEqual(config.analysis, { agent: null, model: null, effort: null }, "agents are auto-picked by default");
-  assert.deepEqual(config.synthesis, { agent: null, model: null, effort: null });
+  assert.deepEqual(
+    config.analysis,
+    { agent: null, model: null, effort: null, tools: null },
+    "agents are auto-picked by default",
+  );
+  assert.deepEqual(config.synthesis, { agent: null, model: null, effort: null, tools: null });
   assert.equal(config.autoAgent, true);
   assert.deepEqual(
     config.ladders.analysis.map((r) => r.model),
@@ -57,6 +61,25 @@ test("a model without an agent is rejected rather than half-auto-picked", () => 
   assert.throws(() => loadConfig(tempRepo({ synthesis: { model: "claude-opus-5" } })), UserError);
   const ok = loadConfig(tempRepo({ synthesis: { agent: "claude", model: "claude-opus-5" } }));
   assert.equal(ok.synthesis.agent, "claude");
+});
+
+test("Pi tool allowlists are normalized and synthesis keeps the required write tools", () => {
+  const config = loadConfig(
+    tempRepo({
+      analysis: { agent: "pi", tools: ["read", "read"] },
+      synthesis: { agent: "pi", tools: ["write", "read", "edit", "write"] },
+    }),
+  );
+  assert.deepEqual(config.analysis.tools, ["read"]);
+  assert.deepEqual(config.synthesis.tools, ["write", "read", "edit"]);
+});
+
+test("Pi tool allowlists reject ambiguous or non-write-capable profiles", () => {
+  assert.throws(() => loadConfig(tempRepo({ analysis: { tools: ["read"] } })), /tools.*agent.*pi/);
+  assert.throws(
+    () => loadConfig(tempRepo({ synthesis: { agent: "pi", tools: ["read"] } })),
+    /must include both.*edit.*write/,
+  );
 });
 
 test("ladders are user-editable and validated", () => {

@@ -382,6 +382,32 @@ test("a Pi session with model and effort uses process --model/--thinking and lea
   assert.equal(defaults.defaultThinkingLevel, "high");
 });
 
+test("a Pi session tool allowlist is applied to the process without changing defaults", async () => {
+  resetLogsAndSettings();
+  const before = Buffer.from(settingsBytes());
+  const session = await openSession({
+    agent: "pi",
+    model: "openai-codex/gpt-5.6-sol",
+    effort: "high",
+    tools: ["read", "read"],
+    sessionName: "bp-pi-tools",
+    cwd: workDir,
+  });
+  await session.close();
+
+  assert.equal(settingsBytes().compare(before), 0);
+  const spawned = jsonl(piLog);
+  assert.deepEqual(spawned[0].slice(0, 6), [
+    "--model",
+    "openai-codex/gpt-5.6-sol",
+    "--thinking",
+    "high",
+    "--tools",
+    "read",
+  ]);
+  assert.deepEqual(spawned[0].slice(6), ["--mode", "rpc", "--no-themes"]);
+});
+
 test("a configured replacement Pi adapter is rejected before model or effort can be claimed", async () => {
   resetLogsAndSettings();
   const before = Buffer.from(settingsBytes());

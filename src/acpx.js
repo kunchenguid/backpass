@@ -247,7 +247,7 @@ export function assertNonEmptyOutput(result, { agent, model }) {
  * still falls through to the next candidate.
  *
  * @param {Parameters<typeof execOneShot>[0]} call
- * @param {{ agent: string, model?: string | null, effort?: string | null }} pick
+ * @param {{ agent: string, model?: string | null, effort?: string | null, tools?: string[] | null }} pick
  * @param {{ sessionName: () => string }} options
  */
 export async function runModelCall(call, pick, { sessionName }) {
@@ -398,6 +398,7 @@ export async function execOneShot({
   agent,
   model = null,
   effort = null,
+  tools = null,
   promptFile,
   cwd,
   timeoutSeconds = 300,
@@ -405,7 +406,7 @@ export async function execOneShot({
   approveReads = true,
   suppressReads = true,
 }) {
-  const invocation = prepareHarnessInvocation({ agent, model, effort });
+  const invocation = prepareHarnessInvocation({ agent, model, effort, tools });
   const args = [
     ...baseArgs({ cwd, model: invocation.acpxModel, timeoutSeconds, approveReads, suppressReads }),
     "--prompt-retries",
@@ -470,12 +471,13 @@ export async function openSession({
   agent,
   model = null,
   effort = null,
+  tools = null,
   sessionName,
   cwd,
   writeAccess = false,
   createTimeoutMs = SESSION_CREATE_TIMEOUT_MS,
 }) {
-  const invocation = prepareHarnessInvocation({ agent, model, effort, writeAccess });
+  const invocation = prepareHarnessInvocation({ agent, model, effort, tools, writeAccess });
   const notes = [...invocation.notes];
   const acpxAgentArgs = invocationAgentArgs(invocation, agent);
   // The adapter is already up once the session exists, so the later `set` calls do not
@@ -642,6 +644,7 @@ export async function sessionPrompt({
   agent,
   model = null,
   effort = null,
+  tools = null,
   sessionName,
   promptFile,
   cwd,
@@ -653,7 +656,7 @@ export async function sessionPrompt({
 }) {
   let session;
   try {
-    session = await openSession({ agent, model, effort, sessionName, cwd, createTimeoutMs });
+    session = await openSession({ agent, model, effort, tools, sessionName, cwd, createTimeoutMs });
   } catch (err) {
     if (!(err instanceof AcpxError) || !err.unsupported) throw err;
     if (effort && effortOptionKey(agent)) {
@@ -673,6 +676,7 @@ export async function sessionPrompt({
       promptRetries,
       approveReads,
       suppressReads,
+      tools,
     });
     return { ...fallback, notes };
   }

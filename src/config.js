@@ -71,8 +71,8 @@ export const DEFAULT_CONFIG = {
    * `DEFAULT_EFFORT[role]`, except OpenCode which omits the overlay until effort
    * is set. Setting `agent` pins the role and skips the ladder.
    */
-  analysis: { agent: null, model: null, effort: null },
-  synthesis: { agent: null, model: null, effort: null },
+  analysis: { agent: null, model: null, effort: null, tools: null },
+  synthesis: { agent: null, model: null, effort: null, tools: null },
   autoAgent: true,
   ladders: DEFAULT_LADDERS,
   discovery: {
@@ -290,6 +290,36 @@ function validate(config, { kind = "project" } = {}) {
       if (!rung || typeof rung.model !== "string" || !Array.isArray(rung.agents) || !rung.agents.length) {
         throw new UserError(`config.ladders.${role} rungs must look like { "model": "<id>", "agents": ["<harness>"] }`);
       }
+    }
+    if (config[role].tools !== null && config[role].tools !== undefined) {
+      if (
+        !Array.isArray(config[role].tools) ||
+        config[role].tools.some((tool) => typeof tool !== "string" || !tool.trim())
+      ) {
+        throw new UserError(
+          `config.${role}.tools must be a non-empty array of tool names`,
+          `set config.${role}.tools to names such as ["read"] or ["read", "edit", "write"]`,
+        );
+      }
+      if (config[role].agent !== "pi") {
+        throw new UserError(
+          `config.${role}.tools is only supported when config.${role}.agent is "pi"`,
+          `pin ${role} to pi, or remove the tools allowlist`,
+        );
+      }
+      const tools = [...new Set(config[role].tools.map((tool) => tool.trim()))];
+      if (!tools.length) {
+        throw new UserError(`config.${role}.tools must contain at least one tool name`);
+      }
+      if (role === "synthesis" && (!tools.includes("edit") || !tools.includes("write"))) {
+        throw new UserError(
+          'config.synthesis.tools must include both "edit" and "write" so synthesis can update its staging copy',
+          'use ["read", "edit", "write"] for the narrowest write-capable Pi synthesis profile',
+        );
+      }
+      config[role].tools = tools;
+    } else {
+      config[role].tools = null;
     }
   }
   if (!["auto", "dark", "light"].includes(config.theme)) {

@@ -53,9 +53,11 @@ const OPTIONS = {
   "analysis-agent": { type: "string" },
   "analysis-model": { type: "string" },
   "analysis-effort": { type: "string" },
+  "analysis-tools": { type: "string" },
   "synthesis-agent": { type: "string" },
   "synthesis-model": { type: "string" },
   "synthesis-effort": { type: "string" },
+  "synthesis-tools": { type: "string" },
 
   "dry-run": { type: "boolean" },
   "no-ui": { type: "boolean" },
@@ -106,9 +108,11 @@ MODELS (two-tier: cheap analysis, smart synthesis - all through acpx)
   --analysis-agent <a>     acpx agent for the per-transcript pass       [auto]
   --analysis-model <id>    model id for the analysis pass (needs --analysis-agent)
   --analysis-effort <e>    one-off reasoning effort, when supported          [medium]
+  --analysis-tools <a,b>   Pi tool allowlist for analysis (for example: read)
   --synthesis-agent <a>    acpx agent for the final proposal pass       [auto]
   --synthesis-model <id>   model id for the synthesis pass (needs --synthesis-agent)
   --synthesis-effort <e>   one-off reasoning effort for synthesis            [high]
+  --synthesis-tools <a,b>  Pi tool allowlist for synthesis (must include edit,write)
   --no-auto-agent          skip the ladders and pin codex / claude (the pre-0.2 defaults)
   --jobs <n>               parallel analysis calls                      [4]
 
@@ -187,9 +191,13 @@ function overridesFrom(values) {
   if (values["analysis-agent"]) overrides.analysis.agent = values["analysis-agent"];
   if (values["analysis-model"]) overrides.analysis.model = values["analysis-model"];
   if (values["analysis-effort"]) overrides.analysis.effort = values["analysis-effort"];
+  if (values["analysis-tools"] !== undefined)
+    overrides.analysis.tools = toTools(values["analysis-tools"], "--analysis-tools");
   if (values["synthesis-agent"]) overrides.synthesis.agent = values["synthesis-agent"];
   if (values["synthesis-model"]) overrides.synthesis.model = values["synthesis-model"];
   if (values["synthesis-effort"]) overrides.synthesis.effort = values["synthesis-effort"];
+  if (values["synthesis-tools"] !== undefined)
+    overrides.synthesis.tools = toTools(values["synthesis-tools"], "--synthesis-tools");
   if (values["no-auto-agent"]) overrides.autoAgent = false;
 
   for (const key of ["discovery", "analysis", "synthesis"]) {
@@ -202,6 +210,15 @@ function toInt(value, flag) {
   const n = Number(value);
   if (!Number.isInteger(n) || n <= 0) throw new UserError(`${flag} must be a positive integer (got "${value}")`);
   return n;
+}
+
+function toTools(value, flag) {
+  const tools = String(value)
+    .split(",")
+    .map((tool) => tool.trim())
+    .filter(Boolean);
+  if (!tools.length) throw new UserError(`${flag} must contain at least one comma-separated tool name`);
+  return [...new Set(tools)];
 }
 
 function toSeed(value) {

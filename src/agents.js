@@ -389,10 +389,16 @@ export class AgentResolver {
   pinned(role) {
     const explicit = this.config[role];
     if (explicit.agent) {
-      return { agent: explicit.agent, model: explicit.model || null, pinned: true, reason: "configured" };
+      return {
+        agent: explicit.agent,
+        model: explicit.model || null,
+        tools: explicit.tools || null,
+        pinned: true,
+        reason: "configured",
+      };
     }
     if (this.config.autoAgent === false) {
-      return { agent: LEGACY_DEFAULT_AGENTS[role], model: null, pinned: true, reason: "--no-auto-agent" };
+      return { agent: LEGACY_DEFAULT_AGENTS[role], model: null, tools: null, pinned: true, reason: "--no-auto-agent" };
     }
     return null;
   }

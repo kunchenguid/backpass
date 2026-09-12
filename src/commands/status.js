@@ -169,7 +169,7 @@ export async function cmdStatus(ctx) {
 function describeRole(config, role) {
   const pinned = config.agents.pinned(role);
   if (pinned) {
-    return `${pinned.agent}${pinned.model ? `/${pinned.model}` : ""} (effort ${formatEffort(resolvedEffort(role, pinned.agent, config))}, ${pinned.reason})`;
+    return `${pinned.agent}${pinned.model ? `/${pinned.model}` : ""} (effort ${formatEffort(resolvedEffort(role, pinned.agent, config))}${formatTools(pinned.tools)}, ${pinned.reason})`;
   }
   const cache = config.state.readProbeCache();
   for (const candidate of config.agents.ladder(role)) {
@@ -187,4 +187,8 @@ function describeRole(config, role) {
 
 function formatEffort(effort) {
   return effort || "unset";
+}
+
+function formatTools(tools) {
+  return Array.isArray(tools) && tools.length ? `, tools ${tools.join(",")}` : "";
 }

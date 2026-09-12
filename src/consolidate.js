@@ -85,6 +85,7 @@ export async function consolidateGapLedger({ ledger, memoryPath, config, repo, m
         cwd: modelCwd || repo.root,
         timeoutSeconds: config.timeoutSeconds,
         promptRetries: config.promptRetries,
+        tools: pick.tools,
       };
       return runModelCall(call, pick, {
         sessionName: () => `backpass-consolidate-${process.pid}-${++callCounter}`,

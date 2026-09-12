@@ -635,8 +635,8 @@ CLI flags on top:
   "maxTranscripts": 100,
   "sampleHalfLife": "14d",
   "seed": null,
-  "analysis": { "agent": null, "model": null, "effort": null },
-  "synthesis": { "agent": null, "model": null, "effort": null },
+  "analysis": { "agent": null, "model": null, "effort": null, "tools": null },
+  "synthesis": { "agent": null, "model": null, "effort": null, "tools": null },
   "ladders": {
     "analysis": [
       { "model": "gpt-5.6-luna", "agents": ["pi", "opencode", "codex"] },
@@ -658,6 +658,22 @@ CLI flags on top:
   },
   "jobs": 4
 }
+```
+
+When Pi is pinned, `tools` is an optional process-level allowlist. The narrowest useful
+read-only analysis profile is `"tools": ["read"]`. Synthesis must be able to update its
+staging copy, so its narrowest write-capable profile is
+`"tools": ["read", "edit", "write"]`. Backpass still applies ACP's read/write permission
+policy around those tools, and the allowlist is invocation-scoped rather than a change to
+Pi's persistent settings.
+
+The same controls are available for one run:
+
+```sh
+backpass analyze --analysis-agent pi --analysis-model gpt-5.6-luna \
+  --analysis-effort max --analysis-tools read --jobs 1 --max-transcripts 1
+backpass propose --synthesis-agent pi --synthesis-model gpt-5.6-luna \
+  --synthesis-effort max --synthesis-tools read,edit,write
 ```
 
 That example is the project scope. User scope ignores `.backpassrc.json` and instead
