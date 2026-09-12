@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.21](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.20...backpass-v0.1.21) (2026-09-12)
+
+
+### Bug Fixes
+
+* **acpx:** fall through the agent ladder on clean-exit empty output ([#122](https://github.com/kunchenguid/backpass/issues/122)) ([764ed95](https://github.com/kunchenguid/backpass/commit/764ed9551ec68dc88b7b6a424e028d1a4c122b29))
+
 ## [0.1.20](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.19...backpass-v0.1.20) (2026-09-10)
 
 
