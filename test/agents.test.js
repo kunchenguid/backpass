@@ -92,6 +92,10 @@ function authRequired(agent) {
   });
 }
 
+function emptyOutput(agent, model) {
+  return new AcpxError(`${agent} (${model}) returned no output`, { emptyOutput: true });
+}
+
 test("the ladders flatten model-outer, harness-inner, in the captain's order", () => {
   assert.deepEqual(
     flattenLadder(DEFAULT_LADDERS.analysis).map((c) => `${c.model}@${c.agent}`),
@@ -366,6 +370,28 @@ test("AUTH_REQUIRED mid-run falls through to the next candidate", async () => {
   assert.deepEqual(replay.calls, [], "the demotion remains cached while auth state is unchanged");
 });
 
+test("a clean exit with no output (e.g. exhausted provider credits) falls through to the next candidate", async () => {
+  const verdicts = {
+    "pi|gpt-5.6-luna": { resolvedModel: "openai/gpt-5.6-luna" },
+    "opencode|gpt-5.6-luna": "model-unavailable",
+    "codex|gpt-5.6-luna": { resolvedModel: "gpt-5.6-luna" },
+  };
+  const { resolver, calls, state } = resolverWith(verdicts);
+
+  const attempts = [];
+  const result = await resolver.withFallthrough("analysis", async (pick) => {
+    attempts.push(`${pick.agent}/${pick.model}`);
+    if (pick.agent === "pi") throw emptyOutput(pick.agent, pick.model);
+    return "evidence";
+  });
+
+  assert.equal(result, "evidence");
+  assert.deepEqual(attempts, ["pi/openai/gpt-5.6-luna", "codex/gpt-5.6-luna"]);
+  assert.deepEqual(calls, ["pi|gpt-5.6-luna", "opencode|gpt-5.6-luna", "codex|gpt-5.6-luna"]);
+  assert.equal(state.cache.entries["pi|gpt-5.6-luna"].verdict, "empty-output", "the failure is remembered");
+  assert.equal((await resolver.resolve("analysis")).agent, "codex", "later calls in the run stay on the fallback");
+});
+
 test("parallel workers failing on the same candidate fall through once, together", async () => {
   const { resolver } = resolverWith({
     "pi|gpt-5.6-luna": { resolvedModel: "openai-codex/gpt-5.6-luna" },
@@ -500,6 +526,24 @@ test("explicit config or CLI flags pin the role and skip the ladder entirely", a
   );
 });
 
+test("a pinned agent that returns no output gets a provider-account hint, not a login one", async () => {
+  const config = loadConfig(tmpRepo(), { synthesis: { agent: "claude", model: "claude-opus-5" } });
+  const { resolver } = resolverWith({}, { config });
+  await assert.rejects(
+    resolver.withFallthrough("synthesis", async () => {
+      throw emptyOutput("claude", "claude-opus-5");
+    }),
+    (err) => {
+      assert.ok(err instanceof UserError);
+      assert.match(err.message, /pinned synthesis agent claude \(claude-opus-5\)/);
+      assert.match(err.message, /returned no output/);
+      assert.match(err.hint, /check the provider account/);
+      assert.doesNotMatch(err.hint, /log in|claude auth login/);
+      return true;
+    },
+  );
+});
+
 test("--no-auto-agent pins the pre-ladder defaults", async () => {
   const config = loadConfig(tmpRepo(), { autoAgent: false });
   const { resolver, calls } = resolverWith({}, { config });
@@ -530,6 +574,29 @@ test("an exhausted ladder fails with one actionable error listing every candidat
       ]) {
         assert.match(err.message, line);
       }
+      assert.match(err.hint, /--synthesis-agent <agent> --synthesis-model <id>/);
+      return true;
+    },
+  );
+});
+
+test("an exhausted ladder that failed only on empty output points at the provider, not login", async () => {
+  const { resolver } = resolverWith({
+    "pi|gpt-5.6-sol": "empty-output",
+    "opencode|gpt-5.6-sol": "empty-output",
+    "codex|gpt-5.6-sol": "empty-output",
+    "claude|claude-opus-5": "empty-output",
+    "pi|grok-4.6": "empty-output",
+    "opencode|grok-4.6": "empty-output",
+    "grok|grok-4.6": "empty-output",
+  });
+  await assert.rejects(
+    () => resolver.resolve("synthesis"),
+    (err) => {
+      assert.ok(err instanceof UserError);
+      assert.match(err.message, /returned no output/);
+      assert.doesNotMatch(err.hint, /log in/);
+      assert.match(err.hint, /check the provider account/);
       assert.match(err.hint, /--synthesis-agent <agent> --synthesis-model <id>/);
       return true;
     },
@@ -972,6 +1039,7 @@ test("acpx failure classification and the per-adapter tables", () => {
   assert.equal(classifyAcpxFailure({ spawnError: { code: "ENOENT" } }), "unreachable");
   assert.equal(classifyAcpxFailure({ stderr: "[acpx] error: TIMEOUT prompt exceeded 300s" }), null);
   assert.equal(classifyAcpxFailure({ stderr: "" }), null);
+  assert.equal(classifyAcpxFailure({ emptyOutput: true, stderr: "" }), "empty-output");
 
   assert.equal(acpxAgentName("grok"), "grok-build", "backpass's grok is acpx's grok-build");
   assert.equal(acpxAgentName("codex"), "codex");

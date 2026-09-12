@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { execOneShot, extractJson, sessionPrompt, usageRecord } from "./acpx.js";
+import { extractJson, runModelCall, usageRecord } from "./acpx.js";
 import { mergeGapEntries } from "./gap-ledger.js";
 import { renderPrompt } from "./prompts.js";
 import { warn } from "./logger.js";
@@ -86,12 +86,8 @@ export async function consolidateGapLedger({ ledger, memoryPath, config, repo, m
         timeoutSeconds: config.timeoutSeconds,
         promptRetries: config.promptRetries,
       };
-      if (!pick.effort) return execOneShot(call);
-      callCounter += 1;
-      return sessionPrompt({
-        ...call,
-        effort: pick.effort,
-        sessionName: `backpass-consolidate-${process.pid}-${callCounter}`,
+      return runModelCall(call, pick, {
+        sessionName: () => `backpass-consolidate-${process.pid}-${++callCounter}`,
       });
     });
   } catch (err) {

@@ -53,6 +53,7 @@ export const VERDICT_LABELS = {
   "model-unavailable": "model not advertised",
   unreachable: "not installed / not spawnable",
   timeout: "probe timed out",
+  "empty-output": "returned no output",
 };
 
 const LOGIN_HINTS = {
@@ -267,9 +268,13 @@ function defaultSleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** "empty-output" is never fixed by logging in - see `assertNonEmptyOutput` in acpx.js. */
+const EMPTY_OUTPUT_HINT = "check the provider account behind this model (quota, credits, a suspended key)";
+
 function hintFor(agent, verdict) {
   if (verdict === "unauthenticated" && LOGIN_HINTS[agent]) return `-> run: ${LOGIN_HINTS[agent]}`;
   if (verdict === "unreachable") return `-> install the ${agent} CLI`;
+  if (verdict === "empty-output") return `-> ${EMPTY_OUTPUT_HINT}`;
   return "";
 }
 
@@ -543,6 +548,8 @@ function pinnedFailureError(role, pick, verdict, err) {
     hint = `run: ${LOGIN_HINTS[pick.agent]}; ${pin}`;
   } else if (verdict === "unreachable") {
     hint = `install the ${pick.agent} CLI; ${pin}`;
+  } else if (verdict === "empty-output") {
+    hint = `${EMPTY_OUTPUT_HINT}; ${pin}`;
   } else if (verdict) {
     hint = pin;
   }
@@ -557,8 +564,14 @@ function exhaustedError(role, trail) {
     const hint = hintFor(t.agent, t.verdict);
     return `  ${t.model.padEnd(width)}  ${t.agent.padEnd(9)} ${label}${t.detail ? ` (${t.detail})` : ""}${hint ? `  ${hint}` : ""}`;
   });
-  return new UserError(
-    `no available agent for the ${role} pass\n\n${lines.join("\n")}`,
-    `log in to one of the harnesses above, or pin one explicitly: backpass --${role}-agent <agent> --${role}-model <id>`,
-  );
+  // "log in" is only true advice when something in the trail is actually an auth
+  // failure - an all-"empty-output" trail (exhausted credits) needs its own line, not
+  // login instructions that don't apply to any candidate shown above.
+  const pinHint = `pin one explicitly: backpass --${role}-agent <agent> --${role}-model <id>`;
+  const closing = trail.some((t) => t.verdict === "unauthenticated")
+    ? `log in to one of the harnesses above, or ${pinHint}`
+    : trail.every((t) => t.verdict === "empty-output")
+      ? `${EMPTY_OUTPUT_HINT} for the candidates above, or ${pinHint}`
+      : pinHint;
+  return new UserError(`no available agent for the ${role} pass\n\n${lines.join("\n")}`, closing);
 }

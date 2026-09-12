@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { extractJson, openSession, usageRecord } from "./acpx.js";
+import { extractJson, isBlankOutput, openSession, usageRecord } from "./acpx.js";
 import { userClaudeSkillsDir } from "./config.js";
 import { renderEvidenceForPrompt } from "./fold.js";
 import { renderInstructionIndex, resolveMemoryPath } from "./memory.js";
@@ -398,7 +398,7 @@ async function annotateLoop({
 
     // An empty turn is not a bad answer; it is no answer. Retry it once in a new session,
     // because the accumulated context of this one is the likeliest reason it collapsed.
-    if (!(result.text || "").trim()) {
+    if (isBlankOutput(result.text)) {
       emptyTurns += 1;
       if (emptyTurns > EMPTY_TURN_RETRIES) {
         terminal = { reason: "empty", violations: [EMPTY_TURN_VIOLATION] };
