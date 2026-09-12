@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { execOneShot, extractJson, sessionPrompt, usageRecord } from "./acpx.js";
+import { extractJson, runModelCall, usageRecord } from "./acpx.js";
 import { distill } from "./distill.js";
 import { classifyInteraction } from "./interaction.js";
 import { readTranscript } from "./discovery/index.js";
@@ -208,12 +208,8 @@ async function analyzeOne({
     };
     // Route effortful calls through a fresh per-transcript session so each harness's
     // invocation-scoped overlay or safe fallback is applied; otherwise one-shot is cheaper.
-    if (!pick.effort) return execOneShot(call);
-    callCounter += 1;
-    return sessionPrompt({
-      ...call,
-      effort: pick.effort,
-      sessionName: `backpass-analysis-${process.pid}-${slot}-${callCounter}`,
+    return runModelCall(call, pick, {
+      sessionName: () => `backpass-analysis-${process.pid}-${slot}-${++callCounter}`,
     });
   });
   for (const note of result.notes || []) noteOnce(note);

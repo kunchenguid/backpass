@@ -46,7 +46,10 @@ export function effortOptionKey(agent) {
 }
 
 export class AcpxError extends Error {
-  constructor(message, { stdout = "", stderr = "", code = null, timedOut = false, spawnError = null } = {}) {
+  constructor(
+    message,
+    { stdout = "", stderr = "", code = null, timedOut = false, spawnError = null, emptyOutput = false } = {},
+  ) {
     super(message);
     this.name = "AcpxError";
     this.stdout = stdout;
@@ -56,6 +59,8 @@ export class AcpxError extends Error {
     this.spawnError = spawnError;
     /** Set when the adapter has no session support at all (not an availability verdict). */
     this.unsupported = false;
+    /** Set when the call exited clean but produced no usable text - see `assertNonEmptyOutput`. */
+    this.emptyOutput = emptyOutput;
   }
 }
 
@@ -129,11 +134,12 @@ function sessionCreateTimeoutError({ agent, acpxAgentArgs, timeoutMs }) {
  * acpx reports these on stderr as `[acpx] error: RUNTIME AUTH_REQUIRED ...` and
  * `Cannot apply --model "x": the ACP agent did not advertise that model`.
  *
- * @param {{ stderr?: string, spawnError?: { code?: string } | null, timedOut?: boolean }} failure
- * @returns {"unauthenticated" | "model-unavailable" | "unreachable" | null}
+ * @param {{ stderr?: string, spawnError?: { code?: string } | null, timedOut?: boolean, emptyOutput?: boolean }} failure
+ * @returns {"unauthenticated" | "model-unavailable" | "unreachable" | "empty-output" | null}
  */
 export function classifyAcpxFailure(failure) {
   if (!failure) return null;
+  if (failure.emptyOutput) return "empty-output";
   if (failure.spawnError?.code === "ENOENT") return "unreachable";
   const text = failure.stderr || "";
   if (/AUTH_REQUIRED|authentication required/i.test(text)) return "unauthenticated";
@@ -198,6 +204,57 @@ export function extractJson(text) {
     }
   }
   return null;
+}
+
+/** True when a model turn produced no usable text at all (blank or whitespace-only). */
+export function isBlankOutput(text) {
+  return !(text || "").trim();
+}
+
+/**
+ * A call that exits clean but returns no text at all is a silent failure, not a
+ * quality problem: the prompt contract always requires at least an empty JSON object
+ * (`"An empty array is a valid and useful answer"`), so blank output means the turn
+ * never really ran - most often an upstream provider error (exhausted credits, a
+ * suspended key) that an ACP bridge swallows without ever writing to stderr. Unlike
+ * garbled prose, no real work was done, so it is safe to demote the candidate and
+ * retry with the next one in the ladder rather than burning the whole run on it.
+ * Call this from inside a `withFallthrough` callback, before the caller's own
+ * `extractJson` check, so the throw is still in scope to trigger a fallthrough.
+ *
+ * Not for every model call: synthesis's edit turn never reads its own `text` (the edit
+ * happens through tool calls, so blank is normal there) and its annotate turn
+ * deliberately never switches agents mid-session - see `src/synthesize.js`. Both stay
+ * on `isBlankOutput` directly instead.
+ *
+ * @param {{ text: string, raw?: string }} result
+ * @param {{ agent: string, model?: string | null }} pick
+ */
+export function assertNonEmptyOutput(result, { agent, model }) {
+  if (!isBlankOutput(result.text)) return result;
+  throw new AcpxError(`${agent} (${model || "default"}) returned no output`, {
+    stdout: result.raw ?? result.text,
+    emptyOutput: true,
+  });
+}
+
+/**
+ * Run one model turn - a one-shot `exec` when no effort override is needed, or a
+ * fresh named session when it is (`sessionName` is called only in that branch, so a
+ * caller's own call counter advances only for calls that actually open a session) -
+ * and reject blank output via `assertNonEmptyOutput`. Shared by `analyze.js` and
+ * `consolidate.js`; call from inside a `withFallthrough` callback so a blank result
+ * still falls through to the next candidate.
+ *
+ * @param {Parameters<typeof execOneShot>[0]} call
+ * @param {{ agent: string, model?: string | null, effort?: string | null }} pick
+ * @param {{ sessionName: () => string }} options
+ */
+export async function runModelCall(call, pick, { sessionName }) {
+  const result = pick.effort
+    ? await sessionPrompt({ ...call, effort: pick.effort, sessionName: sessionName() })
+    : await execOneShot(call);
+  return assertNonEmptyOutput(result, pick);
 }
 
 /**
@@ -280,7 +337,7 @@ export async function acpxVersion({ timeoutMs = 10_000 } = {}) {
  * real auth gate (ACP -32000); for claude it is not, which is why `src/agents.js`
  * checks `claude auth status` before ever calling this.
  *
- * @returns {Promise<{ verdict: "ok" | "unauthenticated" | "model-unavailable" | "unreachable" | "timeout",
+ * @returns {Promise<{ verdict: "ok" | "unauthenticated" | "model-unavailable" | "unreachable" | "timeout" | "empty-output",
  *   detail: string, availableModels: string[], transient?: boolean }>}
  */
 export async function probeSession({
