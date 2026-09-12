@@ -29,7 +29,7 @@ test("the defaults match the approved design", () => {
   assert.equal(config.budgetTokens, 5000);
   assert.equal(config.maxEditsPerRun, null, "the edit cap is adaptive unless pinned");
   assert.equal(config.minGapEvidence, 2);
-  assert.equal(config.jobs, 4);
+  assert.equal(config.jobs, 1);
   assert.equal(config.discovery.since, "30d");
   assert.deepEqual(config.discovery.harnesses, ["claude", "codex", "jcode", "pi", "omp"]);
   assert.ok(!config.discovery.harnesses.includes("cursor-ide"), "Cursor IDE is deferred to v1.1");

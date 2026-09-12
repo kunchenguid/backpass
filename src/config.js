@@ -88,7 +88,7 @@ export const DEFAULT_CONFIG = {
     minUserTurns: 2,
     includeCursorIde: false,
   },
-  jobs: 4,
+  jobs: 1,
   timeoutSeconds: 300,
   promptRetries: 1,
   /** Live progress ink set: "auto" queries the terminal background, or force "dark" / "light". */

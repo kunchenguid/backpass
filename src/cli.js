@@ -114,7 +114,7 @@ MODELS (two-tier: cheap analysis, smart synthesis - all through acpx)
   --synthesis-effort <e>   one-off reasoning effort for synthesis            [high]
   --synthesis-tools <a,b>  Pi tool allowlist for synthesis (must include edit,write)
   --no-auto-agent          skip the ladders and pin codex / claude (the pre-0.2 defaults)
-  --jobs <n>               parallel analysis calls                      [4]
+  --jobs <n>               parallel analysis calls                      [1]
 
 BUDGET AND SHAPE
   --budget <tokens>        always-loaded budget per memory file         [5000]
