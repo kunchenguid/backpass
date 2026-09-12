@@ -1,6 +1,8 @@
 import * as claude from "./adapters/claude.js";
 import * as codex from "./adapters/codex.js";
+import * as jcode from "./adapters/jcode.js";
 import * as pi from "./adapters/pi.js";
+import * as omp from "./adapters/omp.js";
 import * as grok from "./adapters/grok.js";
 import * as opencode from "./adapters/opencode.js";
 import * as hermes from "./adapters/hermes.js";
@@ -19,7 +21,9 @@ import { passesProjectFilter } from "../scope.js";
 export const ADAPTERS = {
   claude,
   codex,
+  jcode,
   pi,
+  omp,
   grok,
   opencode,
   hermes,

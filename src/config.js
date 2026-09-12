@@ -8,7 +8,7 @@ import { normalizeSkillsDir } from "./skills.js";
 export const CONFIG_FILENAME = ".backpassrc.json";
 export const STATE_DIRNAME = ".backpass";
 
-export const ALL_HARNESSES = ["claude", "codex", "pi", "opencode", "grok", "cursor", "hermes"];
+export const ALL_HARNESSES = ["claude", "codex", "jcode", "pi", "omp", "opencode", "grok", "cursor", "hermes"];
 /** Cursor IDE is deferred to v1.1 and only ever runs behind --include-cursor-ide. */
 export const OPT_IN_HARNESSES = ["cursor-ide"];
 

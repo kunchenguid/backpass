@@ -120,7 +120,7 @@ export function read(ref) {
 
   for (const entry of entries) {
     if (entry.type === "model_change") {
-      model = entry.modelId || model;
+      model = entry.modelId || entry.model || model;
       continue;
     }
     if (entry.type !== "message" || !entry.message) continue;

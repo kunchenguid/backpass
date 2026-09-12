@@ -32,7 +32,7 @@ The loop only closes when a human happens to remember a failure and edits the fi
 what happened in them, and proposes evidence-backed edits to your memory surface - the
 memory file and project skills - under a token budget, gated by you.
 
-- **Local-first** - Reads the transcript stores of seven agent harnesses directly from disk.
+- **Local-first** - Reads the transcript stores of nine agent harnesses directly from disk.
   No API, no upload; transcripts never leave your machine except into an agent you already
   authenticated, and obvious secrets are redacted before they do.
 - **Evidence-gated** - Every proposed edit carries verbatim quotes from real sessions,
@@ -151,17 +151,19 @@ It cannot be combined with
 
 ### 1. Collect samples - which sessions belong to this repo
 
-backpass reads the local transcript stores of seven harnesses directly. No API, no upload.
+backpass reads the local transcript stores of nine harnesses directly. No API, no upload.
 
-| Harness        | Store                                          | Repo tie                                            |
-| -------------- | ---------------------------------------------- | --------------------------------------------------- |
-| **claude**     | `~/.claude/projects/<munged-cwd>/<uuid>.jsonl` | per-line `cwd`                                      |
-| **codex**      | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | `cwd` + recorded `git.repository_url`               |
-| **pi**         | standalone and BB-managed Pi JSONL stores      | session-header `cwd`                                |
-| **opencode**   | `~/.local/share/opencode/opencode.db` (sqlite) | `session.directory`                                 |
-| **grok**       | `~/.grok/sessions/<encoded-cwd>/<uuid>/`       | `summary.json` `cwd` + `git_remotes`                |
-| **cursor CLI** | `~/.cursor/chats/<md5(cwd)>/<uuid>/`           | `meta.json` `cwd`                                   |
-| **hermes**     | `~/.hermes/state.db` (sqlite)                  | session cwd, with CLI prompt / ACP config fallbacks |
+| Harness        | Store                                            | Repo tie                                            |
+| -------------- | ------------------------------------------------ | --------------------------------------------------- |
+| **claude**     | `~/.claude/projects/<munged-cwd>/<uuid>.jsonl`   | per-line `cwd`                                      |
+| **codex**      | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`   | `cwd` + recorded `git.repository_url`               |
+| **jcode**      | `$JCODE_HOME/sessions/session_*.json` + journals | `working_dir`                                       |
+| **pi**         | standalone and BB-managed Pi JSONL stores        | session-header `cwd`                                |
+| **omp**        | `~/.omp/agent/sessions/**/*.jsonl`               | session-header `cwd`                                |
+| **opencode**   | `~/.local/share/opencode/opencode.db` (sqlite)   | `session.directory`                                 |
+| **grok**       | `~/.grok/sessions/<encoded-cwd>/<uuid>/`         | `summary.json` `cwd` + `git_remotes`                |
+| **cursor CLI** | `~/.cursor/chats/<md5(cwd)>/<uuid>/`             | `meta.json` `cwd`                                   |
+| **hermes**     | `~/.hermes/state.db` (sqlite)                    | session cwd, with CLI prompt / ACP config fallbacks |
 
 Claude collection covers `$CLAUDE_CONFIG_DIR/projects` alongside the default store, so a
 relocated config dir does not hide its sessions. The variable is read from backpass's own
@@ -173,6 +175,13 @@ sessions under `~/.bb/pi-bridge-sessions/`. It also honors `PI_CODING_AGENT_DIR`
 `PI_CODING_AGENT_SESSION_DIR`, `BB_DATA_DIR`, and `BB_PI_BRIDGE_SESSION_DIR` when they are
 set in backpass's environment. When roots overlap, backpass scans every applicable layout
 and reads each JSONL file once.
+
+Jcode collection reads snapshots from `$JCODE_HOME/sessions/` (default `~/.jcode/sessions/`)
+and merges sibling `.journal.jsonl` append records before association. Oh My Pi collection
+reads nested JSONL sessions from `~/.omp/agent/sessions/`, including title-first files, and
+reuses Pi's message parser. Both roots can be overridden for a backpass run with
+`JCODE_HOME` and `OMP_CODING_AGENT_DIR` respectively; the latter also accepts
+`PI_CODING_AGENT_DIR` for installations that use Oh My Pi's upstream directory variable.
 
 Hermes collection includes CLI and ACP sessions only. Gateway, cron, and WhatsApp sessions
 are excluded because their recorded cwd belongs to the shared gateway process, not a project.

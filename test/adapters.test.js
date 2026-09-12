@@ -8,7 +8,9 @@ import { DatabaseSync } from "node:sqlite";
 
 import * as claude from "../src/discovery/adapters/claude.js";
 import * as codex from "../src/discovery/adapters/codex.js";
+import * as jcode from "../src/discovery/adapters/jcode.js";
 import * as pi from "../src/discovery/adapters/pi.js";
+import * as omp from "../src/discovery/adapters/omp.js";
 import * as grok from "../src/discovery/adapters/grok.js";
 import * as cursorCli from "../src/discovery/adapters/cursor-cli.js";
 import * as hermes from "../src/discovery/adapters/hermes.js";
@@ -144,6 +146,77 @@ test("pi adapter reads the session header and drops thinking blocks", () => {
   const [toolCall] = tools(events);
   assert.equal(toolCall.name, "bash");
   assert.equal(toolCall.result, "nothing to commit");
+});
+
+test("jcode adapter merges snapshot and journal messages", () => {
+  const file = path.join(FIXTURES, "jcode-session.json");
+  const descriptor = jcode.classify(candidateFor(file));
+
+  assert.equal(descriptor.id, "jcode-1234");
+  assert.equal(descriptor.cwd, "/repo/demo");
+  assert.equal(descriptor.model, "gpt-5.6-luna");
+
+  const { events, model } = jcode.read({ path: file });
+  assert.equal(model, "gpt-5.6-luna");
+  assert.deepEqual(
+    messages(events).map((m) => `${m.role}: ${m.text}`),
+    ["user: Fix the parser.", "assistant: I will inspect it."],
+  );
+
+  const [toolCall] = tools(events);
+  assert.equal(toolCall.name, "bash");
+  assert.equal(toolCall.input.command, "npm test");
+  assert.equal(toolCall.result, "1 failing");
+  assert.equal(toolCall.status, "error");
+});
+
+test("omp adapter finds a nested session prefix and reuses Pi message parsing", () => {
+  const file = path.join(FIXTURES, "omp-session.jsonl");
+  const descriptor = omp.classify(candidateFor(file));
+
+  assert.equal(descriptor.id, "omp-1234");
+  assert.equal(descriptor.cwd, "/repo/demo");
+  assert.equal(descriptor.model, "gpt-5.6-sol");
+  assert.equal(descriptor.title, "Demo OMP session");
+
+  const { events, model } = omp.read({ path: file });
+  assert.equal(model, "gpt-5.6-sol");
+  assert.deepEqual(
+    messages(events).map((m) => `${m.role}: ${m.text}`),
+    ["user: Add the changelog entry.", "assistant: Editing CHANGELOG.md."],
+  );
+
+  const [toolCall] = tools(events);
+  assert.equal(toolCall.name, "bash");
+  assert.equal(toolCall.input.command, "git status");
+  assert.equal(toolCall.result, "nothing to commit");
+
+  const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-omp-home-"));
+  const configured = path.join(fakeHome, "omp-agent");
+  const nested = path.join(configured, "sessions", "date", "project", "run");
+  fs.mkdirSync(nested, { recursive: true });
+  fs.copyFileSync(file, path.join(nested, "session.jsonl"));
+  const previous = {
+    HOME: process.env.HOME,
+    OMP_CODING_AGENT_DIR: process.env.OMP_CODING_AGENT_DIR,
+    PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR,
+  };
+  process.env.HOME = fakeHome;
+  process.env.OMP_CODING_AGENT_DIR = configured;
+  delete process.env.PI_CODING_AGENT_DIR;
+  try {
+    assert.deepEqual(
+      omp.enumerate().map((candidate) => path.basename(candidate.path)),
+      ["session.jsonl"],
+    );
+  } finally {
+    if (previous.HOME === undefined) delete process.env.HOME;
+    else process.env.HOME = previous.HOME;
+    if (previous.OMP_CODING_AGENT_DIR === undefined) delete process.env.OMP_CODING_AGENT_DIR;
+    else process.env.OMP_CODING_AGENT_DIR = previous.OMP_CODING_AGENT_DIR;
+    if (previous.PI_CODING_AGENT_DIR === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previous.PI_CODING_AGENT_DIR;
+  }
 });
 
 function writePiSession(file, { id, cwd }) {

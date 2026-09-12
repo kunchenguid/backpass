@@ -1,0 +1,36 @@
+{
+  "id": "jcode-1234",
+  "parent_id": null,
+  "created_at": "2026-08-04T08:00:00.000Z",
+  "updated_at": "2026-08-04T08:00:04.000Z",
+  "model": "gpt-5.6-luna",
+  "working_dir": "/repo/demo",
+  "messages": [
+    {
+      "id": "system-1",
+      "role": "user",
+      "display_role": "system",
+      "content": [{"type": "text", "text": "system scaffolding must be dropped"}]
+    },
+    {
+      "id": "background-1",
+      "role": "user",
+      "display_role": "background_task",
+      "content": [{"type": "text", "text": "background task scaffolding must be dropped"}]
+    },
+    {
+      "id": "u1",
+      "role": "user",
+      "content": [{"type": "text", "text": "Fix the parser."}]
+    },
+    {
+      "id": "a1",
+      "role": "assistant",
+      "content": [
+        {"type": "reasoning_trace", "text": "internal reasoning must be dropped"},
+        {"type": "text", "text": "I will inspect it."},
+        {"type": "tool_use", "id": "tc1", "name": "bash", "input": {"command": "npm test"}}
+      ]
+    }
+  ]
+}
