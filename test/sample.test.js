@@ -192,7 +192,7 @@ test("undated transcripts and duplicate-looking titles never crash or collide th
 });
 
 test("every supported harness's id namespace is sampled independently, never deduped across harnesses", () => {
-  const harnesses = ["claude", "codex", "pi", "opencode", "grok", "cursor", "hermes", "cursor-ide"];
+  const harnesses = ["claude", "codex", "jcode", "pi", "omp", "opencode", "grok", "cursor", "hermes", "cursor-ide"];
   const set = harnesses.map((harness) => ({ harness, id: "s1", startedAt: NOW, mtimeMs: 0 }));
   const kept = sampleTranscripts(set, harnesses.length - 1, { now: NOW });
   assert.equal(kept.length, harnesses.length - 1, "same id under each harness is a distinct sampling entry");

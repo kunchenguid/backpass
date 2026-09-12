@@ -4,7 +4,7 @@ import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 
 import { UserError, fail, setQuiet } from "./logger.js";
-import { loadConfig, parseMaxTranscripts, parseScopeKind } from "./config.js";
+import { ALL_HARNESSES, loadConfig, parseMaxTranscripts, parseScopeKind } from "./config.js";
 import { resolveRepo } from "./repo.js";
 import { printScopeNote, resolveScope } from "./scope.js";
 import { printTargetNote, resolveTarget, TARGET_COMMANDS } from "./target.js";
@@ -89,7 +89,7 @@ COMMANDS
 COLLECT SAMPLES
   --since <dur>            only sessions newer than this (30d, 12h, 2w, all)  [30d]
   --harness <a,b>          limit to these harnesses
-                           (claude, codex, pi, opencode, grok, cursor, hermes)
+                           (${ALL_HARNESSES.join(", ")})
   --strict                 deterministic associations only (tiers 1, 1.5, and 2)
   --include-cursor-ide     also scan the Cursor IDE store (best-effort, v1.1 preview)
   --limit <n>              analyze at most N transcripts this run (newest first)
