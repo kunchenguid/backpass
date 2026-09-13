@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.22](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.21...backpass-v0.1.22) (2026-09-13)
+
+
+### Features
+
+* **discovery:** collect sessions from remote machines over SSH ([#124](https://github.com/kunchenguid/backpass/issues/124)) ([fa712a0](https://github.com/kunchenguid/backpass/commit/fa712a07e928ae392f1c489788387a3fe4724e81))
+
 ## [0.1.21](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.20...backpass-v0.1.21) (2026-09-12)
 
 
