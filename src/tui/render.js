@@ -291,7 +291,6 @@ function hostLines(d, theme) {
             ...Object.entries(host.harnesses || {}).map(([harness, stats]) =>
               stats?.error ? `${harness} unreadable` : `${harness} ${formatCount(stats?.scanned || 0)}`,
             ),
-            host.fetch ? `${formatCount(host.fetch)} fetched` : null,
           ]
             .filter(Boolean)
             .join(" · "),

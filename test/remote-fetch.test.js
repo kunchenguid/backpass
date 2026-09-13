@@ -149,6 +149,20 @@ test("a second run reuses the cached copy and makes no fetch call at all", async
   assert.ok(fs.existsSync(second.transcripts[0].remote.cachePath));
 });
 
+test("a truncated cached payload is refetched instead of reused", async () => {
+  const s = scenario();
+  const first = await collectAndFetch(s);
+  const cached = first.transcripts[0].remote.cachePath;
+  const complete = fs.readFileSync(cached);
+  fs.writeFileSync(cached, complete.subarray(0, Math.floor(complete.length / 2)));
+
+  const second = await collectAndFetch(s);
+  assert.equal(second.stats.reused, 0);
+  assert.equal(second.stats.fetched, 1);
+  assert.equal(fetchCalls(s.log).length, 2);
+  assert.deepEqual(fs.readFileSync(second.transcripts[0].remote.cachePath), complete);
+});
+
 test("a torn fetch stream fails that transcript by name and leaves the next run free to refetch", async () => {
   const s = scenario({ variant: { truncateFetch: 40 } });
   const torn = await collectAndFetch(s);

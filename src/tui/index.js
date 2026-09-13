@@ -176,21 +176,16 @@ export function reduceEvent(state, event, data, now = Date.now()) {
     case "discover:host:start":
       if (!d.hosts[data.host]) {
         d.hostOrder.push(data.host);
-        d.hosts[data.host] = { status: "connecting", node: null, harnesses: {}, scanned: 0, error: null, fetch: 0 };
+        d.hosts[data.host] = { status: "connecting", node: null, harnesses: {}, scanned: 0, error: null };
       }
       break;
     case "discover:host:done": {
-      const h = d.hosts[data.host] || (d.hosts[data.host] = { harnesses: {}, fetch: 0 });
+      const h = d.hosts[data.host] || (d.hosts[data.host] = { harnesses: {} });
       h.status = data.error ? "error" : "done";
       h.error = data.error || null;
       h.node = data.node || null;
       h.harnesses = data.harnesses || {};
       h.scanned = data.scanned || 0;
-      break;
-    }
-    case "discover:host:fetch": {
-      const h = d.hosts[data.host] || (d.hosts[data.host] = { harnesses: {}, fetch: 0 });
-      h.fetch = (h.fetch || 0) + (data.items || 0);
       break;
     }
 

@@ -485,8 +485,6 @@ async function fetchHost(host, pending, { cache, index, stats }) {
     model: transcript.model || null,
     mtimeMs: transcript.mtimeMs,
   }));
-  emitProgress("discover:host:fetch", { host, items: items.length });
-
   const reader = createFrameReader();
   const fetchIdentity = (harness, key) => JSON.stringify([harness, key]);
   const transcriptsByKey = new Map(

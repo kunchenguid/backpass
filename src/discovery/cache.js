@@ -94,7 +94,13 @@ export class HostCache {
       return null;
     }
     const file = path.join(this.root, name);
-    if (!fs.existsSync(file)) return null;
+    let cached;
+    try {
+      cached = fs.lstatSync(file);
+    } catch {
+      return null;
+    }
+    if (!cached.isFile() || cached.size !== entry.cachedBytes) return null;
     return { ...entry, name, path: file };
   }
 
