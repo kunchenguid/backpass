@@ -36,6 +36,7 @@ export const PROBE_MANIFEST = [
   "discovery/adapters/cursor-ide.js",
   "discovery/remote/frames.js",
   "discovery/remote/git-facts.js",
+  "discovery/remote/runtime.js",
   "discovery/remote/probe.js",
 ];
 
@@ -88,6 +89,7 @@ function loader(payloadBase64) {
     '      process.env[key] = value.slice(0, 2) === "~/" ? path.join(os.homedir(), value.slice(2)) : value;',
     "    }",
     '    dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-probe-"));',
+    '    fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ type: "module" }));',
     "    for (const rel of Object.keys(payload.files)) {",
     "      const file = path.join(dir, rel);",
     "      fs.mkdirSync(path.dirname(file), { recursive: true });",

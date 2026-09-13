@@ -155,7 +155,7 @@ test("a host with no Node is skipped by name, and an old Node keeps the file-bac
   );
   assert.match(skipped.perHost[0].error, /has no Node; install Node >= 22\.5 or set discovery\.hosts\[\]\.node/);
 
-  const old = scenario();
+  const old = scenario({ variant: { nodeOptions: "--no-experimental-detect-module" } });
   old.hosts["mac-home"].locateOutput = [
     `node|${process.execPath}|v16.20.2`,
     "git|/usr/bin/git",
@@ -163,9 +163,11 @@ test("a host with no Node is skipped by name, and an old Node keeps the file-bac
     `home|${old.remoteHome}`,
   ].join("\n");
   const kept = await withRemoteEnv({ localHome: old.localHome, hosts: old.hosts }, () =>
-    discoverProject(old.repoRoot, { discovery: { hosts: ["mac-home"], harnesses: ["claude", "hermes"] } }),
+    discoverProject(old.repoRoot, {
+      discovery: { hosts: [{ host: "mac-home", node: process.execPath }], harnesses: ["claude", "hermes"] },
+    }),
   );
-  assert.equal(kept.transcripts.length, 1, "claude still crosses on an old Node");
+  assert.equal(kept.transcripts.length, 1, "claude still crosses with Node 16 module semantics");
   assert.ok(
     kept.perHost[0].warnings.some((note) => /hermes skipped: node v16\.20\.2 lacks node:sqlite/.test(note)),
     `expected a named sqlite skip, got ${JSON.stringify(kept.perHost[0].warnings)}`,

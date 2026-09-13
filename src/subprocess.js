@@ -18,15 +18,11 @@ import path from "node:path";
  *
  * @param {string} bin
  * @param {string[]} args
- * `binaryStdout` keeps stdout as Buffers and returns it as `stdoutBuffer` instead of a
- * string. The remote fetch stream (`src/discovery/remote/ssh.js`) is length-framed, so a
- * lossy decode there would desync the frames rather than corrupt one transcript.
- *
  * @param {{ timeoutMs?: number, cwd?: string, input?: string, env?: NodeJS.ProcessEnv,
- *   platform?: NodeJS.Platform, lookupEnv?: NodeJS.ProcessEnv, binaryStdout?: boolean,
+ *   platform?: NodeJS.Platform, lookupEnv?: NodeJS.ProcessEnv,
  *   captureStdout?: boolean, onStdout?: (chunk: Buffer) => void,
  *   spawnFn?: (file: string, args: string[], options: object) => any }} [options]
- * @returns {Promise<{ code: number | null, stdout: string, stdoutBuffer?: Buffer, stderr: string, timedOut?: boolean, spawnError?: ShimError }>}
+ * @returns {Promise<{ code: number | null, stdout: string, stderr: string, timedOut?: boolean, spawnError?: ShimError }>}
  */
 export function runCapture(
   bin,
@@ -39,7 +35,6 @@ export function runCapture(
     platform = process.platform,
     lookupEnv = process.env,
     spawnFn = spawn,
-    binaryStdout = false,
     captureStdout = true,
     onStdout = null,
   } = {},
@@ -66,8 +61,6 @@ export function runCapture(
       detached: platform !== "win32" && Boolean(timeoutMs),
     });
     let stdout = "";
-    /** @type {Buffer[]} */
-    const stdoutChunks = [];
     let stderr = "";
     let timedOut = false;
     let escalationTimer = null;
@@ -88,9 +81,7 @@ export function runCapture(
     child.stdout.on("data", (d) => {
       const chunk = Buffer.isBuffer(d) ? d : Buffer.from(d);
       if (onStdout) onStdout(chunk);
-      if (!captureStdout) return;
-      if (binaryStdout) stdoutChunks.push(chunk);
-      else stdout += d;
+      if (captureStdout) stdout += d;
     });
     child.stderr.on("data", (d) => {
       stderr += d;
@@ -98,18 +89,14 @@ export function runCapture(
     child.on("error", (err) => {
       if (timer) clearTimeout(timer);
       if (escalationTimer) clearTimeout(escalationTimer);
-      resolve({ code: null, stdout, ...collected(), stderr: `${stderr}${err.message}`, spawnError: err });
+      resolve({ code: null, stdout, stderr: `${stderr}${err.message}`, spawnError: err });
     });
     child.on("close", (code) => {
       if (timer) clearTimeout(timer);
       if (timedOut && platform !== "win32") killPosixGroup(child, "SIGKILL");
       if (escalationTimer) clearTimeout(escalationTimer);
-      resolve({ code, stdout, ...collected(), stderr, timedOut });
+      resolve({ code, stdout, stderr, timedOut });
     });
-
-    function collected() {
-      return binaryStdout && captureStdout ? { stdoutBuffer: Buffer.concat(stdoutChunks) } : {};
-    }
 
     if (input !== undefined) child.stdin.end(input);
     else child.stdin.end();

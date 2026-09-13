@@ -74,6 +74,7 @@ function runCommand() {
   }
 
   const env = { ...process.env, HOME: host.home, USERPROFILE: host.home };
+  if (host.nodeOptions) env.NODE_OPTIONS = host.nodeOptions;
   for (const key of ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "HERMES_HOME", "XDG_CONFIG_HOME"]) delete env[key];
   const result = spawnSync("sh", ["-c", command], {
     env,

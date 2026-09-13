@@ -14,6 +14,7 @@ import * as cursorIde from "../adapters/cursor-ide.js";
 import { isSelfSession } from "../self.js";
 import { collectPathFacts } from "./git-facts.js";
 import { encodeEndFrame, encodeFrameHeader, PROTOCOL } from "./frames.js";
+import { supportsNodeSqlite } from "./runtime.js";
 
 /**
  * The program that runs on a remote host (design section 6.3).
@@ -119,8 +120,14 @@ export async function discover({ harnesses = [], cutoffMs = null } = {}) {
   const harnessStats = {};
   const descriptors = [];
   const warnings = [];
+  let selected = harnesses;
+  if (!supportsNodeSqlite(process.version)) {
+    const dropped = harnesses.filter((harness) => ADAPTERS[harness]?.sqliteBacked);
+    selected = harnesses.filter((harness) => !ADAPTERS[harness]?.sqliteBacked);
+    if (dropped.length) warnings.push(`${dropped.join(", ")} skipped: node ${process.version} lacks node:sqlite`);
+  }
 
-  for (const harness of harnesses) {
+  for (const harness of selected) {
     const adapter = ADAPTERS[harness];
     if (!adapter) {
       harnessStats[harness] = { scanned: 0, classified: 0, self: 0, error: "no adapter" };

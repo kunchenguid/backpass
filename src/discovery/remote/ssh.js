@@ -92,7 +92,7 @@ export function sshArgs({ destination, command, connectTimeoutSeconds = DEFAULT_
  * layer up, which is exactly the failure AGENTS.md records two rounds of.
  *
  * @param {{ destination: string, command: string, input?: string, timeoutMs?: number,
- *   connectTimeoutSeconds?: number, binaryStdout?: boolean, captureStdout?: boolean,
+ *   connectTimeoutSeconds?: number, captureStdout?: boolean,
  *   onStdout?: (chunk: Buffer) => void }} options
  */
 export async function runSsh({
@@ -101,7 +101,6 @@ export async function runSsh({
   input,
   timeoutMs = DEFAULT_CALL_TIMEOUT_MS,
   connectTimeoutSeconds = DEFAULT_CONNECT_TIMEOUT_SECONDS,
-  binaryStdout = false,
   captureStdout = true,
   onStdout = null,
 }) {
@@ -109,7 +108,6 @@ export async function runSsh({
   const result = await runCapture(sshBin(), sshArgs({ destination, command, connectTimeoutSeconds }), {
     input,
     timeoutMs,
-    binaryStdout,
     captureStdout,
     onStdout,
   });
@@ -144,7 +142,7 @@ function tail(stderr, lines = 3) {
  * of them suggests `StrictHostKeyChecking=no`: a host key that cannot be verified is a
  * decision for the person, not a flag for a tool.
  *
- * @param {{ code?: number | null, stdout?: string, stdoutBuffer?: Buffer, stderr?: string,
+ * @param {{ code?: number | null, stdout?: string, stderr?: string,
  *   timedOut?: boolean, spawnError?: object }} result
  * @param {{ destination: string, connectTimeoutSeconds?: number, timeoutMs?: number }} context
  * @returns {{ reason: string, message: string } | null}

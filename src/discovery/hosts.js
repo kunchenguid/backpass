@@ -3,6 +3,9 @@ import { emitProgress } from "../progress.js";
 import { HostCache } from "./cache.js";
 import { buildProbeProgram, createFrameReader, PROTOCOL, REMOTE_ENV_ALLOWLIST } from "./remote/bundle.js";
 import { assertSafeSshValue, classifySshFailure, DEFAULT_CONNECT_TIMEOUT_SECONDS, runSsh } from "./remote/ssh.js";
+import { compareNodeVersions, MIN_SQLITE_NODE, parseNodeVersion, supportsNodeSqlite } from "./remote/runtime.js";
+
+export { MIN_SQLITE_NODE } from "./remote/runtime.js";
 
 /**
  * Per-host orchestration for the ssh collection tier (design section 6.3).
@@ -18,9 +21,6 @@ import { assertSafeSshValue, classifySshFailure, DEFAULT_CONNECT_TIMEOUT_SECONDS
  * which is what keeps this feature on the right side of the vision's "never someone
  * else's transcripts" line.
  */
-
-/** Node gained `node:sqlite` in 22.5; below it the file-backed harnesses still work. */
-export const MIN_SQLITE_NODE = [22, 5, 0];
 
 const LOCATE_TIMEOUT_MS = 60_000;
 const DISCOVER_TIMEOUT_MS = 300_000;
@@ -120,18 +120,6 @@ export function resolveHostList(config) {
   return out;
 }
 
-function parseNodeVersion(text) {
-  const match = String(text || "").match(/^v?(\d+)\.(\d+)\.(\d+)/);
-  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
-}
-
-function compareVersions(a, b) {
-  for (let i = 0; i < 3; i += 1) {
-    if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) - (b[i] || 0);
-  }
-  return 0;
-}
-
 /** @returns {{ nodes: {path: string, version: string, parsed: number[]}[], git: string|null, uname: string|null, home: string|null }} */
 export function parseLocateOutput(stdout) {
   const nodes = [];
@@ -156,13 +144,13 @@ export function parseLocateOutput(stdout) {
   for (const node of nodes) {
     if (!unique.some((other) => other.path === node.path)) unique.push(node);
   }
-  unique.sort((a, b) => compareVersions(b.parsed, a.parsed));
+  unique.sort((a, b) => compareNodeVersions(b.parsed, a.parsed));
   return { nodes: unique, git, uname, home };
 }
 
 /** Newest Node at or above 22.5 if there is one, else the newest there is. */
 export function chooseNode(nodes) {
-  return nodes.find((node) => compareVersions(node.parsed, MIN_SQLITE_NODE) >= 0) || nodes[0] || null;
+  return nodes.find((node) => compareNodeVersions(node.parsed, MIN_SQLITE_NODE) >= 0) || nodes[0] || null;
 }
 
 export function platformFromUname(uname) {
@@ -210,7 +198,8 @@ async function locate(entry) {
   });
   if (failure) return { failure };
   const parsed = parseLocateOutput(result.stdout);
-  const node = entry.node ? { path: entry.node, version: null, parsed: null } : chooseNode(parsed.nodes);
+  const configured = entry.node ? parsed.nodes.find((candidate) => candidate.path === entry.node) : null;
+  const node = entry.node ? configured || { path: entry.node, version: null, parsed: null } : chooseNode(parsed.nodes);
   return { parsed, node };
 }
 
@@ -274,12 +263,10 @@ async function collectOneHost(entry, { harnesses, cutoffMs }, result) {
   result.nodeVersion = node.version;
 
   let selected = entry.harnesses ? harnesses.filter((h) => entry.harnesses.includes(h)) : [...harnesses];
-  if (node.parsed && compareVersions(node.parsed, MIN_SQLITE_NODE) < 0) {
+  if (node.version && !supportsNodeSqlite(node.version)) {
     const dropped = selected.filter((h) => SQLITE_HARNESSES.has(h));
-    if (dropped.length) {
-      selected = selected.filter((h) => !SQLITE_HARNESSES.has(h));
-      result.warnings.push(`${dropped.join(", ")} skipped: node ${node.version} lacks node:sqlite`);
-    }
+    selected = selected.filter((h) => !SQLITE_HARNESSES.has(h));
+    if (dropped.length) result.warnings.push(`${dropped.join(", ")} skipped: node ${node.version} lacks node:sqlite`);
   }
   if (!located.parsed.git) {
     result.warnings.push("live-path association unavailable (no git on the non-interactive PATH); tiers 2 and 3 only");
@@ -329,6 +316,7 @@ async function collectOneHost(entry, { harnesses, cutoffMs }, result) {
     return;
   }
 
+  result.nodeVersion = response.node || result.nodeVersion;
   result.hostname = response.hostname || null;
   result.home = response.home || result.home;
   result.harnesses = response.harnesses || {};
