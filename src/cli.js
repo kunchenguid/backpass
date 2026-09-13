@@ -188,12 +188,22 @@ function overridesFrom(values) {
   if (values["skills-dir"]) overrides.skillsDir = values["skills-dir"];
   if (values.theme) overrides.theme = values.theme;
 
-  if (values["analysis-agent"]) overrides.analysis.agent = values["analysis-agent"];
+  if (values["analysis-agent"]) {
+    overrides.analysis.agent = values["analysis-agent"];
+    if (String(values["analysis-agent"]).trim().toLowerCase() !== "pi" && values["analysis-tools"] === undefined) {
+      overrides.analysis.tools = null;
+    }
+  }
   if (values["analysis-model"]) overrides.analysis.model = values["analysis-model"];
   if (values["analysis-effort"]) overrides.analysis.effort = values["analysis-effort"];
   if (values["analysis-tools"] !== undefined)
     overrides.analysis.tools = toTools(values["analysis-tools"], "--analysis-tools");
-  if (values["synthesis-agent"]) overrides.synthesis.agent = values["synthesis-agent"];
+  if (values["synthesis-agent"]) {
+    overrides.synthesis.agent = values["synthesis-agent"];
+    if (String(values["synthesis-agent"]).trim().toLowerCase() !== "pi" && values["synthesis-tools"] === undefined) {
+      overrides.synthesis.tools = null;
+    }
+  }
   if (values["synthesis-model"]) overrides.synthesis.model = values["synthesis-model"];
   if (values["synthesis-effort"]) overrides.synthesis.effort = values["synthesis-effort"];
   if (values["synthesis-tools"] !== undefined)

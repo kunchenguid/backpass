@@ -17,6 +17,7 @@ import { resolveOnPath } from "./subprocess.js";
  *
  * How each invoked harness applies a requested overlay for this spawn:
  *   pi        process argv via `PI_ACP_PI_COMMAND` wrapper: `--model`, `--thinking`
+ *   jcode     raw acpx `--agent` wrapper: `jcode acp --no-update`; acpx model; ACP `reasoning_effort`
  *   grok      process argv via acpx `--agent` wrapper: `-m`, `--reasoning-effort`
  *   claude    acpx `--model` at `sessions new` (session/new `_meta`); ACP `set effort`
  *   codex     acpx `--model` at `sessions new`; ACP `set reasoning_effort`
@@ -76,6 +77,10 @@ export function prepareHarnessInvocation({ agent, model = null, effort = null, t
     ? [...new Set(tools.map((tool) => String(tool).trim()).filter(Boolean))]
     : null;
   const overlay = Boolean(requestedModel || requestedEffort || requestedTools?.length);
+
+  if (agent === "jcode") {
+    return jcodeInvocation({ requestedModel, requestedEffort, requestedTools, notes, cleanups, dispose });
+  }
 
   if (!overlay && !writeAccess) return baseInvocation({ notes, dispose });
 
@@ -159,6 +164,39 @@ function piInvocation({ requestedModel, requestedEffort, requestedTools, notes, 
     sessionModeRequired: false,
     acpxAgentCommand: null,
     requiredBuiltinAgent: "pi",
+    notes,
+    dispose,
+  };
+}
+
+function jcodeInvocation({ requestedModel, requestedEffort, requestedTools, notes, cleanups, dispose }) {
+  if (requestedTools?.length) {
+    throw new UserError(
+      "cannot apply tool overrides to Jcode through the current ACP adapter",
+      "omit the tool allowlist or pin Pi for tool-restricted calls",
+    );
+  }
+  const real = resolveOnPath("jcode");
+  if (!real) {
+    throw new UserError(
+      "cannot start Jcode's ACP adapter because jcode was not found on PATH",
+      "install Jcode or pin a different analysis / synthesis agent",
+    );
+  }
+  const { nodeCommand, dir } = writeArgvWrapper({
+    realCommand: real,
+    extraArgs: ["acp", "--no-update"],
+    binName: "jcode",
+  });
+  cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
+  return {
+    env: undefined,
+    acpxModel: requestedModel,
+    setEffortKey: requestedEffort ? "reasoning_effort" : null,
+    sessionMode: null,
+    sessionModeRequired: false,
+    acpxAgentCommand: nodeCommand,
+    requiredBuiltinAgent: null,
     notes,
     dispose,
   };

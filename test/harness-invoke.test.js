@@ -30,6 +30,7 @@ const fakeAcpx = path.join(binDir, "acpx");
 const fakePi = path.join(binDir, "pi");
 const fakeGrok = path.join(binDir, "grok");
 const fakeCodex = path.join(binDir, "codex");
+const fakeJcode = path.join(binDir, "jcode");
 const adapterModules = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-codex-adapter-"));
 const adapterBin = path.join(adapterModules, ".bin");
 const bundledCodex = path.join(adapterModules, "@openai", "codex", "bin", "codex.js");
@@ -38,6 +39,7 @@ const acpxLog = path.join(binDir, "acpx.log");
 const piLog = path.join(binDir, "pi.log");
 const grokLog = path.join(binDir, "grok.log");
 const codexLog = path.join(binDir, "codex.log");
+const jcodeLog = path.join(binDir, "jcode.log");
 const workDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-harness-cwd-")));
 
 const ORIGINAL_SETTINGS = `{
@@ -91,6 +93,16 @@ fs.mkdirSync(path.dirname(bundledCodex), { recursive: true });
 fs.mkdirSync(adapterBin, { recursive: true });
 fs.writeFileSync(bundledCodex, codexScript);
 fs.chmodSync(bundledCodex, 0o755);
+
+fs.writeFileSync(
+  fakeJcode,
+  `#!${process.execPath}
+const fs = require("node:fs");
+fs.appendFileSync(process.env.FAKE_JCODE_LOG, JSON.stringify(process.argv.slice(2)) + "\\n");
+process.exit(0);
+`,
+);
+fs.chmodSync(fakeJcode, 0o755);
 
 fs.writeFileSync(
   fakeAcpx,
@@ -224,12 +236,14 @@ process.env.FAKE_ACPX_LOG = acpxLog;
 process.env.FAKE_PI_LOG = piLog;
 process.env.FAKE_GROK_LOG = grokLog;
 process.env.FAKE_CODEX_LOG = codexLog;
+process.env.FAKE_JCODE_LOG = jcodeLog;
 process.env.FAKE_CODEX_ADAPTER_BIN = adapterBin;
 process.env.FAKE_HARNESS_SETTINGS = settingsPath;
 fs.writeFileSync(acpxLog, "");
 fs.writeFileSync(piLog, "");
 fs.writeFileSync(grokLog, "");
 fs.writeFileSync(codexLog, "");
+fs.writeFileSync(jcodeLog, "");
 
 const { execOneShot, openSession, sessionPrompt } = await import("../src/acpx.js");
 const { prepareHarnessInvocation } = await import("../src/harness-invoke.js");
@@ -243,6 +257,7 @@ function resetLogsAndSettings() {
   fs.writeFileSync(piLog, "");
   fs.writeFileSync(grokLog, "");
   fs.writeFileSync(codexLog, "");
+  fs.writeFileSync(jcodeLog, "");
 }
 
 function settingsBytes() {
@@ -726,6 +741,30 @@ test("Grok session forces an acpx raw-command override with process model and ef
   assert.ok(spawned.length >= 1);
   assert.deepEqual(spawned[0].slice(0, 4), ["-m", "grok-4.6", "--reasoning-effort", "high"]);
   assert.deepEqual(spawned[0].slice(4), ["agent", "stdio"]);
+});
+
+test("Jcode session launches the native acp subcommand with model and reasoning effort", async () => {
+  resetLogsAndSettings();
+  const session = await openSession({
+    agent: "jcode",
+    model: "gpt-5.6-luna",
+    effort: "max",
+    sessionName: "bp-jcode",
+    cwd: workDir,
+  });
+  await session.prompt({ promptFile, timeoutSeconds: 5 });
+  await session.close();
+
+  const calls = acpxCalls();
+  assert.ok(calls.length >= 3);
+  assert.ok(calls.every((c) => c.argv.includes("--agent")));
+  const created = calls.find((c) => c.argv.includes("new"));
+  assert.equal(created.argv[created.argv.indexOf("--model") + 1], "gpt-5.6-luna");
+  const effort = calls.find((c) => c.argv.includes("reasoning_effort"));
+  assert.deepEqual(effort.argv.slice(effort.argv.indexOf("set")), ["set", "reasoning_effort", "max", "-s", "bp-jcode"]);
+  const prompted = calls.find((c) => c.argv.includes("--file") && !c.argv.includes("exec"));
+  assert.ok(prompted.argv.indexOf("prompt") < prompted.argv.indexOf("-s"));
+  assert.deepEqual(jsonl(jcodeLog), [["acp", "--no-update"]]);
 });
 
 test("a write-access Codex session enables code-mode on the spawn, not by rewriting config.toml", async () => {

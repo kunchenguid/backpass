@@ -21,15 +21,25 @@ import { readJsonl } from "./discovery/adapters/shared.js";
 export const ACPX_BIN = process.env.BACKPASS_ACPX_BIN || "acpx";
 
 /**
- * backpass's user-facing harness names versus acpx's agent registry. The only
- * mismatch today is grok: backpass calls the harness `grok` everywhere (config,
- * discovery, --harness) while acpx registers it as `grok-build`. Translate at this
+ * backpass's user-facing harness names versus acpx's agent registry. Grok is named
+ * `grok-build` by acpx, while Jcode exposes its ACP adapter as the `jcode acp`
+ * subcommand rather than as a bare `jcode` command. Translate both mismatches at this
  * boundary only, so the user never has to know.
  */
 const ACPX_AGENT_NAMES = { grok: "grok-build" };
+const ACPX_RAW_AGENT_COMMANDS = { jcode: "jcode acp --no-update" };
 
 export function acpxAgentName(agent) {
   return ACPX_AGENT_NAMES[agent] || agent;
+}
+
+export function acpxAgentCommand(agent) {
+  return ACPX_RAW_AGENT_COMMANDS[agent] || null;
+}
+
+export function acpxAgentArgs(agent) {
+  const command = acpxAgentCommand(agent);
+  return command ? ["--agent", command] : [acpxAgentName(agent)];
 }
 
 /**
@@ -37,9 +47,15 @@ export function acpxAgentName(agent) {
  * `set` is session-local. Pi is absent: ACP `set thought_level` rewrites
  * `~/.pi/agent/settings.json`, so Pi effort is process `--thinking` instead
  * (`src/harness-invoke.js`). Grok uses process `--reasoning-effort`. OpenCode
- * uses ACP `set effort`, which is session-local variant state.
+ * uses ACP `set effort`, which is session-local variant state. Jcode uses ACP
+ * `set reasoning_effort` through its `jcode acp` adapter.
  */
-export const EFFORT_OPTION_KEYS = { codex: "reasoning_effort", claude: "effort", opencode: "effort" };
+export const EFFORT_OPTION_KEYS = {
+  codex: "reasoning_effort",
+  claude: "effort",
+  opencode: "effort",
+  jcode: "reasoning_effort",
+};
 
 export function effortOptionKey(agent) {
   return EFFORT_OPTION_KEYS[agent] || null;
@@ -278,7 +294,7 @@ function baseArgs({ cwd, model, timeoutSeconds, approveReads, approveAll = false
 }
 
 function invocationAgentArgs(invocation, agent) {
-  return invocation.acpxAgentCommand ? ["--agent", invocation.acpxAgentCommand] : [acpxAgentName(agent)];
+  return invocation.acpxAgentCommand ? ["--agent", invocation.acpxAgentCommand] : acpxAgentArgs(agent);
 }
 
 async function verifyHarnessInvocation(invocation, cwd) {
@@ -347,8 +363,8 @@ export async function probeSession({
   timeoutMs = 20_000,
   createTimeoutMs = timeoutMs,
 }) {
-  const acpxAgent = acpxAgentName(agent);
-  const created = await run([acpxAgent, "sessions", "new", "--name", sessionName], {
+  const agentArgs = acpxAgentArgs(agent);
+  const created = await run([...agentArgs, "sessions", "new", "--name", sessionName], {
     timeoutMs: createTimeoutMs,
     cwd,
   });
@@ -371,7 +387,7 @@ export async function probeSession({
   }
 
   try {
-    const status = await run(["--format", "json", acpxAgent, "status", "-s", sessionName], { timeoutMs, cwd });
+    const status = await run(["--format", "json", ...agentArgs, "status", "-s", sessionName], { timeoutMs, cwd });
     let availableModels = [];
     if (status.code === 0) {
       try {
@@ -383,7 +399,7 @@ export async function probeSession({
     }
     return { verdict: "ok", detail: "", availableModels };
   } finally {
-    const closed = await run([acpxAgent, "sessions", "close", sessionName], { timeoutMs, cwd });
+    const closed = await run([...agentArgs, "sessions", "close", sessionName], { timeoutMs, cwd });
     if (closed.code !== 0) warn(`could not close acpx probe session ${sessionName}`);
   }
 }
@@ -563,7 +579,10 @@ export async function openSession({
       }
     }
     if (effort && invocation.setEffortKey) {
-      const set = await run([...acpxAgentArgs, "-s", sessionName, "set", invocation.setEffortKey, effort], runOpts);
+      const setArgs = invocation.acpxAgentCommand
+        ? [...acpxAgentArgs, "set", invocation.setEffortKey, effort, "-s", sessionName]
+        : [...acpxAgentArgs, "-s", sessionName, "set", invocation.setEffortKey, effort];
+      const set = await run(setArgs, runOpts);
       if (set.code !== 0) {
         // Same degradation as session create: a killed call exits 130 with no stderr, and
         // `exit 130` would read as the adapter refusing the effort key.

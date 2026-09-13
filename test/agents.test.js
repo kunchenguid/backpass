@@ -9,7 +9,15 @@ import {
   probeCandidate,
   resolveModelId,
 } from "../src/agents.js";
-import { AcpxError, acpxAgentName, classifyAcpxFailure, effortOptionKey, probeSession } from "../src/acpx.js";
+import {
+  AcpxError,
+  acpxAgentArgs,
+  acpxAgentCommand,
+  acpxAgentName,
+  classifyAcpxFailure,
+  effortOptionKey,
+  probeSession,
+} from "../src/acpx.js";
 import { DEFAULT_LADDERS, loadConfig } from "../src/config.js";
 import { UserError, setLoggerSink, setQuiet } from "../src/logger.js";
 
@@ -1043,9 +1051,12 @@ test("acpx failure classification and the per-adapter tables", () => {
 
   assert.equal(acpxAgentName("grok"), "grok-build", "backpass's grok is acpx's grok-build");
   assert.equal(acpxAgentName("codex"), "codex");
+  assert.equal(acpxAgentCommand("jcode"), "jcode acp --no-update");
+  assert.deepEqual(acpxAgentArgs("jcode"), ["--agent", "jcode acp --no-update"]);
   assert.equal(effortOptionKey("codex"), "reasoning_effort");
   assert.equal(effortOptionKey("claude"), "effort");
   assert.equal(effortOptionKey("opencode"), "effort");
+  assert.equal(effortOptionKey("jcode"), "reasoning_effort");
   assert.equal(effortOptionKey("pi"), null, "Pi effort is process --thinking, not ACP set");
   assert.equal(effortOptionKey("grok"), null);
 });
