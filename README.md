@@ -32,9 +32,10 @@ The loop only closes when a human happens to remember a failure and edits the fi
 what happened in them, and proposes evidence-backed edits to your memory surface - the
 memory file and project skills - under a token budget, gated by you.
 
-- **Local-first** - Reads the transcript stores of seven agent harnesses directly from disk.
-  No API, no upload; transcripts never leave your machine except into an agent you already
-  authenticated, and obvious secrets are redacted before they do.
+- **Local-first** - Reads the transcript stores of seven agent harnesses directly from disk,
+  locally or over SSH to your own machines. No API, no upload; transcripts never leave your
+  machines except into an agent you already authenticated, and obvious secrets are redacted
+  before they do.
 - **Evidence-gated** - Every proposed edit carries verbatim quotes from real sessions,
   and every `add`, `rewrite`, or `remove` edit needs evidence from at least two distinct
   sessions. Small, noisy, bounded steps - not a rewrite.
@@ -143,7 +144,14 @@ hosts once in your personal config:
 `--host <dest>` adds one for a single run (repeatable), and `--host none` collects
 locally only. Hosts are **personal configuration**: a `discovery.hosts` in a repo's
 `.backpassrc.json` is refused by name, so a checked-in file can never point someone
-else's backpass at a machine.
+else's backpass at a machine. The personal file is
+`$XDG_CONFIG_HOME/backpass/config.json` (default `~/.config/backpass/config.json`).
+
+An object entry may set an absolute remote `node` path, an optional `harnesses` subset,
+a positive integer `connectTimeoutSeconds` (default `10`), and store relocation variables
+under `env`. The allowed variables are `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `HERMES_HOME`,
+`PI_CODING_AGENT_DIR`, `PI_CODING_AGENT_SESSION_DIR`, `BB_DATA_DIR`, and
+`BB_PI_BRIDGE_SESSION_DIR`.
 
 backpass installs nothing on the remote. It runs your own `ssh` (with `BatchMode=yes`,
 so a password prompt fails the host instead of hanging the run) and pipes a one-shot Node
@@ -591,7 +599,7 @@ pointer-aware:
 | Command            | What it does                                                                             |
 | ------------------ | ---------------------------------------------------------------------------------------- |
 | `backpass`         | collect samples → calculate loss → aggregate gradients → gradient descent. Never writes. |
-| `backpass scan`    | collect samples only: the transcript table with a confidence column                      |
+| `backpass scan`    | collect samples only: the transcript table with host and confidence columns              |
 | `backpass analyze` | calculate loss: the tier-1 pass over pending transcripts                                 |
 | `backpass propose` | aggregate gradients + gradient descent: the tier-2 pass from cached evidence             |
 | `backpass apply`   | review and write the accepted edits                                                      |
@@ -604,8 +612,8 @@ Run `backpass --help` for the full flag list.
 
 On an interactive terminal the default run renders a live progress view: the budget gauge,
 a stage rail (collect samples → calculate loss → aggregate gradients → gradient descent),
-per-store collection counts, one lane
-per analysis job with its distillation receipt, and a running evidence tally. It draws to
+per-store and per-host collection counts, one lane per analysis job with its distillation
+receipt, and a running evidence tally. It draws to
 stderr only and collapses into the plain line summary when the run ends, so scrollback and
 piped output are identical to a run without it.
 
@@ -706,9 +714,9 @@ CLI flags on top:
 }
 ```
 
-`discovery.hosts` is the one setting a repo file may not carry; it belongs in
-`~/.config/backpass/config.json`. In user scope it defaults to that file's top-level
-list, so you name your machines once.
+`discovery.hosts` is the one setting a repo file may not carry; it belongs in the personal
+configuration file named above. In user scope it defaults to that file's top-level list,
+so you name your machines once.
 
 That example is the project scope. User scope ignores `.backpassrc.json` and instead
 layers the `"user"` block in `$XDG_CONFIG_HOME/backpass/config.json` (default

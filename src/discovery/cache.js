@@ -167,7 +167,7 @@ export class HostCache {
     }
 
     const claimed = new Set(Object.keys(index.entries));
-    let files = [];
+    let files;
     try {
       files = fs.readdirSync(this.root, { withFileTypes: true });
     } catch {
@@ -175,7 +175,7 @@ export class HostCache {
     }
     for (const file of files) {
       if (!file.isFile() || file.name === path.basename(this.indexPath)) continue;
-      let ageMs = null;
+      let ageMs;
       try {
         ageMs = now - fs.statSync(path.join(this.root, file.name)).mtimeMs;
       } catch {
@@ -195,7 +195,7 @@ export class HostCache {
     return removed;
   }
 
-  /** Entry count and bytes per host, for `backpass status`. */
+  /** @returns {Record<string, { entries: number, bytes: number }>} Entry count and bytes per host. */
   stats(index = this.readIndex()) {
     const perHost = Object.create(null);
     for (const entry of Object.values(index.entries)) {

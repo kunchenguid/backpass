@@ -45,8 +45,9 @@ test("the probe runs from a directory holding only the manifest, so no hidden im
 
     const unknown = await probe.discover({ harnesses: ["__proto__"], cutoffMs: null });
     assert.equal(Object.hasOwn(unknown.harnesses, "__proto__"), true);
-    assert.equal(unknown.harnesses.__proto__.error, "no adapter");
-    assert.equal(Object.prototype.error, undefined);
+    const prototypeHarness = /** @type {{ error: string }} */ (unknown.harnesses["__proto__"]);
+    assert.equal(prototypeHarness.error, "no adapter");
+    assert.equal(/** @type {Record<string, unknown>} */ (Object.prototype).error, undefined);
   } finally {
     if (previousHome === undefined) delete process.env.HOME;
     else process.env.HOME = previousHome;
@@ -56,8 +57,9 @@ test("the probe runs from a directory holding only the manifest, so no hidden im
 test("path facts preserve path names that match prototype keys", () => {
   const facts = collectPathFacts(["__proto__"], { git: false });
   assert.equal(Object.hasOwn(facts, "__proto__"), true);
-  assert.equal(facts.__proto__.exists, false);
-  assert.equal(Object.prototype.exists, undefined);
+  const prototypeFacts = /** @type {{ exists: boolean }} */ (facts["__proto__"]);
+  assert.equal(prototypeFacts.exists, false);
+  assert.equal(/** @type {Record<string, unknown>} */ (Object.prototype).exists, undefined);
 });
 
 test("the locate command and shipped probe execute through the supported remote shell path", async () => {

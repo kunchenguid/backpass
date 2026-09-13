@@ -40,9 +40,11 @@ test("cache stats preserve host aliases that match prototype keys", () => {
 
   const stats = cache.stats(index);
   assert.equal(Object.hasOwn(stats, "__proto__"), true);
-  assert.deepEqual(stats.__proto__, { entries: 1, bytes: 4 });
-  assert.equal(Object.prototype.entries, undefined);
-  assert.equal(Object.prototype.bytes, undefined);
+  const prototypeStats = /** @type {{ entries: number, bytes: number }} */ (stats["__proto__"]);
+  assert.deepEqual(prototypeStats, { entries: 1, bytes: 4 });
+  const objectPrototype = /** @type {Record<string, unknown>} */ (Object.prototype);
+  assert.equal(objectPrototype.entries, undefined);
+  assert.equal(objectPrototype.bytes, undefined);
 });
 
 test("a direct propose run prunes unused host cache entries", () => {

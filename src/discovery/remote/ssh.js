@@ -44,18 +44,16 @@ function killMaster(master) {
   if (!master.child || master.child.exitCode !== null || master.child.signalCode !== null) return;
   try {
     master.child.kill("SIGTERM");
-  } catch {}
+  } catch {
+    // Best effort: the child may have exited between the state check and signal.
+  }
 }
 
 function cleanupMastersSync() {
   for (const master of activeMasters.values()) killMaster(master);
 }
 
-for (const [signal, exitCode] of [
-  ["SIGINT", 130],
-  ["SIGTERM", 143],
-  ["SIGHUP", 129],
-]) {
+for (const [signal, exitCode] of Object.entries({ SIGINT: 130, SIGTERM: 143, SIGHUP: 129 })) {
   process.on(signal, () => {
     cleanupMastersSync();
     if (process.listenerCount(signal) === 1) process.exit(exitCode);
@@ -138,15 +136,6 @@ function masterExitArgs(destination, connectTimeoutSeconds, controlPath) {
   return [...baseArgs(connectTimeoutSeconds, controlPath), "-O", "exit", "-T", "--", destination];
 }
 
-/**
- * Run one remote command. Resolves, never rejects, except for a Windows shim refusal:
- * that one must be raised by name here rather than degraded into "host unreachable" a
- * layer up, which is exactly the failure AGENTS.md records two rounds of.
- *
- * @param {{ destination: string, command: string, input?: string, timeoutMs?: number,
- *   connectTimeoutSeconds?: number, captureStdout?: boolean,
- *   onStdout?: (chunk: Buffer) => void }} options
- */
 function raiseWindowsShimRefusal(result, destination) {
   if (result.spawnError?.code === "ERR_WINDOWS_SHIM_UNSAFE_ARG") {
     throw new UserError(
@@ -157,6 +146,15 @@ function raiseWindowsShimRefusal(result, destination) {
   }
 }
 
+/**
+ * Run one remote command. Resolves, never rejects, except for a Windows shim refusal:
+ * that one must be raised by name here rather than degraded into "host unreachable" a
+ * layer up, which is exactly the failure AGENTS.md records two rounds of.
+ *
+ * @param {{ destination: string, command: string, input?: string, timeoutMs?: number,
+ *   connectTimeoutSeconds?: number, captureStdout?: boolean,
+ *   onStdout?: (chunk: Buffer) => void, controlPath?: string }} options
+ */
 export async function runSsh({
   destination,
   command,
@@ -248,7 +246,9 @@ export async function closeSshMaster(master) {
       await runCapture(sshBin(), masterExitArgs(master.destination, master.connectTimeoutSeconds, master.controlPath), {
         timeoutMs: DEFAULT_CALL_TIMEOUT_MS,
       });
-    } catch {}
+    } catch {
+      // The tracked child below remains the fallback when graceful close fails.
+    }
     if (master.child.exitCode === null && master.child.signalCode === null) killMaster(master);
     if (master.child.exitCode === null && master.child.signalCode === null) {
       await new Promise((resolve) => master.child.once("close", resolve));

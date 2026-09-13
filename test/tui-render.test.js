@@ -96,8 +96,9 @@ test("host progress preserves aliases that match prototype keys", () => {
 
   assert.deepEqual(state.discover.hostOrder, ["__proto__"]);
   assert.equal(Object.hasOwn(state.discover.hosts, "__proto__"), true);
-  assert.equal(state.discover.hosts.__proto__.status, "done");
-  assert.equal(Object.prototype.status, undefined);
+  const prototypeHost = /** @type {{ status: string }} */ (state.discover.hosts["__proto__"]);
+  assert.equal(prototypeHost.status, "done");
+  assert.equal(/** @type {Record<string, unknown>} */ (Object.prototype).status, undefined);
   assert.match(render(state).join("\n"), /ssh __proto__ node v24\.0\.0 · claude 2/);
 });
 
