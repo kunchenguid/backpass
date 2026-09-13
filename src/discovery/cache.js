@@ -32,6 +32,7 @@ export class HostCache {
   constructor(stateDir) {
     this.root = path.join(stateDir, "hosts");
     this.indexPath = path.join(this.root, "index.json");
+    this.indexSnapshots = new WeakMap();
   }
 
   ensure() {
@@ -46,6 +47,12 @@ export class HostCache {
   }
 
   readIndex() {
+    const index = this.readCurrentIndex();
+    this.indexSnapshots.set(index, structuredClone(index.entries));
+    return index;
+  }
+
+  readCurrentIndex() {
     try {
       const parsed = JSON.parse(fs.readFileSync(this.indexPath, "utf8"));
       if (
@@ -69,9 +76,25 @@ export class HostCache {
 
   writeIndex(index) {
     this.ensure();
+    const snapshot = this.indexSnapshots.get(index);
+    const merged = this.readCurrentIndex();
+    if (snapshot) {
+      for (const name of Object.keys(snapshot)) {
+        if (!Object.hasOwn(index.entries, name)) delete merged.entries[name];
+      }
+      for (const [name, entry] of Object.entries(index.entries)) {
+        if (!Object.hasOwn(snapshot, name) || JSON.stringify(entry) !== JSON.stringify(snapshot[name])) {
+          merged.entries[name] = entry;
+        }
+      }
+    } else {
+      Object.assign(merged.entries, index.entries);
+    }
     const tmp = `${this.indexPath}.${process.pid}-${crypto.randomBytes(6).toString("hex")}.tmp`;
-    fs.writeFileSync(tmp, `${JSON.stringify(index, null, 2)}\n`, { mode: 0o600 });
+    fs.writeFileSync(tmp, `${JSON.stringify(merged, null, 2)}\n`, { mode: 0o600 });
     fs.renameSync(tmp, this.indexPath);
+    index.entries = merged.entries;
+    this.indexSnapshots.set(index, structuredClone(index.entries));
   }
 
   filePath(host, harness, key) {

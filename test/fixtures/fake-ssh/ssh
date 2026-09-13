@@ -167,7 +167,12 @@ function runCommand() {
 
   const out = result.stdout ?? Buffer.alloc(0);
   const truncate = op === "fetch" && host.truncateFetch != null;
-  let emitted = truncate ? out.subarray(0, host.truncateFetch) : out;
+  let emitted =
+    op === "fetch" && host.fetchOutput !== undefined
+      ? Buffer.from(host.fetchOutput, "base64")
+      : truncate
+        ? out.subarray(0, host.truncateFetch)
+        : out;
   if (op === "fetch" && host.omitFetchFrame != null) {
     const span = fetchFrameSpans(emitted)[host.omitFetchFrame - 1];
     if (span) emitted = Buffer.concat([emitted.subarray(0, span.start), emitted.subarray(span.end)]);

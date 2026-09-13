@@ -15,6 +15,11 @@
 /** The probe wire contract's version. Both sides refuse a response that does not match. */
 export const PROTOCOL = 1;
 
+// Runaway guards, not transcript size policy. The body ceiling remains deliberately
+// generous enough for unusually large raw agent-session files.
+export const MAX_FRAME_HEADER_BYTES = 64 * 1024;
+export const MAX_FRAME_BODY_BYTES = 256 * 1024 * 1024;
+
 const NEWLINE = 0x0a;
 
 /** The header line (plus its newline) for one frame. */
@@ -78,6 +83,17 @@ export function createFrameReader() {
     return output;
   }
 
+  function unreadable(message) {
+    // Release every retained transport chunk before handing the failure to the host
+    // orchestrator. It will stop feeding this reader while other hosts continue.
+    chunks = [];
+    head = 0;
+    headOffset = 0;
+    buffered = 0;
+    awaiting = null;
+    throw new Error(`probe response unreadable: ${message}`);
+  }
+
   function takeLine() {
     let distance = 0;
     for (let index = head; index < chunks.length; index += 1) {
@@ -85,10 +101,13 @@ export function createFrameReader() {
       const start = index === head ? headOffset : 0;
       const newline = chunk.indexOf(NEWLINE, start);
       if (newline !== -1) {
-        const line = consume(distance + newline - start + 1);
+        const lineBytes = distance + newline - start;
+        if (lineBytes > MAX_FRAME_HEADER_BYTES) unreadable("frame header is too large");
+        const line = consume(lineBytes + 1);
         return line.subarray(0, line.length - 1).toString("utf8");
       }
       distance += chunk.length - start;
+      if (distance > MAX_FRAME_HEADER_BYTES) unreadable("frame header is too large or unterminated");
     }
     return null;
   }
@@ -127,8 +146,9 @@ export function createFrameReader() {
             ["raw", "events", "error"].includes(header.kind) &&
             Number.isSafeInteger(header.bytes) &&
             header.bytes >= 0 &&
+            header.bytes <= MAX_FRAME_BODY_BYTES &&
             (header.kind !== "error" || (header.bytes === 0 && typeof header.error === "string"));
-          if (!validFrame) throw new Error("probe response unreadable: invalid frame header");
+          if (!validFrame) unreadable("invalid frame header");
           awaiting = header;
         }
         const want = awaiting.bytes;

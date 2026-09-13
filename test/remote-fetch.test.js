@@ -12,6 +12,7 @@ import { evidenceKey } from "../src/state.js";
 import { SELF_SESSION_SENTINEL } from "../src/sentinel.js";
 import { prefetchRemoteTranscripts } from "../src/discovery/hosts.js";
 import { readTranscript } from "../src/discovery/index.js";
+import { MAX_FRAME_BODY_BYTES, MAX_FRAME_HEADER_BYTES } from "../src/discovery/remote/frames.js";
 import {
   discoverProject,
   initRepo,
@@ -308,6 +309,59 @@ test("a torn fetch stream fails that transcript by name and leaves the next run 
   const retried = await collectAndFetch(s);
   assert.equal(retried.stats.fetched, 1);
   assert.equal(retried.transcripts[0].remoteError, undefined);
+});
+
+test("a runaway fetch frame fails only its named host while a sibling host still collects", async (t) => {
+  const cases = [
+    {
+      name: "oversized header",
+      output: Buffer.from(
+        `${JSON.stringify({ key: "bad", harness: "claude", kind: "raw", bytes: 0, padding: "x".repeat(MAX_FRAME_HEADER_BYTES) })}\n`,
+      ),
+    },
+    {
+      name: "unterminated header",
+      output: Buffer.from("x".repeat(MAX_FRAME_HEADER_BYTES + 1)),
+    },
+    {
+      name: "oversized declared body",
+      output: Buffer.from(
+        `${JSON.stringify({ key: "bad", harness: "claude", kind: "raw", bytes: MAX_FRAME_BODY_BYTES + 1 })}\n`,
+      ),
+    },
+  ];
+
+  for (const testCase of cases) {
+    await t.test(testCase.name, async () => {
+      const localHome = tmpdir("fetch-limit-local");
+      const badHome = tmpdir("fetch-limit-bad");
+      const goodHome = tmpdir("fetch-limit-good");
+      const repoRoot = initRepo(path.join(localHome, "demo"), "https://github.com/acme/demo.git");
+      const badClone = initRepo(path.join(badHome, "demo"), "git@github.com:acme/demo.git");
+      const goodClone = initRepo(path.join(goodHome, "demo"), "git@github.com:acme/demo.git");
+      writeClaudeSession(badHome, { cwd: badClone, id: "11111111-2222-3333-4444-555555555555" });
+      writeClaudeSession(goodHome, { cwd: goodClone, id: "22222222-3333-4444-5555-666666666666" });
+      const hosts = {
+        "bad-host": { home: badHome, fetchOutput: testCase.output.toString("base64") },
+        "good-host": { home: goodHome },
+      };
+
+      await withRemoteEnv({ localHome, hosts }, async () => {
+        const result = await discoverProject(repoRoot, {
+          discovery: { hosts: ["bad-host", "good-host"], harnesses: ["claude"] },
+        });
+        const stats = await prefetchRemoteTranscripts(result.transcripts, { config: result.config });
+        const bad = result.transcripts.find((transcript) => transcript.host === "bad-host");
+        const good = result.transcripts.find((transcript) => transcript.host === "good-host");
+
+        assert.equal(stats.fetched, 1);
+        assert.equal(stats.failed, 1);
+        assert.match(bad.remoteError, /^bad-host: probe response unreadable:/);
+        assert.ok(good.remote.cachePath);
+        assert.equal(fs.existsSync(good.remote.cachePath), true);
+      });
+    });
+  }
 });
 
 test("a clean terminated stream commits every complete item", async () => {

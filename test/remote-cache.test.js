@@ -92,6 +92,33 @@ test("concurrent cache work keeps fresh sibling payloads and uses private stagin
   second.discard(stagedSecond);
 });
 
+test("an index write preserves an entry committed after its snapshot was read", () => {
+  const stateDir = tmpdir("host-cache-merge");
+  const earlierRun = new HostCache(stateDir);
+  const laterRun = new HostCache(stateDir);
+  const earlierIndex = earlierRun.readIndex();
+  const laterIndex = laterRun.readIndex();
+
+  const sibling = laterRun.write(
+    laterIndex,
+    { host: "studio", harness: "claude", key: "sibling", kind: "raw", mtimeMs: 1, bytes: 7 },
+    Buffer.from("sibling"),
+  );
+  laterRun.writeIndex(laterIndex);
+
+  const own = earlierRun.write(
+    earlierIndex,
+    { host: "laptop", harness: "claude", key: "own", kind: "raw", mtimeMs: 2, bytes: 3 },
+    Buffer.from("own"),
+  );
+  earlierRun.writeIndex(earlierIndex);
+
+  const persisted = earlierRun.readIndex();
+  assert.deepEqual(new Set(Object.keys(persisted.entries)), new Set([sibling.name, own.name]));
+  assert.equal(fs.readFileSync(sibling.path, "utf8"), "sibling");
+  assert.equal(fs.readFileSync(own.path, "utf8"), "own");
+});
+
 test("cache pruning removes stale entries, orphan payloads, and abandoned temporary files", () => {
   const stateDir = tmpdir("host-cache");
   const cache = new HostCache(stateDir);
