@@ -131,5 +131,8 @@ export function createFrameReader() {
     get incomplete() {
       return awaiting ? { header: awaiting, received: buffered } : null;
     },
+    get partialHeader() {
+      return !awaiting && !ended && buffered > 0 ? { received: buffered } : null;
+    },
   };
 }

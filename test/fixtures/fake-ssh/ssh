@@ -64,6 +64,21 @@ if (host.hang) {
   runCommand();
 }
 
+function fetchFrameSpans(output) {
+  const spans = [];
+  let offset = 0;
+  while (offset < output.length) {
+    const newline = output.indexOf(0x0a, offset);
+    if (newline === -1) break;
+    const header = JSON.parse(output.subarray(offset, newline).toString("utf8"));
+    if (header.end === true) break;
+    const end = newline + 1 + header.bytes;
+    spans.push({ start: offset, headerEnd: newline + 1, end });
+    offset = end;
+  }
+  return spans;
+}
+
 function runCommand() {
   // The locate call may be answered from the fixture (to stand in for a machine with an
   // old Node, no Node, or no git) or run for real, which is what keeps the shipped POSIX
@@ -91,20 +106,17 @@ function runCommand() {
   const out = result.stdout ?? Buffer.alloc(0);
   const truncate = op === "fetch" && host.truncateFetch != null;
   let emitted = truncate ? out.subarray(0, host.truncateFetch) : out;
+  if (op === "fetch" && host.omitFetchFrame != null) {
+    const span = fetchFrameSpans(emitted)[host.omitFetchFrame - 1];
+    if (span) emitted = Buffer.concat([emitted.subarray(0, span.start), emitted.subarray(span.end)]);
+  }
   if (op === "fetch" && host.truncateFetchFrame != null) {
-    let offset = 0;
-    for (let frame = 1; offset < emitted.length; frame += 1) {
-      const newline = emitted.indexOf(0x0a, offset);
-      if (newline === -1) break;
-      const header = JSON.parse(emitted.subarray(offset, newline).toString("utf8"));
-      if (header.end === true) break;
-      const bodyStart = newline + 1;
-      if (frame === host.truncateFetchFrame) {
-        emitted = emitted.subarray(0, bodyStart + Math.floor(header.bytes / 2));
-        break;
-      }
-      offset = bodyStart + header.bytes;
-    }
+    const span = fetchFrameSpans(emitted)[host.truncateFetchFrame - 1];
+    if (span) emitted = emitted.subarray(0, span.headerEnd + Math.floor((span.end - span.headerEnd) / 2));
+  }
+  if (op === "fetch" && host.truncateFetchHeader != null) {
+    const span = fetchFrameSpans(emitted)[host.truncateFetchHeader - 1];
+    if (span) emitted = emitted.subarray(0, span.start + Math.max(1, Math.floor((span.headerEnd - span.start) / 2)));
   }
   if (op === "fetch" && host.omitEndFrame) {
     const terminator = Buffer.from('{"end":true}\n');

@@ -114,6 +114,12 @@ test("a fetch frame is read back byte for byte, and a torn stream is reported ra
   assert.equal(torn.ended, false);
   assert.equal(torn.incomplete.header.key, "one");
   assert.equal(torn.incomplete.received, body.length - 4);
+
+  const partialHeader = createFrameReader();
+  partialHeader.push(Buffer.from('{"key":"two"', "utf8"));
+  assert.equal(partialHeader.incomplete, null);
+  assert.deepEqual(partialHeader.partialHeader, { received: 12 });
+  assert.equal(partialHeader.ended, false);
 });
 
 test("malformed fetch headers are rejected instead of becoming empty transcripts", () => {
