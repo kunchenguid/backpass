@@ -15,6 +15,7 @@ import { isPointerTo, memorySetHash, memoryTextHash, parseMemoryUnits } from "..
 import { evidenceKey, State } from "../src/state.js";
 import { clearProgressSink, setProgressSink } from "../src/progress.js";
 import { ProposalViolation } from "../src/proposal.js";
+import { HostCache, PRUNE_MAX_AGE_MS } from "../src/discovery/cache.js";
 
 const CLI = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../bin/backpass");
 
@@ -198,6 +199,49 @@ test("no memory file and no transcripts: seeds AGENTS.md from defaults plus a CL
   const claude = fs.readFileSync(path.join(repo.root, "CLAUDE.md"), "utf8");
   assert.equal(claude, renderPointer("AGENTS.md"));
   assert.equal(isPointerTo(claude, "AGENTS.md"), true);
+});
+
+test("bootstrap prefetches remote sessions and prunes its host cache", async () => {
+  const repo = makeRepo();
+  const ctx = makeCtx(repo);
+  const cache = new HostCache(ctx.config.state.root);
+  const index = cache.readIndex();
+  const stale = cache.write(
+    index,
+    { host: "old-host", harness: "claude", key: "stale", kind: "raw", mtimeMs: 1, bytes: 5 },
+    Buffer.from("stale"),
+  );
+  index.entries[stale.name].usedAt = new Date(Date.now() - PRUNE_MAX_AGE_MS - 1_000).toISOString();
+  cache.writeIndex(index);
+
+  const remote = {
+    ...transcript("remote-1"),
+    host: "mac-home",
+    remote: { host: "mac-home", key: "remote-1", kind: "raw" },
+  };
+  let prefetched = 0;
+  await bootstrapRun(ctx, {
+    discover: async () => ({ transcripts: [remote], perHarness: { claude: {} } }),
+    prefetch: async (pending) => {
+      prefetched += pending.length;
+      pending[0].remote.cachePath = "/cached/remote-1";
+    },
+    analyze: async (args) => {
+      await args.prefetch(args.transcripts);
+      assert.equal(args.transcripts[0].remote.cachePath, "/cached/remote-1");
+      return { total: 1, analyzed: 0, cached: 0, skipped: 1, failed: 0, usage: [] };
+    },
+    fold: async () => ({
+      instructions: [],
+      gaps: [],
+      analyzedSessions: 0,
+      totals: { gapClusters: 0, reportOnlyGapClusters: 0, droppedGapSingletons: 0 },
+    }),
+  });
+
+  assert.equal(prefetched, 1);
+  assert.equal(fs.existsSync(stale.path), false);
+  assert.equal(cache.readIndex().entries[stale.name], undefined);
 });
 
 test("bootstrap analyzes and folds only the balanced capped sample", async () => {

@@ -9,6 +9,8 @@ import { capTranscripts } from "../sample.js";
 import { synthesizeProposal } from "../synthesize.js";
 import { budgetBar, formatTokens } from "../tokens.js";
 import { discoverForRun } from "./scan.js";
+import { prefetchRemoteTranscripts } from "../discovery/hosts.js";
+import { pruneHostCache } from "../discovery/cache.js";
 import { accountForConsolidationUsage, foldForRun, printProposal } from "./propose.js";
 
 /**
@@ -38,11 +40,20 @@ const BOOTSTRAP_RUN_NOTE =
  * default to the real pipeline and can be swapped for fakes.
  */
 export async function bootstrapRun(ctx, deps = {}) {
+  try {
+    return await bootstrapRunCore(ctx, deps);
+  } finally {
+    pruneHostCache(ctx.config.state.root);
+  }
+}
+
+async function bootstrapRunCore(ctx, deps) {
   const { repo, config } = ctx;
   const discover = deps.discover || discoverForRun;
   const analyze = deps.analyze || analyzeTranscripts;
   const synthesize = deps.synthesize || synthesizeProposal;
   const fold = deps.fold || foldForRun;
+  const prefetch = deps.prefetch || ((pending) => prefetchRemoteTranscripts(pending, { config }));
   const { canonical, pointer } = bootstrapTargets(config.memoryFiles);
 
   const { transcripts, perHarness } = capTranscripts(await discover(ctx), config);
@@ -97,6 +108,7 @@ export async function bootstrapRun(ctx, deps = {}) {
     repo,
     memoryHash,
     force: Boolean(ctx.flags.force),
+    prefetch,
   });
   info(
     `${color.cyan("·")} evidence: ${result.summary.analyzed} new · ${result.summary.cached} cached · ` +
