@@ -14,7 +14,8 @@ import {
   probeSources,
 } from "../src/discovery/remote/bundle.js";
 import { LOCATE_COMMAND, probeCommand } from "../src/discovery/hosts.js";
-import { initRepo, tmpdir, writeClaudeSession } from "./helpers/remote.js";
+import { runSsh } from "../src/discovery/remote/ssh.js";
+import { initRepo, sshCalls, tmpdir, withRemoteEnv, writeClaudeSession } from "./helpers/remote.js";
 
 test("the probe runs from a directory holding only the manifest, so no hidden import can break a host", async () => {
   const dir = tmpdir("probe-isolated");
@@ -46,28 +47,35 @@ test("the probe runs from a directory holding only the manifest, so no hidden im
   }
 });
 
-test("everything backpass puts on a remote command line survives any shell quoting", () => {
-  // These strings are backpass's own half of the wire contract, not implementation
-  // detail: the locate snippet is wrapped in `sh -c '...'` so a fish or csh login shell
-  // cannot misparse it, and the loader is the program that carries the adapters over.
-  // A single quote would end that wrapper; a backslash or a bang changes meaning between
-  // shells. There is nowhere else these values can be checked.
-  const program = buildProbeProgram({ protocol: 1, op: "discover", harnesses: [], cutoffMs: null });
-  const payloadStart = program.indexOf('Buffer.from("');
-  const payloadEnd = program.indexOf('", "base64")');
-  const loaderOnly = program.slice(0, payloadStart) + program.slice(payloadEnd);
-  const quote = String.fromCharCode(39);
-  const backslash = String.fromCharCode(92);
+test("the locate command and shipped probe execute through the supported remote shell path", async () => {
+  const localHome = tmpdir("probe-shell-local");
+  const remoteHome = tmpdir("probe-shell-remote");
+  const log = path.join(localHome, "ssh.log");
 
-  for (const [name, text] of [
-    ["the locate command", LOCATE_COMMAND.slice(LOCATE_COMMAND.indexOf(quote) + 1, -1)],
-    ["the probe command", probeCommand("/usr/bin/node").replaceAll(quote, "")],
-    ["the loader", loaderOnly],
-  ]) {
-    assert.ok(!text.includes(quote), `${name} must contain no single quote`);
-    assert.ok(!text.includes(backslash), `${name} must contain no backslash`);
-    assert.ok(!text.includes("!"), `${name} must contain no history-expansion bang`);
-  }
+  await withRemoteEnv({ localHome, hosts: { shellhost: { home: remoteHome } }, log }, async () => {
+    const located = await runSsh({ destination: "shellhost", command: LOCATE_COMMAND });
+    assert.equal(located.code, 0);
+    assert.match(located.stdout, /node\|/);
+    assert.match(located.stdout, /uname\|/);
+
+    const probed = await runSsh({
+      destination: "shellhost",
+      command: probeCommand(process.execPath),
+      input: buildProbeProgram({ protocol: 1, op: "discover", harnesses: [], cutoffMs: null }),
+    });
+    assert.equal(probed.code, 0);
+    const response = JSON.parse(probed.stdout.trim());
+    assert.equal(response.protocol, 1);
+    assert.deepEqual(response.transcripts, []);
+  });
+
+  assert.deepEqual(
+    sshCalls(log).map(({ destination, op }) => ({ destination, op })),
+    [
+      { destination: "shellhost", op: null },
+      { destination: "shellhost", op: "discover" },
+    ],
+  );
 });
 
 test("a fetch frame is read back byte for byte, and a torn stream is reported rather than parsed", () => {

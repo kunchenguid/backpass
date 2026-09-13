@@ -92,7 +92,8 @@ export function sshArgs({ destination, command, connectTimeoutSeconds = DEFAULT_
  * layer up, which is exactly the failure AGENTS.md records two rounds of.
  *
  * @param {{ destination: string, command: string, input?: string, timeoutMs?: number,
- *   connectTimeoutSeconds?: number, binaryStdout?: boolean }} options
+ *   connectTimeoutSeconds?: number, binaryStdout?: boolean, captureStdout?: boolean,
+ *   onStdout?: (chunk: Buffer) => void }} options
  */
 export async function runSsh({
   destination,
@@ -101,12 +102,16 @@ export async function runSsh({
   timeoutMs = DEFAULT_CALL_TIMEOUT_MS,
   connectTimeoutSeconds = DEFAULT_CONNECT_TIMEOUT_SECONDS,
   binaryStdout = false,
+  captureStdout = true,
+  onStdout = null,
 }) {
   assertSafeSshValue("ssh destination", destination);
   const result = await runCapture(sshBin(), sshArgs({ destination, command, connectTimeoutSeconds }), {
     input,
     timeoutMs,
     binaryStdout,
+    captureStdout,
+    onStdout,
   });
   if (result.spawnError?.code === "ERR_WINDOWS_SHIM_UNSAFE_ARG") {
     throw new UserError(

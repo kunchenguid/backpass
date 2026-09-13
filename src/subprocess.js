@@ -24,7 +24,7 @@ import path from "node:path";
  *
  * @param {{ timeoutMs?: number, cwd?: string, input?: string, env?: NodeJS.ProcessEnv,
  *   platform?: NodeJS.Platform, lookupEnv?: NodeJS.ProcessEnv, binaryStdout?: boolean,
- *   onStdout?: (chunk: Buffer) => void,
+ *   captureStdout?: boolean, onStdout?: (chunk: Buffer) => void,
  *   spawnFn?: (file: string, args: string[], options: object) => any }} [options]
  * @returns {Promise<{ code: number | null, stdout: string, stdoutBuffer?: Buffer, stderr: string, timedOut?: boolean, spawnError?: ShimError }>}
  */
@@ -40,6 +40,7 @@ export function runCapture(
     lookupEnv = process.env,
     spawnFn = spawn,
     binaryStdout = false,
+    captureStdout = true,
     onStdout = null,
   } = {},
 ) {
@@ -85,8 +86,10 @@ export function runCapture(
       : null;
 
     child.stdout.on("data", (d) => {
-      if (onStdout) onStdout(Buffer.isBuffer(d) ? d : Buffer.from(d));
-      if (binaryStdout) stdoutChunks.push(Buffer.isBuffer(d) ? d : Buffer.from(d));
+      const chunk = Buffer.isBuffer(d) ? d : Buffer.from(d);
+      if (onStdout) onStdout(chunk);
+      if (!captureStdout) return;
+      if (binaryStdout) stdoutChunks.push(chunk);
       else stdout += d;
     });
     child.stderr.on("data", (d) => {
@@ -105,7 +108,7 @@ export function runCapture(
     });
 
     function collected() {
-      return binaryStdout ? { stdoutBuffer: Buffer.concat(stdoutChunks) } : {};
+      return binaryStdout && captureStdout ? { stdoutBuffer: Buffer.concat(stdoutChunks) } : {};
     }
 
     if (input !== undefined) child.stdin.end(input);

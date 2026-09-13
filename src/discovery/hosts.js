@@ -78,8 +78,8 @@ export function normalizeHostEntry(entry) {
     if (typeof value !== "string") throw new UserError(`discovery.hosts[].env.${key} must be a string`);
     env[key] = value;
   }
-  if (raw.node !== undefined && raw.node !== null && typeof raw.node !== "string") {
-    throw new UserError("discovery.hosts[].node must be an absolute path string");
+  if (raw.node !== undefined && raw.node !== null && (typeof raw.node !== "string" || !raw.node.startsWith("/"))) {
+    throw new UserError("discovery.hosts[].node must be an absolute POSIX path string");
   }
   if (raw.harnesses !== undefined && raw.harnesses !== null) {
     if (!Array.isArray(raw.harnesses) || raw.harnesses.some((h) => typeof h !== "string")) {
@@ -405,7 +405,49 @@ async function fetchHost(host, pending, { cache, index, stats }) {
   emitProgress("discover:host:fetch", { host, items: items.length });
 
   const reader = createFrameReader();
-  const received = new Map();
+  const transcriptsByKey = new Map(pending.map((transcript) => [transcript.remote.key, transcript]));
+  const outcomes = new Map();
+  let parseError = null;
+
+  function acceptFrame(frame) {
+    const key = frame.header.key;
+    const transcript = transcriptsByKey.get(key);
+    if (!transcript || outcomes.has(key)) return;
+    if (frame.header.kind === "error") {
+      outcomes.set(key, { error: frame.header.error || "remote fetch failed" });
+      return;
+    }
+    try {
+      // A session that grew (or shrank) between discover and fetch is accepted, but the
+      // descriptor has to catch up first: `evidenceKey` is the content signature, so
+      // analyzing the new bytes under the old one would cache the judgment against a
+      // session that no longer exists.
+      if (frame.header.kind === "raw") {
+        if (Number.isFinite(frame.header.mtimeMs)) transcript.mtimeMs = frame.header.mtimeMs;
+        transcript.bytes = frame.body.length;
+      }
+      const written = cache.write(
+        index,
+        {
+          host,
+          harness: transcript.harness,
+          key,
+          kind: frame.header.kind,
+          mtimeMs: transcript.mtimeMs,
+          bytes: transcript.bytes,
+          model: frame.header.model || null,
+        },
+        frame.body,
+      );
+      transcript.remote.cachePath = written.path;
+      outcomes.set(key, { ok: true });
+      stats.fetched += 1;
+      stats.bytes += written.bytes;
+    } catch (err) {
+      outcomes.set(key, { error: err.message });
+    }
+  }
+
   let call;
   try {
     call = await runSsh({
@@ -414,54 +456,29 @@ async function fetchHost(host, pending, { cache, index, stats }) {
       input: buildProbeProgram({ protocol: PROTOCOL, op: "fetch", items }, { env: first.env || {} }),
       timeoutMs: FETCH_TIMEOUT_MS,
       connectTimeoutSeconds: first.connectTimeoutSeconds,
-      binaryStdout: true,
+      captureStdout: false,
+      onStdout(chunk) {
+        if (parseError) return;
+        try {
+          for (const frame of reader.push(chunk)) acceptFrame(frame);
+        } catch (err) {
+          parseError = err.message;
+        }
+      },
     });
   } catch (err) {
     if (err instanceof UserError) throw err;
-    call = { code: null, stdout: "", stdoutBuffer: Buffer.alloc(0), stderr: err.message };
-  }
-
-  let parseError = null;
-  try {
-    for (const frame of reader.push(call.stdoutBuffer || Buffer.alloc(0))) received.set(frame.header.key, frame);
-  } catch (err) {
-    parseError = err.message;
+    call = { code: null, stdout: "", stderr: err.message };
   }
 
   const failure = classifySshFailure(call, { destination: host, timeoutMs: FETCH_TIMEOUT_MS });
   for (const transcript of pending) {
-    const frame = received.get(transcript.remote.key);
-    if (!frame || frame.header.kind === "error") {
-      transcript.remoteError = frame?.header?.error || parseError || failure?.message || "remote fetch incomplete";
-      stats.failed += 1;
-      continue;
-    }
-    // A session that grew (or shrank) between discover and fetch is accepted, but the
-    // descriptor has to catch up first: `evidenceKey` is the content signature, so
-    // analyzing the new bytes under the old one would cache the judgment against a
-    // session that no longer exists.
-    if (frame.header.kind === "raw") {
-      if (Number.isFinite(frame.header.mtimeMs)) transcript.mtimeMs = frame.header.mtimeMs;
-      transcript.bytes = frame.body.length;
-    }
-    const written = cache.write(
-      index,
-      {
-        host,
-        harness: transcript.harness,
-        key: transcript.remote.key,
-        kind: frame.header.kind,
-        mtimeMs: transcript.mtimeMs,
-        bytes: transcript.bytes,
-        model: frame.header.model || null,
-      },
-      frame.body,
-    );
-    transcript.remote.cachePath = written.path;
-    stats.fetched += 1;
-    stats.bytes += written.bytes;
+    const outcome = outcomes.get(transcript.remote.key);
+    if (outcome?.ok) continue;
+    transcript.remoteError = outcome?.error || parseError || failure?.message || "remote fetch incomplete";
+    stats.failed += 1;
   }
-  if (!reader.ended && !failure && !parseError && received.size < pending.length) {
+  if (!reader.ended && !failure && !parseError && outcomes.size < pending.length) {
     warn(`${host}: the fetch stream ended early; the missing transcripts are retried next run`);
   }
 }

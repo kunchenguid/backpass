@@ -120,6 +120,33 @@ export class HostCache {
         // A file we cannot remove is reported by the next status, not a failed run.
       }
     }
+
+    const claimed = new Set(Object.keys(index.entries));
+    let files = [];
+    try {
+      files = fs.readdirSync(this.root, { withFileTypes: true });
+    } catch {
+      return removed;
+    }
+    for (const file of files) {
+      if (!file.isFile() || file.name === path.basename(this.indexPath)) continue;
+      const orphan = /^[a-f0-9]{64}$/.test(file.name) && !claimed.has(file.name);
+      let staleTemporary = false;
+      if (file.name.endsWith(".tmp")) {
+        try {
+          staleTemporary = now - fs.statSync(path.join(this.root, file.name)).mtimeMs >= maxAgeMs;
+        } catch {
+          continue;
+        }
+      }
+      if (!orphan && !staleTemporary) continue;
+      try {
+        fs.rmSync(path.join(this.root, file.name), { force: true });
+        removed += 1;
+      } catch {
+        // A file we cannot remove is reported by the next status, not a failed run.
+      }
+    }
     return removed;
   }
 
@@ -133,4 +160,13 @@ export class HostCache {
     }
     return perHost;
   }
+}
+
+export function pruneHostCache(stateDir) {
+  const cache = new HostCache(stateDir);
+  if (!fs.existsSync(cache.root)) return 0;
+  const index = cache.readIndex();
+  const removed = cache.prune(index);
+  cache.writeIndex(index);
+  return removed;
 }

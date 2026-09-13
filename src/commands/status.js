@@ -11,7 +11,7 @@ import {
   skillDescriptionTokens,
 } from "../skills.js";
 import { crossSurfaceDuplicates } from "../overlap.js";
-import { HostCache } from "../discovery/cache.js";
+import { HostCache, pruneHostCache } from "../discovery/cache.js";
 import { budgetBar, budgetStatus, formatTokens } from "../tokens.js";
 import { table } from "./scan.js";
 import { candidateKey, isProbeEntryFresh, resolvedEffort } from "../agents.js";
@@ -27,6 +27,7 @@ export async function cmdStatus(ctx) {
   for (const e of evidence) counts[e.status] = (counts[e.status] || 0) + 1;
 
   const cache = state.readScanCache();
+  pruneHostCache(state.root);
   const hostCache = new HostCache(state.root).stats();
   const summary = state.readSummary();
   const proposal = state.readProposal();

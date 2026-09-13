@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 
-import { loadConfig } from "../src/config.js";
+import { applyHostFlag, loadConfig } from "../src/config.js";
 import { discoverProject, initRepo, sshCalls, tmpdir, withRemoteEnv, writeClaudeSession } from "./helpers/remote.js";
 import { disambiguateSourceLabels, gapSource } from "../src/gap-ledger.js";
 import { classifySshFailure } from "../src/discovery/remote/ssh.js";
@@ -217,6 +217,16 @@ test("a destination that could be read as an option or break quoting is refused 
     });
   }
   assert.deepEqual(sshCalls(s.log), [], "nothing may be spawned for a destination that was refused");
+});
+
+test("host configuration requires an absolute node path and treats each flag as one exact destination", () => {
+  assert.throws(
+    () => resolveHostList({ discovery: { hosts: [{ host: "mac-home", node: "node" }] } }),
+    /absolute POSIX path/,
+  );
+  assert.deepEqual(applyHostFlag([], ["mac-home,mac-work"]), ["mac-home,mac-work"]);
+  assert.deepEqual(applyHostFlag(["configured"], ["NONE"]), ["configured", "NONE"]);
+  assert.deepEqual(applyHostFlag(["configured"], ["none"]), []);
 });
 
 test("an evidence source label carries the host and stays one label per session", () => {

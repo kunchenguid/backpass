@@ -388,11 +388,8 @@ export function loadConfig(repoRoot, overrides = {}, { kind = "project" } = {}) 
  */
 export function applyHostFlag(configured, flagValues) {
   if (!flagValues?.length) return configured;
-  const named = flagValues
-    .flatMap((value) => String(value).split(","))
-    .map((value) => value.trim())
-    .filter(Boolean);
-  if (named.some((value) => value.toLowerCase() === "none")) return [];
+  const named = flagValues.map((value) => String(value));
+  if (named.includes("none")) return [];
   const out = [...(configured || [])];
   for (const host of named) {
     const already = out.some((entry) => (typeof entry === "string" ? entry : entry?.host) === host);

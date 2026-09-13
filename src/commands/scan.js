@@ -1,4 +1,5 @@
 import { discoverTranscripts } from "../discovery/index.js";
+import { pruneHostCache } from "../discovery/cache.js";
 import { corpusMix, formatCorpusMix } from "../interaction.js";
 import { color, info, json, out } from "../logger.js";
 import { attachSiblingClones } from "../repo.js";
@@ -24,6 +25,14 @@ function ago(ms) {
 }
 
 export async function cmdScan(ctx) {
+  try {
+    return await cmdScanCore(ctx);
+  } finally {
+    pruneHostCache(ctx.config.state.root);
+  }
+}
+
+async function cmdScanCore(ctx) {
   const { transcripts, perHarness, perHost = [], truncated } = await discoverForRun(ctx);
   const mix = corpusMix(transcripts);
 

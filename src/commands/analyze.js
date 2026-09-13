@@ -10,6 +10,7 @@ import { discoverForRun } from "./scan.js";
 import { printUsage } from "./usage.js";
 import { capTranscripts } from "../sample.js";
 import { prefetchRemoteTranscripts } from "../discovery/hosts.js";
+import { pruneHostCache } from "../discovery/cache.js";
 
 /**
  * The memory file a run optimizes: the first configured file that exists (AGENTS.md by
@@ -70,6 +71,14 @@ export function primaryMemoryFile(repo, config, scope = null) {
 }
 
 export async function runAnalysis(ctx) {
+  try {
+    return await runAnalysisCore(ctx);
+  } finally {
+    pruneHostCache(ctx.config.state.root);
+  }
+}
+
+async function runAnalysisCore(ctx) {
   const { repo, scope, config } = ctx;
   const { file, hash, skills } = primaryMemoryFile(repo, config, scope);
   // Deterministic by design: tokens and units come from parsing the file, no model.
