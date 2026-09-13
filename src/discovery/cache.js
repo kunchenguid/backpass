@@ -20,6 +20,7 @@ import path from "node:path";
 
 export const PRUNE_MAX_AGE_MS = 30 * 86_400_000;
 const INDEX_VERSION = 1;
+const ENTRY_NAME = /^[a-f0-9]{64}$/;
 
 function entryName(host, harness, key) {
   return crypto.createHash("sha256").update(`${host}\n${harness}\n${key}`, "utf8").digest("hex");
@@ -46,7 +47,19 @@ export class HostCache {
   readIndex() {
     try {
       const parsed = JSON.parse(fs.readFileSync(this.indexPath, "utf8"));
-      if (parsed?.version === INDEX_VERSION && parsed.entries) return parsed;
+      if (
+        parsed?.version === INDEX_VERSION &&
+        parsed.entries &&
+        typeof parsed.entries === "object" &&
+        !Array.isArray(parsed.entries)
+      ) {
+        parsed.entries = Object.fromEntries(
+          Object.entries(parsed.entries).filter(
+            ([name, entry]) => ENTRY_NAME.test(name) && entry && typeof entry === "object" && !Array.isArray(entry),
+          ),
+        );
+        return parsed;
+      }
     } catch {
       // A missing or corrupt index only costs a refetch.
     }
@@ -130,7 +143,12 @@ export class HostCache {
   prune(index, { maxAgeMs = PRUNE_MAX_AGE_MS, now = Date.now() } = {}) {
     let removed = 0;
     for (const [name, entry] of Object.entries(index.entries)) {
-      const usedAt = Date.parse(entry.usedAt || "");
+      if (!ENTRY_NAME.test(name)) {
+        delete index.entries[name];
+        removed += 1;
+        continue;
+      }
+      const usedAt = Date.parse(entry?.usedAt || "");
       if (Number.isFinite(usedAt) && now - usedAt < maxAgeMs) continue;
       delete index.entries[name];
       removed += 1;
@@ -150,7 +168,7 @@ export class HostCache {
     }
     for (const file of files) {
       if (!file.isFile() || file.name === path.basename(this.indexPath)) continue;
-      const orphan = /^[a-f0-9]{64}$/.test(file.name) && !claimed.has(file.name);
+      const orphan = ENTRY_NAME.test(file.name) && !claimed.has(file.name);
       let staleTemporary = false;
       if (file.name.endsWith(".tmp")) {
         try {

@@ -12,7 +12,8 @@ import { resolveHostList } from "../src/discovery/hosts.js";
 import { resolveScope } from "../src/scope.js";
 import { State } from "../src/state.js";
 import { SELF_SESSION_SENTINEL } from "../src/sentinel.js";
-import { UserError } from "../src/logger.js";
+import { UserError, setLoggerSink } from "../src/logger.js";
+import { clearProgressSink, setProgressSink } from "../src/progress.js";
 
 const REMOTE = "github.com/acme/demo";
 
@@ -38,6 +39,43 @@ function scenario({ variant = {}, cwdOverride = null, sessionText = null } = {})
     hosts: { "mac-home": { home: remoteHome, ...variant } },
   };
 }
+
+test("host collection has plain progress without duplicating live progress", async () => {
+  const plain = scenario();
+  const lines = [];
+  setLoggerSink((line) => lines.push(line));
+  try {
+    await withRemoteEnv({ localHome: plain.localHome, hosts: plain.hosts }, () =>
+      discoverProject(plain.repoRoot, { discovery: { hosts: ["mac-home"] } }),
+    );
+  } finally {
+    setLoggerSink(null);
+  }
+  assert.ok(lines.includes("ssh mac-home connecting"));
+  assert.ok(lines.some((line) => /^ssh mac-home done · node v.* · 1 scanned$/.test(line)));
+
+  const live = scenario();
+  const liveLines = [];
+  const events = [];
+  setLoggerSink((line) => liveLines.push(line));
+  setProgressSink((event, data) => events.push({ event, data }));
+  try {
+    await withRemoteEnv({ localHome: live.localHome, hosts: live.hosts }, () =>
+      discoverProject(live.repoRoot, { discovery: { hosts: ["mac-home"] } }),
+    );
+  } finally {
+    clearProgressSink();
+    setLoggerSink(null);
+  }
+  assert.equal(
+    liveLines.some((line) => line.startsWith("ssh mac-home ")),
+    false,
+  );
+  assert.deepEqual(
+    events.filter(({ event }) => event.startsWith("discover:host:")).map(({ event }) => event),
+    ["discover:host:start", "discover:host:done"],
+  );
+});
 
 test("a remote session in a clone that shares this repo's remote is tier 1.5, named by host, and survives --strict", async () => {
   const s = scenario();
@@ -191,6 +229,10 @@ test("a malformed probe response skips only that host", async () => {
     { protocol: 1, harnesses: {}, transcripts: null, paths: {}, warnings: [] },
     {
       protocol: 1,
+      node: process.version,
+      platform: process.platform,
+      hostname: "mac-home",
+      home: "/home/kun",
       harnesses: {},
       transcripts: [
         {
@@ -201,12 +243,31 @@ test("a malformed probe response skips only that host", async () => {
           cwd: "/remote/demo",
           gitRoot: null,
           remotes: [],
+          title: null,
+          model: null,
+          startedAt: null,
+          mtimeMs: 0,
+          bytes: 0,
+          contentSignature: null,
+          extra: {},
+          interactionSignals: {},
           kind: "raw",
         },
       ],
       paths: {
         "/remote/demo": { real: "/remote/demo", exists: true, toplevel: "/remote/demo", remotes: "invalid" },
       },
+      warnings: [],
+    },
+    {
+      protocol: 1,
+      node: process.version,
+      platform: process.platform,
+      hostname: "mac-home",
+      home: {},
+      harnesses: {},
+      transcripts: [],
+      paths: {},
       warnings: [],
     },
   ];

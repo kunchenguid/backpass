@@ -20,10 +20,11 @@ export function clearProgressSink() {
 
 /** Emit one progress event. A throwing sink must never break the pipeline. */
 export function emitProgress(event, data = {}) {
-  if (!sink) return;
+  if (!sink) return false;
   try {
     sink(event, data);
   } catch {
     // Rendering is best-effort; the run itself is what matters.
   }
+  return true;
 }

@@ -1,4 +1,4 @@
-import { UserError, warn } from "../logger.js";
+import { UserError, info, warn } from "../logger.js";
 import { emitProgress } from "../progress.js";
 import { HostCache } from "./cache.js";
 import { buildProbeProgram, createFrameReader, PROTOCOL, REMOTE_ENV_ALLOWLIST } from "./remote/bundle.js";
@@ -214,7 +214,8 @@ export async function collectHosts({ hosts, harnesses, cutoffMs }) {
   for (const entry of hosts) {
     const result = emptyHostResult(entry);
     results.push(result);
-    emitProgress("discover:host:start", { host: entry.host });
+    const liveProgress = emitProgress("discover:host:start", { host: entry.host });
+    if (!liveProgress) info(`ssh ${entry.host} connecting`);
 
     try {
       await collectOneHost(entry, { harnesses, cutoffMs }, result);
@@ -232,6 +233,11 @@ export async function collectHosts({ hosts, harnesses, cutoffMs }) {
       harnesses: result.harnesses,
       scanned: result.scanned,
     });
+    if (!liveProgress && !result.error) {
+      info(
+        `ssh ${entry.host} done · ${result.nodeVersion ? `node ${result.nodeVersion} · ` : ""}${result.scanned} scanned`,
+      );
+    }
   }
   return results;
 }
@@ -333,11 +339,41 @@ async function collectOneHost(entry, { harnesses, cutoffMs }, result) {
         (descriptor.gitRoot === null || typeof descriptor.gitRoot === "string") &&
         Array.isArray(descriptor.remotes) &&
         descriptor.remotes.every((remote) => typeof remote === "string") &&
+        (descriptor.title === null || typeof descriptor.title === "string") &&
+        (descriptor.model === null || typeof descriptor.model === "string") &&
+        (descriptor.startedAt === null || Number.isFinite(descriptor.startedAt)) &&
+        Number.isFinite(descriptor.mtimeMs) &&
+        Number.isFinite(descriptor.bytes) &&
+        (descriptor.contentSignature === null || typeof descriptor.contentSignature === "string") &&
+        descriptor.extra &&
+        typeof descriptor.extra === "object" &&
+        !Array.isArray(descriptor.extra) &&
+        descriptor.interactionSignals &&
+        typeof descriptor.interactionSignals === "object" &&
+        !Array.isArray(descriptor.interactionSignals) &&
         (descriptor.kind === "raw" || descriptor.kind === "events"),
     );
   const validRecords = [response.harnesses, response.paths].every(
     (value) => value && typeof value === "object" && !Array.isArray(value),
   );
+  const validScalars =
+    typeof response.node === "string" &&
+    typeof response.platform === "string" &&
+    typeof response.hostname === "string" &&
+    typeof response.home === "string" &&
+    response.home.length > 0;
+  const validHarnesses =
+    validRecords &&
+    Object.values(response.harnesses).every(
+      (stats) =>
+        stats &&
+        typeof stats === "object" &&
+        !Array.isArray(stats) &&
+        Number.isFinite(stats.scanned) &&
+        Number.isFinite(stats.classified) &&
+        Number.isFinite(stats.self) &&
+        (stats.error === null || typeof stats.error === "string"),
+    );
   const validFacts =
     validRecords &&
     Object.values(response.paths).every(
@@ -354,6 +390,8 @@ async function collectOneHost(entry, { harnesses, cutoffMs }, result) {
   if (
     !validDescriptors ||
     !validRecords ||
+    !validScalars ||
+    !validHarnesses ||
     !validFacts ||
     !Array.isArray(response.warnings) ||
     response.warnings.some((note) => typeof note !== "string")

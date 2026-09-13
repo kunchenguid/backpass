@@ -6,6 +6,24 @@ import path from "node:path";
 import { HostCache, PRUNE_MAX_AGE_MS, pruneHostCache } from "../src/discovery/cache.js";
 import { tmpdir } from "./helpers/remote.js";
 
+test("cache index names cannot steer pruning outside the cache", () => {
+  const stateDir = tmpdir("host-cache-index");
+  const cache = new HostCache(stateDir).ensure();
+  const victim = path.join(stateDir, "victim");
+  fs.writeFileSync(victim, "keep");
+  fs.writeFileSync(
+    cache.indexPath,
+    JSON.stringify({
+      version: 1,
+      entries: { "../victim": { usedAt: new Date(0).toISOString() } },
+    }),
+  );
+
+  pruneHostCache(stateDir);
+  assert.equal(fs.readFileSync(victim, "utf8"), "keep");
+  assert.deepEqual(cache.readIndex().entries, {});
+});
+
 test("cache pruning removes stale entries, orphan payloads, and abandoned temporary files", () => {
   const stateDir = tmpdir("host-cache");
   const cache = new HostCache(stateDir);
