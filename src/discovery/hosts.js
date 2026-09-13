@@ -87,8 +87,8 @@ export function normalizeHostEntry(entry) {
     }
   }
   const connectTimeoutSeconds = raw.connectTimeoutSeconds ?? DEFAULT_CONNECT_TIMEOUT_SECONDS;
-  if (!Number.isFinite(connectTimeoutSeconds) || connectTimeoutSeconds <= 0) {
-    throw new UserError("discovery.hosts[].connectTimeoutSeconds must be a positive number");
+  if (!Number.isInteger(connectTimeoutSeconds) || connectTimeoutSeconds <= 0) {
+    throw new UserError("discovery.hosts[].connectTimeoutSeconds must be a positive integer");
   }
   return {
     host: raw.host,

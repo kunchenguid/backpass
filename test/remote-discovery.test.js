@@ -349,10 +349,14 @@ test("a destination that could be read as an option or break quoting is refused 
   assert.deepEqual(sshCalls(s.log), [], "nothing may be spawned for a destination that was refused");
 });
 
-test("host configuration requires an absolute node path and treats each flag as one exact destination", () => {
+test("host configuration validates OpenSSH values and treats each flag as one exact destination", () => {
   assert.throws(
     () => resolveHostList({ discovery: { hosts: [{ host: "mac-home", node: "node" }] } }),
     /absolute POSIX path/,
+  );
+  assert.throws(
+    () => resolveHostList({ discovery: { hosts: [{ host: "mac-home", connectTimeoutSeconds: 0.5 }] } }),
+    /connectTimeoutSeconds must be a positive integer/,
   );
   assert.deepEqual(applyHostFlag([], ["mac-home,mac-work"]), ["mac-home,mac-work"]);
   assert.deepEqual(applyHostFlag(["configured"], ["NONE"]), ["configured", "NONE"]);
