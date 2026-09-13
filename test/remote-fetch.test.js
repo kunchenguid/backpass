@@ -428,6 +428,7 @@ test("scan --json carries the host on each transcript and one perHost row", asyn
 
   assert.equal(parsed.transcripts.length, 1);
   assert.equal(parsed.transcripts[0].host, "mac-home");
+  assert.equal(Object.hasOwn(parsed.transcripts[0], "remote"), false);
   assert.equal(parsed.perHost.length, 1);
   assert.equal(parsed.perHost[0].host, "mac-home");
   assert.equal(parsed.perHost[0].error, null);

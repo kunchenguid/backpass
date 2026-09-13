@@ -43,7 +43,11 @@ async function cmdScanCore(ctx) {
       perHarness,
       perHost,
       mix,
-      transcripts,
+      transcripts: transcripts.map((transcript) => {
+        const serialized = { ...transcript };
+        delete serialized.remote;
+        return serialized;
+      }),
     });
     return 0;
   }
