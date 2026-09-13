@@ -1,6 +1,6 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
-import path from "node:path";
 import { execFileSync } from "node:child_process";
 
 import * as claude from "../adapters/claude.js";
@@ -60,20 +60,15 @@ function fetchKind(adapter) {
   return adapter.sqliteBacked ? "events" : "raw";
 }
 
-function contentSignature(adapter, ref) {
-  const file = adapter.contentPath ? adapter.contentPath(ref) : ref.path;
-  if (typeof file !== "string" || !file) return null;
-  const parts = [];
-  for (const candidate of [file, `${file}-wal`]) {
-    try {
-      const stat = fs.statSync(candidate);
-      parts.push(`${path.basename(candidate)}:${stat.size}:${stat.mtimeMs}`);
-    } catch {}
-  }
-  return parts.length ? parts.join("|") : null;
+function eventSignature(result) {
+  return crypto
+    .createHash("sha256")
+    .update(JSON.stringify([result.events || [], result.model || null]), "utf8")
+    .digest("hex");
 }
 
-function descriptorFrom(adapter, row, id) {
+async function descriptorFrom(adapter, row, id) {
+  const contentSignature = adapter.sqliteBacked ? eventSignature(await adapter.read(row)) : null;
   return {
     harness: adapter.name,
     kind: fetchKind(adapter),
@@ -88,7 +83,7 @@ function descriptorFrom(adapter, row, id) {
     startedAt: row.startedAt || null,
     mtimeMs: row.mtimeMs || 0,
     bytes: row.bytes || 0,
-    contentSignature: adapter.sqliteBacked ? contentSignature(adapter, row) : null,
+    contentSignature,
     model: row.model || null,
     extra: row.extra || {},
     interactionSignals: row.interactionSignals ?? row.extra?.interactionSignals ?? {},
@@ -105,7 +100,7 @@ async function discoverHarness(adapter, { cutoffMs }) {
     for (const row of await adapter.discover({ cutoffMs })) {
       stats.scanned += 1;
       stats.classified += 1;
-      out.push(descriptorFrom(adapter, row, row.id));
+      out.push(await descriptorFrom(adapter, row, row.id));
     }
     return { stats, descriptors: out };
   }
@@ -117,7 +112,7 @@ async function discoverHarness(adapter, { cutoffMs }) {
     if (!classified) continue;
     stats.classified += 1;
     const merged = { ...candidate, ...classified };
-    const descriptor = descriptorFrom(adapter, merged, classified.id);
+    const descriptor = await descriptorFrom(adapter, merged, classified.id);
     descriptor.rawPath = rawPathOf(adapter, merged);
     // backpass's own acpx sessions are filed under the repo cwd on whichever machine ran
     // them; drop a remote one here so it never crosses the wire, let alone the corpus.
@@ -224,7 +219,7 @@ export async function fetchTranscripts({ items = [] } = {}, { stdout = process.s
           kind: "events",
           bytes: body.length,
           mtimeMs: item.mtimeMs ?? null,
-          contentSignature: contentSignature(adapter, item),
+          contentSignature: eventSignature(result),
           model: result.model || null,
         };
       }

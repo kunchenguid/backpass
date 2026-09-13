@@ -389,6 +389,7 @@ async function fetchHost(host, pending, { cache, index, stats }) {
     kind: transcript.remote.kind,
     path: transcript.path,
     extra: transcript.extra || {},
+    model: transcript.model || null,
     mtimeMs: transcript.mtimeMs,
   }));
   emitProgress("discover:host:fetch", { host, items: items.length });

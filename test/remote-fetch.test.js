@@ -177,6 +177,54 @@ test("event-backed fetch updates its signature when the remote database grows", 
   });
 });
 
+test("an unrelated Hermes session update preserves another session's cached events", async () => {
+  const s = scenario({ harnesses: ["hermes"] });
+  const dbPath = path.join(s.remoteHome, ".hermes", "state.db");
+  const db = new DatabaseSync(dbPath);
+  try {
+    db.prepare(
+      `INSERT INTO sessions (id, source, model, system_prompt, title, started_at, ended_at)
+       VALUES (?, 'cli', 'claude-sonnet-5', ?, 'second session', ?, ?)`,
+    ).run("cli-remote-2", `Current working directory: ${s.remoteClone}\n`, 1_800_000_100, 1_800_000_160);
+    const insert = db.prepare(`INSERT INTO messages (id, session_id, role, content, timestamp) VALUES (?, ?, ?, ?, ?)`);
+    insert.run(10, "cli-remote-2", "user", "Second session question.", 1_800_000_110);
+    insert.run(11, "cli-remote-2", "assistant", "Second session answer.", 1_800_000_120);
+  } finally {
+    db.close();
+  }
+
+  const first = await collectAndFetch(s);
+  assert.equal(first.stats.fetched, 2);
+  const signatures = new Map(first.transcripts.map((transcript) => [transcript.nativeId, transcript.contentSignature]));
+
+  const grown = new DatabaseSync(dbPath);
+  try {
+    grown
+      .prepare(`INSERT INTO messages (id, session_id, role, content, timestamp) VALUES (?, ?, ?, ?, ?)`)
+      .run(12, "cli-remote-2", "assistant", "Only the second session changed.", 1_800_000_130);
+  } finally {
+    grown.close();
+  }
+
+  const second = await withRemoteEnv({ localHome: s.localHome, hosts: s.hosts, log: s.log }, async () => {
+    const discovered = await discoverProject(s.repoRoot, {
+      discovery: { hosts: ["mac-home"], harnesses: ["hermes"] },
+    });
+    assert.equal(
+      discovered.transcripts.find((transcript) => transcript.nativeId === "cli-remote-1").contentSignature,
+      signatures.get("cli-remote-1"),
+    );
+    assert.notEqual(
+      discovered.transcripts.find((transcript) => transcript.nativeId === "cli-remote-2").contentSignature,
+      signatures.get("cli-remote-2"),
+    );
+    const stats = await prefetchRemoteTranscripts(discovered.transcripts, { config: discovered.config });
+    return { ...discovered, stats };
+  });
+  assert.equal(second.stats.reused, 1);
+  assert.equal(second.stats.fetched, 1);
+});
+
 test("Cursor database growth invalidates cached events even when meta.json is unchanged", async () => {
   const s = scenario({ harnesses: ["cursor"] });
   const sessionDir = path.join(s.remoteHome, ".cursor", "chats", cwdHash(s.remoteClone), "cursor-remote-1");
