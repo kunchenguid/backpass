@@ -56,10 +56,10 @@ Growth of the memory file is never reported as progress.
 
 ## It reads what you already have and owns nothing
 
-Transcripts are read from local harness stores, never uploaded, and they leave the machine only into an agent the user already authenticated.
+Transcripts are read from local harness stores, or over SSH the person already trusts from their own other machines; they are never uploaded, and they leave the person's machines only into an agent the user already authenticated.
 `backpass` holds no API key of its own, so it can never become a bill or a service the user did not ask for.
 One machine is the default, not the limit: pooling corroboration across a person's machines, or across a team, is a change of scale and not a change of kind, because two independent observers hitting one gap is the strongest evidence there is.
-What may be shared is the derived evidence, carried by infrastructure the user already owns, never a transcript and never through anything `backpass` runs.
+Across people, what may be shared is the derived evidence, carried by infrastructure the user already owns, never a transcript and never through anything `backpass` runs.
 Redaction is a coarse net and says so, so a stricter check may warn or be offered but never blocks a run by default on a guess: a default refusal on unclassified high-entropy strings would reject most real sessions, and the predictable response is turning redaction off.
 All model invocation stays behind one module, so an upstream change has exactly one blast radius.
 A harness qualifies when it records real session transcripts, because a store holding only a model's summary of a session is not evidence.

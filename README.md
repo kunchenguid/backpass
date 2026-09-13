@@ -119,6 +119,57 @@ backpass --scope user
 backpass apply --scope user
 ```
 
+### Your other machines
+
+Sessions you ran on your own other machines can join the same corpus over SSH. Name the
+hosts once in your personal config:
+
+```json
+{
+  "discovery": {
+    "hosts": [
+      "mac-home",
+      {
+        "host": "kunchen@nixos-home",
+        "node": "/run/current-system/sw/bin/node",
+        "env": { "CLAUDE_CONFIG_DIR": "~/.claude-work" },
+        "harnesses": ["claude", "codex"]
+      }
+    ]
+  }
+}
+```
+
+`--host <dest>` adds one for a single run (repeatable), and `--host none` collects
+locally only. Hosts are **personal configuration**: a `discovery.hosts` in a repo's
+`.backpassrc.json` is refused by name, so a checked-in file can never point someone
+else's backpass at a machine.
+
+backpass installs nothing on the remote. It runs your own `ssh` (with `BatchMode=yes`,
+so a password prompt fails the host instead of hanging the run) and pipes a one-shot Node
+program holding its own adapters into `node -` over there. That program lists the
+sessions in the window, computes the filesystem and git facts about each session's cwd -
+which is the only place those paths are real - and exits, removing its temp directory.
+Association then runs here, with the same tiers, against those facts. Only the sessions
+that are associated, sampled, and not already analyzed are fetched: the raw transcript
+file for file-backed stores, so the analysis agent's raw-transcript escape hatch still
+opens a real file, and the adapter's normalized events for SQLite stores. Fetched copies
+are cached under the run's state directory (mode 0700) and pruned after 30 days unused;
+`backpass status` lists them per host.
+
+Remote tiers are the local ones with a lower ceiling. Nothing on another machine is
+tier 1 ("this clone"); a live remote checkout sharing a git remote with this repo is
+tier 1.5, a recorded remote is tier 2, and a dead path is tier 3. A session that exists
+on two machines is kept once, local copy first. Evidence labels carry the host, so
+cross-machine corroboration is visible in the apply surface.
+
+Every host is fail-soft and named: an unreachable machine, a key that needs a prompt, an
+unknown or changed host key, no Node, a Node below 22.5 (file-backed harnesses still
+work, the SQLite ones are named as skipped), or a missing git each produce one row in
+`backpass scan` and leave the rest of the run alone. Host keys are never auto-accepted
+and `StrictHostKeyChecking=no` is never suggested. Windows remotes are out of scope.
+`BACKPASS_SSH_BIN` overrides the ssh binary.
+
 ### One file instead of the whole surface
 
 `--target` narrows a run to one configured memory file or one skill, named exactly: a
@@ -194,6 +245,9 @@ Association runs in four tiers:
    after the worktree is gone.
 4. **Tier 3 - best-effort.** A dead path whose last segment is the repo's directory name,
    or one matching a glob you configured. Labelled as such, and excluded by `--strict`.
+
+Configured SSH hosts are collected after the local stores and join the same corpus, with
+the same tiers, sample and cap - see [Your other machines](#your-other-machines).
 
 Collection is incremental. Codex alone can hold 10,000+ rollouts, so verdicts are cached in
 `.backpass/scan-cache.json` by path, mtime and size - re-scans cost only the new files.
@@ -645,11 +699,16 @@ CLI flags on top:
     "since": "30d",
     "worktreeGlobs": [],
     "cloneRoots": [],
+    "hosts": [],
     "minUserTurns": 2
   },
   "jobs": 4
 }
 ```
+
+`discovery.hosts` is the one setting a repo file may not carry; it belongs in
+`~/.config/backpass/config.json`. In user scope it defaults to that file's top-level
+list, so you name your machines once.
 
 That example is the project scope. User scope ignores `.backpassrc.json` and instead
 layers the `"user"` block in `$XDG_CONFIG_HOME/backpass/config.json` (default
@@ -697,6 +756,7 @@ exclude (`.git/info/exclude`, written by `backpass init`) rather than the tracke
   agent-probe-cache.json which harnesses were available and logged in, and when
   rejections.json        edits you turned down, and the evidence behind them
   gap-ledger.json        gap sightings by gap and session, accumulated across runs
+  hosts/                 transcripts fetched from SSH hosts (mode 0700), pruned after 30 days unused
   apply/apply.html       the rendered review surface
 ```
 
@@ -713,6 +773,9 @@ For the user-scope state location and isolation contract, see
   pinned by a golden fixture and fails soft.
 - **Cursor IDE is deferred to v1.1.** Its composer→workspace link is version-dependent;
   `--include-cursor-ide` enables a best-effort pass, but it is not a v1 guarantee.
+- **SSH collection is for your own machines.** Windows remotes are not supported, hosts
+  get no budget, cap, or window of their own, and pooling evidence across _people_ is a
+  different design - the vision's answer there is sharing derived evidence, not transcripts.
 - A project-scoped run never writes a user-level file. User-level edits are
   `--scope user` only (see [User-level memory](#user-level-memory)).
 - Paths are verified on macOS and Linux.

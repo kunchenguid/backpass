@@ -1,3 +1,5 @@
+import fs from "node:fs";
+
 import * as claude from "./adapters/claude.js";
 import * as codex from "./adapters/codex.js";
 import * as pi from "./adapters/pi.js";
@@ -8,6 +10,7 @@ import * as cursorCli from "./adapters/cursor-cli.js";
 import * as cursorIde from "./adapters/cursor-ide.js";
 
 import { associate, passesStrict } from "./association.js";
+import { collectHosts, resolveHostList } from "./hosts.js";
 import { isSelfSession } from "./self.js";
 import { classifyInteraction, emptyInteractionSignals, hasInteractionSignals } from "../interaction.js";
 import { sinceCutoff } from "../config.js";
@@ -48,6 +51,11 @@ export function getAdapter(harness) {
  * Sessions backpass itself created (its analysis and synthesis calls, which the harness
  * files under this repo's cwd) are excluded after association and counted in
  * `perHarness[h].self` - see `./self.js`.
+ *
+ * Configured ssh hosts (`./hosts.js`) are collected after the local harnesses and join
+ * the same corpus: same tiers, same sample, same cap. They have no tier of their own and
+ * no budget of their own. A session that exists on two machines - a synced or copied
+ * store - is kept once, or one session would satisfy `minGapEvidence` by itself.
  */
 export async function discoverTranscripts({
   repo,
@@ -70,6 +78,7 @@ export async function discoverTranscripts({
   const identities = new Set();
   const perHarness = {};
   let cacheDirty = false;
+  const hosts = resolveHostList(config);
 
   emitProgress("discover:start", { harnesses: selected.filter((h) => getAdapter(h)) });
 
@@ -134,10 +143,117 @@ export async function discoverTranscripts({
 
   if (cacheDirty) config.state.writeScanCache(cache);
 
+  const perHost = [];
+  if (hosts.length) {
+    const collected = await collectHosts({ hosts, harnesses: selected.filter((h) => getAdapter(h)), cutoffMs });
+    for (const result of collected) {
+      const entry = hosts.find((h) => h.host === result.host);
+      transcripts.push(...remoteTranscripts(result, entry, { scope, repo, config, strict, identities }));
+      perHost.push(hostSummary(result));
+    }
+  }
+
+  const duplicates = dropCrossHostDuplicates(transcripts);
+  for (const row of perHost) row.duplicates = duplicates.get(row.host) || 0;
+
   scope?.normalizeProjects?.(transcripts);
   transcripts.sort((a, b) => (b.mtimeMs || 0) - (a.mtimeMs || 0));
   emitProgress("discover:done", { total: transcripts.length });
-  return { transcripts, perHarness, cutoffMs };
+  return { transcripts, perHarness, perHost, cutoffMs };
+}
+
+function hostSummary(result) {
+  return {
+    host: result.host,
+    node: result.nodeVersion,
+    platform: result.platform,
+    hostname: result.hostname,
+    harnesses: result.harnesses,
+    scanned: result.scanned,
+    matched: result.matched,
+    self: result.self,
+    skipped: result.skipped,
+    duplicates: 0,
+    warnings: result.warnings,
+    error: result.error,
+  };
+}
+
+/**
+ * Turn one host's descriptors into transcripts, applying the same gates local discovery
+ * applies: association (against the facts the probe computed where the paths are real),
+ * `--strict`, and the user-scope project filter. The probe already dropped backpass's
+ * own sessions on that machine, so none of them ever crossed the wire.
+ */
+function remoteTranscripts(result, entry, { scope, repo, config, strict, identities }) {
+  if (result.error) return [];
+  const associateFn =
+    scope?.associateRemote ||
+    ((descriptor, options) =>
+      associate(descriptor, repo, { ...options, worktreeGlobs: config.discovery.worktreeGlobs }));
+  const userFilter = scope?.kind === "user";
+  const out = [];
+
+  for (const descriptor of result.descriptors) {
+    const adapter = getAdapter(descriptor.harness);
+    if (!adapter) continue;
+    const association = associateFn(
+      { cwd: descriptor.cwd, remotes: descriptor.remotes || [], gitRoot: descriptor.gitRoot },
+      { facts: result.facts, host: result.host, home: result.home || "" },
+    );
+    if (!passesStrict(association, strict)) {
+      result.skipped += 1;
+      continue;
+    }
+    const transcript = toTranscript(adapter, descriptor, association, descriptor.id, {
+      host: result.host,
+      remote: {
+        host: result.host,
+        node: result.node,
+        env: entry?.env || {},
+        connectTimeoutSeconds: entry?.connectTimeoutSeconds,
+        kind: descriptor.kind,
+        key: descriptor.key,
+      },
+    });
+    if (userFilter && !passesProjectFilter(transcript, config)) {
+      result.skipped += 1;
+      continue;
+    }
+    if (identities.has(transcript.identity)) continue;
+    identities.add(transcript.identity);
+    out.push(transcript);
+  }
+  result.matched = out.length;
+  return out;
+}
+
+/**
+ * A store synced or copied between machines shows the same session twice. Keep it once -
+ * the local copy first, then in configured host order, which is the order transcripts
+ * arrive in - and only ever collapse copies that came from *different* machines, so a
+ * store legitimately split across two local roots keeps both records.
+ *
+ * @returns {Map<string, number>} drops attributed to the host whose copy was dropped
+ */
+function dropCrossHostDuplicates(transcripts) {
+  const seen = new Map();
+  const drops = new Map();
+  let write = 0;
+  for (const transcript of transcripts) {
+    const key = `${transcript.harness}\n${transcript.nativeId}`;
+    const previous = seen.get(key);
+    if (previous && previous.host !== (transcript.host || null)) {
+      const host = transcript.host || "local";
+      drops.set(host, (drops.get(host) || 0) + 1);
+      continue;
+    }
+    if (!previous) seen.set(key, { host: transcript.host || null });
+    transcripts[write] = transcript;
+    write += 1;
+  }
+  transcripts.length = write;
+  return drops;
 }
 
 function tierCounts(found) {
@@ -244,7 +360,7 @@ function discoverFiles(
   return out;
 }
 
-function toTranscript(adapter, row, association, id) {
+function toTranscript(adapter, row, association, id, { host = null, remote = null } = {}) {
   const transcript = {
     harness: adapter.name,
     id: `${adapter.name}-${id}`,
@@ -263,16 +379,51 @@ function toTranscript(adapter, row, association, id) {
     interactionSignals: row.interactionSignals ?? row.extra?.interactionSignals ?? emptyInteractionSignals(),
     project: association?.project || null,
     projectRoot: association?.projectRoot || null,
+    /** The ssh destination this session was collected from; null for a local store. */
+    host,
+    /** How to fetch and read it again: host, node, cache kind and key. Null when local. */
+    remote,
   };
   transcript.identity = transcriptIdentity(transcript);
   transcript.interaction = classifyInteraction(transcript);
   return transcript;
 }
 
-/** Read one transcript through its adapter and normalize it to distiller events. */
+/**
+ * Read one transcript through its adapter and normalize it to distiller events.
+ *
+ * A remote session reads from the copy the fetch step cached locally. For a file-backed
+ * store that copy is the transcript file itself, so the adapter runs unchanged and
+ * `rawPath` names a real local file - which is what keeps the analysis prompt's
+ * raw-transcript escape hatch working for a session that ran on another machine. A
+ * SQLite store has no per-session file to copy, so the probe ran `read()` over there and
+ * the cache holds its events, exactly the situation a local SQLite session is already in.
+ */
 export async function readTranscript(transcript) {
   const adapter = getAdapter(transcript.harness);
   if (!adapter) throw new Error(`no adapter for harness ${transcript.harness}`);
+
+  if (transcript.host) {
+    if (transcript.remoteError) throw new Error(transcript.remoteError);
+    const cached = transcript.remote?.cachePath;
+    if (!cached) throw new Error("remote fetch incomplete");
+    if (transcript.remote.kind === "events") {
+      const payload = JSON.parse(fs.readFileSync(cached, "utf8"));
+      return {
+        events: payload.events || [],
+        model: payload.model || transcript.model || null,
+        rawPath: cached,
+      };
+    }
+    const local = { ...transcript, path: cached, extra: { ...transcript.extra, chatPath: cached } };
+    const result = await adapter.read(local);
+    return {
+      events: result.events || [],
+      model: result.model || transcript.model || null,
+      rawPath: cached,
+    };
+  }
+
   const result = await adapter.read(transcript);
   return {
     events: result.events || [],

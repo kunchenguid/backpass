@@ -276,9 +276,38 @@ function harnessDot(theme, harness) {
   return theme.paint("●", HARNESS_HUES[harness] || "blue");
 }
 
+/** One row per configured ssh host, under the harness rows it extends. */
+function hostLines(d, theme) {
+  if (!d.hostOrder?.length) return [];
+  const lines = [""];
+  for (const name of d.hostOrder) {
+    const host = d.hosts[name];
+    const glyph = mark(theme, host.status === "error" ? "error" : host.status === "done" ? "done" : "active", "·");
+    const detail = host.error
+      ? theme.paint(`${host.error} · host skipped, run continues`, "yellow")
+      : theme.paint(
+          [
+            host.node ? `node ${host.node}` : "connecting",
+            ...Object.entries(host.harnesses || {}).map(([harness, stats]) =>
+              stats?.error ? `${harness} unreadable` : `${harness} ${formatCount(stats?.scanned || 0)}`,
+            ),
+            host.fetch ? `${formatCount(host.fetch)} fetched` : null,
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          "dim",
+        );
+    lines.push(` ${glyph} ${theme.paint("ssh", "blue")} ${theme.paint(name, "text")} ${detail}`);
+  }
+  return lines;
+}
+
 function discoverDetail(state, theme, width, spin) {
   const d = state.discover;
-  const lines = [sectionRule(theme, STAGE_LABELS.discover, "local stores only · nothing leaves this machine", width)];
+  const label = d.hostOrder?.length
+    ? `local stores + ${d.hostOrder.length} ssh host(s) · read over ssh you already trust`
+    : "local stores only · nothing leaves this machine";
+  const lines = [sectionRule(theme, STAGE_LABELS.discover, label, width)];
   const countWidth = 15;
   const howWidth = 25;
   const activityWidth = width - 2 - 2 - 11 - countWidth - (state.narrow ? 0 : howWidth) - 4;
@@ -326,6 +355,7 @@ function discoverDetail(state, theme, width, spin) {
     lines.push(row);
   }
 
+  lines.push(...hostLines(d, theme));
   lines.push("");
   lines.push(theme.paint("new = not seen by a previous scan · re-scans only read new or changed files", "faint"));
   return lines;

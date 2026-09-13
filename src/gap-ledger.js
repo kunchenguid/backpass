@@ -65,10 +65,14 @@ export function emptyGapLedger() {
  * `sourceProjects` all key off this string, so it must not collapse two sessions.
  * Time-prefixed Codex ULIDs share an 8-character prefix when they start in the same
  * minute; keep the native id whole.
+ *
+ * A session collected over ssh carries its host, so the apply surface shows what
+ * cross-machine corroboration actually is: two machines hitting one gap, named.
  */
 export function gapSource(transcript = {}) {
   const date = transcript.startedAt ? new Date(transcript.startedAt).toISOString().slice(0, 10) : "unknown date";
-  return `${transcript.harness} · ${sessionSourceId(transcript)} · ${date}`;
+  const host = transcript.host ? ` · ${transcript.host}` : "";
+  return `${transcript.harness} · ${sessionSourceId(transcript)} · ${date}${host}`;
 }
 
 export function sessionSourceId(transcript = {}) {

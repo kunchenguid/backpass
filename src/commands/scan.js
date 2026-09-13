@@ -24,7 +24,7 @@ function ago(ms) {
 }
 
 export async function cmdScan(ctx) {
-  const { transcripts, perHarness, truncated } = await discoverForRun(ctx);
+  const { transcripts, perHarness, perHost = [], truncated } = await discoverForRun(ctx);
   const mix = corpusMix(transcripts);
 
   if (ctx.flags.json) {
@@ -32,6 +32,7 @@ export async function cmdScan(ctx) {
       repo: ctx.repo.name,
       ...(ctx.scope ? { scope: ctx.scope.kind } : {}),
       perHarness,
+      perHost,
       mix,
       transcripts,
     });
@@ -45,15 +46,27 @@ export async function cmdScan(ctx) {
   }
   out("");
 
-  const rows = [["HARNESS", "SCANNED", "MATCHED", "SELF", "CACHED", "NOTE"]];
+  const rows = [["HOST", "HARNESS", "SCANNED", "MATCHED", "SELF", "CACHED", "NOTE"]];
   for (const [harness, stats] of Object.entries(perHarness)) {
     rows.push([
+      "local",
       harness,
       String(stats.scanned),
       String(stats.matched),
       String(stats.self || 0),
       String(stats.cached),
       stats.error ? `unreadable: ${stats.error}` : "",
+    ]);
+  }
+  for (const host of perHost) {
+    rows.push([
+      host.host,
+      host.error ? "-" : Object.keys(host.harnesses || {}).join(",") || "-",
+      String(host.scanned || 0),
+      String(host.matched || 0),
+      String(host.self || 0),
+      "-",
+      hostNote(host),
     ]);
   }
   out(table(rows));
@@ -89,12 +102,13 @@ export async function cmdScan(ctx) {
   const preview = transcripts.slice(0, 25);
   const detail =
     ctx.scope?.kind === "user"
-      ? [["HARNESS", "SESSION", "KIND", "WHEN", "SIZE", "TIER", "PROJECT"]]
-      : [["HARNESS", "SESSION", "KIND", "WHEN", "SIZE", "TIER", "HOW"]];
+      ? [["HOST", "HARNESS", "SESSION", "KIND", "WHEN", "SIZE", "TIER", "PROJECT"]]
+      : [["HOST", "HARNESS", "SESSION", "KIND", "WHEN", "SIZE", "TIER", "HOW"]];
   for (const t of preview) {
     detail.push(
       ctx.scope?.kind === "user"
         ? [
+            t.host || "local",
             t.harness,
             t.nativeId.slice(0, 12),
             t.interaction,
@@ -104,6 +118,7 @@ export async function cmdScan(ctx) {
             String(t.project || t.cwd || "-").slice(0, 48),
           ]
         : [
+            t.host || "local",
             t.harness,
             t.nativeId.slice(0, 12),
             t.interaction,
@@ -119,6 +134,16 @@ export async function cmdScan(ctx) {
     info(color.dim(`  ... and ${transcripts.length - preview.length} more`));
   }
   return 0;
+}
+
+/** One host row's note: the named failure, or what the probe found over there. */
+function hostNote(host) {
+  if (host.error) return `skipped: ${host.error}`;
+  const parts = [];
+  if (host.node) parts.push(`node ${host.node}`);
+  if (host.duplicates) parts.push(`${host.duplicates} already seen locally`);
+  for (const warning of host.warnings || []) parts.push(warning);
+  return parts.join(" · ");
 }
 
 export function table(rows) {

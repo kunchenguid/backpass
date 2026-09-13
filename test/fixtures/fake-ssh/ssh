@@ -1,0 +1,90 @@
+#!/usr/bin/env node
+/**
+ * A stand-in for the `ssh` binary, selected with `BACKPASS_SSH_BIN` (the same hatch
+ * `test/fixtures/fake-lavish/` uses). It makes the whole remote tier testable offline:
+ * the real option set, the real stdin program, the real loader, the real adapters and
+ * the real frame parser all run - only the network is replaced by `sh -c` against a
+ * fixture home.
+ *
+ * `BACKPASS_FAKE_SSH_MAP` names a JSON file of destination -> behaviour:
+ *   {
+ *     "mac-home": {
+ *       "home": "/tmp/...",                     the fixture HOME the command runs against
+ *       "locateOutput": "node|...",             stand in for a machine with an old, or no, Node
+ *       "fail": { "stderr": "...", "code": 255 },
+ *       "hang": true, "hangStderr": "...",      a connection that succeeds and then waits
+ *       "truncateFetch": 40                     cut the fetch stream, the way a dropped link does
+ *     }
+ *   }
+ * An unlisted destination answers the way ssh does for a name that will not resolve.
+ * `BACKPASS_FAKE_SSH_LOG` collects one JSON line per call, including the probe request's
+ * `op`, so a test can prove a second run made no fetch call at all.
+ */
+import fs from "node:fs";
+import { spawnSync } from "node:child_process";
+
+const argv = process.argv.slice(2);
+const command = argv[argv.length - 1];
+const destination = argv[argv.length - 2];
+const input = fs.readFileSync(0);
+
+/** The probe request travels inside the stdin program's base64 payload, never on the command line. */
+function requestOp(program) {
+  const match = program.match(/Buffer\.from\("([A-Za-z0-9+/=]+)", "base64"\)/);
+  if (!match) return null;
+  try {
+    return JSON.parse(Buffer.from(match[1], "base64").toString("utf8")).request?.op ?? null;
+  } catch {
+    return null;
+  }
+}
+
+const op = requestOp(input.toString("utf8"));
+
+const log = process.env.BACKPASS_FAKE_SSH_LOG;
+if (log) {
+  fs.appendFileSync(log, `${JSON.stringify({ destination, op, options: argv.slice(0, -2) })}\n`);
+}
+
+const map = JSON.parse(fs.readFileSync(process.env.BACKPASS_FAKE_SSH_MAP, "utf8"));
+const host = map[destination];
+
+if (!host) {
+  process.stderr.write(`ssh: Could not resolve hostname ${destination}: nodename nor servname provided\n`);
+  process.exit(255);
+}
+if (host.fail) {
+  process.stderr.write(`${host.fail.stderr}\n`);
+  process.exit(host.fail.code ?? 255);
+}
+if (host.hang) {
+  if (host.hangStderr) process.stderr.write(`${host.hangStderr}\n`);
+  setTimeout(() => process.exit(0), 600_000);
+} else {
+  runCommand();
+}
+
+function runCommand() {
+  // The locate call may be answered from the fixture (to stand in for a machine with an
+  // old Node, no Node, or no git) or run for real, which is what keeps the shipped POSIX
+  // snippet honest.
+  if (op === null && host.locateOutput !== undefined) {
+    process.stdout.write(host.locateOutput ? `${host.locateOutput}\n` : "");
+    process.exit(0);
+  }
+
+  const env = { ...process.env, HOME: host.home, USERPROFILE: host.home };
+  for (const key of ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "HERMES_HOME", "XDG_CONFIG_HOME"]) delete env[key];
+  const result = spawnSync("sh", ["-c", command], {
+    env,
+    cwd: host.home,
+    stdio: ["pipe", "pipe", "inherit"],
+    input,
+    maxBuffer: 256 * 1024 * 1024,
+  });
+
+  const out = result.stdout ?? Buffer.alloc(0);
+  const truncate = op === "fetch" && host.truncateFetch != null;
+  fs.writeSync(1, truncate ? out.subarray(0, host.truncateFetch) : out);
+  process.exit(result.status === null ? 255 : result.status);
+}

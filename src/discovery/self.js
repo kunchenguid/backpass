@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { SELF_SESSION_SENTINEL } from "../prompts.js";
+import { SELF_SESSION_SENTINEL } from "../sentinel.js";
 
 /**
  * Self-session exclusion.

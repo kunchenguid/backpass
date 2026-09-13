@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { parseScopeKind, userStateDir } from "./config.js";
-import { associate as associateProject, globToRegExp } from "./discovery/association.js";
+import { associate as associateProject, associateRemote, globToRegExp } from "./discovery/association.js";
 import { UserError, info } from "./logger.js";
 import { gitProjectIdentity, gitToplevel, listWorktrees, normalizeRemote } from "./repo.js";
 
@@ -105,6 +105,57 @@ export function associateUser(descriptor, { strict = false } = {}) {
   };
 }
 
+/**
+ * User-scope association for a session that ran on another machine.
+ *
+ * Same three tiers, judged from facts computed on that host. The project key is what
+ * makes cross-machine corroboration work: when the remote checkout has a git remote,
+ * two machines working on one project agree on one key and `minGapProjects` counts them
+ * as the same project. Without a remote there is nothing to agree on, so the key is
+ * host-qualified rather than a path that could collide with a different project of the
+ * same name here.
+ *
+ * @param {{ cwd?: string, remotes?: string[] }} descriptor
+ * @param {{ facts: Record<string, object>, host: string, strict?: boolean }} options
+ */
+export function associateUserRemote(descriptor, { facts, host, strict = false }) {
+  const cwd = descriptor?.cwd;
+  if (!cwd) return null;
+  const fact = facts?.[cwd] || null;
+
+  if (fact?.toplevel) {
+    const remote = (fact.remotes || []).map(normalizeRemote).find(Boolean);
+    return {
+      tier: 1,
+      confidence: "git",
+      reason: `cwd is in ${fact.toplevel} on ${host}`,
+      project: remote || `${host}:${fact.toplevel}`,
+      projectRoot: null,
+    };
+  }
+
+  const recorded = (descriptor.remotes || []).map(normalizeRemote).find(Boolean);
+  if (recorded) {
+    return {
+      tier: 2,
+      confidence: "remote",
+      reason: `remote ${recorded} (on ${host})`,
+      project: recorded,
+      projectRoot: null,
+    };
+  }
+
+  if (strict) return null;
+
+  return {
+    tier: 3,
+    confidence: "cwd",
+    reason: `cwd ${cwd} on ${host}`,
+    project: `${host}:${fact?.real || cwd}`,
+    projectRoot: null,
+  };
+}
+
 function matchesAnyGlob(values, globs) {
   if (!globs?.length) return false;
   return values.some((value) => globs.some((glob) => globToRegExp(glob).test(value)));
@@ -152,6 +203,19 @@ function resolveProjectScope(repo, config) {
     associate: (descriptor, options = {}) => {
       const result = associateProject(descriptor, repo, {
         worktreeGlobs: options.worktreeGlobs || config.discovery?.worktreeGlobs || [],
+      });
+      if (result) {
+        result.project = repo.root;
+        result.projectRoot = repo.root;
+      }
+      return result;
+    },
+    associateRemote: (descriptor, { facts, host, home }) => {
+      const result = associateRemote(descriptor, repo, {
+        facts,
+        host,
+        home,
+        worktreeGlobs: config.discovery?.worktreeGlobs || [],
       });
       if (result) {
         result.project = repo.root;
@@ -213,6 +277,7 @@ function resolveUserScope(cwd, config, { strict = false, home = os.homedir(), as
     skillDirs,
     overflowDir,
     associate,
+    associateRemote: (descriptor, { facts, host }) => associateUserRemote(descriptor, { facts, host, strict }),
     normalizeProjects,
     cwdNote: gitToplevel(cwd)
       ? "user scope: this checkout is not a write target; edits go to the user-level memory file and skills"

@@ -32,9 +32,13 @@ function isUnder(child, parent) {
   return child.startsWith(parent.endsWith(path.sep) ? parent : parent + path.sep);
 }
 
-/** Glob support is intentionally minimal: `*` (one segment) and `**` (many). */
-export function globToRegExp(glob) {
-  const expanded = glob.startsWith("~/") ? path.join(process.env.HOME || "", glob.slice(2)) : glob;
+/**
+ * Glob support is intentionally minimal: `*` (one segment) and `**` (many).
+ * `home` is the machine the glob describes - the remote host's home for a remote
+ * session, so `~/work/*` means the same thing on both sides of an ssh connection.
+ */
+export function globToRegExp(glob, { home = process.env.HOME || "" } = {}) {
+  const expanded = glob.startsWith("~/") ? path.posix.join(home, glob.slice(2)) : glob;
   let out = "";
   for (let i = 0; i < expanded.length; i += 1) {
     const c = expanded[i];
@@ -55,7 +59,9 @@ export function globToRegExp(glob) {
   return new RegExp(`^${out}/?$`);
 }
 
-export function associate({ cwd, remotes = [], gitRoot = null }, repo, options = {}) {
+export function associate(descriptor, repo, options = {}) {
+  if (options.facts) return associateRemote(descriptor, repo, options);
+  const { cwd, remotes = [], gitRoot = null } = descriptor;
   const globs = options.worktreeGlobs || [];
   const candidates = [cwd, gitRoot].filter(Boolean);
 
@@ -105,6 +111,62 @@ export function associate({ cwd, remotes = [], gitRoot = null }, repo, options =
     for (const glob of globs) {
       if (globToRegExp(glob).test(resolved)) {
         return { tier: 3, confidence: "glob", reason: `dead path matches glob ${glob}` };
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Association for a session that ran on another machine (design section 6.5).
+ *
+ * The tier rules are the local ones, applied to facts computed where the paths are real
+ * (`src/discovery/remote/git-facts.js`): whether the cwd still exists over there, which
+ * checkout it sits in, and that checkout's git remotes. What changes is the ceiling.
+ * Tier 1 means "this clone", and nothing on another host is this clone, so a remote
+ * session is never tier 1 - it reaches tier 1.5 by sharing a remote with this repo,
+ * which is the same bar a sibling clone clears here. That also means a second checkout
+ * over there with no overlapping remote is never associated, matching the sibling rule.
+ *
+ * @param {{ cwd?: string, remotes?: string[], gitRoot?: string | null }} descriptor
+ * @param {object} repo
+ * @param {{ facts?: Record<string, object>, host?: string, home?: string, worktreeGlobs?: string[] }} [options]
+ */
+export function associateRemote({ cwd, remotes = [], gitRoot = null }, repo, options = {}) {
+  const { facts = {}, host = "", home = "", worktreeGlobs: globs = [] } = options;
+  const candidates = [cwd, gitRoot].filter(Boolean);
+  const repoRemotes = new Set(repo.remotes);
+
+  // Tier 1.5 - a live checkout over there that shares a remote with this repo.
+  for (const candidate of candidates) {
+    const fact = facts[candidate];
+    if (!fact?.toplevel) continue;
+    const shared = (fact.remotes || []).map(normalizeRemote).find((r) => r && repoRemotes.has(r));
+    if (shared) {
+      return { tier: 1.5, confidence: "remote-clone", reason: `cwd is in clone ${fact.toplevel} on ${host}` };
+    }
+  }
+
+  // Tier 2 - a remote the transcript itself recorded (codex, grok).
+  for (const remote of remotes) {
+    const norm = normalizeRemote(remote);
+    if (norm && repoRemotes.has(norm)) {
+      return { tier: 2, confidence: "remote", reason: `recorded remote ${norm} (on ${host})` };
+    }
+  }
+
+  // Tier 3 - best-effort, only for paths that no longer exist over there.
+  for (const candidate of candidates) {
+    const fact = facts[candidate];
+    if (fact?.exists) continue;
+    const resolved = fact?.real || candidate;
+    if (path.posix.basename(String(resolved).replace(/\/+$/, "")) === repo.name) {
+      return { tier: 3, confidence: "path", reason: `dead path ending in /${repo.name} on ${host}` };
+    }
+    for (const glob of globs) {
+      if (globToRegExp(glob, { home }).test(resolved)) {
+        return { tier: 3, confidence: "glob", reason: `dead path matches glob ${glob} on ${host}` };
       }
     }
   }

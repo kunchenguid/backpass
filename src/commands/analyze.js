@@ -9,6 +9,7 @@ import { emitProgress } from "../progress.js";
 import { discoverForRun } from "./scan.js";
 import { printUsage } from "./usage.js";
 import { capTranscripts } from "../sample.js";
+import { prefetchRemoteTranscripts } from "../discovery/hosts.js";
 
 /**
  * The memory file a run optimizes: the first configured file that exists (AGENTS.md by
@@ -97,6 +98,7 @@ export async function runAnalysis(ctx) {
     modelCwd: scope?.modelCwd || repo.root,
     memoryHash: hash,
     force: Boolean(ctx.flags.force),
+    prefetch: (pending) => prefetchRemoteTranscripts(pending, { config }),
   });
 
   return { file, hash, skills, transcripts, perHarness, summary };

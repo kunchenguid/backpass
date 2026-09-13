@@ -1,0 +1,183 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+import { distill } from "../src/distill.js";
+import { prefetchRemoteTranscripts } from "../src/discovery/hosts.js";
+import { readTranscript } from "../src/discovery/index.js";
+import {
+  discoverProject,
+  initRepo,
+  sshCalls,
+  tmpdir,
+  withRemoteEnv,
+  writeClaudeSession,
+  writeHermesStore,
+} from "./helpers/remote.js";
+
+const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "bin", "backpass.js");
+
+/** One host carrying a claude session and a hermes session, both in a clone of this repo. */
+function scenario({ variant = {}, harnesses = ["claude"] } = {}) {
+  const localHome = tmpdir("fetch-local");
+  const remoteHome = tmpdir("fetch-home");
+  const repoRoot = initRepo(path.join(localHome, "demo"), "https://github.com/acme/demo.git");
+  const remoteClone = initRepo(path.join(remoteHome, "code", "demo"), "git@github.com:acme/demo.git");
+  writeClaudeSession(remoteHome, { cwd: remoteClone });
+  if (harnesses.includes("hermes")) writeHermesStore(remoteHome, { cwd: remoteClone });
+  return {
+    localHome,
+    remoteHome,
+    repoRoot,
+    remoteClone,
+    harnesses,
+    log: path.join(localHome, "ssh-calls.log"),
+    /** @type {Record<string, Record<string, any>>} */
+    hosts: { "mac-home": { home: remoteHome, ...variant } },
+  };
+}
+
+function fetchCalls(log) {
+  return sshCalls(log).filter((call) => call.op === "fetch");
+}
+
+async function collectAndFetch(s, overrides = {}) {
+  return withRemoteEnv({ localHome: s.localHome, hosts: s.hosts, log: s.log }, async () => {
+    const result = await discoverProject(s.repoRoot, {
+      discovery: { hosts: ["mac-home"], harnesses: s.harnesses },
+      ...overrides,
+    });
+    const stats = await prefetchRemoteTranscripts(result.transcripts, { config: result.config });
+    return { ...result, stats };
+  });
+}
+
+test("a file-backed remote session is cached as its own file, so the trace footer still names a real transcript", async () => {
+  const s = scenario();
+  const { transcripts, stats, config } = await collectAndFetch(s);
+
+  assert.equal(transcripts.length, 1);
+  assert.equal(stats.fetched, 1);
+  const [transcript] = transcripts;
+  assert.equal(transcript.remote.kind, "raw");
+
+  const cached = transcript.remote.cachePath;
+  assert.ok(cached.startsWith(path.join(config.state.root, "hosts")), `cache escaped its directory: ${cached}`);
+  assert.equal(
+    fs.readFileSync(cached, "utf8"),
+    fs.readFileSync(
+      path.join(
+        s.remoteHome,
+        ".claude",
+        "projects",
+        `-${s.remoteClone.replaceAll("/", "-")}`,
+        `${transcript.nativeId}.jsonl`,
+      ),
+      "utf8",
+    ),
+    "the raw file must arrive byte for byte, since the analysis agent may open it",
+  );
+  assert.equal((fs.statSync(path.join(config.state.root, "hosts")).mode & 0o777).toString(8), "700");
+
+  const raw = await readTranscript(transcript);
+  assert.equal(raw.rawPath, cached);
+  assert.deepEqual(
+    raw.events.filter((event) => event.kind === "message").map((event) => event.text),
+    ["Open a PR for the parser fix.", "I'll run the tests first.", "Opened PR #2731."],
+  );
+  const { trace } = distill(raw.events, { ...transcript, rawPath: raw.rawPath });
+  assert.match(trace, new RegExp(`raw transcript: ${cached.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+});
+
+test("a SQLite-backed remote session arrives as events, since there is no per-session file to copy", async () => {
+  const s = scenario({ harnesses: ["claude", "hermes"] });
+  const { transcripts, stats } = await collectAndFetch(s);
+
+  const hermes = transcripts.find((transcript) => transcript.harness === "hermes");
+  assert.ok(hermes, `expected a hermes session, got ${transcripts.map((t) => t.harness).join(", ")}`);
+  assert.equal(hermes.remote.kind, "events");
+  assert.equal(stats.fetched, 2);
+
+  const raw = await readTranscript(hermes);
+  assert.equal(raw.model, "claude-sonnet-5");
+  assert.deepEqual(
+    raw.events.filter((event) => event.kind === "message").map((event) => event.text),
+    ["Ship the remote collection tier.", "Fetched the transcript over ssh."],
+  );
+});
+
+test("a second run reuses the cached copy and makes no fetch call at all", async () => {
+  const s = scenario();
+  const first = await collectAndFetch(s);
+  assert.equal(first.stats.fetched, 1);
+  assert.equal(fetchCalls(s.log).length, 1);
+
+  const second = await collectAndFetch(s);
+  assert.equal(second.stats.fetched, 0);
+  assert.equal(second.stats.reused, 1);
+  assert.equal(fetchCalls(s.log).length, 1, "an unchanged remote session must not cross the wire twice");
+  assert.ok(fs.existsSync(second.transcripts[0].remote.cachePath));
+});
+
+test("a torn fetch stream fails that transcript by name and leaves the next run free to refetch", async () => {
+  const s = scenario({ variant: { truncateFetch: 40 } });
+  const torn = await collectAndFetch(s);
+
+  assert.equal(torn.stats.failed, 1);
+  assert.equal(torn.stats.fetched, 0);
+  const [transcript] = torn.transcripts;
+  assert.equal(transcript.remoteError, "remote fetch incomplete");
+  await assert.rejects(() => readTranscript(transcript), /remote fetch incomplete/);
+
+  // Nothing was cached, so the next run fetches again rather than reading a prefix.
+  s.hosts["mac-home"].truncateFetch = undefined;
+  const retried = await collectAndFetch(s);
+  assert.equal(retried.stats.fetched, 1);
+  assert.equal(retried.transcripts[0].remoteError, undefined);
+});
+
+test("scan --json carries the host on each transcript and one perHost row", async () => {
+  const s = scenario();
+  const output = await withRemoteEnv({ localHome: s.localHome, hosts: s.hosts, log: s.log }, () =>
+    execFileSync(
+      process.execPath,
+      [CLI, "scan", "--json", "--since", "all", "--harness", "claude", "--host", "mac-home"],
+      {
+        cwd: s.repoRoot,
+        encoding: "utf8",
+        env: process.env,
+      },
+    ),
+  );
+  const parsed = JSON.parse(output);
+
+  assert.equal(parsed.transcripts.length, 1);
+  assert.equal(parsed.transcripts[0].host, "mac-home");
+  assert.equal(parsed.perHost.length, 1);
+  assert.equal(parsed.perHost[0].host, "mac-home");
+  assert.equal(parsed.perHost[0].error, null);
+  assert.equal(parsed.perHost[0].matched, 1);
+  assert.match(parsed.perHost[0].node, /^v\d+\./);
+});
+
+test("--host none collects locally only, and never spawns ssh", async () => {
+  const s = scenario();
+  writeClaudeSession(s.localHome, { cwd: s.repoRoot, id: "aaaaaaaa-1111-2222-3333-444444444444" });
+
+  const output = await withRemoteEnv({ localHome: s.localHome, hosts: s.hosts, log: s.log }, () =>
+    execFileSync(
+      process.execPath,
+      [CLI, "scan", "--json", "--since", "all", "--harness", "claude", "--host", "mac-home", "--host", "none"],
+      { cwd: s.repoRoot, encoding: "utf8", env: process.env },
+    ),
+  );
+  const parsed = JSON.parse(output);
+
+  assert.deepEqual(parsed.perHost, []);
+  assert.equal(parsed.transcripts.length, 1);
+  assert.equal(parsed.transcripts[0].host, null);
+  assert.deepEqual(sshCalls(s.log), []);
+});

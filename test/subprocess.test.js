@@ -39,7 +39,10 @@ setInterval(() => {}, 1000);
 
     let harnessPid;
     try {
-      const result = await runCapture(process.execPath, [acpxPath], { timeoutMs: 250 });
+      // The timeout has to outlast a cold Node start twice over (the stub, then the
+      // grandchild it spawns), or a loaded machine fires the timer before the harness
+      // exists and the test fails on the fixture's startup rather than on the behavior.
+      const result = await runCapture(process.execPath, [acpxPath], { timeoutMs: 2000 });
       assert.equal(result.timedOut, true);
       assert.ok(fs.existsSync(pidPath));
       assert.equal(fs.readFileSync(signalPath, "utf8"), "SIGTERM");

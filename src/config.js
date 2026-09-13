@@ -84,6 +84,14 @@ export const DEFAULT_CONFIG = {
      * checkout or a parent of checkouts. Discovery only reads git identity there.
      */
     cloneRoots: [],
+    /**
+     * SSH destinations whose harness stores this run also collects from
+     * (`src/discovery/hosts.js`). Personal configuration only: a repository file that
+     * sets it is refused by name, so a checked-in config can never point a
+     * contributor's backpass at a machine. Entries are an ssh destination string, or
+     * `{ host, node, env, harnesses, connectTimeoutSeconds }`.
+     */
+    hosts: [],
     minUserTurns: 2,
     includeCursorIde: false,
   },
@@ -305,7 +313,26 @@ function validate(config, { kind = "project" } = {}) {
   if (!Array.isArray(config.discovery.cloneRoots) || config.discovery.cloneRoots.some((p) => typeof p !== "string")) {
     throw new UserError("config.discovery.cloneRoots must be an array of paths");
   }
+  if (config.discovery.hosts !== undefined && !Array.isArray(config.discovery.hosts)) {
+    throw new UserError("config.discovery.hosts must be an array of ssh destinations");
+  }
   return config;
+}
+
+/**
+ * A repository may not name a machine.
+ *
+ * `.backpassrc.json` is checked in and shared, so a `discovery.hosts` there would let one
+ * contributor point every other contributor's backpass at a host - which is exactly the
+ * "someone else's transcripts" the vision resists. Hosts are personal configuration and
+ * live in the person's own global file, or on the command line for one run.
+ */
+function refuseRepoHosts(repoFile, file) {
+  if (!repoFile?.discovery || repoFile.discovery.hosts === undefined) return;
+  throw new UserError(
+    `${file} sets discovery.hosts, but ssh hosts are personal configuration`,
+    `move them to ${userConfigPath()}, or pass --host <destination> for one run`,
+  );
 }
 
 /**
@@ -315,6 +342,10 @@ function validate(config, { kind = "project" } = {}) {
  *   <repo>/.backpassrc.json < CLI flags.
  * User: defaults < user-scope defaults < ~/.config/backpass/config.json `user` block <
  *   CLI flags. `.backpassrc.json` is never read.
+ *
+ * `discovery.hosts` is the one setting a repository file may not carry at all
+ * (`refuseRepoHosts`). In user scope it defaults to the global file's top-level list, so
+ * a person names their machines once rather than once per scope.
  */
 export function loadConfig(repoRoot, overrides = {}, { kind = "project" } = {}) {
   const scopeKind = parseScopeKind(kind);
@@ -327,15 +358,19 @@ export function loadConfig(repoRoot, overrides = {}, { kind = "project" } = {}) 
       (acc, layer) => (layer ? deepMerge(acc, layer) : acc),
       {},
     );
+    if (userBlock.discovery?.hosts === undefined && overrides.discovery?.hosts === undefined) {
+      merged.discovery.hosts = globalFile?.discovery?.hosts ?? DEFAULT_CONFIG.discovery.hosts;
+    }
   } else {
     const globalFile = readJsonIfPresent(userConfigPath());
     const projectGlobal = globalFile ? { ...globalFile } : null;
     if (projectGlobal) delete projectGlobal.user;
-    merged = [
-      projectGlobal,
-      repoRoot ? readJsonIfPresent(path.join(repoRoot, CONFIG_FILENAME)) : null,
-      overrides,
-    ].reduce((acc, layer) => (layer ? deepMerge(acc, layer) : acc), DEFAULT_CONFIG);
+    const repoFile = repoRoot ? readJsonIfPresent(path.join(repoRoot, CONFIG_FILENAME)) : null;
+    refuseRepoHosts(repoFile, repoRoot ? path.join(repoRoot, CONFIG_FILENAME) : CONFIG_FILENAME);
+    merged = [projectGlobal, repoFile, overrides].reduce(
+      (acc, layer) => (layer ? deepMerge(acc, layer) : acc),
+      DEFAULT_CONFIG,
+    );
   }
 
   const config = structuredClone(merged);
@@ -344,6 +379,26 @@ export function loadConfig(repoRoot, overrides = {}, { kind = "project" } = {}) 
     config.discovery.harnesses = [...config.discovery.harnesses, "cursor-ide"];
   }
   return validate(config, { kind: scopeKind });
+}
+
+/**
+ * `--host` adds a destination to this run's list; `--host none` collects locally only.
+ * It adds rather than replaces because the flag is for "also look over there today",
+ * and the one case that needs replacing - skip everything configured - has its own word.
+ */
+export function applyHostFlag(configured, flagValues) {
+  if (!flagValues?.length) return configured;
+  const named = flagValues
+    .flatMap((value) => String(value).split(","))
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (named.some((value) => value.toLowerCase() === "none")) return [];
+  const out = [...(configured || [])];
+  for (const host of named) {
+    const already = out.some((entry) => (typeof entry === "string" ? entry : entry?.host) === host);
+    if (!already) out.push(host);
+  }
+  return out;
 }
 
 export function repoConfigPath(repoRoot) {

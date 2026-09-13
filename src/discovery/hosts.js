@@ -1,0 +1,467 @@
+import { UserError, warn } from "../logger.js";
+import { emitProgress } from "../progress.js";
+import { HostCache } from "./cache.js";
+import { buildProbeProgram, createFrameReader, PROTOCOL, REMOTE_ENV_ALLOWLIST } from "./remote/bundle.js";
+import { assertSafeSshValue, classifySshFailure, DEFAULT_CONNECT_TIMEOUT_SECONDS, runSsh } from "./remote/ssh.js";
+
+/**
+ * Per-host orchestration for the ssh collection tier (design section 6.3).
+ *
+ * Three calls per host, multiplexed over one connection: find a Node and a git, run the
+ * probe's `discover`, and later run its `fetch` for the sampled sessions that still need
+ * content. Every host is fail-soft in exactly the way a harness whose store is
+ * unreadable already is - the run continues on local sessions and the host becomes one
+ * named row - because a laptop that is asleep must not be able to fail a run.
+ *
+ * Hosts are personal configuration. A repository can never point a contributor's
+ * backpass at a machine (`src/config.js` refuses `discovery.hosts` in `.backpassrc.json`),
+ * which is what keeps this feature on the right side of the vision's "never someone
+ * else's transcripts" line.
+ */
+
+/** Node gained `node:sqlite` in 22.5; below it the file-backed harnesses still work. */
+export const MIN_SQLITE_NODE = [22, 5, 0];
+
+const LOCATE_TIMEOUT_MS = 60_000;
+const DISCOVER_TIMEOUT_MS = 300_000;
+const FETCH_TIMEOUT_MS = 900_000;
+
+const SUPPORTED_PLATFORMS = new Set(["darwin", "linux"]);
+
+/**
+ * Where a Node might be on a machine whose login profile never ran. A non-interactive
+ * ssh session gets a bare PATH, so `node` alone misses every version manager - and a
+ * first-match glob picks whichever nvm version sorts first, which on a real host was
+ * v16. Every candidate that answers is reported with its version and the newest one
+ * wins.
+ *
+ * The snippet carries no single quote, backslash, or `!`, so it survives being wrapped
+ * in `sh -c '...'` - which is itself deliberate, so a fish or csh login shell cannot
+ * misparse it.
+ */
+export const LOCATE_SNIPPET =
+  "for n in node /opt/homebrew/bin/node /usr/local/bin/node /usr/bin/node /run/current-system/sw/bin/node " +
+  "$HOME/.nvm/versions/node/*/bin/node $HOME/.volta/bin/node $HOME/.local/share/fnm/aliases/default/bin/node; " +
+  'do p=$(command -v "$n" 2>/dev/null) || continue; v=$("$p" -p process.version 2>/dev/null) || continue; ' +
+  'echo "node|$p|$v"; done; echo "git|$(command -v git 2>/dev/null)"; ' +
+  'echo "uname|$(uname -s 2>/dev/null)"; echo "home|$HOME"';
+
+export const LOCATE_COMMAND = `sh -c '${LOCATE_SNIPPET}'`;
+
+/** The only thing variable about a probe call: which Node runs it. Everything else travels on stdin. */
+export function probeCommand(nodePath) {
+  assertSafeSshValue("remote node path", nodePath);
+  return `'${nodePath}' -`;
+}
+
+/**
+ * @param {string | object} entry
+ * @returns {{ host: string, node: string | null, env: Record<string, string>,
+ *   harnesses: string[] | null, connectTimeoutSeconds: number }}
+ */
+export function normalizeHostEntry(entry) {
+  const raw = typeof entry === "string" ? { host: entry } : entry;
+  if (!raw || typeof raw !== "object" || typeof raw.host !== "string") {
+    throw new UserError(
+      `each discovery.hosts entry must be an ssh destination string or an object with a "host" field ` +
+        `(got ${JSON.stringify(entry)})`,
+    );
+  }
+  /** @type {Record<string, string>} */
+  const env = {};
+  for (const [key, value] of Object.entries(raw.env || {})) {
+    if (!REMOTE_ENV_ALLOWLIST.includes(key)) {
+      throw new UserError(
+        `discovery.hosts[].env may only set store locations (${REMOTE_ENV_ALLOWLIST.join(", ")}); got "${key}"`,
+      );
+    }
+    if (typeof value !== "string") throw new UserError(`discovery.hosts[].env.${key} must be a string`);
+    env[key] = value;
+  }
+  if (raw.node !== undefined && raw.node !== null && typeof raw.node !== "string") {
+    throw new UserError("discovery.hosts[].node must be an absolute path string");
+  }
+  if (raw.harnesses !== undefined && raw.harnesses !== null) {
+    if (!Array.isArray(raw.harnesses) || raw.harnesses.some((h) => typeof h !== "string")) {
+      throw new UserError("discovery.hosts[].harnesses must be an array of harness names");
+    }
+  }
+  const connectTimeoutSeconds = raw.connectTimeoutSeconds ?? DEFAULT_CONNECT_TIMEOUT_SECONDS;
+  if (!Number.isFinite(connectTimeoutSeconds) || connectTimeoutSeconds <= 0) {
+    throw new UserError("discovery.hosts[].connectTimeoutSeconds must be a positive number");
+  }
+  return {
+    host: raw.host,
+    node: raw.node || null,
+    env,
+    harnesses: raw.harnesses ? [...raw.harnesses] : null,
+    connectTimeoutSeconds,
+  };
+}
+
+/**
+ * The hosts this run collects from: the configured list, plus any `--host`, or none at
+ * all when the person passed `--host none`.
+ */
+export function resolveHostList(config) {
+  const entries = config.discovery?.hosts;
+  if (!entries) return [];
+  if (!Array.isArray(entries)) throw new UserError("config.discovery.hosts must be an array");
+  const seen = new Set();
+  const out = [];
+  for (const entry of entries) {
+    const normalized = normalizeHostEntry(entry);
+    if (seen.has(normalized.host)) continue;
+    seen.add(normalized.host);
+    assertSafeSshValue("ssh destination", normalized.host);
+    if (normalized.node) assertSafeSshValue("remote node path", normalized.node);
+    out.push(normalized);
+  }
+  return out;
+}
+
+function parseNodeVersion(text) {
+  const match = String(text || "").match(/^v?(\d+)\.(\d+)\.(\d+)/);
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+}
+
+function compareVersions(a, b) {
+  for (let i = 0; i < 3; i += 1) {
+    if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) - (b[i] || 0);
+  }
+  return 0;
+}
+
+/** @returns {{ nodes: {path: string, version: string, parsed: number[]}[], git: string|null, uname: string|null, home: string|null }} */
+export function parseLocateOutput(stdout) {
+  const nodes = [];
+  let git = null;
+  let uname = null;
+  let home = null;
+  for (const line of String(stdout || "").split("\n")) {
+    const [kind, ...rest] = line.trim().split("|");
+    if (kind === "node") {
+      const [nodePath, version] = rest;
+      const parsed = parseNodeVersion(version);
+      if (nodePath && parsed) nodes.push({ path: nodePath, version, parsed });
+    } else if (kind === "git" && rest[0]) {
+      git = rest[0];
+    } else if (kind === "uname" && rest[0]) {
+      uname = rest[0];
+    } else if (kind === "home" && rest[0]) {
+      home = rest[0];
+    }
+  }
+  const unique = [];
+  for (const node of nodes) {
+    if (!unique.some((other) => other.path === node.path)) unique.push(node);
+  }
+  unique.sort((a, b) => compareVersions(b.parsed, a.parsed));
+  return { nodes: unique, git, uname, home };
+}
+
+/** Newest Node at or above 22.5 if there is one, else the newest there is. */
+export function chooseNode(nodes) {
+  return nodes.find((node) => compareVersions(node.parsed, MIN_SQLITE_NODE) >= 0) || nodes[0] || null;
+}
+
+export function platformFromUname(uname) {
+  const value = String(uname || "").toLowerCase();
+  if (value === "darwin") return "darwin";
+  if (value === "linux") return "linux";
+  return value || null;
+}
+
+function emptyHostResult(entry) {
+  return {
+    host: entry.host,
+    node: entry.node,
+    nodeVersion: null,
+    platform: null,
+    hostname: null,
+    home: null,
+    git: null,
+    descriptors: [],
+    facts: {},
+    harnesses: {},
+    warnings: [],
+    error: null,
+    scanned: 0,
+    matched: 0,
+    self: 0,
+    skipped: 0,
+    duplicates: 0,
+  };
+}
+
+async function locate(entry) {
+  // One call answers all three questions - platform, git, and every Node on the box -
+  // so a configured `node` skips the choosing, not the call.
+  const result = await runSsh({
+    destination: entry.host,
+    command: LOCATE_COMMAND,
+    timeoutMs: LOCATE_TIMEOUT_MS,
+    connectTimeoutSeconds: entry.connectTimeoutSeconds,
+  });
+  const failure = classifySshFailure(result, {
+    destination: entry.host,
+    connectTimeoutSeconds: entry.connectTimeoutSeconds,
+    timeoutMs: LOCATE_TIMEOUT_MS,
+  });
+  if (failure) return { failure };
+  const parsed = parseLocateOutput(result.stdout);
+  const node = entry.node ? { path: entry.node, version: null, parsed: null } : chooseNode(parsed.nodes);
+  return { parsed, node };
+}
+
+/**
+ * Discover on every configured host, fail-soft per host.
+ *
+ * @param {{ hosts: object[], harnesses: string[], cutoffMs: number | null }} options
+ * @returns {Promise<object[]>} one result per host, in configured order
+ */
+export async function collectHosts({ hosts, harnesses, cutoffMs }) {
+  const results = [];
+  for (const entry of hosts) {
+    const result = emptyHostResult(entry);
+    results.push(result);
+    emitProgress("discover:host:start", { host: entry.host });
+
+    try {
+      await collectOneHost(entry, { harnesses, cutoffMs }, result);
+    } catch (err) {
+      if (err instanceof UserError) throw err;
+      result.error = err.message;
+    }
+
+    if (result.error) warn(`${entry.host}: ${result.error} - host skipped, run continues`);
+    for (const note of result.warnings) warn(`${entry.host}: ${note}`);
+    emitProgress("discover:host:done", {
+      host: entry.host,
+      node: result.nodeVersion,
+      error: result.error,
+      harnesses: result.harnesses,
+      scanned: result.scanned,
+    });
+  }
+  return results;
+}
+
+async function collectOneHost(entry, { harnesses, cutoffMs }, result) {
+  const located = await locate(entry);
+  if (located.failure) {
+    result.error = located.failure.message;
+    return;
+  }
+
+  const platform = platformFromUname(located.parsed.uname);
+  if (!platform || !SUPPORTED_PLATFORMS.has(platform)) {
+    result.error = located.parsed.uname
+      ? `Windows and other non-POSIX remotes are not supported (uname said "${located.parsed.uname}")`
+      : "could not identify the remote platform (uname produced nothing)";
+    return;
+  }
+  result.platform = platform;
+  result.home = located.parsed.home;
+  result.git = located.parsed.git;
+
+  const node = located.node;
+  if (!node) {
+    result.error = `${entry.host} has no Node; install Node >= 22.5 or set discovery.hosts[].node`;
+    return;
+  }
+  result.node = node.path;
+  result.nodeVersion = node.version;
+
+  let selected = entry.harnesses ? harnesses.filter((h) => entry.harnesses.includes(h)) : [...harnesses];
+  if (node.parsed && compareVersions(node.parsed, MIN_SQLITE_NODE) < 0) {
+    const dropped = selected.filter((h) => SQLITE_HARNESSES.has(h));
+    if (dropped.length) {
+      selected = selected.filter((h) => !SQLITE_HARNESSES.has(h));
+      result.warnings.push(`${dropped.join(", ")} skipped: node ${node.version} lacks node:sqlite`);
+    }
+  }
+  if (!located.parsed.git) {
+    result.warnings.push("live-path association unavailable (no git on the non-interactive PATH); tiers 2 and 3 only");
+  }
+
+  let command;
+  try {
+    command = probeCommand(node.path);
+  } catch (err) {
+    // A path the remote itself reported is this host's problem, not the run's.
+    result.error = err.message;
+    return;
+  }
+
+  const program = buildProbeProgram(
+    { protocol: PROTOCOL, op: "discover", harnesses: selected, cutoffMs },
+    {
+      env: entry.env,
+    },
+  );
+  const call = await runSsh({
+    destination: entry.host,
+    command,
+    input: program,
+    timeoutMs: DISCOVER_TIMEOUT_MS,
+    connectTimeoutSeconds: entry.connectTimeoutSeconds,
+  });
+  const failure = classifySshFailure(call, {
+    destination: entry.host,
+    connectTimeoutSeconds: entry.connectTimeoutSeconds,
+    timeoutMs: DISCOVER_TIMEOUT_MS,
+  });
+  if (failure) {
+    result.error = failure.reason === "exit" ? `probe failed: ${failure.message}` : failure.message;
+    return;
+  }
+
+  let response;
+  try {
+    response = JSON.parse(call.stdout.trim().split("\n").pop() || "");
+  } catch {
+    result.error = "probe response unreadable";
+    return;
+  }
+  if (response?.protocol !== PROTOCOL) {
+    result.error = `probe spoke protocol ${response?.protocol}, this backpass speaks ${PROTOCOL}`;
+    return;
+  }
+
+  result.hostname = response.hostname || null;
+  result.home = response.home || result.home;
+  result.harnesses = response.harnesses || {};
+  result.descriptors = response.transcripts || [];
+  result.facts = response.paths || {};
+  result.scanned = Object.values(result.harnesses).reduce((n, s) => n + (s?.scanned || 0), 0);
+  result.self = Object.values(result.harnesses).reduce((n, s) => n + (s?.self || 0), 0);
+  for (const note of response.warnings || []) result.warnings.push(note);
+}
+
+const SQLITE_HARNESSES = new Set(["opencode", "hermes", "cursor", "cursor-ide"]);
+
+/**
+ * Bring the content of the sampled remote sessions local, before the analysis pool.
+ *
+ * Only what is about to be analyzed moves: transcripts with fresh evidence never reach
+ * here, and a cached copy whose descriptor still matches is reused without an ssh call.
+ * A frame that arrives short marks that one transcript failed with a named reason and
+ * leaves the rest of the run alone - never a truncated session analyzed as a whole one.
+ *
+ * @param {object[]} transcripts the pending set
+ * @param {{ config: object }} options
+ */
+export async function prefetchRemoteTranscripts(transcripts, { config }) {
+  const cache = new HostCache(config.state.root);
+  const index = cache.readIndex();
+  const stats = { fetched: 0, reused: 0, failed: 0, bytes: 0 };
+  const remote = transcripts.filter((t) => t.remote?.host);
+
+  const byHost = new Map();
+  for (const transcript of remote) {
+    if (!byHost.has(transcript.remote.host)) byHost.set(transcript.remote.host, []);
+    byHost.get(transcript.remote.host).push(transcript);
+  }
+
+  for (const [host, group] of byHost) {
+    const pending = [];
+    for (const transcript of group) {
+      const hit = cache.lookup(index, {
+        host,
+        harness: transcript.harness,
+        key: transcript.remote.key,
+        mtimeMs: transcript.mtimeMs,
+        bytes: transcript.bytes,
+      });
+      if (hit) {
+        transcript.remote.cachePath = hit.path;
+        cache.touch(index, hit.name);
+        stats.reused += 1;
+      } else {
+        pending.push(transcript);
+      }
+    }
+    if (pending.length) await fetchHost(host, pending, { cache, index, stats });
+  }
+
+  if (byHost.size || Object.keys(index.entries).length) {
+    cache.prune(index);
+    cache.writeIndex(index);
+  }
+  return stats;
+}
+
+async function fetchHost(host, pending, { cache, index, stats }) {
+  const first = pending[0].remote;
+  const items = pending.map((transcript) => ({
+    harness: transcript.harness,
+    key: transcript.remote.key,
+    kind: transcript.remote.kind,
+    path: transcript.path,
+    extra: transcript.extra || {},
+    mtimeMs: transcript.mtimeMs,
+  }));
+  emitProgress("discover:host:fetch", { host, items: items.length });
+
+  const reader = createFrameReader();
+  const received = new Map();
+  let call;
+  try {
+    call = await runSsh({
+      destination: host,
+      command: probeCommand(first.node),
+      input: buildProbeProgram({ protocol: PROTOCOL, op: "fetch", items }, { env: first.env || {} }),
+      timeoutMs: FETCH_TIMEOUT_MS,
+      connectTimeoutSeconds: first.connectTimeoutSeconds,
+      binaryStdout: true,
+    });
+  } catch (err) {
+    if (err instanceof UserError) throw err;
+    call = { code: null, stdout: "", stdoutBuffer: Buffer.alloc(0), stderr: err.message };
+  }
+
+  let parseError = null;
+  try {
+    for (const frame of reader.push(call.stdoutBuffer || Buffer.alloc(0))) received.set(frame.header.key, frame);
+  } catch (err) {
+    parseError = err.message;
+  }
+
+  const failure = classifySshFailure(call, { destination: host, timeoutMs: FETCH_TIMEOUT_MS });
+  for (const transcript of pending) {
+    const frame = received.get(transcript.remote.key);
+    if (!frame || frame.header.kind === "error") {
+      transcript.remoteError = frame?.header?.error || parseError || failure?.message || "remote fetch incomplete";
+      stats.failed += 1;
+      continue;
+    }
+    // A session that grew (or shrank) between discover and fetch is accepted, but the
+    // descriptor has to catch up first: `evidenceKey` is the content signature, so
+    // analyzing the new bytes under the old one would cache the judgment against a
+    // session that no longer exists.
+    if (frame.header.kind === "raw") {
+      if (Number.isFinite(frame.header.mtimeMs)) transcript.mtimeMs = frame.header.mtimeMs;
+      transcript.bytes = frame.body.length;
+    }
+    const written = cache.write(
+      index,
+      {
+        host,
+        harness: transcript.harness,
+        key: transcript.remote.key,
+        kind: frame.header.kind,
+        mtimeMs: transcript.mtimeMs,
+        bytes: transcript.bytes,
+        model: frame.header.model || null,
+      },
+      frame.body,
+    );
+    transcript.remote.cachePath = written.path;
+    stats.fetched += 1;
+    stats.bytes += written.bytes;
+  }
+  if (!reader.ended && !failure && !parseError && received.size < pending.length) {
+    warn(`${host}: the fetch stream ended early; the missing transcripts are retried next run`);
+  }
+}

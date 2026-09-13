@@ -11,6 +11,7 @@ import {
   skillDescriptionTokens,
 } from "../skills.js";
 import { crossSurfaceDuplicates } from "../overlap.js";
+import { HostCache } from "../discovery/cache.js";
 import { budgetBar, budgetStatus, formatTokens } from "../tokens.js";
 import { table } from "./scan.js";
 import { candidateKey, isProbeEntryFresh, resolvedEffort } from "../agents.js";
@@ -26,6 +27,7 @@ export async function cmdStatus(ctx) {
   for (const e of evidence) counts[e.status] = (counts[e.status] || 0) + 1;
 
   const cache = state.readScanCache();
+  const hostCache = new HostCache(state.root).stats();
   const summary = state.readSummary();
   const proposal = state.readProposal();
   const rejections = state.readRejections();
@@ -63,6 +65,7 @@ export async function cmdStatus(ctx) {
       crossSurfaceDuplicates: duplicates,
       evidence: counts,
       scanCacheEntries: Object.keys(cache.entries).length,
+      hosts: hostCache,
       summary: summary ? { analyzedSessions: summary.analyzedSessions, totals: summary.totals } : null,
       proposal: proposal ? { generatedAt: proposal.generatedAt, edits: proposal.edits.length } : null,
       rejections: Object.keys(rejections.entries).length,
@@ -133,6 +136,15 @@ export async function cmdStatus(ctx) {
   out(`  rejections      ${Object.keys(rejections.entries).length} remembered`);
   out("");
 
+  const hostRows = Object.entries(hostCache);
+  if (hostRows.length) {
+    out(color.dim("HOSTS (fetched transcripts, pruned after 30 days unused)"));
+    for (const [host, row] of hostRows) {
+      out(`  ${host.padEnd(14)}  ${row.entries} transcript(s) · ${formatBytes(row.bytes)}`);
+    }
+    out("");
+  }
+
   if (counts.failed) {
     out(color.dim("FAILED TRANSCRIPTS (retried on the next run)"));
     const rows = [["HARNESS", "SESSION", "ERROR"]];
@@ -183,6 +195,12 @@ function describeRole(config, role) {
     typeof config[role].effort === "string" && config[role].effort.trim() ? config[role].effort.trim() : null;
   const count = `auto - ${config.agents.ladder(role).length} candidates, none probed yet`;
   return color.dim(configured ? `${count} (effort ${configured})` : count);
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function formatEffort(effort) {
