@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import { loadConfig } from "../../src/config.js";
 import { discoverTranscripts } from "../../src/discovery/index.js";
+import { closeSshMasters } from "../../src/discovery/remote/ssh.js";
 import { resolveScope } from "../../src/scope.js";
 import { State } from "../../src/state.js";
 import { resolveRepo } from "../../src/repo.js";
@@ -79,7 +80,10 @@ export function writeHermesStore(home, { cwd, id = "cli-remote-1" }) {
  * adapters find nothing of the developer's own, an isolated XDG config so no personal
  * `discovery.hosts` leaks in, and the fake ssh wired up.
  */
+const testMasters = [];
+
 export async function withRemoteEnv({ localHome, hosts, log = null }, fn) {
+  const firstMaster = testMasters.length;
   const mapFile = path.join(localHome, "fake-ssh-map.json");
   fs.writeFileSync(mapFile, JSON.stringify(hosts, null, 2));
   const overrides = {
@@ -102,6 +106,7 @@ export async function withRemoteEnv({ localHome, hosts, log = null }, fn) {
     }
     return await fn();
   } finally {
+    await closeSshMasters(testMasters.splice(firstMaster));
     for (const key of Object.keys(overrides)) {
       if (previous[key] === undefined) delete process.env[key];
       else process.env[key] = previous[key];
@@ -124,6 +129,7 @@ export function projectRun(repoRoot, overrides = {}) {
 export async function discoverProject(repoRoot, overrides = {}) {
   const { repo, config, scope } = projectRun(repoRoot, overrides);
   const result = await discoverTranscripts({ repo, scope, config, strict: Boolean(overrides.strict) });
+  testMasters.push(...result.remoteMasters);
   return { ...result, repo, config, scope };
 }
 

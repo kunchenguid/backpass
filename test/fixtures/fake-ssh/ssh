@@ -74,7 +74,7 @@ if (host.fail) {
   process.exit(host.fail.code ?? 255);
 }
 if (op === "master:start") {
-  fs.writeFileSync(socket, JSON.stringify({ startedAt: Date.now(), persist: option("ControlPersist") }));
+  fs.writeFileSync(socket, JSON.stringify({ startedAt: Date.now(), persist: option("ControlPersist"), pid: process.pid }));
   const wait = setInterval(() => {
     if (!fs.existsSync(socket)) {
       clearInterval(wait);
@@ -88,7 +88,13 @@ if (op === "master:start") {
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
 } else if (op === "master:check") {
-  process.exit(fs.existsSync(socket) ? 0 : 255);
+  try {
+    const master = JSON.parse(fs.readFileSync(socket, "utf8"));
+    process.kill(master.pid, 0);
+    process.exit(0);
+  } catch {
+    process.exit(255);
+  }
 } else if (op === "master:stop") {
   fs.rmSync(socket, { force: true });
   if (host.masterStopFail) {

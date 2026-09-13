@@ -29,7 +29,8 @@ export const DEFAULT_CONNECT_TIMEOUT_SECONDS = 10;
 export const DEFAULT_CALL_TIMEOUT_MS = 120_000;
 
 export function createControlPath() {
-  return path.join(os.tmpdir(), `bp-${process.pid}-${randomBytes(6).toString("hex")}-%C`);
+  const root = process.platform === "win32" ? os.tmpdir() : "/tmp";
+  return path.join(root, `bp-${process.pid}-${randomBytes(6).toString("hex")}-%C`);
 }
 
 const fallbackControlPath = createControlPath();
@@ -42,13 +43,8 @@ function masterIdentity(master) {
 function killMaster(master) {
   if (!master.child || master.child.exitCode !== null || master.child.signalCode !== null) return;
   try {
-    if (process.platform === "win32") master.child.kill("SIGTERM");
-    else process.kill(-master.child.pid, "SIGTERM");
-  } catch {
-    try {
-      master.child.kill("SIGTERM");
-    } catch {}
-  }
+    master.child.kill("SIGTERM");
+  } catch {}
 }
 
 function cleanupMastersSync() {
@@ -196,23 +192,17 @@ export async function startSshMaster({
   let child;
   try {
     child = spawn(launch.file, launch.args, {
-      stdio: ["ignore", "ignore", "pipe"],
+      stdio: "ignore",
       windowsHide: true,
       windowsVerbatimArguments: launch.verbatim,
-      detached: process.platform !== "win32",
     });
   } catch (spawnError) {
     return { code: null, stdout: "", stderr: spawnError.message, spawnError };
   }
 
-  child.unref();
-  child.stderr.unref();
-  const master = { destination, connectTimeoutSeconds, controlPath, child, stderr: "", closed: false };
+  const master = { destination, connectTimeoutSeconds, controlPath, child, closed: false };
   const identity = masterIdentity(master);
   activeMasters.set(identity, master);
-  child.stderr.on("data", (chunk) => {
-    master.stderr = `${master.stderr}${chunk}`.slice(-4096);
-  });
   child.once("close", () => activeMasters.delete(identity));
   child.once("error", (error) => {
     master.spawnError = error;
@@ -225,7 +215,7 @@ export async function startSshMaster({
       return {
         code: child.exitCode,
         stdout: "",
-        stderr: master.stderr || check?.stderr || master.spawnError?.message || "",
+        stderr: check?.stderr || master.spawnError?.message || "",
         spawnError: master.spawnError,
       };
     }
@@ -238,7 +228,7 @@ export async function startSshMaster({
   }
 
   killMaster(master);
-  return { code: null, stdout: "", stderr: master.stderr || check?.stderr || "", timedOut: true };
+  return { code: null, stdout: "", stderr: check?.stderr || "", timedOut: true };
 }
 
 export async function closeSshMaster(master) {

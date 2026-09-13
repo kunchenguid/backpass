@@ -132,13 +132,14 @@ test("the explicit master survives idle time and cleanup failure stays fail-soft
   assert.equal(fs.existsSync(socket), false);
 });
 
-test("interrupting a run terminates its tracked master and removes its socket", async () => {
+test("a hard-killed run process group leaves no live master", async () => {
   const s = scenario({ variant: { enforceMaster: true } });
 
   await withRemoteEnv({ localHome: s.localHome, hosts: s.hosts, log: s.log }, async () => {
     const child = spawn(process.execPath, [INTERRUPT_RUNNER], {
       env: process.env,
       stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
     });
     const line = await new Promise((resolve, reject) => {
       let stdout = "";
@@ -155,10 +156,10 @@ test("interrupting a run terminates its tracked master and removes its socket", 
     const socket = master.controlPath.replace("%C", Buffer.from("mac-home").toString("hex"));
     assert.equal(fs.existsSync(socket), true);
 
-    child.kill("SIGTERM");
+    process.kill(-child.pid, "SIGKILL");
     await new Promise((resolve) => child.once("exit", resolve));
     let masterAlive = true;
-    for (let attempt = 0; attempt < 50 && (fs.existsSync(socket) || masterAlive); attempt += 1) {
+    for (let attempt = 0; attempt < 50 && masterAlive; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 10));
       try {
         process.kill(master.pid, 0);
@@ -166,8 +167,8 @@ test("interrupting a run terminates its tracked master and removes its socket", 
         masterAlive = false;
       }
     }
-    assert.equal(fs.existsSync(socket), false);
     assert.equal(masterAlive, false);
+    fs.rmSync(socket, { force: true });
   });
 });
 
@@ -192,6 +193,37 @@ test("overlapping runs use private masters and cannot close each other's connect
   });
 
   assert.equal(sshCalls(s.log).filter((call) => call.op === "master:stop").length, 2);
+});
+
+test("control sockets stay short and separate hosts within one run", async () => {
+  const s = scenario({ variant: { enforceMaster: true } });
+  s.hosts["mac-away"] = { ...s.hosts["mac-home"] };
+
+  await withRemoteEnv({ localHome: s.localHome, hosts: s.hosts, log: s.log }, async () => {
+    const previousTmpdir = process.env.TMPDIR;
+    const longTmpdir = path.join(s.localHome, ...Array.from({ length: 8 }, () => "long-segment"), "T");
+    fs.mkdirSync(longTmpdir, { recursive: true });
+    process.env.TMPDIR = longTmpdir;
+    try {
+      const result = await discoverProject(s.repoRoot, {
+        discovery: { hosts: ["mac-home", "mac-away"], harnesses: s.harnesses },
+      });
+      assert.deepEqual(
+        result.perHost.map((host) => host.error),
+        [null, null],
+      );
+    } finally {
+      if (previousTmpdir === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = previousTmpdir;
+    }
+  });
+
+  const starts = sshCalls(s.log).filter((call) => call.op === "master:start");
+  const templates = starts.map((call) => call.options.find((option) => option.startsWith("ControlPath=")).slice(12));
+  assert.equal(new Set(templates).size, 1);
+  assert.ok(templates[0].replace("%C", "a".repeat(40)).length < 104);
+  const sockets = starts.map((call) => templates[0].replace("%C", Buffer.from(call.destination).toString("hex")));
+  assert.equal(new Set(sockets).size, 2);
 });
 
 test("a SQLite-backed remote session arrives as events, since there is no per-session file to copy", async () => {
