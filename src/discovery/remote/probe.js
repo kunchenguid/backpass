@@ -95,14 +95,19 @@ async function descriptorFrom(adapter, row, id) {
 async function discoverHarness(adapter, { cutoffMs }) {
   const stats = { scanned: 0, classified: 0, self: 0, error: null };
   const out = [];
+  const warnings = [];
 
   if (adapter.discover) {
     for (const row of await adapter.discover({ cutoffMs })) {
       stats.scanned += 1;
       stats.classified += 1;
-      out.push(await descriptorFrom(adapter, row, row.id));
+      try {
+        out.push(await descriptorFrom(adapter, row, row.id));
+      } catch (err) {
+        warnings.push(`${adapter.name} session ${row.id || row.key || row.path} skipped: ${err.message}`);
+      }
     }
-    return { stats, descriptors: out };
+    return { stats, descriptors: out, warnings };
   }
 
   for (const candidate of adapter.enumerate({ cutoffMs })) {
@@ -112,7 +117,15 @@ async function discoverHarness(adapter, { cutoffMs }) {
     if (!classified) continue;
     stats.classified += 1;
     const merged = { ...candidate, ...classified };
-    const descriptor = await descriptorFrom(adapter, merged, classified.id);
+    let descriptor;
+    try {
+      descriptor = await descriptorFrom(adapter, merged, classified.id);
+    } catch (err) {
+      warnings.push(
+        `${adapter.name} session ${classified.id || candidate.key || candidate.path} skipped: ${err.message}`,
+      );
+      continue;
+    }
     descriptor.rawPath = rawPathOf(adapter, merged);
     // backpass's own acpx sessions are filed under the repo cwd on whichever machine ran
     // them; drop a remote one here so it never crosses the wire, let alone the corpus.
@@ -122,7 +135,7 @@ async function discoverHarness(adapter, { cutoffMs }) {
     }
     out.push(descriptor);
   }
-  return { stats, descriptors: out };
+  return { stats, descriptors: out, warnings };
 }
 
 /** @param {{ harnesses?: string[], cutoffMs?: number | null }} request */
@@ -147,6 +160,7 @@ export async function discover({ harnesses = [], cutoffMs = null } = {}) {
       const result = await discoverHarness(adapter, { cutoffMs });
       harnessStats[harness] = result.stats;
       descriptors.push(...result.descriptors);
+      warnings.push(...result.warnings);
     } catch (err) {
       // Fail-soft per store, exactly as locally: an unreadable store is one named row,
       // never a failed host.

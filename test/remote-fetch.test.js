@@ -225,6 +225,38 @@ test("an unrelated Hermes session update preserves another session's cached even
   assert.equal(second.stats.fetched, 1);
 });
 
+test("one unreadable Cursor session does not drop readable sessions", async () => {
+  const s = scenario({ harnesses: ["cursor"] });
+  const root = path.join(s.remoteHome, ".cursor", "chats", cwdHash(s.remoteClone));
+  const good = path.join(root, "cursor-good");
+  const bad = path.join(root, "cursor-bad");
+  for (const dir of [good, bad]) {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "meta.json"),
+      JSON.stringify({ cwd: s.remoteClone, title: path.basename(dir), createdAtMs: 1_800_000_000_000 }),
+    );
+  }
+  const db = new DatabaseSync(path.join(good, "store.db"));
+  db.exec("CREATE TABLE blobs (id TEXT PRIMARY KEY, data BLOB)");
+  db.prepare("INSERT INTO blobs (id, data) VALUES (?, ?)").run(
+    "one",
+    Buffer.from(JSON.stringify({ role: "user", content: "Readable session" })),
+  );
+  db.close();
+  fs.writeFileSync(path.join(bad, "store.db"), "not a sqlite database");
+
+  const result = await withRemoteEnv({ localHome: s.localHome, hosts: s.hosts, log: s.log }, () =>
+    discoverProject(s.repoRoot, { discovery: { hosts: ["mac-home"], harnesses: ["cursor"] } }),
+  );
+  assert.deepEqual(
+    result.transcripts.map((transcript) => transcript.nativeId),
+    ["cursor-good"],
+  );
+  assert.ok(result.perHost[0].warnings.some((warning) => /cursor session cursor-bad skipped:/.test(warning)));
+  assert.equal(result.perHost[0].error, null);
+});
+
 test("Cursor database growth invalidates cached events even when meta.json is unchanged", async () => {
   const s = scenario({ harnesses: ["cursor"] });
   const sessionDir = path.join(s.remoteHome, ".cursor", "chats", cwdHash(s.remoteClone), "cursor-remote-1");
