@@ -40,14 +40,21 @@ function requestOp(program) {
   }
 }
 
-const controlOperation = argv.includes("-M") ? "master:start" : argv[argv.indexOf("-O") + 1] === "exit" ? "master:stop" : null;
+const requestedControlOperation = argv[argv.indexOf("-O") + 1];
+const controlOperation = argv.includes("-M")
+  ? "master:start"
+  : requestedControlOperation === "exit"
+    ? "master:stop"
+    : requestedControlOperation === "check"
+      ? "master:check"
+      : null;
 const op = controlOperation || requestOp(input.toString("utf8"));
 const options = argv.slice(0, separator);
 const option = (name) => options.find((value) => value.startsWith(`${name}=`))?.slice(name.length + 1);
 const socket = option("ControlPath")?.replace("%C", Buffer.from(destination).toString("hex"));
 
 const log = process.env.BACKPASS_FAKE_SSH_LOG;
-if (log) {
+if (log && op !== "master:check") {
   fs.appendFileSync(log, `${JSON.stringify({ destination, op, options })}\n`);
 }
 
@@ -62,10 +69,27 @@ if (op === "master:start" && host.masterFail) {
   process.stderr.write(`${host.masterFail.stderr}\n`);
   process.exit(host.masterFail.code ?? 255);
 }
-if (op === "master:start" && host.enforceMaster) {
-  fs.writeFileSync(socket, JSON.stringify({ startedAt: Date.now(), persist: option("ControlPersist") }));
+if (host.fail) {
+  process.stderr.write(`${host.fail.stderr}\n`);
+  process.exit(host.fail.code ?? 255);
 }
-if (op === "master:stop" && host.enforceMaster) {
+if (op === "master:start") {
+  fs.writeFileSync(socket, JSON.stringify({ startedAt: Date.now(), persist: option("ControlPersist") }));
+  const wait = setInterval(() => {
+    if (!fs.existsSync(socket)) {
+      clearInterval(wait);
+      process.exit(0);
+    }
+  }, 10);
+  const stop = () => {
+    fs.rmSync(socket, { force: true });
+    process.exit(0);
+  };
+  process.on("SIGINT", stop);
+  process.on("SIGTERM", stop);
+} else if (op === "master:check") {
+  process.exit(fs.existsSync(socket) ? 0 : 255);
+} else if (op === "master:stop") {
   fs.rmSync(socket, { force: true });
   if (host.masterStopFail) {
     process.stderr.write(`${host.masterStopFail.stderr}\n`);
@@ -73,30 +97,27 @@ if (op === "master:stop" && host.enforceMaster) {
   }
   process.exit(0);
 }
-if (!controlOperation && host.enforceMaster) {
-  let master;
-  try {
-    master = JSON.parse(fs.readFileSync(socket, "utf8"));
-  } catch {
-    process.stderr.write("control master unavailable\n");
-    process.exit(255);
+if (op !== "master:start") {
+  if (!controlOperation && host.enforceMaster) {
+    let master;
+    try {
+      master = JSON.parse(fs.readFileSync(socket, "utf8"));
+    } catch {
+      process.stderr.write("control master unavailable\n");
+      process.exit(255);
+    }
+    if (master.persist !== "yes" && Date.now() - master.startedAt > Number(master.persist)) {
+      fs.rmSync(socket, { force: true });
+      process.stderr.write("control master expired\n");
+      process.exit(255);
+    }
   }
-  if (master.persist !== "yes" && Date.now() - master.startedAt > Number(master.persist)) {
-    fs.rmSync(socket, { force: true });
-    process.stderr.write("control master expired\n");
-    process.exit(255);
+  if (host.hang) {
+    if (host.hangStderr) process.stderr.write(`${host.hangStderr}\n`);
+    setTimeout(() => process.exit(0), 600_000);
+  } else {
+    runCommand();
   }
-}
-if (host.fail) {
-  process.stderr.write(`${host.fail.stderr}\n`);
-  process.exit(host.fail.code ?? 255);
-}
-if (op === "master:start" || op === "master:stop") process.exit(0);
-if (host.hang) {
-  if (host.hangStderr) process.stderr.write(`${host.hangStderr}\n`);
-  setTimeout(() => process.exit(0), 600_000);
-} else {
-  runCommand();
 }
 
 function fetchFrameSpans(output) {

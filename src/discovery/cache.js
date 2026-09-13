@@ -19,6 +19,7 @@ import path from "node:path";
  */
 
 export const PRUNE_MAX_AGE_MS = 30 * 86_400_000;
+export const ORPHAN_SAFETY_MS = 60_000;
 const INDEX_VERSION = 1;
 const ENTRY_NAME = /^[a-f0-9]{64}$/;
 
@@ -68,7 +69,7 @@ export class HostCache {
 
   writeIndex(index) {
     this.ensure();
-    const tmp = `${this.indexPath}.tmp`;
+    const tmp = `${this.indexPath}.${process.pid}-${crypto.randomBytes(6).toString("hex")}.tmp`;
     fs.writeFileSync(tmp, `${JSON.stringify(index, null, 2)}\n`, { mode: 0o600 });
     fs.renameSync(tmp, this.indexPath);
   }
@@ -108,7 +109,7 @@ export class HostCache {
     this.ensure();
     const name = entryName(host, harness, key);
     const file = path.join(this.root, name);
-    const tmp = `${file}.tmp`;
+    const tmp = `${file}.${process.pid}-${crypto.randomBytes(6).toString("hex")}.tmp`;
     fs.writeFileSync(tmp, body, { mode: 0o600 });
     return { name, path: file, tmp, bytes: body.length };
   }
@@ -174,15 +175,15 @@ export class HostCache {
     }
     for (const file of files) {
       if (!file.isFile() || file.name === path.basename(this.indexPath)) continue;
-      const orphan = ENTRY_NAME.test(file.name) && !claimed.has(file.name);
-      let staleTemporary = false;
-      if (file.name.endsWith(".tmp")) {
-        try {
-          staleTemporary = now - fs.statSync(path.join(this.root, file.name)).mtimeMs >= maxAgeMs;
-        } catch {
-          continue;
-        }
+      let ageMs = null;
+      try {
+        ageMs = now - fs.statSync(path.join(this.root, file.name)).mtimeMs;
+      } catch {
+        continue;
       }
+      const orphan = ENTRY_NAME.test(file.name) && !claimed.has(file.name) && ageMs >= ORPHAN_SAFETY_MS;
+      let staleTemporary = false;
+      if (file.name.endsWith(".tmp")) staleTemporary = ageMs >= maxAgeMs;
       if (!orphan && !staleTemporary) continue;
       try {
         fs.rmSync(path.join(this.root, file.name), { force: true });

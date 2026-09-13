@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 
@@ -22,7 +22,9 @@ import {
   writeHermesStore,
 } from "./helpers/remote.js";
 
-const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "bin", "backpass.js");
+const TEST_ROOT = path.dirname(fileURLToPath(import.meta.url));
+const CLI = path.join(TEST_ROOT, "..", "bin", "backpass.js");
+const INTERRUPT_RUNNER = path.join(TEST_ROOT, "fixtures", "ssh-interrupt-runner.js");
 
 /** One host carrying a claude session and a hermes session, both in a clone of this repo. */
 function scenario({ variant = {}, harnesses = ["claude"], remoteCloneName = "demo" } = {}) {
@@ -128,6 +130,45 @@ test("the explicit master survives idle time and cleanup failure stays fail-soft
   const configuredPath = calls[0].options.find((option) => option.startsWith("ControlPath=")).slice(12);
   const socket = configuredPath.replace("%C", Buffer.from("mac-home").toString("hex"));
   assert.equal(fs.existsSync(socket), false);
+});
+
+test("interrupting a run terminates its tracked master and removes its socket", async () => {
+  const s = scenario({ variant: { enforceMaster: true } });
+
+  await withRemoteEnv({ localHome: s.localHome, hosts: s.hosts, log: s.log }, async () => {
+    const child = spawn(process.execPath, [INTERRUPT_RUNNER], {
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const line = await new Promise((resolve, reject) => {
+      let stdout = "";
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk;
+        if (stdout.includes("\n")) resolve(stdout.split("\n")[0]);
+      });
+      child.once("error", reject);
+      child.once("exit", (code) => {
+        if (!stdout.includes("\n")) reject(new Error(`interrupt runner exited ${code}`));
+      });
+    });
+    const master = JSON.parse(line);
+    const socket = master.controlPath.replace("%C", Buffer.from("mac-home").toString("hex"));
+    assert.equal(fs.existsSync(socket), true);
+
+    child.kill("SIGTERM");
+    await new Promise((resolve) => child.once("exit", resolve));
+    let masterAlive = true;
+    for (let attempt = 0; attempt < 50 && (fs.existsSync(socket) || masterAlive); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      try {
+        process.kill(master.pid, 0);
+      } catch {
+        masterAlive = false;
+      }
+    }
+    assert.equal(fs.existsSync(socket), false);
+    assert.equal(masterAlive, false);
+  });
 });
 
 test("overlapping runs use private masters and cannot close each other's connection", async () => {

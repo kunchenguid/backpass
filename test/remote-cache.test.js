@@ -5,7 +5,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { HostCache, PRUNE_MAX_AGE_MS, pruneHostCache } from "../src/discovery/cache.js";
+import { HostCache, ORPHAN_SAFETY_MS, PRUNE_MAX_AGE_MS, pruneHostCache } from "../src/discovery/cache.js";
 import { initRepo, tmpdir } from "./helpers/remote.js";
 
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "bin", "backpass.js");
@@ -70,6 +70,26 @@ test("a direct propose run prunes unused host cache entries", () => {
   assert.deepEqual(cache.readIndex().entries, {});
 });
 
+test("concurrent cache work keeps fresh sibling payloads and uses private staging files", () => {
+  const stateDir = tmpdir("host-cache-concurrent");
+  const first = new HostCache(stateDir);
+  const second = new HostCache(stateDir);
+  const stagedFirst = first.stage("mac-home", "claude", "same-session", Buffer.from("first"));
+  const stagedSecond = second.stage("mac-home", "claude", "same-session", Buffer.from("second"));
+  assert.notEqual(stagedFirst.tmp, stagedSecond.tmp);
+  assert.equal(fs.readFileSync(stagedFirst.tmp, "utf8"), "first");
+  assert.equal(fs.readFileSync(stagedSecond.tmp, "utf8"), "second");
+
+  const sibling = path.join(first.root, "a".repeat(64));
+  fs.writeFileSync(sibling, "sibling run");
+  const index = first.readIndex();
+  assert.equal(first.prune(index), 0);
+  assert.equal(fs.readFileSync(sibling, "utf8"), "sibling run");
+
+  first.discard(stagedFirst);
+  second.discard(stagedSecond);
+});
+
 test("cache pruning removes stale entries, orphan payloads, and abandoned temporary files", () => {
   const stateDir = tmpdir("host-cache");
   const cache = new HostCache(stateDir);
@@ -94,6 +114,11 @@ test("cache pruning removes stale entries, orphan payloads, and abandoned tempor
   fs.writeFileSync(freshTemporary, "active");
   fs.writeFileSync(staleTemporary, "abandoned");
   const old = new Date(Date.now() - PRUNE_MAX_AGE_MS - 1_000);
+  fs.utimesSync(
+    orphan,
+    new Date(Date.now() - ORPHAN_SAFETY_MS - 1_000),
+    new Date(Date.now() - ORPHAN_SAFETY_MS - 1_000),
+  );
   fs.utimesSync(staleTemporary, old, old);
 
   assert.equal(pruneHostCache(stateDir), 3);

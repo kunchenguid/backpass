@@ -1,10 +1,10 @@
+import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
 
 import { UserError } from "../../logger.js";
-import { runCapture } from "../../subprocess.js";
+import { runCapture, windowsShimLaunch } from "../../subprocess.js";
 
 /**
  * The one ssh spawn boundary (design section 6.3), the way `src/acpx.js` is the one
@@ -39,16 +39,20 @@ function masterIdentity(master) {
   return JSON.stringify([master.destination, master.controlPath]);
 }
 
-function cleanupMastersSync() {
-  for (const master of activeMasters.values()) {
+function killMaster(master) {
+  if (!master.child || master.child.exitCode !== null || master.child.signalCode !== null) return;
+  try {
+    if (process.platform === "win32") master.child.kill("SIGTERM");
+    else process.kill(-master.child.pid, "SIGTERM");
+  } catch {
     try {
-      spawnSync(sshBin(), masterExitArgs(master.destination, master.connectTimeoutSeconds, master.controlPath), {
-        stdio: "ignore",
-        timeout: DEFAULT_CALL_TIMEOUT_MS,
-      });
+      master.child.kill("SIGTERM");
     } catch {}
   }
-  activeMasters.clear();
+}
+
+function cleanupMastersSync() {
+  for (const master of activeMasters.values()) killMaster(master);
 }
 
 for (const [signal, exitCode] of [
@@ -125,7 +129,11 @@ export function sshArgs({
 }
 
 function masterArgs(destination, connectTimeoutSeconds, controlPath) {
-  return [...baseArgs(connectTimeoutSeconds, controlPath, "yes"), "-M", "-N", "-f", "-T", "--", destination];
+  return [...baseArgs(connectTimeoutSeconds, controlPath, "yes"), "-M", "-N", "-T", "--", destination];
+}
+
+function masterCheckArgs(destination, connectTimeoutSeconds, controlPath) {
+  return [...baseArgs(connectTimeoutSeconds, controlPath), "-O", "check", "-T", "--", destination];
 }
 
 function masterExitArgs(destination, connectTimeoutSeconds, controlPath) {
@@ -179,29 +187,75 @@ export async function startSshMaster({
   controlPath,
 }) {
   assertSafeSshValue("ssh destination", destination);
-  const result = await runCapture(sshBin(), masterArgs(destination, connectTimeoutSeconds, controlPath), { timeoutMs });
-  raiseWindowsShimRefusal(result, destination);
-  if (result.code === 0) {
-    activeMasters.set(masterIdentity({ destination, controlPath }), {
-      destination,
-      connectTimeoutSeconds,
-      controlPath,
-    });
+  const launch = windowsShimLaunch(sshBin(), masterArgs(destination, connectTimeoutSeconds, controlPath));
+  if (launch.error) {
+    const result = { code: null, stdout: "", stderr: launch.error.message, spawnError: launch.error };
+    raiseWindowsShimRefusal(result, destination);
   }
-  return result;
+
+  let child;
+  try {
+    child = spawn(launch.file, launch.args, {
+      stdio: ["ignore", "ignore", "pipe"],
+      windowsHide: true,
+      windowsVerbatimArguments: launch.verbatim,
+      detached: process.platform !== "win32",
+    });
+  } catch (spawnError) {
+    return { code: null, stdout: "", stderr: spawnError.message, spawnError };
+  }
+
+  child.unref();
+  child.stderr.unref();
+  const master = { destination, connectTimeoutSeconds, controlPath, child, stderr: "", closed: false };
+  const identity = masterIdentity(master);
+  activeMasters.set(identity, master);
+  child.stderr.on("data", (chunk) => {
+    master.stderr = `${master.stderr}${chunk}`.slice(-4096);
+  });
+  child.once("close", () => activeMasters.delete(identity));
+  child.once("error", (error) => {
+    master.spawnError = error;
+  });
+
+  const deadline = Date.now() + timeoutMs;
+  let check = null;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null || child.signalCode !== null || master.spawnError) {
+      return {
+        code: child.exitCode,
+        stdout: "",
+        stderr: master.stderr || check?.stderr || master.spawnError?.message || "",
+        spawnError: master.spawnError,
+      };
+    }
+    check = await runCapture(sshBin(), masterCheckArgs(destination, connectTimeoutSeconds, controlPath), {
+      timeoutMs: Math.min(1_000, Math.max(1, deadline - Date.now())),
+    });
+    raiseWindowsShimRefusal(check, destination);
+    if (check.code === 0) return { code: 0, stdout: check.stdout, stderr: check.stderr, master };
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+
+  killMaster(master);
+  return { code: null, stdout: "", stderr: master.stderr || check?.stderr || "", timedOut: true };
 }
 
 export async function closeSshMaster(master) {
-  if (!master || master.closed) return;
+  if (!master || master.closed) return master?.closing;
   master.closed = true;
-  try {
-    await runCapture(sshBin(), masterExitArgs(master.destination, master.connectTimeoutSeconds, master.controlPath), {
-      timeoutMs: DEFAULT_CALL_TIMEOUT_MS,
-    });
-  } catch {
-  } finally {
-    activeMasters.delete(masterIdentity(master));
-  }
+  master.closing = (async () => {
+    try {
+      await runCapture(sshBin(), masterExitArgs(master.destination, master.connectTimeoutSeconds, master.controlPath), {
+        timeoutMs: DEFAULT_CALL_TIMEOUT_MS,
+      });
+    } catch {}
+    if (master.child.exitCode === null && master.child.signalCode === null) killMaster(master);
+    if (master.child.exitCode === null && master.child.signalCode === null) {
+      await new Promise((resolve) => master.child.once("close", resolve));
+    }
+  })();
+  return master.closing;
 }
 
 export async function closeSshMasters(masters = []) {

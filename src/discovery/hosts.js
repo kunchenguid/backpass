@@ -242,12 +242,7 @@ export async function collectHosts({ hosts, harnesses, cutoffMs, controlPath }) 
       if (masterFailure) {
         result.error = `failed to start ssh control master: ${masterFailure.message}`;
       } else {
-        result.master = {
-          destination: entry.host,
-          connectTimeoutSeconds: entry.connectTimeoutSeconds,
-          controlPath,
-          closed: false,
-        };
+        result.master = masterCall.master;
         await collectOneHost(entry, { harnesses, cutoffMs }, result);
       }
     } catch (err) {
