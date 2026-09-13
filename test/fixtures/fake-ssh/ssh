@@ -24,8 +24,9 @@ import fs from "node:fs";
 import { spawnSync } from "node:child_process";
 
 const argv = process.argv.slice(2);
-const command = argv[argv.length - 1];
-const destination = argv[argv.length - 2];
+const separator = argv.indexOf("--");
+const destination = argv[separator + 1];
+const command = argv[separator + 2] || "";
 const input = fs.readFileSync(0);
 
 /** The probe request travels inside the stdin program's base64 payload, never on the command line. */
@@ -39,11 +40,12 @@ function requestOp(program) {
   }
 }
 
-const op = requestOp(input.toString("utf8"));
+const controlOperation = argv.includes("-M") ? "master:start" : argv[argv.indexOf("-O") + 1] === "exit" ? "master:stop" : null;
+const op = controlOperation || requestOp(input.toString("utf8"));
 
 const log = process.env.BACKPASS_FAKE_SSH_LOG;
 if (log) {
-  fs.appendFileSync(log, `${JSON.stringify({ destination, op, options: argv.slice(0, -2) })}\n`);
+  fs.appendFileSync(log, `${JSON.stringify({ destination, op, options: argv.slice(0, separator) })}\n`);
 }
 
 const map = JSON.parse(fs.readFileSync(process.env.BACKPASS_FAKE_SSH_MAP, "utf8"));
@@ -53,10 +55,15 @@ if (!host) {
   process.stderr.write(`ssh: Could not resolve hostname ${destination}: nodename nor servname provided\n`);
   process.exit(255);
 }
+if (op === "master:start" && host.masterFail) {
+  process.stderr.write(`${host.masterFail.stderr}\n`);
+  process.exit(host.masterFail.code ?? 255);
+}
 if (host.fail) {
   process.stderr.write(`${host.fail.stderr}\n`);
   process.exit(host.fail.code ?? 255);
 }
+if (op === "master:start" || op === "master:stop") process.exit(0);
 if (host.hang) {
   if (host.hangStderr) process.stderr.write(`${host.hangStderr}\n`);
   setTimeout(() => process.exit(0), 600_000);

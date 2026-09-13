@@ -89,10 +89,10 @@ test("a remote session in a clone that shares this repo's remote is tier 1.5, na
   assert.equal(transcript.association.tier, 1.5);
   assert.match(transcript.association.reason, /on mac-home$/);
   assert.match(transcript.association.reason, new RegExp(s.remoteClone.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  // Two multiplexed calls: locate, then discover. Nothing is fetched until analysis.
   assert.deepEqual(
     sshCalls(s.log).map((call) => [call.destination, call.op]),
     [
+      ["mac-home", "master:start"],
       ["mac-home", null],
       ["mac-home", "discover"],
     ],
@@ -139,6 +139,37 @@ test("a remote session whose first user message is backpass's own is counted as 
   assert.equal(result.transcripts.length, 0);
   assert.equal(result.perHost[0].self, 1);
   assert.equal(result.perHost[0].error, null);
+});
+
+test("a control-master failure skips one host while another still collects", async () => {
+  const localHome = tmpdir("remote-master-failure-local");
+  const goodHome = tmpdir("remote-master-failure-good");
+  const repoRoot = initRepo(path.join(localHome, "demo"), `https://${REMOTE}.git`);
+  const goodClone = initRepo(path.join(goodHome, "demo"), `git@github.com:acme/demo.git`);
+  writeClaudeSession(goodHome, { cwd: goodClone });
+  const log = path.join(localHome, "ssh.log");
+  const hosts = {
+    broken: { home: goodHome, masterFail: { stderr: "control socket unavailable", code: 255 } },
+    working: { home: goodHome },
+  };
+
+  const result = await withRemoteEnv({ localHome, hosts, log }, () =>
+    discoverProject(repoRoot, { discovery: { hosts: ["broken", "working"], harnesses: ["claude"] } }),
+  );
+
+  assert.equal(result.transcripts.length, 1);
+  assert.equal(result.transcripts[0].host, "working");
+  assert.match(result.perHost[0].error, /failed to start ssh control master: ssh broken exited 255/);
+  assert.equal(result.perHost[1].error, null);
+  assert.deepEqual(
+    sshCalls(log).map((call) => [call.destination, call.op]),
+    [
+      ["broken", "master:start"],
+      ["working", "master:start"],
+      ["working", null],
+      ["working", "discover"],
+    ],
+  );
 });
 
 test("an authentication failure skips the host with the command to make succeed, and keeps local results", async () => {

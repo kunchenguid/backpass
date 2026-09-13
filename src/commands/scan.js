@@ -3,12 +3,14 @@ import { pruneHostCache } from "../discovery/cache.js";
 import { corpusMix, formatCorpusMix } from "../interaction.js";
 import { color, info, json, out } from "../logger.js";
 import { attachSiblingClones } from "../repo.js";
+import { closeSshMasters } from "../discovery/remote/ssh.js";
 
 /** Shared by every command that needs the transcript set. */
 export async function discoverForRun(ctx) {
   const { repo, scope, config, strict } = ctx;
   if (scope?.kind !== "user") attachSiblingClones(repo, config.discovery.cloneRoots);
   const result = await discoverTranscripts({ repo, scope, config, strict });
+  ctx.remoteMasters = [...(ctx.remoteMasters || []), ...(result.remoteMasters || [])];
   if (ctx.limit && result.transcripts.length > ctx.limit) {
     result.truncated = result.transcripts.length - ctx.limit;
     result.transcripts = result.transcripts.slice(0, ctx.limit);
@@ -24,10 +26,16 @@ function ago(ms) {
   return `${days}d ago`;
 }
 
+export async function closeRemoteDiscovery(ctx) {
+  await closeSshMasters(ctx.remoteMasters || []);
+  ctx.remoteMasters = [];
+}
+
 export async function cmdScan(ctx) {
   try {
     return await cmdScanCore(ctx);
   } finally {
+    await closeRemoteDiscovery(ctx);
     pruneHostCache(ctx.config.state.root);
   }
 }

@@ -9,7 +9,7 @@ import { budgetBar, formatTokens } from "../tokens.js";
 import { emitProgress } from "../progress.js";
 import { primaryMemoryFile } from "./analyze.js";
 import { printUsage } from "./usage.js";
-import { discoverForRun } from "./scan.js";
+import { closeRemoteDiscovery, discoverForRun } from "./scan.js";
 import { capTranscripts } from "../sample.js";
 import { isEvidenceFresh } from "../state.js";
 import { transcriptIdentity } from "../transcript.js";
@@ -102,6 +102,7 @@ export async function runProposal(ctx, precomputed = null) {
   try {
     return await runProposalCore(ctx, precomputed);
   } finally {
+    await closeRemoteDiscovery(ctx);
     pruneHostCache(ctx.config.state.root);
   }
 }

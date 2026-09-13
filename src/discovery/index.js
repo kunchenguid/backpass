@@ -144,8 +144,10 @@ export async function discoverTranscripts({
   if (cacheDirty) config.state.writeScanCache(cache);
 
   const perHost = [];
+  const remoteMasters = [];
   if (hosts.length) {
     const collected = await collectHosts({ hosts, harnesses: selected.filter((h) => getAdapter(h)), cutoffMs });
+    remoteMasters.push(...collected.map((result) => result.master).filter(Boolean));
     for (const result of collected) {
       const entry = hosts.find((h) => h.host === result.host);
       transcripts.push(...remoteTranscripts(result, entry, { scope, repo, config, strict, identities }));
@@ -159,7 +161,13 @@ export async function discoverTranscripts({
   scope?.normalizeProjects?.(transcripts);
   transcripts.sort((a, b) => (b.mtimeMs || 0) - (a.mtimeMs || 0));
   emitProgress("discover:done", { total: transcripts.length });
-  return { transcripts, perHarness, perHost, cutoffMs };
+  return {
+    transcripts,
+    perHarness,
+    perHost,
+    cutoffMs,
+    remoteMasters,
+  };
 }
 
 function hostSummary(result) {
@@ -212,7 +220,7 @@ function remoteTranscripts(result, entry, { scope, repo, config, strict, identit
         node: result.node,
         env: entry?.env || {},
         connectTimeoutSeconds: entry?.connectTimeoutSeconds,
-        controlPersistSeconds: result.controlPersistSeconds,
+        master: result.master,
         kind: descriptor.kind,
         key: descriptor.key,
       },

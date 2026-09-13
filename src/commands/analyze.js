@@ -6,7 +6,7 @@ import { UserError, color, info, json, out, warn } from "../logger.js";
 import { memorySurfaceHash, resolveMemoryFiles } from "../memory.js";
 import { loadProjectSkills, resolveOverflowTarget, skillDescriptionTokens } from "../skills.js";
 import { emitProgress } from "../progress.js";
-import { discoverForRun } from "./scan.js";
+import { closeRemoteDiscovery, discoverForRun } from "./scan.js";
 import { printUsage } from "./usage.js";
 import { capTranscripts } from "../sample.js";
 import { prefetchRemoteTranscripts } from "../discovery/hosts.js";
@@ -74,6 +74,7 @@ export async function runAnalysis(ctx) {
   try {
     return await runAnalysisCore(ctx);
   } finally {
+    await closeRemoteDiscovery(ctx);
     pruneHostCache(ctx.config.state.root);
   }
 }

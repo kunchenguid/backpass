@@ -50,8 +50,9 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   only staging (`stagedSkills` in `prepareWorkspace`) and the `buildProposal` gate narrow.
   `TARGET_COMMANDS` lists where the flag applies; everything else rejects it.
 - **SSH hosts are a collection tier, not a second scope.** `src/discovery/hosts.js` runs
-  three multiplexed `ssh` calls per configured host - locate Node/git, probe `discover`,
-  probe `fetch` - and the descriptors join the one corpus with the same tiers, sample and
+  three remote commands per configured host - locate Node/git, probe `discover`, probe
+  `fetch` - over one explicit ControlMaster that is opened before locate and closed after
+  fetch or at command teardown; the descriptors join the one corpus with the same tiers, sample and
   cap. `src/discovery/remote/ssh.js` is the sole ssh spawn boundary (constant option set,
   destination/node-path refusal, `classifySshFailure`, `BACKPASS_SSH_BIN`), and a Windows
   shim refusal must be raised by name there like every other spawn. Nothing installs on

@@ -8,7 +8,7 @@ import { ProposalViolation } from "../proposal.js";
 import { capTranscripts } from "../sample.js";
 import { synthesizeProposal } from "../synthesize.js";
 import { budgetBar, formatTokens } from "../tokens.js";
-import { discoverForRun } from "./scan.js";
+import { closeRemoteDiscovery, discoverForRun } from "./scan.js";
 import { prefetchRemoteTranscripts } from "../discovery/hosts.js";
 import { pruneHostCache } from "../discovery/cache.js";
 import { accountForConsolidationUsage, foldForRun, printProposal } from "./propose.js";
@@ -43,6 +43,7 @@ export async function bootstrapRun(ctx, deps = {}) {
   try {
     return await bootstrapRunCore(ctx, deps);
   } finally {
+    await closeRemoteDiscovery(ctx);
     pruneHostCache(ctx.config.state.root);
   }
 }

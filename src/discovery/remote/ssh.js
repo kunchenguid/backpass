@@ -23,7 +23,6 @@ export function sshBin() {
 }
 
 export const DEFAULT_CONNECT_TIMEOUT_SECONDS = 10;
-export const DEFAULT_CONTROL_PERSIST_SECONDS = 60;
 /** Wall clock per call. `ConnectTimeout` alone cannot bound a connection that succeeds and then waits. */
 export const DEFAULT_CALL_TIMEOUT_MS = 120_000;
 
@@ -64,12 +63,7 @@ export function assertSafeSshValue(kind, value) {
  * The constant option set. `ControlMaster` multiplexes the three calls of one host over
  * a single connection; `ServerAliveInterval` notices a dropped link mid-fetch.
  */
-export function sshArgs({
-  destination,
-  command,
-  connectTimeoutSeconds = DEFAULT_CONNECT_TIMEOUT_SECONDS,
-  controlPersistSeconds = DEFAULT_CONTROL_PERSIST_SECONDS,
-}) {
+function baseArgs(connectTimeoutSeconds) {
   return [
     "-o",
     "BatchMode=yes",
@@ -84,12 +78,20 @@ export function sshArgs({
     "-o",
     `ControlPath=${controlPath()}`,
     "-o",
-    `ControlPersist=${controlPersistSeconds}`,
-    "-T",
-    "--",
-    destination,
-    command,
+    "ControlPersist=60",
   ];
+}
+
+export function sshArgs({ destination, command, connectTimeoutSeconds = DEFAULT_CONNECT_TIMEOUT_SECONDS }) {
+  return [...baseArgs(connectTimeoutSeconds), "-T", "--", destination, command];
+}
+
+function masterArgs(destination, connectTimeoutSeconds) {
+  return [...baseArgs(connectTimeoutSeconds), "-M", "-N", "-f", "-T", "--", destination];
+}
+
+function masterExitArgs(destination, connectTimeoutSeconds) {
+  return [...baseArgs(connectTimeoutSeconds), "-O", "exit", "-T", "--", destination];
 }
 
 /**
@@ -98,30 +100,10 @@ export function sshArgs({
  * layer up, which is exactly the failure AGENTS.md records two rounds of.
  *
  * @param {{ destination: string, command: string, input?: string, timeoutMs?: number,
- *   connectTimeoutSeconds?: number, controlPersistSeconds?: number, captureStdout?: boolean,
+ *   connectTimeoutSeconds?: number, captureStdout?: boolean,
  *   onStdout?: (chunk: Buffer) => void }} options
  */
-export async function runSsh({
-  destination,
-  command,
-  input,
-  timeoutMs = DEFAULT_CALL_TIMEOUT_MS,
-  connectTimeoutSeconds = DEFAULT_CONNECT_TIMEOUT_SECONDS,
-  controlPersistSeconds = DEFAULT_CONTROL_PERSIST_SECONDS,
-  captureStdout = true,
-  onStdout = null,
-}) {
-  assertSafeSshValue("ssh destination", destination);
-  const result = await runCapture(
-    sshBin(),
-    sshArgs({ destination, command, connectTimeoutSeconds, controlPersistSeconds }),
-    {
-      input,
-      timeoutMs,
-      captureStdout,
-      onStdout,
-    },
-  );
+function raiseWindowsShimRefusal(result, destination) {
   if (result.spawnError?.code === "ERR_WINDOWS_SHIM_UNSAFE_ARG") {
     throw new UserError(
       `cannot run ssh for ${destination}: ${JSON.stringify(result.spawnError.value)} cannot be passed safely ` +
@@ -129,7 +111,51 @@ export async function runSsh({
       "rename the host alias, or configure a destination without that character",
     );
   }
+}
+
+export async function runSsh({
+  destination,
+  command,
+  input,
+  timeoutMs = DEFAULT_CALL_TIMEOUT_MS,
+  connectTimeoutSeconds = DEFAULT_CONNECT_TIMEOUT_SECONDS,
+  captureStdout = true,
+  onStdout = null,
+}) {
+  assertSafeSshValue("ssh destination", destination);
+  const result = await runCapture(sshBin(), sshArgs({ destination, command, connectTimeoutSeconds }), {
+    input,
+    timeoutMs,
+    captureStdout,
+    onStdout,
+  });
+  raiseWindowsShimRefusal(result, destination);
   return result;
+}
+
+export async function startSshMaster({
+  destination,
+  connectTimeoutSeconds = DEFAULT_CONNECT_TIMEOUT_SECONDS,
+  timeoutMs = DEFAULT_CALL_TIMEOUT_MS,
+}) {
+  assertSafeSshValue("ssh destination", destination);
+  const result = await runCapture(sshBin(), masterArgs(destination, connectTimeoutSeconds), { timeoutMs });
+  raiseWindowsShimRefusal(result, destination);
+  return result;
+}
+
+export async function closeSshMaster(master) {
+  if (!master || master.closed) return;
+  master.closed = true;
+  try {
+    await runCapture(sshBin(), masterExitArgs(master.destination, master.connectTimeoutSeconds), {
+      timeoutMs: DEFAULT_CALL_TIMEOUT_MS,
+    });
+  } catch {}
+}
+
+export async function closeSshMasters(masters = []) {
+  await Promise.all(masters.map((master) => closeSshMaster(master)));
 }
 
 /** The Tailscale check-mode URL, so the message can say where to approve it. */

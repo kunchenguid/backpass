@@ -85,11 +85,13 @@ test("a file-backed remote session is cached as its own file, so the trace foote
     "the raw file must arrive byte for byte, since the analysis agent may open it",
   );
   assert.equal((fs.statSync(path.join(config.state.root, "hosts")).mode & 0o777).toString(8), "700");
-  const persistValues = sshCalls(s.log).map((call) =>
-    Number(call.options.find((option) => option.startsWith("ControlPersist="))?.split("=")[1]),
+  const calls = sshCalls(s.log);
+  assert.deepEqual(
+    calls.map((call) => call.op),
+    ["master:start", null, "discover", "fetch", "master:stop"],
   );
-  assert.equal(persistValues.length, 3);
-  assert.ok(persistValues.every((seconds) => seconds > 60 && seconds === persistValues[0]));
+  const controlPaths = calls.map((call) => call.options.find((option) => option.startsWith("ControlPath=")));
+  assert.ok(controlPaths.every((controlPath) => controlPath && controlPath === controlPaths[0]));
 
   const raw = await readTranscript(transcript);
   assert.equal(raw.rawPath, cached);

@@ -2,7 +2,15 @@ import { UserError, info, warn } from "../logger.js";
 import { emitProgress } from "../progress.js";
 import { HostCache } from "./cache.js";
 import { buildProbeProgram, createFrameReader, PROTOCOL, REMOTE_ENV_ALLOWLIST } from "./remote/bundle.js";
-import { assertSafeSshValue, classifySshFailure, DEFAULT_CONNECT_TIMEOUT_SECONDS, runSsh } from "./remote/ssh.js";
+import {
+  assertSafeSshValue,
+  classifySshFailure,
+  closeSshMaster,
+  closeSshMasters,
+  DEFAULT_CONNECT_TIMEOUT_SECONDS,
+  runSsh,
+  startSshMaster,
+} from "./remote/ssh.js";
 import { compareNodeVersions, MIN_SQLITE_NODE, parseNodeVersion, supportsNodeSqlite } from "./remote/runtime.js";
 
 export { MIN_SQLITE_NODE } from "./remote/runtime.js";
@@ -10,7 +18,7 @@ export { MIN_SQLITE_NODE } from "./remote/runtime.js";
 /**
  * Per-host orchestration for the ssh collection tier (design section 6.3).
  *
- * Three calls per host, multiplexed over one connection: find a Node and a git, run the
+ * Three remote commands per host, multiplexed over one connection: find a Node and a git, run the
  * probe's `discover`, and later run its `fetch` for the sampled sessions that still need
  * content. Every host is fail-soft in exactly the way a harness whose store is
  * unreadable already is - the run continues on local sessions and the host becomes one
@@ -169,7 +177,7 @@ function emptyHostResult(entry) {
     hostname: null,
     home: null,
     git: null,
-    controlPersistSeconds: entry.controlPersistSeconds,
+    master: null,
     descriptors: [],
     facts: {},
     harnesses: {},
@@ -191,7 +199,6 @@ async function locate(entry) {
     command: LOCATE_COMMAND,
     timeoutMs: LOCATE_TIMEOUT_MS,
     connectTimeoutSeconds: entry.connectTimeoutSeconds,
-    controlPersistSeconds: entry.controlPersistSeconds,
   });
   const failure = classifySshFailure(result, {
     destination: entry.host,
@@ -213,22 +220,42 @@ async function locate(entry) {
  */
 export async function collectHosts({ hosts, harnesses, cutoffMs }) {
   const results = [];
-  for (const [index, entry] of hosts.entries()) {
-    const controlPersistSeconds =
-      Math.ceil(((hosts.length - index) * (LOCATE_TIMEOUT_MS + DISCOVER_TIMEOUT_MS)) / 1000) + 60;
-    const activeEntry = { ...entry, controlPersistSeconds };
-    const result = emptyHostResult(activeEntry);
+  for (const entry of hosts) {
+    const result = emptyHostResult(entry);
     results.push(result);
     const liveProgress = emitProgress("discover:host:start", { host: entry.host });
     if (!liveProgress) info(`ssh ${entry.host} connecting`);
 
     try {
-      await collectOneHost(activeEntry, { harnesses, cutoffMs }, result);
+      const masterCall = await startSshMaster({
+        destination: entry.host,
+        connectTimeoutSeconds: entry.connectTimeoutSeconds,
+        timeoutMs: LOCATE_TIMEOUT_MS,
+      });
+      const masterFailure = classifySshFailure(masterCall, {
+        destination: entry.host,
+        connectTimeoutSeconds: entry.connectTimeoutSeconds,
+        timeoutMs: LOCATE_TIMEOUT_MS,
+      });
+      if (masterFailure) {
+        result.error = `failed to start ssh control master: ${masterFailure.message}`;
+      } else {
+        result.master = {
+          destination: entry.host,
+          connectTimeoutSeconds: entry.connectTimeoutSeconds,
+          closed: false,
+        };
+        await collectOneHost(entry, { harnesses, cutoffMs }, result);
+      }
     } catch (err) {
-      if (err instanceof UserError) throw err;
+      if (err instanceof UserError) {
+        await closeSshMasters(results.map((hostResult) => hostResult.master).filter(Boolean));
+        throw err;
+      }
       result.error = err.message;
     }
 
+    if (result.error && result.master) await closeSshMaster(result.master);
     if (result.error) warn(`${entry.host}: ${result.error} - host skipped, run continues`);
     for (const note of result.warnings) warn(`${entry.host}: ${note}`);
     emitProgress("discover:host:done", {
@@ -304,7 +331,6 @@ async function collectOneHost(entry, { harnesses, cutoffMs }, result) {
     input: program,
     timeoutMs: DISCOVER_TIMEOUT_MS,
     connectTimeoutSeconds: entry.connectTimeoutSeconds,
-    controlPersistSeconds: entry.controlPersistSeconds,
   });
   const failure = classifySshFailure(call, {
     destination: entry.host,
@@ -452,25 +478,29 @@ export async function prefetchRemoteTranscripts(transcripts, { config }) {
   }
 
   for (const [host, group] of byHost) {
-    const pending = [];
-    for (const transcript of group) {
-      const hit = cache.lookup(index, {
-        host,
-        harness: transcript.harness,
-        key: transcript.remote.key,
-        mtimeMs: transcript.mtimeMs,
-        bytes: transcript.bytes,
-        contentSignature: transcript.contentSignature,
-      });
-      if (hit) {
-        transcript.remote.cachePath = hit.path;
-        cache.touch(index, hit.name);
-        stats.reused += 1;
-      } else {
-        pending.push(transcript);
+    try {
+      const pending = [];
+      for (const transcript of group) {
+        const hit = cache.lookup(index, {
+          host,
+          harness: transcript.harness,
+          key: transcript.remote.key,
+          mtimeMs: transcript.mtimeMs,
+          bytes: transcript.bytes,
+          contentSignature: transcript.contentSignature,
+        });
+        if (hit) {
+          transcript.remote.cachePath = hit.path;
+          cache.touch(index, hit.name);
+          stats.reused += 1;
+        } else {
+          pending.push(transcript);
+        }
       }
+      if (pending.length) await fetchHost(host, pending, { cache, index, stats });
+    } finally {
+      await closeSshMaster(group[0].remote.master);
     }
-    if (pending.length) await fetchHost(host, pending, { cache, index, stats });
   }
 
   if (byHost.size || Object.keys(index.entries).length) {
@@ -540,7 +570,6 @@ async function fetchHost(host, pending, { cache, index, stats }) {
       input: buildProbeProgram({ protocol: PROTOCOL, op: "fetch", items }, { env: first.env || {} }),
       timeoutMs: FETCH_TIMEOUT_MS,
       connectTimeoutSeconds: first.connectTimeoutSeconds,
-      controlPersistSeconds: first.controlPersistSeconds,
       captureStdout: false,
       onStdout(chunk) {
         if (parseError) return;
