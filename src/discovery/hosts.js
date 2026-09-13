@@ -551,12 +551,26 @@ async function fetchHost(host, pending, { cache, index, stats }) {
 
   const failure = classifySshFailure(call, { destination: host, timeoutMs: FETCH_TIMEOUT_MS });
   const transportError = failure?.message || parseError;
-  const torn = reader.incomplete || reader.partialHeader;
+  const incompleteIdentity = reader.incomplete
+    ? fetchIdentity(reader.incomplete.header.harness, reader.incomplete.header.key)
+    : null;
+  const partialHeader = reader.partialHeader;
+  const partialMatches = partialHeader
+    ? pending.filter((transcript) => {
+        const identity = fetchIdentity(transcript.harness, transcript.remote.key);
+        if (outcomes.has(identity)) return false;
+        const prefix = JSON.stringify({ key: transcript.remote.key, harness: transcript.harness }).slice(0, -1);
+        return prefix.startsWith(partialHeader.text) || partialHeader.text.startsWith(prefix);
+      })
+    : [];
+  const tornOutstanding =
+    (incompleteIdentity && transcriptsByKey.has(incompleteIdentity) && !outcomes.has(incompleteIdentity)) ||
+    partialMatches.length === 1;
   const streamError = transportError || (!reader.ended ? "remote fetch incomplete" : null);
   for (const transcript of pending) {
     const identity = fetchIdentity(transcript.harness, transcript.remote.key);
     const outcome = outcomes.get(identity);
-    const independentlyComplete = reader.ended || Boolean(torn);
+    const independentlyComplete = reader.ended || Boolean(tornOutstanding);
     if (outcome?.staged && !transportError && independentlyComplete) {
       try {
         const written = cache.commit(index, outcome.staged, outcome.metadata);

@@ -180,6 +180,21 @@ test("a torn fetch stream fails that transcript by name and leaves the next run 
   assert.equal(retried.transcripts[0].remoteError, undefined);
 });
 
+test("a clean terminated stream commits every complete item", async () => {
+  const s = scenario();
+  writeClaudeSession(s.remoteHome, {
+    cwd: s.remoteClone,
+    id: "22222222-3333-4444-5555-666666666666",
+    prefixText: "Review the second parser fix.",
+  });
+
+  const fetched = await collectAndFetch(s);
+  assert.equal(fetched.transcripts.length, 2);
+  assert.equal(fetched.stats.fetched, 2);
+  assert.equal(fetched.stats.failed, 0);
+  assert.equal(fetched.transcripts.filter((transcript) => transcript.remote.cachePath).length, 2);
+});
+
 test("a missing frame before the terminator fails only that item", async () => {
   const s = scenario({ variant: { omitFetchFrame: 2 } });
   writeClaudeSession(s.remoteHome, {
@@ -245,6 +260,30 @@ test("a torn frame header does not discard a complete sibling transcript", async
     torn.transcripts.filter((transcript) => transcript.remoteError === "mac-home: remote fetch incomplete").length,
     1,
   );
+});
+
+test("a truncated terminator rejects every otherwise complete item", async () => {
+  const s = scenario({ variant: { truncateEndFrame: true } });
+  writeClaudeSession(s.remoteHome, {
+    cwd: s.remoteClone,
+    id: "22222222-3333-4444-5555-666666666666",
+    prefixText: "Review the second parser fix.",
+  });
+
+  const rejected = await collectAndFetch(s);
+  assert.equal(rejected.stats.fetched, 0);
+  assert.equal(rejected.stats.failed, 2);
+  assert.equal(rejected.transcripts.filter((transcript) => transcript.remote.cachePath).length, 0);
+  assert.equal(
+    rejected.transcripts.filter((transcript) => transcript.remoteError === "mac-home: remote fetch incomplete").length,
+    2,
+  );
+
+  delete s.hosts["mac-home"].truncateEndFrame;
+  const retried = await collectAndFetch(s);
+  assert.equal(retried.stats.reused, 0);
+  assert.equal(retried.stats.fetched, 2);
+  assert.equal(retried.stats.failed, 0);
 });
 
 test("complete frames are rejected unless the fetch terminates successfully", async () => {

@@ -116,7 +116,17 @@ function runCommand() {
   }
   if (op === "fetch" && host.truncateFetchHeader != null) {
     const span = fetchFrameSpans(emitted)[host.truncateFetchHeader - 1];
-    if (span) emitted = emitted.subarray(0, span.start + Math.max(1, Math.floor((span.headerEnd - span.start) / 2)));
+    if (span) {
+      const header = emitted.subarray(span.start, span.headerEnd - 1);
+      const identityEnd = header.indexOf(Buffer.from(',"kind"'));
+      const kept = identityEnd === -1 ? Math.max(1, Math.floor(header.length / 2)) : identityEnd + 3;
+      emitted = emitted.subarray(0, span.start + kept);
+    }
+  }
+  if (op === "fetch" && host.truncateEndFrame) {
+    const terminator = Buffer.from('{"end":true}\n');
+    const end = emitted.lastIndexOf(terminator);
+    if (end !== -1) emitted = emitted.subarray(0, end + Math.floor(terminator.length / 2));
   }
   if (op === "fetch" && host.omitEndFrame) {
     const terminator = Buffer.from('{"end":true}\n');

@@ -65,6 +65,19 @@ export function createFrameReader() {
     return output;
   }
 
+  function peek(size) {
+    const output = Buffer.allocUnsafe(size);
+    let written = 0;
+    for (let index = head; written < size; index += 1) {
+      const chunk = chunks[index];
+      const start = index === head ? headOffset : 0;
+      const take = Math.min(size - written, chunk.length - start);
+      chunk.copy(output, written, start, start + take);
+      written += take;
+    }
+    return output;
+  }
+
   function takeLine() {
     let distance = 0;
     for (let index = head; index < chunks.length; index += 1) {
@@ -132,7 +145,7 @@ export function createFrameReader() {
       return awaiting ? { header: awaiting, received: buffered } : null;
     },
     get partialHeader() {
-      return !awaiting && !ended && buffered > 0 ? { received: buffered } : null;
+      return !awaiting && !ended && buffered > 0 ? { received: buffered, text: peek(buffered).toString("utf8") } : null;
     },
   };
 }
