@@ -70,11 +70,11 @@ export function remotesOf(toplevel) {
  */
 export function collectPathFacts(paths, { git: hasGit = true } = {}) {
   /** @type {Record<string, PathFacts>} */
-  const facts = {};
+  const facts = Object.create(null);
   const remotesByToplevel = new Map();
 
   for (const candidate of paths) {
-    if (typeof candidate !== "string" || !candidate || facts[candidate]) continue;
+    if (typeof candidate !== "string" || !candidate || Object.hasOwn(facts, candidate)) continue;
     const exists = fs.existsSync(candidate);
     const real = exists ? realpathOrResolve(candidate) : path.resolve(candidate);
     const toplevel = exists && hasGit ? toplevelOf(candidate) : null;

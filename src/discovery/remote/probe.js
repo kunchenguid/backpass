@@ -42,7 +42,7 @@ import { supportsNodeSqlite } from "./runtime.js";
 
 export { PROTOCOL };
 
-const ADAPTERS = {
+const ADAPTERS = Object.assign(Object.create(null), {
   claude,
   codex,
   pi,
@@ -51,7 +51,7 @@ const ADAPTERS = {
   hermes,
   cursor: cursorCli,
   "cursor-ide": cursorIde,
-};
+});
 
 function rawPathOf(adapter, ref) {
   return adapter.rawPath ? adapter.rawPath(ref) : ref.path;
@@ -157,7 +157,7 @@ async function discoverHarness(adapter, { cutoffMs }) {
 
 /** @param {{ harnesses?: string[], cutoffMs?: number | null }} request */
 export async function discover({ harnesses = [], cutoffMs = null } = {}) {
-  const harnessStats = {};
+  const harnessStats = Object.create(null);
   const descriptors = [];
   const warnings = [];
   let selected = harnesses;

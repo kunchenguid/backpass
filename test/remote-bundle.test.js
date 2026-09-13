@@ -14,6 +14,7 @@ import {
   probeSources,
 } from "../src/discovery/remote/bundle.js";
 import { LOCATE_COMMAND, probeCommand } from "../src/discovery/hosts.js";
+import { collectPathFacts } from "../src/discovery/remote/git-facts.js";
 import { runSsh } from "../src/discovery/remote/ssh.js";
 import { initRepo, sshCalls, tmpdir, withRemoteEnv, writeClaudeSession } from "./helpers/remote.js";
 
@@ -41,10 +42,22 @@ test("the probe runs from a directory holding only the manifest, so no hidden im
     assert.equal(response.transcripts[0].cwd, clone);
     assert.equal(response.paths[clone].exists, true);
     assert.deepEqual(response.paths[clone].remotes, ["git@github.com:acme/demo.git"]);
+
+    const unknown = await probe.discover({ harnesses: ["__proto__"], cutoffMs: null });
+    assert.equal(Object.hasOwn(unknown.harnesses, "__proto__"), true);
+    assert.equal(unknown.harnesses.__proto__.error, "no adapter");
+    assert.equal(Object.prototype.error, undefined);
   } finally {
     if (previousHome === undefined) delete process.env.HOME;
     else process.env.HOME = previousHome;
   }
+});
+
+test("path facts preserve path names that match prototype keys", () => {
+  const facts = collectPathFacts(["__proto__"], { git: false });
+  assert.equal(Object.hasOwn(facts, "__proto__"), true);
+  assert.equal(facts.__proto__.exists, false);
+  assert.equal(Object.prototype.exists, undefined);
 });
 
 test("the locate command and shipped probe execute through the supported remote shell path", async () => {

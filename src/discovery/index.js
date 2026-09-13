@@ -19,7 +19,7 @@ import { warn } from "../logger.js";
 import { transcriptIdentity } from "../transcript.js";
 import { passesProjectFilter } from "../scope.js";
 
-export const ADAPTERS = {
+export const ADAPTERS = Object.assign(Object.create(null), {
   claude,
   codex,
   pi,
@@ -28,7 +28,7 @@ export const ADAPTERS = {
   hermes,
   cursor: cursorCli,
   "cursor-ide": cursorIde,
-};
+});
 
 export function getAdapter(harness) {
   return ADAPTERS[harness] || null;
