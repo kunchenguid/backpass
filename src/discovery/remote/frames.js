@@ -145,7 +145,7 @@ export function createFrameReader() {
       return awaiting ? { header: awaiting, received: buffered } : null;
     },
     get partialHeader() {
-      return !awaiting && !ended && buffered > 0 ? { received: buffered, text: peek(buffered).toString("utf8") } : null;
+      return !awaiting && !ended && buffered > 0 ? { received: buffered, bytes: peek(buffered) } : null;
     },
   };
 }

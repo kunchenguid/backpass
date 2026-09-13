@@ -118,7 +118,7 @@ test("a fetch frame is read back byte for byte, and a torn stream is reported ra
   const partialHeader = createFrameReader();
   partialHeader.push(Buffer.from('{"key":"two"', "utf8"));
   assert.equal(partialHeader.incomplete, null);
-  assert.deepEqual(partialHeader.partialHeader, { received: 12, text: '{"key":"two"' });
+  assert.deepEqual(partialHeader.partialHeader, { received: 12, bytes: Buffer.from('{"key":"two"') });
   assert.equal(partialHeader.ended, false);
 });
 

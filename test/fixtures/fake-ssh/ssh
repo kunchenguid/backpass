@@ -123,6 +123,14 @@ function runCommand() {
       emitted = emitted.subarray(0, span.start + kept);
     }
   }
+  if (op === "fetch" && host.truncateFetchHeaderMidUnicode != null) {
+    const span = fetchFrameSpans(emitted)[host.truncateFetchHeaderMidUnicode - 1];
+    if (span) {
+      const header = emitted.subarray(span.start, span.headerEnd - 1);
+      const multibyte = header.findIndex((byte) => byte >= 0x80);
+      if (multibyte !== -1) emitted = emitted.subarray(0, span.start + multibyte + 1);
+    }
+  }
   if (op === "fetch" && host.truncateEndFrame) {
     const terminator = Buffer.from('{"end":true}\n');
     const end = emitted.lastIndexOf(terminator);

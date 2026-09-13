@@ -25,11 +25,11 @@ import {
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "bin", "backpass.js");
 
 /** One host carrying a claude session and a hermes session, both in a clone of this repo. */
-function scenario({ variant = {}, harnesses = ["claude"] } = {}) {
+function scenario({ variant = {}, harnesses = ["claude"], remoteCloneName = "demo" } = {}) {
   const localHome = tmpdir("fetch-local");
   const remoteHome = tmpdir("fetch-home");
   const repoRoot = initRepo(path.join(localHome, "demo"), "https://github.com/acme/demo.git");
-  const remoteClone = initRepo(path.join(remoteHome, "code", "demo"), "git@github.com:acme/demo.git");
+  const remoteClone = initRepo(path.join(remoteHome, "code", remoteCloneName), "git@github.com:acme/demo.git");
   writeClaudeSession(remoteHome, { cwd: remoteClone });
   if (harnesses.includes("hermes")) writeHermesStore(remoteHome, { cwd: remoteClone });
   return {
@@ -85,6 +85,11 @@ test("a file-backed remote session is cached as its own file, so the trace foote
     "the raw file must arrive byte for byte, since the analysis agent may open it",
   );
   assert.equal((fs.statSync(path.join(config.state.root, "hosts")).mode & 0o777).toString(8), "700");
+  const persistValues = sshCalls(s.log).map((call) =>
+    Number(call.options.find((option) => option.startsWith("ControlPersist="))?.split("=")[1]),
+  );
+  assert.equal(persistValues.length, 3);
+  assert.ok(persistValues.every((seconds) => seconds > 60 && seconds === persistValues[0]));
 
   const raw = await readTranscript(transcript);
   assert.equal(raw.rawPath, cached);
@@ -253,6 +258,27 @@ test("a torn frame header does not discard a complete sibling transcript", async
 
   const torn = await collectAndFetch(s);
   assert.equal(torn.transcripts.length, 2);
+  assert.equal(torn.stats.fetched, 1);
+  assert.equal(torn.stats.failed, 1);
+  assert.equal(torn.transcripts.filter((transcript) => transcript.remote.cachePath).length, 1);
+  assert.equal(
+    torn.transcripts.filter((transcript) => transcript.remoteError === "mac-home: remote fetch incomplete").length,
+    1,
+  );
+});
+
+test("a unicode header torn mid-character preserves its complete sibling", async () => {
+  const s = scenario({
+    variant: { truncateFetchHeaderMidUnicode: 2 },
+    remoteCloneName: "démonstration",
+  });
+  writeClaudeSession(s.remoteHome, {
+    cwd: s.remoteClone,
+    id: "22222222-3333-4444-5555-666666666666",
+    prefixText: "Review the unicode parser fix.",
+  });
+
+  const torn = await collectAndFetch(s);
   assert.equal(torn.stats.fetched, 1);
   assert.equal(torn.stats.failed, 1);
   assert.equal(torn.transcripts.filter((transcript) => transcript.remote.cachePath).length, 1);

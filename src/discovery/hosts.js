@@ -169,6 +169,7 @@ function emptyHostResult(entry) {
     hostname: null,
     home: null,
     git: null,
+    controlPersistSeconds: entry.controlPersistSeconds,
     descriptors: [],
     facts: {},
     harnesses: {},
@@ -190,6 +191,7 @@ async function locate(entry) {
     command: LOCATE_COMMAND,
     timeoutMs: LOCATE_TIMEOUT_MS,
     connectTimeoutSeconds: entry.connectTimeoutSeconds,
+    controlPersistSeconds: entry.controlPersistSeconds,
   });
   const failure = classifySshFailure(result, {
     destination: entry.host,
@@ -211,14 +213,17 @@ async function locate(entry) {
  */
 export async function collectHosts({ hosts, harnesses, cutoffMs }) {
   const results = [];
-  for (const entry of hosts) {
-    const result = emptyHostResult(entry);
+  for (const [index, entry] of hosts.entries()) {
+    const controlPersistSeconds =
+      Math.ceil(((hosts.length - index) * (LOCATE_TIMEOUT_MS + DISCOVER_TIMEOUT_MS)) / 1000) + 60;
+    const activeEntry = { ...entry, controlPersistSeconds };
+    const result = emptyHostResult(activeEntry);
     results.push(result);
     const liveProgress = emitProgress("discover:host:start", { host: entry.host });
     if (!liveProgress) info(`ssh ${entry.host} connecting`);
 
     try {
-      await collectOneHost(entry, { harnesses, cutoffMs }, result);
+      await collectOneHost(activeEntry, { harnesses, cutoffMs }, result);
     } catch (err) {
       if (err instanceof UserError) throw err;
       result.error = err.message;
@@ -299,6 +304,7 @@ async function collectOneHost(entry, { harnesses, cutoffMs }, result) {
     input: program,
     timeoutMs: DISCOVER_TIMEOUT_MS,
     connectTimeoutSeconds: entry.connectTimeoutSeconds,
+    controlPersistSeconds: entry.controlPersistSeconds,
   });
   const failure = classifySshFailure(call, {
     destination: entry.host,
@@ -534,6 +540,7 @@ async function fetchHost(host, pending, { cache, index, stats }) {
       input: buildProbeProgram({ protocol: PROTOCOL, op: "fetch", items }, { env: first.env || {} }),
       timeoutMs: FETCH_TIMEOUT_MS,
       connectTimeoutSeconds: first.connectTimeoutSeconds,
+      controlPersistSeconds: first.controlPersistSeconds,
       captureStdout: false,
       onStdout(chunk) {
         if (parseError) return;
@@ -559,8 +566,12 @@ async function fetchHost(host, pending, { cache, index, stats }) {
     ? pending.filter((transcript) => {
         const identity = fetchIdentity(transcript.harness, transcript.remote.key);
         if (outcomes.has(identity)) return false;
-        const prefix = JSON.stringify({ key: transcript.remote.key, harness: transcript.harness }).slice(0, -1);
-        return prefix.startsWith(partialHeader.text) || partialHeader.text.startsWith(prefix);
+        const prefix = Buffer.from(
+          JSON.stringify({ key: transcript.remote.key, harness: transcript.harness }).slice(0, -1),
+          "utf8",
+        );
+        const common = Math.min(prefix.length, partialHeader.bytes.length);
+        return prefix.subarray(0, common).equals(partialHeader.bytes.subarray(0, common));
       })
     : [];
   const tornOutstanding =

@@ -212,6 +212,7 @@ function remoteTranscripts(result, entry, { scope, repo, config, strict, identit
         node: result.node,
         env: entry?.env || {},
         connectTimeoutSeconds: entry?.connectTimeoutSeconds,
+        controlPersistSeconds: result.controlPersistSeconds,
         kind: descriptor.kind,
         key: descriptor.key,
       },

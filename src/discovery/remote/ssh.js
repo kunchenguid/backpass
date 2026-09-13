@@ -23,6 +23,7 @@ export function sshBin() {
 }
 
 export const DEFAULT_CONNECT_TIMEOUT_SECONDS = 10;
+export const DEFAULT_CONTROL_PERSIST_SECONDS = 60;
 /** Wall clock per call. `ConnectTimeout` alone cannot bound a connection that succeeds and then waits. */
 export const DEFAULT_CALL_TIMEOUT_MS = 120_000;
 
@@ -63,7 +64,12 @@ export function assertSafeSshValue(kind, value) {
  * The constant option set. `ControlMaster` multiplexes the three calls of one host over
  * a single connection; `ServerAliveInterval` notices a dropped link mid-fetch.
  */
-export function sshArgs({ destination, command, connectTimeoutSeconds = DEFAULT_CONNECT_TIMEOUT_SECONDS }) {
+export function sshArgs({
+  destination,
+  command,
+  connectTimeoutSeconds = DEFAULT_CONNECT_TIMEOUT_SECONDS,
+  controlPersistSeconds = DEFAULT_CONTROL_PERSIST_SECONDS,
+}) {
   return [
     "-o",
     "BatchMode=yes",
@@ -78,7 +84,7 @@ export function sshArgs({ destination, command, connectTimeoutSeconds = DEFAULT_
     "-o",
     `ControlPath=${controlPath()}`,
     "-o",
-    "ControlPersist=60",
+    `ControlPersist=${controlPersistSeconds}`,
     "-T",
     "--",
     destination,
@@ -92,7 +98,7 @@ export function sshArgs({ destination, command, connectTimeoutSeconds = DEFAULT_
  * layer up, which is exactly the failure AGENTS.md records two rounds of.
  *
  * @param {{ destination: string, command: string, input?: string, timeoutMs?: number,
- *   connectTimeoutSeconds?: number, captureStdout?: boolean,
+ *   connectTimeoutSeconds?: number, controlPersistSeconds?: number, captureStdout?: boolean,
  *   onStdout?: (chunk: Buffer) => void }} options
  */
 export async function runSsh({
@@ -101,16 +107,21 @@ export async function runSsh({
   input,
   timeoutMs = DEFAULT_CALL_TIMEOUT_MS,
   connectTimeoutSeconds = DEFAULT_CONNECT_TIMEOUT_SECONDS,
+  controlPersistSeconds = DEFAULT_CONTROL_PERSIST_SECONDS,
   captureStdout = true,
   onStdout = null,
 }) {
   assertSafeSshValue("ssh destination", destination);
-  const result = await runCapture(sshBin(), sshArgs({ destination, command, connectTimeoutSeconds }), {
-    input,
-    timeoutMs,
-    captureStdout,
-    onStdout,
-  });
+  const result = await runCapture(
+    sshBin(),
+    sshArgs({ destination, command, connectTimeoutSeconds, controlPersistSeconds }),
+    {
+      input,
+      timeoutMs,
+      captureStdout,
+      onStdout,
+    },
+  );
   if (result.spawnError?.code === "ERR_WINDOWS_SHIM_UNSAFE_ARG") {
     throw new UserError(
       `cannot run ssh for ${destination}: ${JSON.stringify(result.spawnError.value)} cannot be passed safely ` +

@@ -2,9 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 import { HostCache, PRUNE_MAX_AGE_MS, pruneHostCache } from "../src/discovery/cache.js";
-import { tmpdir } from "./helpers/remote.js";
+import { initRepo, tmpdir } from "./helpers/remote.js";
+
+const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "bin", "backpass.js");
 
 test("cache index names cannot steer pruning outside the cache", () => {
   const stateDir = tmpdir("host-cache-index");
@@ -39,6 +43,31 @@ test("cache stats preserve host aliases that match prototype keys", () => {
   assert.deepEqual(stats.__proto__, { entries: 1, bytes: 4 });
   assert.equal(Object.prototype.entries, undefined);
   assert.equal(Object.prototype.bytes, undefined);
+});
+
+test("a direct propose run prunes unused host cache entries", () => {
+  const home = tmpdir("host-cache-propose-home");
+  const repo = initRepo(path.join(home, "demo"), "https://github.com/acme/demo.git");
+  fs.writeFileSync(path.join(repo, "AGENTS.md"), "# Agent instructions\n");
+  const cache = new HostCache(path.join(repo, ".backpass"));
+  const index = cache.readIndex();
+  const stale = cache.write(
+    index,
+    { host: "old-host", harness: "claude", key: "stale", kind: "raw", mtimeMs: 1, bytes: 5 },
+    Buffer.from("stale"),
+  );
+  index.entries[stale.name].usedAt = new Date(Date.now() - PRUNE_MAX_AGE_MS - 1_000).toISOString();
+  cache.writeIndex(index);
+
+  const result = spawnSync(process.execPath, [CLI, "propose", "--host", "none", "--since", "all"], {
+    cwd: repo,
+    encoding: "utf8",
+    env: { ...process.env, HOME: home, XDG_CONFIG_HOME: path.join(home, ".config") },
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.equal(fs.existsSync(stale.path), false);
+  assert.deepEqual(cache.readIndex().entries, {});
 });
 
 test("cache pruning removes stale entries, orphan payloads, and abandoned temporary files", () => {
