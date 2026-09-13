@@ -191,7 +191,7 @@ function emptyHostResult(entry) {
   };
 }
 
-async function locate(entry) {
+async function locate(entry, controlPath) {
   // One call answers all three questions - platform, git, and every Node on the box -
   // so a configured `node` skips the choosing, not the call.
   const result = await runSsh({
@@ -199,6 +199,7 @@ async function locate(entry) {
     command: LOCATE_COMMAND,
     timeoutMs: LOCATE_TIMEOUT_MS,
     connectTimeoutSeconds: entry.connectTimeoutSeconds,
+    controlPath,
   });
   const failure = classifySshFailure(result, {
     destination: entry.host,
@@ -215,10 +216,10 @@ async function locate(entry) {
 /**
  * Discover on every configured host, fail-soft per host.
  *
- * @param {{ hosts: object[], harnesses: string[], cutoffMs: number | null }} options
+ * @param {{ hosts: object[], harnesses: string[], cutoffMs: number | null, controlPath: string }} options
  * @returns {Promise<object[]>} one result per host, in configured order
  */
-export async function collectHosts({ hosts, harnesses, cutoffMs }) {
+export async function collectHosts({ hosts, harnesses, cutoffMs, controlPath }) {
   const results = [];
   for (const entry of hosts) {
     const result = emptyHostResult(entry);
@@ -231,6 +232,7 @@ export async function collectHosts({ hosts, harnesses, cutoffMs }) {
         destination: entry.host,
         connectTimeoutSeconds: entry.connectTimeoutSeconds,
         timeoutMs: LOCATE_TIMEOUT_MS,
+        controlPath,
       });
       const masterFailure = classifySshFailure(masterCall, {
         destination: entry.host,
@@ -243,6 +245,7 @@ export async function collectHosts({ hosts, harnesses, cutoffMs }) {
         result.master = {
           destination: entry.host,
           connectTimeoutSeconds: entry.connectTimeoutSeconds,
+          controlPath,
           closed: false,
         };
         await collectOneHost(entry, { harnesses, cutoffMs }, result);
@@ -275,7 +278,7 @@ export async function collectHosts({ hosts, harnesses, cutoffMs }) {
 }
 
 async function collectOneHost(entry, { harnesses, cutoffMs }, result) {
-  const located = await locate(entry);
+  const located = await locate(entry, result.master.controlPath);
   if (located.failure) {
     result.error = located.failure.message;
     return;
@@ -331,6 +334,7 @@ async function collectOneHost(entry, { harnesses, cutoffMs }, result) {
     input: program,
     timeoutMs: DISCOVER_TIMEOUT_MS,
     connectTimeoutSeconds: entry.connectTimeoutSeconds,
+    controlPath: result.master.controlPath,
   });
   const failure = classifySshFailure(call, {
     destination: entry.host,
@@ -570,6 +574,7 @@ async function fetchHost(host, pending, { cache, index, stats }) {
       input: buildProbeProgram({ protocol: PROTOCOL, op: "fetch", items }, { env: first.env || {} }),
       timeoutMs: FETCH_TIMEOUT_MS,
       connectTimeoutSeconds: first.connectTimeoutSeconds,
+      controlPath: first.master.controlPath,
       captureStdout: false,
       onStdout(chunk) {
         if (parseError) return;

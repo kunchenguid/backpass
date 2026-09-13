@@ -11,6 +11,7 @@ import * as cursorIde from "./adapters/cursor-ide.js";
 
 import { associate, passesStrict } from "./association.js";
 import { collectHosts, resolveHostList } from "./hosts.js";
+import { createControlPath } from "./remote/ssh.js";
 import { isSelfSession } from "./self.js";
 import { classifyInteraction, emptyInteractionSignals, hasInteractionSignals } from "../interaction.js";
 import { sinceCutoff } from "../config.js";
@@ -146,7 +147,12 @@ export async function discoverTranscripts({
   const perHost = [];
   const remoteMasters = [];
   if (hosts.length) {
-    const collected = await collectHosts({ hosts, harnesses: selected.filter((h) => getAdapter(h)), cutoffMs });
+    const collected = await collectHosts({
+      hosts,
+      harnesses: selected.filter((h) => getAdapter(h)),
+      cutoffMs,
+      controlPath: createControlPath(),
+    });
     remoteMasters.push(...collected.map((result) => result.master).filter(Boolean));
     for (const result of collected) {
       const entry = hosts.find((h) => h.host === result.host);

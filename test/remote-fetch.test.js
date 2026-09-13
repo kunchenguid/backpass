@@ -103,6 +103,56 @@ test("a file-backed remote session is cached as its own file, so the trace foote
   assert.match(trace, new RegExp(`raw transcript: ${cached.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
 });
 
+test("the explicit master survives idle time and cleanup failure stays fail-soft", async () => {
+  const s = scenario({
+    variant: {
+      enforceMaster: true,
+      masterStopFail: { stderr: "control socket already gone", code: 255 },
+    },
+  });
+
+  await withRemoteEnv({ localHome: s.localHome, hosts: s.hosts, log: s.log }, async () => {
+    const result = await discoverProject(s.repoRoot, {
+      discovery: { hosts: ["mac-home"], harnesses: s.harnesses },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    const stats = await prefetchRemoteTranscripts(result.transcripts, { config: result.config });
+    assert.equal(stats.fetched, 1);
+  });
+
+  const calls = sshCalls(s.log);
+  assert.deepEqual(
+    calls.map((call) => call.op),
+    ["master:start", null, "discover", "fetch", "master:stop"],
+  );
+  const configuredPath = calls[0].options.find((option) => option.startsWith("ControlPath=")).slice(12);
+  const socket = configuredPath.replace("%C", Buffer.from("mac-home").toString("hex"));
+  assert.equal(fs.existsSync(socket), false);
+});
+
+test("overlapping runs use private masters and cannot close each other's connection", async () => {
+  const s = scenario({ variant: { enforceMaster: true } });
+
+  await withRemoteEnv({ localHome: s.localHome, hosts: s.hosts, log: s.log }, async () => {
+    const options = { discovery: { hosts: ["mac-home"], harnesses: s.harnesses } };
+    const [first, second] = await Promise.all([
+      discoverProject(s.repoRoot, options),
+      discoverProject(s.repoRoot, options),
+    ]);
+    const starts = sshCalls(s.log).filter((call) => call.op === "master:start");
+    const paths = starts.map((call) => call.options.find((option) => option.startsWith("ControlPath=")));
+    assert.equal(new Set(paths).size, 2);
+
+    const firstStats = await prefetchRemoteTranscripts(first.transcripts, { config: first.config });
+    assert.equal(firstStats.fetched, 1);
+    fs.rmSync(path.join(first.config.state.root, "hosts"), { recursive: true, force: true });
+    const secondStats = await prefetchRemoteTranscripts(second.transcripts, { config: second.config });
+    assert.equal(secondStats.fetched, 1);
+  });
+
+  assert.equal(sshCalls(s.log).filter((call) => call.op === "master:stop").length, 2);
+});
+
 test("a SQLite-backed remote session arrives as events, since there is no per-session file to copy", async () => {
   const s = scenario({ harnesses: ["claude", "hermes"] });
   const { transcripts, stats } = await collectAndFetch(s);

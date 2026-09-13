@@ -1,5 +1,7 @@
+import { randomBytes } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 
 import { UserError } from "../../logger.js";
 import { runCapture } from "../../subprocess.js";
@@ -26,9 +28,40 @@ export const DEFAULT_CONNECT_TIMEOUT_SECONDS = 10;
 /** Wall clock per call. `ConnectTimeout` alone cannot bound a connection that succeeds and then waits. */
 export const DEFAULT_CALL_TIMEOUT_MS = 120_000;
 
-export function controlPath() {
-  return path.join(os.tmpdir(), "backpass-ssh-%C");
+export function createControlPath() {
+  return path.join(os.tmpdir(), `bp-${process.pid}-${randomBytes(6).toString("hex")}-%C`);
 }
+
+const fallbackControlPath = createControlPath();
+const activeMasters = new Map();
+
+function masterIdentity(master) {
+  return JSON.stringify([master.destination, master.controlPath]);
+}
+
+function cleanupMastersSync() {
+  for (const master of activeMasters.values()) {
+    try {
+      spawnSync(sshBin(), masterExitArgs(master.destination, master.connectTimeoutSeconds, master.controlPath), {
+        stdio: "ignore",
+        timeout: DEFAULT_CALL_TIMEOUT_MS,
+      });
+    } catch {}
+  }
+  activeMasters.clear();
+}
+
+for (const [signal, exitCode] of [
+  ["SIGINT", 130],
+  ["SIGTERM", 143],
+  ["SIGHUP", 129],
+]) {
+  process.on(signal, () => {
+    cleanupMastersSync();
+    if (process.listenerCount(signal) === 1) process.exit(exitCode);
+  });
+}
+process.once("exit", cleanupMastersSync);
 
 /**
  * Values that reach the ssh command line. A destination starting with `-` would be read
@@ -63,7 +96,7 @@ export function assertSafeSshValue(kind, value) {
  * The constant option set. `ControlMaster` multiplexes the three calls of one host over
  * a single connection; `ServerAliveInterval` notices a dropped link mid-fetch.
  */
-function baseArgs(connectTimeoutSeconds) {
+function baseArgs(connectTimeoutSeconds, controlPath, controlPersist = "60") {
   return [
     "-o",
     "BatchMode=yes",
@@ -76,22 +109,27 @@ function baseArgs(connectTimeoutSeconds) {
     "-o",
     "ControlMaster=auto",
     "-o",
-    `ControlPath=${controlPath()}`,
+    `ControlPath=${controlPath}`,
     "-o",
-    "ControlPersist=60",
+    `ControlPersist=${controlPersist}`,
   ];
 }
 
-export function sshArgs({ destination, command, connectTimeoutSeconds = DEFAULT_CONNECT_TIMEOUT_SECONDS }) {
-  return [...baseArgs(connectTimeoutSeconds), "-T", "--", destination, command];
+export function sshArgs({
+  destination,
+  command,
+  connectTimeoutSeconds = DEFAULT_CONNECT_TIMEOUT_SECONDS,
+  controlPath = fallbackControlPath,
+}) {
+  return [...baseArgs(connectTimeoutSeconds, controlPath), "-T", "--", destination, command];
 }
 
-function masterArgs(destination, connectTimeoutSeconds) {
-  return [...baseArgs(connectTimeoutSeconds), "-M", "-N", "-f", "-T", "--", destination];
+function masterArgs(destination, connectTimeoutSeconds, controlPath) {
+  return [...baseArgs(connectTimeoutSeconds, controlPath, "yes"), "-M", "-N", "-f", "-T", "--", destination];
 }
 
-function masterExitArgs(destination, connectTimeoutSeconds) {
-  return [...baseArgs(connectTimeoutSeconds), "-O", "exit", "-T", "--", destination];
+function masterExitArgs(destination, connectTimeoutSeconds, controlPath) {
+  return [...baseArgs(connectTimeoutSeconds, controlPath), "-O", "exit", "-T", "--", destination];
 }
 
 /**
@@ -121,9 +159,10 @@ export async function runSsh({
   connectTimeoutSeconds = DEFAULT_CONNECT_TIMEOUT_SECONDS,
   captureStdout = true,
   onStdout = null,
+  controlPath = fallbackControlPath,
 }) {
   assertSafeSshValue("ssh destination", destination);
-  const result = await runCapture(sshBin(), sshArgs({ destination, command, connectTimeoutSeconds }), {
+  const result = await runCapture(sshBin(), sshArgs({ destination, command, connectTimeoutSeconds, controlPath }), {
     input,
     timeoutMs,
     captureStdout,
@@ -137,10 +176,18 @@ export async function startSshMaster({
   destination,
   connectTimeoutSeconds = DEFAULT_CONNECT_TIMEOUT_SECONDS,
   timeoutMs = DEFAULT_CALL_TIMEOUT_MS,
+  controlPath,
 }) {
   assertSafeSshValue("ssh destination", destination);
-  const result = await runCapture(sshBin(), masterArgs(destination, connectTimeoutSeconds), { timeoutMs });
+  const result = await runCapture(sshBin(), masterArgs(destination, connectTimeoutSeconds, controlPath), { timeoutMs });
   raiseWindowsShimRefusal(result, destination);
+  if (result.code === 0) {
+    activeMasters.set(masterIdentity({ destination, controlPath }), {
+      destination,
+      connectTimeoutSeconds,
+      controlPath,
+    });
+  }
   return result;
 }
 
@@ -148,10 +195,13 @@ export async function closeSshMaster(master) {
   if (!master || master.closed) return;
   master.closed = true;
   try {
-    await runCapture(sshBin(), masterExitArgs(master.destination, master.connectTimeoutSeconds), {
+    await runCapture(sshBin(), masterExitArgs(master.destination, master.connectTimeoutSeconds, master.controlPath), {
       timeoutMs: DEFAULT_CALL_TIMEOUT_MS,
     });
-  } catch {}
+  } catch {
+  } finally {
+    activeMasters.delete(masterIdentity(master));
+  }
 }
 
 export async function closeSshMasters(masters = []) {
