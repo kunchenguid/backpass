@@ -113,6 +113,29 @@ test("a SQLite-backed remote session arrives as events, since there is no per-se
   );
 });
 
+test("fetch bookkeeping keeps identical keys from different harnesses separate", async () => {
+  const s = scenario();
+  await withRemoteEnv({ localHome: s.localHome, hosts: s.hosts, log: s.log }, async () => {
+    const discovered = await discoverProject(s.repoRoot, {
+      discovery: { hosts: ["mac-home"], harnesses: ["claude"] },
+    });
+    const claude = discovered.transcripts[0];
+    const codex = {
+      ...claude,
+      harness: "codex",
+      nativeId: claude.nativeId,
+      remote: { ...claude.remote },
+    };
+
+    const stats = await prefetchRemoteTranscripts([claude, codex], { config: discovered.config });
+    assert.equal(stats.fetched, 2);
+    assert.equal(stats.failed, 0);
+    assert.ok(fs.existsSync(claude.remote.cachePath));
+    assert.ok(fs.existsSync(codex.remote.cachePath));
+    assert.notEqual(claude.remote.cachePath, codex.remote.cachePath);
+  });
+});
+
 test("a second run reuses the cached copy and makes no fetch call at all", async () => {
   const s = scenario();
   const first = await collectAndFetch(s);

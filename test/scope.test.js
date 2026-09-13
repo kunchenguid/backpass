@@ -6,7 +6,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 
 import { loadConfig } from "../src/config.js";
-import { associateUser, passesProjectFilter, resolveScope } from "../src/scope.js";
+import { associateUser, associateUserRemote, passesProjectFilter, resolveScope } from "../src/scope.js";
 
 function git(args, cwd) {
   execFileSync("git", args, { cwd, stdio: "ignore" });
@@ -113,6 +113,19 @@ test("user association groups a deleted worktree by recorded remote", () => {
   assert.equal(result.tier, 2);
   assert.equal(result.project, "github.com/acme/other");
   assert.equal(result.projectRoot, null);
+});
+
+test("remote user fallback preserves the recorded cwd in its project key", () => {
+  const cwd = "/aliases/demo";
+  const result = associateUserRemote(
+    { cwd, remotes: [] },
+    {
+      host: "mac-home",
+      facts: { [cwd]: { real: "/repos/demo", exists: true, toplevel: null, remotes: [] } },
+    },
+  );
+  assert.equal(result.tier, 3);
+  assert.equal(result.project, `mac-home:${cwd}`);
 });
 
 test("user --strict drops sessions with only a dead unrecognisable cwd", () => {

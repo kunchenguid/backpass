@@ -387,12 +387,21 @@ async function collectOneHost(entry, { harnesses, cutoffMs }, result) {
         Array.isArray(facts.remotes) &&
         facts.remotes.every((remote) => typeof remote === "string"),
     );
+  const validDescriptorFacts =
+    validDescriptors &&
+    validFacts &&
+    response.transcripts.every((descriptor) =>
+      [descriptor.cwd, descriptor.gitRoot]
+        .filter((candidate) => candidate !== null)
+        .every((candidate) => candidate.length > 0 && Object.hasOwn(response.paths, candidate)),
+    );
   if (
     !validDescriptors ||
     !validRecords ||
     !validScalars ||
     !validHarnesses ||
     !validFacts ||
+    !validDescriptorFacts ||
     !Array.isArray(response.warnings) ||
     response.warnings.some((note) => typeof note !== "string")
   ) {
@@ -479,16 +488,20 @@ async function fetchHost(host, pending, { cache, index, stats }) {
   emitProgress("discover:host:fetch", { host, items: items.length });
 
   const reader = createFrameReader();
-  const transcriptsByKey = new Map(pending.map((transcript) => [transcript.remote.key, transcript]));
+  const fetchIdentity = (harness, key) => JSON.stringify([harness, key]);
+  const transcriptsByKey = new Map(
+    pending.map((transcript) => [fetchIdentity(transcript.harness, transcript.remote.key), transcript]),
+  );
   const outcomes = new Map();
   let parseError = null;
 
   function acceptFrame(frame) {
-    const key = frame.header.key;
-    const transcript = transcriptsByKey.get(key);
-    if (!transcript || outcomes.has(key)) return;
+    const { harness, key } = frame.header;
+    const identity = fetchIdentity(harness, key);
+    const transcript = transcriptsByKey.get(identity);
+    if (!transcript || outcomes.has(identity)) return;
     if (frame.header.kind === "error") {
-      outcomes.set(key, { error: frame.header.error || "remote fetch failed" });
+      outcomes.set(identity, { error: frame.header.error || "remote fetch failed" });
       return;
     }
     try {
@@ -509,9 +522,9 @@ async function fetchHost(host, pending, { cache, index, stats }) {
         model: frame.header.model || null,
       };
       const staged = cache.stage(host, transcript.harness, key, frame.body);
-      outcomes.set(key, { staged, metadata });
+      outcomes.set(identity, { staged, metadata });
     } catch (err) {
-      outcomes.set(key, { error: err.message });
+      outcomes.set(identity, { error: err.message });
     }
   }
 
@@ -541,7 +554,7 @@ async function fetchHost(host, pending, { cache, index, stats }) {
   const failure = classifySshFailure(call, { destination: host, timeoutMs: FETCH_TIMEOUT_MS });
   const streamError = failure?.message || parseError || (!reader.ended ? "remote fetch incomplete" : null);
   for (const transcript of pending) {
-    const outcome = outcomes.get(transcript.remote.key);
+    const outcome = outcomes.get(fetchIdentity(transcript.harness, transcript.remote.key));
     if (outcome?.staged && !streamError) {
       try {
         const written = cache.commit(index, outcome.staged, outcome.metadata);

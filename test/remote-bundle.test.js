@@ -81,7 +81,7 @@ test("the locate command and shipped probe execute through the supported remote 
 test("a fetch frame is read back byte for byte, and a torn stream is reported rather than parsed", () => {
   const body = Buffer.from([0x61, 0x0a, 0x62, 0x00, 0x63, 0x7b, 0x22, 0x65, 0x6e, 0x64, 0x22]);
   const stream = Buffer.concat([
-    encodeFrameHeader({ key: "one", bytes: body.length, kind: "raw" }),
+    encodeFrameHeader({ key: "one", harness: "claude", bytes: body.length, kind: "raw" }),
     body,
     encodeEndFrame(),
   ]);
@@ -101,4 +101,18 @@ test("a fetch frame is read back byte for byte, and a torn stream is reported ra
   assert.equal(torn.ended, false);
   assert.equal(torn.incomplete.header.key, "one");
   assert.equal(torn.incomplete.received, body.length - 4);
+});
+
+test("malformed fetch headers are rejected instead of becoming empty transcripts", () => {
+  for (const header of [
+    { key: "one", harness: "claude", bytes: "invalid", kind: "raw" },
+    { key: "one", harness: "claude", bytes: -1, kind: "raw" },
+    { key: "one", bytes: 0, kind: "raw" },
+    { key: "one", harness: "claude", bytes: 0, kind: "unknown" },
+    { key: "one", harness: "claude", bytes: 1, kind: "error", error: "failed" },
+  ]) {
+    const reader = createFrameReader();
+    assert.throws(() => reader.push(encodeFrameHeader(header)), /probe response unreadable/);
+    assert.equal(reader.ended, false);
+  }
 });

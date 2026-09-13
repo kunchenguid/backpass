@@ -151,7 +151,7 @@ export function associateUserRemote(descriptor, { facts, host, strict = false })
     tier: 3,
     confidence: "cwd",
     reason: `cwd ${cwd} on ${host}`,
-    project: `${host}:${fact?.real || cwd}`,
+    project: `${host}:${cwd}`,
     projectRoot: null,
   };
 }

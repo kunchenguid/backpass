@@ -62,13 +62,26 @@ export function createFrameReader() {
           } catch {
             throw new Error(`probe response unreadable: frame header is not JSON (${line.slice(0, 120)})`);
           }
-          if (header?.end === true) {
+          if (!header || typeof header !== "object" || Array.isArray(header)) {
+            throw new Error("probe response unreadable: frame header is not an object");
+          }
+          if (header.end === true) {
             ended = true;
             return frames;
           }
+          const validFrame =
+            typeof header.key === "string" &&
+            header.key.length > 0 &&
+            typeof header.harness === "string" &&
+            header.harness.length > 0 &&
+            ["raw", "events", "error"].includes(header.kind) &&
+            Number.isSafeInteger(header.bytes) &&
+            header.bytes >= 0 &&
+            (header.kind !== "error" || (header.bytes === 0 && typeof header.error === "string"));
+          if (!validFrame) throw new Error("probe response unreadable: invalid frame header");
           awaiting = header;
         }
-        const want = Number(awaiting.bytes) || 0;
+        const want = awaiting.bytes;
         if (buffer.length < want) return frames;
         frames.push({ header: awaiting, body: Buffer.from(buffer.subarray(0, want)) });
         buffer = buffer.subarray(want);
