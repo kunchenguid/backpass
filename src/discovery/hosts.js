@@ -311,8 +311,36 @@ async function collectOneHost(entry, { harnesses, cutoffMs }, result) {
     result.error = "probe response unreadable";
     return;
   }
-  if (response?.protocol !== PROTOCOL) {
-    result.error = `probe spoke protocol ${response?.protocol}, this backpass speaks ${PROTOCOL}`;
+  if (!response || typeof response !== "object" || Array.isArray(response)) {
+    result.error = "probe response unreadable";
+    return;
+  }
+  if (response.protocol !== PROTOCOL) {
+    result.error = `probe spoke protocol ${response.protocol}, this backpass speaks ${PROTOCOL}`;
+    return;
+  }
+  const validDescriptors =
+    Array.isArray(response.transcripts) &&
+    response.transcripts.every(
+      (descriptor) =>
+        descriptor &&
+        typeof descriptor === "object" &&
+        typeof descriptor.harness === "string" &&
+        typeof descriptor.id === "string" &&
+        typeof descriptor.path === "string" &&
+        typeof descriptor.key === "string" &&
+        (descriptor.kind === "raw" || descriptor.kind === "events"),
+    );
+  const validRecords = [response.harnesses, response.paths].every(
+    (value) => value && typeof value === "object" && !Array.isArray(value),
+  );
+  if (
+    !validDescriptors ||
+    !validRecords ||
+    !Array.isArray(response.warnings) ||
+    response.warnings.some((note) => typeof note !== "string")
+  ) {
+    result.error = "probe response unreadable";
     return;
   }
 

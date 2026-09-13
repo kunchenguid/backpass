@@ -252,7 +252,7 @@ function resolveUserScope(cwd, config, { strict = false, home = os.homedir(), as
   };
   const normalizeProjects = (transcripts) => {
     for (const transcript of transcripts) {
-      if (transcript.association?.tier !== 3 || !transcript.cwd) continue;
+      if (transcript.host || transcript.association?.tier !== 3 || !transcript.cwd) continue;
       const cwdPath = realpathOrResolve(transcript.cwd);
       const match = [...knownWorktrees.entries()]
         .filter(([worktree]) => cwdPath === worktree || cwdPath.startsWith(`${worktree}${path.sep}`))

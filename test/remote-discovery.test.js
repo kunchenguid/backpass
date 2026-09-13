@@ -186,6 +186,22 @@ test("a non-POSIX remote is refused by name rather than probed", async () => {
   assert.match(result.perHost[0].error, /Windows and other non-POSIX remotes are not supported/);
 });
 
+test("a malformed probe response skips only that host", async () => {
+  const s = scenario({
+    variant: {
+      discoverOutput: JSON.stringify({ protocol: 1, harnesses: {}, transcripts: null, paths: {}, warnings: [] }),
+    },
+  });
+  writeClaudeSession(s.localHome, { cwd: s.repoRoot, id: "aaaaaaaa-1111-2222-3333-444444444444" });
+
+  const result = await withRemoteEnv({ localHome: s.localHome, hosts: s.hosts }, () =>
+    discoverProject(s.repoRoot, { discovery: { hosts: ["mac-home"], harnesses: ["claude"] } }),
+  );
+  assert.equal(result.transcripts.length, 1);
+  assert.equal(result.transcripts[0].host, null);
+  assert.equal(result.perHost[0].error, "probe response unreadable");
+});
+
 test("discovery.hosts in the repository config is refused and points at the personal file", async () => {
   const localHome = tmpdir("remote-repoconf");
   const repoRoot = initRepo(path.join(localHome, "demo"), `https://${REMOTE}.git`);
@@ -273,6 +289,28 @@ test("a user-scope run collects from a host and keys the project by the clone's 
   // A clone with no remote has nothing to agree on, so its key names the machine.
   assert.equal(byId.get("22222222-2222-2222-2222-222222222222").project, `mac-home:${private_}`);
   for (const transcript of result.transcripts) assert.equal(transcript.host, "mac-home");
+});
+
+test("user project normalization never requalifies a hosted tier-3 path", async () => {
+  const home = tmpdir("remote-user-normalize");
+  const localRepo = initRepo(path.join(home, "shared"), "git@github.com:acme/shared.git");
+
+  await withRemoteEnv({ localHome: home, hosts: {} }, async () => {
+    const config = loadConfig(null, {}, { kind: "user" });
+    const scope = resolveScope(home, { scope: "user" }, config, null, { home });
+    assert.equal(scope.associate({ cwd: localRepo, remotes: [] }).tier, 1);
+    const remote = {
+      host: "mac-home",
+      cwd: localRepo,
+      project: `mac-home:${localRepo}`,
+      association: { tier: 3, project: `mac-home:${localRepo}`, confidence: "path", reason: "remote dead path" },
+    };
+
+    scope.normalizeProjects([remote]);
+    assert.equal(remote.project, `mac-home:${localRepo}`);
+    assert.equal(remote.association.project, `mac-home:${localRepo}`);
+    assert.equal(remote.association.reason, "remote dead path");
+  });
 });
 
 test("every named ssh failure is classified into the message that says what to do next", () => {

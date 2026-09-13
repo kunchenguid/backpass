@@ -72,6 +72,10 @@ function runCommand() {
     process.stdout.write(host.locateOutput ? `${host.locateOutput}\n` : "");
     process.exit(0);
   }
+  if (op === "discover" && host.discoverOutput !== undefined) {
+    process.stdout.write(`${host.discoverOutput}\n`);
+    process.exit(0);
+  }
 
   const env = { ...process.env, HOME: host.home, USERPROFILE: host.home };
   if (host.nodeOptions) env.NODE_OPTIONS = host.nodeOptions;

@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { distill } from "../src/distill.js";
 import { cwdHash } from "../src/discovery/adapters/cursor-cli.js";
 import { evidenceKey } from "../src/state.js";
+import { SELF_SESSION_SENTINEL } from "../src/sentinel.js";
 import { prefetchRemoteTranscripts } from "../src/discovery/hosts.js";
 import { readTranscript } from "../src/discovery/index.js";
 import {
@@ -175,6 +176,24 @@ test("event-backed fetch updates its signature when the remote database grows", 
     const fetched = await readTranscript(transcript);
     assert.ok(fetched.events.some((event) => event.text === "A message added after discovery."));
   });
+});
+
+test("an event-backed self session is excluded before it reaches the corpus", async () => {
+  const s = scenario({ harnesses: ["hermes"] });
+  const db = new DatabaseSync(path.join(s.remoteHome, ".hermes", "state.db"));
+  try {
+    db.prepare("UPDATE messages SET content = ? WHERE id = 1").run(
+      `${SELF_SESSION_SENTINEL}\nAnalyze this transcript.`,
+    );
+  } finally {
+    db.close();
+  }
+
+  const result = await withRemoteEnv({ localHome: s.localHome, hosts: s.hosts, log: s.log }, () =>
+    discoverProject(s.repoRoot, { discovery: { hosts: ["mac-home"], harnesses: ["hermes"] } }),
+  );
+  assert.deepEqual(result.transcripts, []);
+  assert.equal(result.perHost[0].self, 1);
 });
 
 test("an unrelated Hermes session update preserves another session's cached events", async () => {

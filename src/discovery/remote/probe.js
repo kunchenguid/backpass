@@ -13,6 +13,7 @@ import * as cursorCli from "../adapters/cursor-cli.js";
 import * as cursorIde from "../adapters/cursor-ide.js";
 
 import { isSelfSession } from "../self.js";
+import { SELF_SESSION_SENTINEL } from "../../sentinel.js";
 import { collectPathFacts } from "./git-facts.js";
 import { encodeEndFrame, encodeFrameHeader, PROTOCOL } from "./frames.js";
 import { supportsNodeSqlite } from "./runtime.js";
@@ -68,27 +69,33 @@ function eventSignature(result) {
 }
 
 async function descriptorFrom(adapter, row, id) {
-  const contentSignature = adapter.sqliteBacked ? eventSignature(await adapter.read(row)) : null;
+  const content = adapter.sqliteBacked ? await adapter.read(row) : null;
+  const contentSignature = content ? eventSignature(content) : null;
+  const firstUser = content?.events?.find((event) => event?.kind === "message" && event.role === "user");
+  const self = typeof firstUser?.text === "string" && firstUser.text.startsWith(SELF_SESSION_SENTINEL);
   return {
-    harness: adapter.name,
-    kind: fetchKind(adapter),
-    key: row.key ?? row.path,
-    id,
-    path: row.path,
-    cwd: row.cwd || null,
-    gitRoot: row.gitRoot || null,
-    gitBranch: row.gitBranch || null,
-    remotes: Array.isArray(row.remotes) ? row.remotes : [],
-    title: row.title || null,
-    startedAt: row.startedAt || null,
-    mtimeMs: row.mtimeMs || 0,
-    bytes: row.bytes || 0,
-    contentSignature,
-    model: row.model || null,
-    extra: row.extra || {},
-    interactionSignals: row.interactionSignals ?? row.extra?.interactionSignals ?? {},
-    /** The file the raw fetch sends and the trace footer names; unused for SQLite stores. */
-    rawPath: row.path,
+    self,
+    descriptor: {
+      harness: adapter.name,
+      kind: fetchKind(adapter),
+      key: row.key ?? row.path,
+      id,
+      path: row.path,
+      cwd: row.cwd || null,
+      gitRoot: row.gitRoot || null,
+      gitBranch: row.gitBranch || null,
+      remotes: Array.isArray(row.remotes) ? row.remotes : [],
+      title: row.title || null,
+      startedAt: row.startedAt || null,
+      mtimeMs: row.mtimeMs || 0,
+      bytes: row.bytes || 0,
+      contentSignature,
+      model: row.model || null,
+      extra: row.extra || {},
+      interactionSignals: row.interactionSignals ?? row.extra?.interactionSignals ?? {},
+      /** The file the raw fetch sends and the trace footer names; unused for SQLite stores. */
+      rawPath: row.path,
+    },
   };
 }
 
@@ -102,7 +109,12 @@ async function discoverHarness(adapter, { cutoffMs }) {
       stats.scanned += 1;
       stats.classified += 1;
       try {
-        out.push(await descriptorFrom(adapter, row, row.id));
+        const built = await descriptorFrom(adapter, row, row.id);
+        if (built.self) {
+          stats.self += 1;
+          continue;
+        }
+        out.push(built.descriptor);
       } catch (err) {
         warnings.push(`${adapter.name} session ${row.id || row.key || row.path} skipped: ${err.message}`);
       }
@@ -117,15 +129,20 @@ async function discoverHarness(adapter, { cutoffMs }) {
     if (!classified) continue;
     stats.classified += 1;
     const merged = { ...candidate, ...classified };
-    let descriptor;
+    let built;
     try {
-      descriptor = await descriptorFrom(adapter, merged, classified.id);
+      built = await descriptorFrom(adapter, merged, classified.id);
     } catch (err) {
       warnings.push(
         `${adapter.name} session ${classified.id || candidate.key || candidate.path} skipped: ${err.message}`,
       );
       continue;
     }
+    if (built.self) {
+      stats.self += 1;
+      continue;
+    }
+    const descriptor = built.descriptor;
     descriptor.rawPath = rawPathOf(adapter, merged);
     // backpass's own acpx sessions are filed under the repo cwd on whichever machine ran
     // them; drop a remote one here so it never crosses the wire, let alone the corpus.
