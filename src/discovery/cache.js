@@ -69,18 +69,24 @@ export class HostCache {
    * the descriptor's own `mtimeMs` + `bytes`, so a session that grew since the last run
    * is refetched rather than analyzed from a prefix of itself.
    */
-  lookup(index, { host, harness, key, mtimeMs, bytes }) {
+  lookup(index, { host, harness, key, mtimeMs, bytes, contentSignature = null }) {
     const name = entryName(host, harness, key);
     const entry = index.entries[name];
     if (!entry) return null;
-    if (entry.mtimeMs !== (mtimeMs ?? null) || entry.bytes !== (bytes ?? null)) return null;
+    if (
+      entry.mtimeMs !== (mtimeMs ?? null) ||
+      entry.bytes !== (bytes ?? null) ||
+      (entry.contentSignature ?? null) !== contentSignature
+    ) {
+      return null;
+    }
     const file = path.join(this.root, name);
     if (!fs.existsSync(file)) return null;
     return { ...entry, name, path: file };
   }
 
   /** @returns {{ name: string, path: string, kind: string, bytes: number }} */
-  write(index, { host, harness, key, kind, mtimeMs, bytes, model = null }, body) {
+  write(index, { host, harness, key, kind, mtimeMs, bytes, contentSignature = null, model = null }, body) {
     this.ensure();
     const name = entryName(host, harness, key);
     const file = path.join(this.root, name);
@@ -94,6 +100,7 @@ export class HostCache {
       kind,
       mtimeMs: mtimeMs ?? null,
       bytes: bytes ?? null,
+      contentSignature,
       model,
       cachedBytes: body.length,
       usedAt: new Date().toISOString(),

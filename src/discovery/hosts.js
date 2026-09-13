@@ -361,6 +361,7 @@ export async function prefetchRemoteTranscripts(transcripts, { config }) {
         key: transcript.remote.key,
         mtimeMs: transcript.mtimeMs,
         bytes: transcript.bytes,
+        contentSignature: transcript.contentSignature,
       });
       if (hit) {
         transcript.remote.cachePath = hit.path;
@@ -413,6 +414,8 @@ async function fetchHost(host, pending, { cache, index, stats }) {
       if (frame.header.kind === "raw") {
         if (Number.isFinite(frame.header.mtimeMs)) transcript.mtimeMs = frame.header.mtimeMs;
         transcript.bytes = frame.body.length;
+      } else if (typeof frame.header.contentSignature === "string") {
+        transcript.contentSignature = frame.header.contentSignature;
       }
       const written = cache.write(
         index,
@@ -423,6 +426,7 @@ async function fetchHost(host, pending, { cache, index, stats }) {
           kind: frame.header.kind,
           mtimeMs: transcript.mtimeMs,
           bytes: transcript.bytes,
+          contentSignature: transcript.contentSignature,
           model: frame.header.model || null,
         },
         frame.body,
@@ -463,7 +467,8 @@ async function fetchHost(host, pending, { cache, index, stats }) {
   for (const transcript of pending) {
     const outcome = outcomes.get(transcript.remote.key);
     if (outcome?.ok) continue;
-    transcript.remoteError = outcome?.error || parseError || failure?.message || "remote fetch incomplete";
+    const reason = outcome?.error || parseError || failure?.message || "remote fetch incomplete";
+    transcript.remoteError = `${host}: ${reason}`;
     stats.failed += 1;
   }
   if (!reader.ended && !failure && !parseError && outcomes.size < pending.length) {

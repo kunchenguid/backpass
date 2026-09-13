@@ -3,9 +3,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 
 import { distill } from "../src/distill.js";
+import { cwdHash } from "../src/discovery/adapters/cursor-cli.js";
+import { evidenceKey } from "../src/state.js";
 import { prefetchRemoteTranscripts } from "../src/discovery/hosts.js";
 import { readTranscript } from "../src/discovery/index.js";
 import {
@@ -129,7 +132,7 @@ test("a torn fetch stream fails that transcript by name and leaves the next run 
   assert.equal(torn.stats.failed, 1);
   assert.equal(torn.stats.fetched, 0);
   const [transcript] = torn.transcripts;
-  assert.equal(transcript.remoteError, "remote fetch incomplete");
+  assert.equal(transcript.remoteError, "mac-home: remote fetch incomplete");
   await assert.rejects(() => readTranscript(transcript), /remote fetch incomplete/);
 
   // Nothing was cached, so the next run fetches again rather than reading a prefix.
@@ -137,6 +140,95 @@ test("a torn fetch stream fails that transcript by name and leaves the next run 
   const retried = await collectAndFetch(s);
   assert.equal(retried.stats.fetched, 1);
   assert.equal(retried.transcripts[0].remoteError, undefined);
+});
+
+test("event-backed fetch updates its signature when the remote database grows", async () => {
+  const s = scenario({ harnesses: ["hermes"] });
+
+  await withRemoteEnv({ localHome: s.localHome, hosts: s.hosts, log: s.log }, async () => {
+    const discovered = await discoverProject(s.repoRoot, {
+      discovery: { hosts: ["mac-home"], harnesses: ["hermes"] },
+    });
+    const transcript = discovered.transcripts[0];
+    const beforeSignature = transcript.contentSignature;
+    const beforeEvidence = evidenceKey(transcript, "memory");
+    const dbPath = path.join(s.remoteHome, ".hermes", "state.db");
+    const db = new DatabaseSync(dbPath);
+    try {
+      db.prepare(`INSERT INTO messages (id, session_id, role, content, timestamp) VALUES (?, ?, ?, ?, ?)`).run(
+        3,
+        transcript.nativeId,
+        "assistant",
+        "A message added after discovery.",
+        1_800_000_030,
+      );
+    } finally {
+      db.close();
+    }
+    const changedAt = new Date(Date.now() + 2_000);
+    fs.utimesSync(dbPath, changedAt, changedAt);
+
+    const stats = await prefetchRemoteTranscripts(discovered.transcripts, { config: discovered.config });
+    assert.equal(stats.fetched, 1);
+    assert.notEqual(transcript.contentSignature, beforeSignature);
+    assert.notEqual(evidenceKey(transcript, "memory"), beforeEvidence);
+    const fetched = await readTranscript(transcript);
+    assert.ok(fetched.events.some((event) => event.text === "A message added after discovery."));
+  });
+});
+
+test("Cursor database growth invalidates cached events even when meta.json is unchanged", async () => {
+  const s = scenario({ harnesses: ["cursor"] });
+  const sessionDir = path.join(s.remoteHome, ".cursor", "chats", cwdHash(s.remoteClone), "cursor-remote-1");
+  fs.mkdirSync(sessionDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(sessionDir, "meta.json"),
+    JSON.stringify({ cwd: s.remoteClone, title: "remote cursor", createdAtMs: 1_800_000_000_000 }),
+  );
+  const dbPath = path.join(sessionDir, "store.db");
+  const db = new DatabaseSync(dbPath);
+  db.exec("CREATE TABLE blobs (id TEXT PRIMARY KEY, data BLOB)");
+  db.prepare("INSERT INTO blobs (id, data) VALUES (?, ?)").run(
+    "one",
+    Buffer.from(JSON.stringify({ role: "user", content: "First message" })),
+  );
+  db.close();
+
+  const first = await collectAndFetch(s);
+  assert.equal(first.stats.fetched, 1);
+  const metaMtime = fs.statSync(path.join(sessionDir, "meta.json")).mtimeMs;
+
+  const grown = new DatabaseSync(dbPath);
+  grown
+    .prepare("INSERT INTO blobs (id, data) VALUES (?, ?)")
+    .run("two", Buffer.from(JSON.stringify({ role: "assistant", content: "Second message" })));
+  grown.close();
+  const changedAt = new Date(Date.now() + 2_000);
+  fs.utimesSync(dbPath, changedAt, changedAt);
+
+  const second = await collectAndFetch(s);
+  assert.equal(second.stats.fetched, 1);
+  assert.equal(second.stats.reused, 0);
+  assert.equal(fs.statSync(path.join(sessionDir, "meta.json")).mtimeMs, metaMtime);
+  const fetched = await readTranscript(second.transcripts[0]);
+  assert.deepEqual(
+    fetched.events.filter((event) => event.kind === "message").map((event) => event.text),
+    ["First message", "Second message"],
+  );
+});
+
+test("a remote item failure names its host", async () => {
+  const s = scenario();
+  await withRemoteEnv({ localHome: s.localHome, hosts: s.hosts, log: s.log }, async () => {
+    const discovered = await discoverProject(s.repoRoot, {
+      discovery: { hosts: ["mac-home"], harnesses: ["claude"] },
+    });
+    fs.rmSync(discovered.transcripts[0].path);
+    const stats = await prefetchRemoteTranscripts(discovered.transcripts, { config: discovered.config });
+    assert.equal(stats.failed, 1);
+    assert.match(discovered.transcripts[0].remoteError, /^mac-home: /);
+    await assert.rejects(() => readTranscript(discovered.transcripts[0]), /mac-home: /);
+  });
 });
 
 test("scan --json carries the host on each transcript and one perHost row", async () => {

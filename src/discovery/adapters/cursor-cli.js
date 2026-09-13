@@ -44,6 +44,10 @@ export function enumerate() {
   return out;
 }
 
+export function contentPath(ref) {
+  return path.join(ref.path, "store.db");
+}
+
 export function classify(candidate) {
   const meta = readJsonFile(path.join(candidate.path, "meta.json"));
   if (!meta?.cwd) return null;
@@ -60,7 +64,7 @@ export function classify(candidate) {
 }
 
 export async function read(ref) {
-  const db = await openReadOnly(path.join(ref.path, "store.db"));
+  const db = await openReadOnly(contentPath(ref));
   if (!db) return { events: [], model: null };
 
   try {

@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import os from "node:os";
+import path from "node:path";
 import { execFileSync } from "node:child_process";
 
 import * as claude from "../adapters/claude.js";
@@ -59,6 +60,19 @@ function fetchKind(adapter) {
   return adapter.sqliteBacked ? "events" : "raw";
 }
 
+function contentSignature(adapter, ref) {
+  const file = adapter.contentPath ? adapter.contentPath(ref) : ref.path;
+  if (typeof file !== "string" || !file) return null;
+  const parts = [];
+  for (const candidate of [file, `${file}-wal`]) {
+    try {
+      const stat = fs.statSync(candidate);
+      parts.push(`${path.basename(candidate)}:${stat.size}:${stat.mtimeMs}`);
+    } catch {}
+  }
+  return parts.length ? parts.join("|") : null;
+}
+
 function descriptorFrom(adapter, row, id) {
   return {
     harness: adapter.name,
@@ -74,6 +88,7 @@ function descriptorFrom(adapter, row, id) {
     startedAt: row.startedAt || null,
     mtimeMs: row.mtimeMs || 0,
     bytes: row.bytes || 0,
+    contentSignature: adapter.sqliteBacked ? contentSignature(adapter, row) : null,
     model: row.model || null,
     extra: row.extra || {},
     interactionSignals: row.interactionSignals ?? row.extra?.interactionSignals ?? {},
@@ -209,6 +224,7 @@ export async function fetchTranscripts({ items = [] } = {}, { stdout = process.s
           kind: "events",
           bytes: body.length,
           mtimeMs: item.mtimeMs ?? null,
+          contentSignature: contentSignature(adapter, item),
           model: result.model || null,
         };
       }

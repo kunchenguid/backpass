@@ -373,6 +373,7 @@ function toTranscript(adapter, row, association, id, { host = null, remote = nul
     startedAt: row.startedAt || null,
     mtimeMs: row.mtimeMs || 0,
     bytes: row.bytes || 0,
+    contentSignature: row.contentSignature || null,
     experimental: Boolean(adapter.experimental),
     association,
     extra: row.extra || {},
