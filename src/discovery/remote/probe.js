@@ -15,7 +15,7 @@ import * as cursorIde from "../adapters/cursor-ide.js";
 import { isSelfSession } from "../self.js";
 import { SELF_SESSION_SENTINEL } from "../../sentinel.js";
 import { collectPathFacts } from "./git-facts.js";
-import { encodeEndFrame, encodeFrameHeader, PROTOCOL } from "./frames.js";
+import { encodeEndFrame, encodeFrameHeader, MAX_FRAME_BODY_BYTES, PROTOCOL } from "./frames.js";
 import { supportsNodeSqlite } from "./runtime.js";
 
 /**
@@ -239,11 +239,15 @@ export async function fetchTranscripts({ items = [] } = {}, { stdout = process.s
       if (!adapter) throw new Error(`no adapter for harness ${item.harness}`);
       if (fetchKind(adapter) === "raw") {
         const file = rawPathOf(adapter, item);
+        const stat = fs.statSync(file);
+        if (stat.size > MAX_FRAME_BODY_BYTES) throw transcriptTooLarge(item, stat.size);
         body = fs.readFileSync(file);
+        if (body.length > MAX_FRAME_BODY_BYTES) throw transcriptTooLarge(item, body.length);
         header = { key: item.key, harness: item.harness, kind: "raw", bytes: body.length, mtimeMs: mtimeOf(file) };
       } else {
         const result = await adapter.read(item);
         body = Buffer.from(JSON.stringify({ events: result.events || [], model: result.model || null }), "utf8");
+        if (body.length > MAX_FRAME_BODY_BYTES) throw transcriptTooLarge(item, body.length);
         header = {
           key: item.key,
           harness: item.harness,
@@ -270,6 +274,10 @@ function mtimeOf(file) {
   } catch {
     return null;
   }
+}
+
+function transcriptTooLarge(item, bytes) {
+  return new Error(`transcript ${item.key} too large (${bytes} bytes)`);
 }
 
 /** The loader's entry point: one request in, one response on stdout. */

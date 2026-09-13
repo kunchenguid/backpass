@@ -44,6 +44,8 @@ export function createFrameReader() {
   let buffered = 0;
   /** @type {object | null} */
   let awaiting = null;
+  let discardRemaining = 0;
+  let discarded = 0;
   let ended = false;
 
   function consume(size) {
@@ -70,6 +72,26 @@ export function createFrameReader() {
     return output;
   }
 
+  function discard(size) {
+    let remaining = size;
+    while (remaining > 0) {
+      const chunk = chunks[head];
+      const available = chunk.length - headOffset;
+      const take = Math.min(remaining, available);
+      headOffset += take;
+      buffered -= take;
+      remaining -= take;
+      if (headOffset === chunk.length) {
+        head += 1;
+        headOffset = 0;
+      }
+    }
+    if (head > 0 && (head >= 1024 || head === chunks.length)) {
+      chunks = chunks.slice(head);
+      head = 0;
+    }
+  }
+
   function peek(size) {
     const output = Buffer.allocUnsafe(size);
     let written = 0;
@@ -91,6 +113,8 @@ export function createFrameReader() {
     headOffset = 0;
     buffered = 0;
     awaiting = null;
+    discardRemaining = 0;
+    discarded = 0;
     throw new Error(`probe response unreadable: ${message}`);
   }
 
@@ -129,10 +153,10 @@ export function createFrameReader() {
           try {
             header = JSON.parse(line);
           } catch {
-            throw new Error(`probe response unreadable: frame header is not JSON (${line.slice(0, 120)})`);
+            unreadable(`frame header is not JSON (${line.slice(0, 120)})`);
           }
           if (!header || typeof header !== "object" || Array.isArray(header)) {
-            throw new Error("probe response unreadable: frame header is not an object");
+            unreadable("frame header is not an object");
           }
           if (header.end === true) {
             ended = true;
@@ -146,10 +170,32 @@ export function createFrameReader() {
             ["raw", "events", "error"].includes(header.kind) &&
             Number.isSafeInteger(header.bytes) &&
             header.bytes >= 0 &&
-            header.bytes <= MAX_FRAME_BODY_BYTES &&
             (header.kind !== "error" || (header.bytes === 0 && typeof header.error === "string"));
           if (!validFrame) unreadable("invalid frame header");
           awaiting = header;
+          if (header.bytes > MAX_FRAME_BODY_BYTES) {
+            discardRemaining = header.bytes;
+            discarded = 0;
+          }
+        }
+        if (discardRemaining > 0) {
+          const take = Math.min(buffered, discardRemaining);
+          discard(take);
+          discardRemaining -= take;
+          discarded += take;
+          if (discardRemaining > 0) return frames;
+          frames.push({
+            header: {
+              ...awaiting,
+              kind: "error",
+              bytes: 0,
+              error: `transcript ${awaiting.key} too large (${awaiting.bytes} bytes)`,
+            },
+            body: Buffer.alloc(0),
+          });
+          awaiting = null;
+          discarded = 0;
+          continue;
         }
         const want = awaiting.bytes;
         if (buffered < want) return frames;
@@ -162,7 +208,7 @@ export function createFrameReader() {
     },
     /** Bytes received for a frame whose body never arrived - a torn stream. */
     get incomplete() {
-      return awaiting ? { header: awaiting, received: buffered } : null;
+      return awaiting ? { header: awaiting, received: discarded + buffered } : null;
     },
     get partialHeader() {
       return !awaiting && !ended && buffered > 0 ? { received: buffered, bytes: peek(buffered) } : null;

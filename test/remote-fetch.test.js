@@ -323,12 +323,6 @@ test("a runaway fetch frame fails only its named host while a sibling host still
       name: "unterminated header",
       output: Buffer.from("x".repeat(MAX_FRAME_HEADER_BYTES + 1)),
     },
-    {
-      name: "oversized declared body",
-      output: Buffer.from(
-        `${JSON.stringify({ key: "bad", harness: "claude", kind: "raw", bytes: MAX_FRAME_BODY_BYTES + 1 })}\n`,
-      ),
-    },
   ];
 
   for (const testCase of cases) {
@@ -362,6 +356,30 @@ test("a runaway fetch frame fails only its named host while a sibling host still
       });
     });
   }
+});
+
+test("an oversized transcript fails by name while its sibling still commits", async () => {
+  const s = scenario();
+  const largeId = "22222222-3333-4444-5555-666666666666";
+  const largeFile = writeClaudeSession(s.remoteHome, {
+    cwd: s.remoteClone,
+    id: largeId,
+    prefixText: "This transcript grows beyond the transport guard.",
+  });
+  fs.truncateSync(largeFile, MAX_FRAME_BODY_BYTES + 1);
+
+  const fetched = await collectAndFetch(s);
+  const oversized = fetched.transcripts.find((transcript) => transcript.nativeId === largeId);
+  const normal = fetched.transcripts.find((transcript) => transcript.nativeId !== largeId);
+
+  assert.equal(fetched.stats.fetched, 1);
+  assert.equal(fetched.stats.failed, 1);
+  assert.match(
+    oversized.remoteError,
+    new RegExp(`^mac-home: transcript .*${largeId}\\.jsonl too large \\(${MAX_FRAME_BODY_BYTES + 1} bytes\\)$`),
+  );
+  assert.equal(oversized.remote.cachePath, undefined);
+  assert.equal(fs.existsSync(normal.remote.cachePath), true);
 });
 
 test("a clean terminated stream commits every complete item", async () => {

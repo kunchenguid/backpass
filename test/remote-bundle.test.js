@@ -14,6 +14,7 @@ import {
   probeSources,
 } from "../src/discovery/remote/bundle.js";
 import { LOCATE_COMMAND, probeCommand } from "../src/discovery/hosts.js";
+import { MAX_FRAME_BODY_BYTES } from "../src/discovery/remote/frames.js";
 import { collectPathFacts } from "../src/discovery/remote/git-facts.js";
 import { runSsh } from "../src/discovery/remote/ssh.js";
 import { initRepo, sshCalls, tmpdir, withRemoteEnv, writeClaudeSession } from "./helpers/remote.js";
@@ -122,6 +123,45 @@ test("a fetch frame is read back byte for byte, and a torn stream is reported ra
   assert.equal(partialHeader.incomplete, null);
   assert.deepEqual(partialHeader.partialHeader, { received: 12, bytes: Buffer.from('{"key":"two"') });
   assert.equal(partialHeader.ended, false);
+});
+
+test("an oversized declared body is discarded and the next frame remains readable", () => {
+  const reader = createFrameReader();
+  const oversizedBytes = MAX_FRAME_BODY_BYTES + 1;
+  const frames = reader.push(
+    encodeFrameHeader({ key: "large", harness: "claude", bytes: oversizedBytes, kind: "raw" }),
+  );
+  const chunk = Buffer.alloc(1024 * 1024);
+  for (let remaining = oversizedBytes; remaining > 0;) {
+    const take = Math.min(remaining, chunk.length);
+    frames.push(...reader.push(chunk.subarray(0, take)));
+    remaining -= take;
+  }
+  const normalBody = Buffer.from("still collected");
+  frames.push(
+    ...reader.push(
+      Buffer.concat([
+        encodeFrameHeader({ key: "normal", harness: "claude", bytes: normalBody.length, kind: "raw" }),
+        normalBody,
+        encodeEndFrame(),
+      ]),
+    ),
+  );
+
+  assert.equal(reader.ended, true);
+  assert.equal(frames.length, 2);
+  assert.deepEqual(frames[0], {
+    header: {
+      key: "large",
+      harness: "claude",
+      bytes: 0,
+      kind: "error",
+      error: `transcript large too large (${oversizedBytes} bytes)`,
+    },
+    body: Buffer.alloc(0),
+  });
+  assert.equal(frames[1].header.key, "normal");
+  assert.deepEqual(frames[1].body, normalBody);
 });
 
 test("malformed fetch headers are rejected instead of becoming empty transcripts", () => {
