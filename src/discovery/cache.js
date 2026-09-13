@@ -190,7 +190,7 @@ export class HostCache {
 
   /** Entry count and bytes per host, for `backpass status`. */
   stats(index = this.readIndex()) {
-    const perHost = {};
+    const perHost = Object.create(null);
     for (const entry of Object.values(index.entries)) {
       const row = (perHost[entry.host] ||= { entries: 0, bytes: 0 });
       row.entries += 1;

@@ -24,6 +24,23 @@ test("cache index names cannot steer pruning outside the cache", () => {
   assert.deepEqual(cache.readIndex().entries, {});
 });
 
+test("cache stats preserve host aliases that match prototype keys", () => {
+  const stateDir = tmpdir("host-cache-stats");
+  const cache = new HostCache(stateDir);
+  const index = cache.readIndex();
+  cache.write(
+    index,
+    { host: "__proto__", harness: "claude", key: "session", kind: "raw", mtimeMs: 1, bytes: 4 },
+    Buffer.from("data"),
+  );
+
+  const stats = cache.stats(index);
+  assert.equal(Object.hasOwn(stats, "__proto__"), true);
+  assert.deepEqual(stats.__proto__, { entries: 1, bytes: 4 });
+  assert.equal(Object.prototype.entries, undefined);
+  assert.equal(Object.prototype.bytes, undefined);
+});
+
 test("cache pruning removes stale entries, orphan payloads, and abandoned temporary files", () => {
   const stateDir = tmpdir("host-cache");
   const cache = new HostCache(stateDir);
