@@ -91,6 +91,21 @@ function runCommand() {
   const out = result.stdout ?? Buffer.alloc(0);
   const truncate = op === "fetch" && host.truncateFetch != null;
   let emitted = truncate ? out.subarray(0, host.truncateFetch) : out;
+  if (op === "fetch" && host.truncateFetchFrame != null) {
+    let offset = 0;
+    for (let frame = 1; offset < emitted.length; frame += 1) {
+      const newline = emitted.indexOf(0x0a, offset);
+      if (newline === -1) break;
+      const header = JSON.parse(emitted.subarray(offset, newline).toString("utf8"));
+      if (header.end === true) break;
+      const bodyStart = newline + 1;
+      if (frame === host.truncateFetchFrame) {
+        emitted = emitted.subarray(0, bodyStart + Math.floor(header.bytes / 2));
+        break;
+      }
+      offset = bodyStart + header.bytes;
+    }
+  }
   if (op === "fetch" && host.omitEndFrame) {
     const terminator = Buffer.from('{"end":true}\n');
     const end = emitted.lastIndexOf(terminator);

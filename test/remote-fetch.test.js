@@ -180,6 +180,35 @@ test("a torn fetch stream fails that transcript by name and leaves the next run 
   assert.equal(retried.transcripts[0].remoteError, undefined);
 });
 
+test("a torn frame does not discard a complete sibling transcript", async () => {
+  const s = scenario({ variant: { truncateFetchFrame: 2 } });
+  writeClaudeSession(s.remoteHome, {
+    cwd: s.remoteClone,
+    id: "22222222-3333-4444-5555-666666666666",
+    prefixText: "Review the second parser fix.",
+  });
+
+  const torn = await collectAndFetch(s);
+  assert.equal(torn.transcripts.length, 2);
+  assert.equal(torn.stats.fetched, 1);
+  assert.equal(torn.stats.failed, 1);
+  assert.equal(
+    torn.transcripts.filter((transcript) => transcript.remote.cachePath).length,
+    1,
+    "the complete frame is committed only after the stream finishes",
+  );
+  assert.equal(
+    torn.transcripts.filter((transcript) => transcript.remoteError === "mac-home: remote fetch incomplete").length,
+    1,
+  );
+
+  delete s.hosts["mac-home"].truncateFetchFrame;
+  const retried = await collectAndFetch(s);
+  assert.equal(retried.stats.reused, 1);
+  assert.equal(retried.stats.fetched, 1);
+  assert.equal(retried.stats.failed, 0);
+});
+
 test("complete frames are rejected unless the fetch terminates successfully", async () => {
   for (const variant of [{ omitEndFrame: true }, { fetchExitCode: 23 }]) {
     const s = scenario({ variant });

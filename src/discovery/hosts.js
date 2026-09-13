@@ -550,10 +550,15 @@ async function fetchHost(host, pending, { cache, index, stats }) {
   }
 
   const failure = classifySshFailure(call, { destination: host, timeoutMs: FETCH_TIMEOUT_MS });
-  const streamError = failure?.message || parseError || (!reader.ended ? "remote fetch incomplete" : null);
+  const transportError = failure?.message || parseError;
+  const incomplete = reader.incomplete;
+  const incompleteIdentity = incomplete ? fetchIdentity(incomplete.header.harness, incomplete.header.key) : null;
+  const streamError = transportError || (!reader.ended ? "remote fetch incomplete" : null);
   for (const transcript of pending) {
-    const outcome = outcomes.get(fetchIdentity(transcript.harness, transcript.remote.key));
-    if (outcome?.staged && !streamError) {
+    const identity = fetchIdentity(transcript.harness, transcript.remote.key);
+    const outcome = outcomes.get(identity);
+    const independentlyComplete = reader.ended || (incompleteIdentity && identity !== incompleteIdentity);
+    if (outcome?.staged && !transportError && independentlyComplete) {
       try {
         const written = cache.commit(index, outcome.staged, outcome.metadata);
         transcript.mtimeMs = outcome.metadata.mtimeMs;
