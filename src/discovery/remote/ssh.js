@@ -192,7 +192,7 @@ export async function startSshMaster({
   let child;
   try {
     child = spawn(launch.file, launch.args, {
-      stdio: "ignore",
+      stdio: ["ignore", "ignore", "pipe"],
       windowsHide: true,
       windowsVerbatimArguments: launch.verbatim,
     });
@@ -200,10 +200,17 @@ export async function startSshMaster({
     return { code: null, stdout: "", stderr: spawnError.message, spawnError };
   }
 
-  const master = { destination, connectTimeoutSeconds, controlPath, child, closed: false };
+  const master = { destination, connectTimeoutSeconds, controlPath, child, stderr: "", closed: false };
   const identity = masterIdentity(master);
   activeMasters.set(identity, master);
-  child.once("close", () => activeMasters.delete(identity));
+  child.stderr.on("data", (chunk) => {
+    master.stderr = `${master.stderr}${chunk}`.slice(-16_384);
+  });
+  child.once("close", (code) => {
+    master.exited = true;
+    master.exitCode = code;
+    activeMasters.delete(identity);
+  });
   child.once("error", (error) => {
     master.spawnError = error;
   });
@@ -211,11 +218,11 @@ export async function startSshMaster({
   const deadline = Date.now() + timeoutMs;
   let check = null;
   while (Date.now() < deadline) {
-    if (child.exitCode !== null || child.signalCode !== null || master.spawnError) {
+    if (master.exited || master.spawnError) {
       return {
-        code: child.exitCode,
+        code: master.exitCode ?? child.exitCode,
         stdout: "",
-        stderr: check?.stderr || master.spawnError?.message || "",
+        stderr: master.stderr || check?.stderr || master.spawnError?.message || "",
         spawnError: master.spawnError,
       };
     }
@@ -228,7 +235,7 @@ export async function startSshMaster({
   }
 
   killMaster(master);
-  return { code: null, stdout: "", stderr: check?.stderr || "", timedOut: true };
+  return { code: null, stdout: "", stderr: master.stderr || check?.stderr || "", timedOut: true };
 }
 
 export async function closeSshMaster(master) {

@@ -149,7 +149,7 @@ test("a control-master failure skips one host while another still collects", asy
   writeClaudeSession(goodHome, { cwd: goodClone });
   const log = path.join(localHome, "ssh.log");
   const hosts = {
-    broken: { home: goodHome, masterFail: { stderr: "control socket unavailable", code: 255 } },
+    broken: { home: goodHome, masterFail: { stderr: "broken: Permission denied (publickey).", code: 255 } },
     working: { home: goodHome },
   };
 
@@ -159,7 +159,7 @@ test("a control-master failure skips one host while another still collects", asy
 
   assert.equal(result.transcripts.length, 1);
   assert.equal(result.transcripts[0].host, "working");
-  assert.match(result.perHost[0].error, /failed to start ssh control master: ssh broken exited 255/);
+  assert.match(result.perHost[0].error, /make "ssh broken true" succeed without a prompt/);
   assert.equal(result.perHost[1].error, null);
   assert.deepEqual(
     sshCalls(log).map((call) => [call.destination, call.op]),
@@ -168,13 +168,14 @@ test("a control-master failure skips one host while another still collects", asy
       ["working", "master:start"],
       ["working", null],
       ["working", "discover"],
+      ["working", "master:stop"],
     ],
   );
 });
 
 test("an authentication failure skips the host with the command to make succeed, and keeps local results", async () => {
   const s = scenario({
-    variant: { fail: { stderr: "kunchen@mac-home: Permission denied (publickey,keyboard-interactive)." } },
+    variant: { masterFail: { stderr: "kunchen@mac-home: Permission denied (publickey,keyboard-interactive)." } },
   });
   writeClaudeSession(s.localHome, { cwd: s.repoRoot, id: "aaaaaaaa-1111-2222-3333-444444444444" });
 
@@ -185,6 +186,24 @@ test("an authentication failure skips the host with the command to make succeed,
   assert.equal(result.transcripts.length, 1, "the local session is still collected");
   assert.equal(result.transcripts[0].host, null);
   assert.match(result.perHost[0].error, /make "ssh mac-home true" succeed without a prompt/);
+});
+
+test("a Tailscale check-mode master preserves its approval URL", async () => {
+  const s = scenario({
+    variant: {
+      masterFail: {
+        stderr:
+          "Tailscale SSH requires an additional check.\nTo authenticate, visit: https://login.tailscale.com/a/l148.",
+        code: 255,
+      },
+    },
+  });
+
+  const result = await withRemoteEnv({ localHome: s.localHome, hosts: s.hosts }, () =>
+    discoverProject(s.repoRoot, { discovery: { hosts: ["mac-home"] } }),
+  );
+
+  assert.match(result.perHost[0].error, /approve it at https:\/\/login\.tailscale\.com\/a\/l148 and re-run/);
 });
 
 test("an unknown host key names the interactive connection and never offers a bypass", async () => {
