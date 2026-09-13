@@ -349,6 +349,24 @@ test("a destination that could be read as an option or break quoting is refused 
   assert.deepEqual(sshCalls(s.log), [], "nothing may be spawned for a destination that was refused");
 });
 
+test("an unsafe configured node path is refused before ssh runs", async () => {
+  const s = scenario();
+  const error = await withRemoteEnv({ localHome: s.localHome, hosts: s.hosts, log: s.log }, async () => {
+    try {
+      await discoverProject(s.repoRoot, {
+        discovery: { hosts: [{ host: "mac-home", node: "/usr/bin/no'de" }], harnesses: ["claude"] },
+      });
+    } catch (err) {
+      return err;
+    }
+    return null;
+  });
+
+  assert.ok(error instanceof UserError);
+  assert.match(error.message, /remote node path/);
+  assert.deepEqual(sshCalls(s.log), []);
+});
+
 test("host configuration validates OpenSSH values and treats each flag as one exact destination", () => {
   assert.throws(
     () => resolveHostList({ discovery: { hosts: [{ host: "mac-home", node: "node" }] } }),
