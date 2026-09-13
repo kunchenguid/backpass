@@ -32,24 +32,61 @@ export function encodeEndFrame() {
  * from one that finished.
  */
 export function createFrameReader() {
-  /** @type {Buffer<ArrayBufferLike>} */
-  let buffer = Buffer.alloc(0);
+  /** @type {Buffer<ArrayBufferLike>[]} */
+  let chunks = [];
+  let head = 0;
+  let headOffset = 0;
+  let buffered = 0;
   /** @type {object | null} */
   let awaiting = null;
   let ended = false;
 
+  function consume(size) {
+    if (size === 0) return Buffer.alloc(0);
+    const output = Buffer.allocUnsafe(size);
+    let written = 0;
+    while (written < size) {
+      const chunk = chunks[head];
+      const available = chunk.length - headOffset;
+      const take = Math.min(size - written, available);
+      chunk.copy(output, written, headOffset, headOffset + take);
+      written += take;
+      headOffset += take;
+      buffered -= take;
+      if (headOffset === chunk.length) {
+        head += 1;
+        headOffset = 0;
+      }
+    }
+    if (head > 0 && (head >= 1024 || head === chunks.length)) {
+      chunks = chunks.slice(head);
+      head = 0;
+    }
+    return output;
+  }
+
   function takeLine() {
-    const index = buffer.indexOf(NEWLINE);
-    if (index === -1) return null;
-    const line = buffer.subarray(0, index).toString("utf8");
-    buffer = buffer.subarray(index + 1);
-    return line;
+    let distance = 0;
+    for (let index = head; index < chunks.length; index += 1) {
+      const chunk = chunks[index];
+      const start = index === head ? headOffset : 0;
+      const newline = chunk.indexOf(NEWLINE, start);
+      if (newline !== -1) {
+        const line = consume(distance + newline - start + 1);
+        return line.subarray(0, line.length - 1).toString("utf8");
+      }
+      distance += chunk.length - start;
+    }
+    return null;
   }
 
   return {
     /** @param {Buffer} chunk @returns {{ header: object, body: Buffer }[]} */
     push(chunk) {
-      buffer = buffer.length ? Buffer.concat([buffer, chunk]) : chunk;
+      if (chunk.length) {
+        chunks.push(chunk);
+        buffered += chunk.length;
+      }
       const frames = [];
       for (;;) {
         if (ended) return frames;
@@ -82,9 +119,8 @@ export function createFrameReader() {
           awaiting = header;
         }
         const want = awaiting.bytes;
-        if (buffer.length < want) return frames;
-        frames.push({ header: awaiting, body: Buffer.from(buffer.subarray(0, want)) });
-        buffer = buffer.subarray(want);
+        if (buffered < want) return frames;
+        frames.push({ header: awaiting, body: consume(want) });
         awaiting = null;
       }
     },
@@ -93,7 +129,7 @@ export function createFrameReader() {
     },
     /** Bytes received for a frame whose body never arrived - a torn stream. */
     get incomplete() {
-      return awaiting ? { header: awaiting, received: buffer.length } : null;
+      return awaiting ? { header: awaiting, received: buffered } : null;
     },
   };
 }
