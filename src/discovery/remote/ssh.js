@@ -125,7 +125,9 @@ export function sshArgs({
 }
 
 function masterArgs(destination, connectTimeoutSeconds, controlPath) {
-  return [...baseArgs(connectTimeoutSeconds, controlPath, "yes"), "-M", "-N", "-T", "--", destination];
+  // ControlPersist backgrounds an otherwise foreground master as soon as it connects,
+  // severing the tracked-child lifecycle. The explicit master itself keeps the socket live.
+  return [...baseArgs(connectTimeoutSeconds, controlPath, "no"), "-M", "-N", "-T", "--", destination];
 }
 
 function masterCheckArgs(destination, connectTimeoutSeconds, controlPath) {

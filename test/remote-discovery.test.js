@@ -6,7 +6,7 @@ import path from "node:path";
 import { applyHostFlag, loadConfig } from "../src/config.js";
 import { discoverProject, initRepo, sshCalls, tmpdir, withRemoteEnv, writeClaudeSession } from "./helpers/remote.js";
 import { disambiguateSourceLabels, gapSource } from "../src/gap-ledger.js";
-import { classifySshFailure } from "../src/discovery/remote/ssh.js";
+import { classifySshFailure, closeSshMasters } from "../src/discovery/remote/ssh.js";
 import { discoverTranscripts } from "../src/discovery/index.js";
 import { resolveHostList } from "../src/discovery/hosts.js";
 import { resolveScope } from "../src/scope.js";
@@ -95,6 +95,7 @@ test("a remote session in a clone that shares this repo's remote is tier 1.5, na
       ["mac-home", "master:start"],
       ["mac-home", null],
       ["mac-home", "discover"],
+      ["mac-home", "master:stop"],
     ],
   );
 });
@@ -461,7 +462,9 @@ test("a user-scope run collects from a host and keys the project by the clone's 
     );
     const scope = resolveScope(localHome, { scope: "user" }, config, null, { home: localHome });
     config.state = new State(scope.root, { stateDir: scope.stateDir, mode: 0o700, exclude: false }).ensure();
-    return discoverTranscripts({ repo: scope.repo, scope, config, strict: false });
+    const discovered = await discoverTranscripts({ repo: scope.repo, scope, config, strict: false });
+    await closeSshMasters(discovered.remoteMasters);
+    return discovered;
   });
 
   const byId = new Map(result.transcripts.map((transcript) => [transcript.nativeId, transcript]));
