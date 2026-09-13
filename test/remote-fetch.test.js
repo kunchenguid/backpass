@@ -143,6 +143,21 @@ test("a torn fetch stream fails that transcript by name and leaves the next run 
   assert.equal(retried.transcripts[0].remoteError, undefined);
 });
 
+test("complete frames are rejected unless the fetch terminates successfully", async () => {
+  for (const variant of [{ omitEndFrame: true }, { fetchExitCode: 23 }]) {
+    const s = scenario({ variant });
+    const rejected = await collectAndFetch(s);
+    assert.equal(rejected.stats.failed, 1);
+    assert.equal(rejected.stats.fetched, 0);
+    assert.equal(rejected.transcripts[0].remote.cachePath, undefined);
+
+    delete s.hosts["mac-home"].omitEndFrame;
+    delete s.hosts["mac-home"].fetchExitCode;
+    const retried = await collectAndFetch(s);
+    assert.equal(retried.stats.fetched, 1);
+  }
+});
+
 test("event-backed fetch updates its signature when the remote database grows", async () => {
   const s = scenario({ harnesses: ["hermes"] });
 

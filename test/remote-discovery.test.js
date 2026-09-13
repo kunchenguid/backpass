@@ -187,19 +187,40 @@ test("a non-POSIX remote is refused by name rather than probed", async () => {
 });
 
 test("a malformed probe response skips only that host", async () => {
-  const s = scenario({
-    variant: {
-      discoverOutput: JSON.stringify({ protocol: 1, harnesses: {}, transcripts: null, paths: {}, warnings: [] }),
+  const malformed = [
+    { protocol: 1, harnesses: {}, transcripts: null, paths: {}, warnings: [] },
+    {
+      protocol: 1,
+      harnesses: {},
+      transcripts: [
+        {
+          harness: "claude",
+          id: "remote-id",
+          key: "/remote/demo/session.jsonl",
+          path: "/remote/demo/session.jsonl",
+          cwd: "/remote/demo",
+          gitRoot: null,
+          remotes: [],
+          kind: "raw",
+        },
+      ],
+      paths: {
+        "/remote/demo": { real: "/remote/demo", exists: true, toplevel: "/remote/demo", remotes: "invalid" },
+      },
+      warnings: [],
     },
-  });
-  writeClaudeSession(s.localHome, { cwd: s.repoRoot, id: "aaaaaaaa-1111-2222-3333-444444444444" });
+  ];
 
-  const result = await withRemoteEnv({ localHome: s.localHome, hosts: s.hosts }, () =>
-    discoverProject(s.repoRoot, { discovery: { hosts: ["mac-home"], harnesses: ["claude"] } }),
-  );
-  assert.equal(result.transcripts.length, 1);
-  assert.equal(result.transcripts[0].host, null);
-  assert.equal(result.perHost[0].error, "probe response unreadable");
+  for (const response of malformed) {
+    const s = scenario({ variant: { discoverOutput: JSON.stringify(response) } });
+    writeClaudeSession(s.localHome, { cwd: s.repoRoot, id: "aaaaaaaa-1111-2222-3333-444444444444" });
+    const result = await withRemoteEnv({ localHome: s.localHome, hosts: s.hosts }, () =>
+      discoverProject(s.repoRoot, { discovery: { hosts: ["mac-home"], harnesses: ["claude"] } }),
+    );
+    assert.equal(result.transcripts.length, 1);
+    assert.equal(result.transcripts[0].host, null);
+    assert.equal(result.perHost[0].error, "probe response unreadable");
+  }
 });
 
 test("discovery.hosts in the repository config is refused and points at the personal file", async () => {

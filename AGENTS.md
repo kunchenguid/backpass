@@ -58,8 +58,9 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
   the remote: `src/discovery/remote/bundle.js` ships `PROBE_MANIFEST` plus the request as
   one stdin program, so a stray import in a manifest module breaks every host at once -
   `test/remote-bundle.test.js` runs the probe from a directory holding only the manifest.
-  Nothing variable ever reaches the remote shell, and the locate snippet, probe command
-  and loader carry no single quote, backslash, or `!`. Remote tiers have no tier 1
+  The payload never reaches the remote shell; the refused node path is the only variable
+  command text and is single-quoted. The locate snippet and loader bodies carry no single
+  quote, backslash, or `!`. Remote tiers have no tier 1
   (nothing over there is this clone); facts come from `remote/git-facts.js`, computed
   where the paths are real, and `associateRemote` applies the local rules to them. Hosts
   are personal configuration: `discovery.hosts` in `.backpassrc.json` is a `UserError` by

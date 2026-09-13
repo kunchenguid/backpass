@@ -329,14 +329,32 @@ async function collectOneHost(entry, { harnesses, cutoffMs }, result) {
         typeof descriptor.id === "string" &&
         typeof descriptor.path === "string" &&
         typeof descriptor.key === "string" &&
+        (descriptor.cwd === null || typeof descriptor.cwd === "string") &&
+        (descriptor.gitRoot === null || typeof descriptor.gitRoot === "string") &&
+        Array.isArray(descriptor.remotes) &&
+        descriptor.remotes.every((remote) => typeof remote === "string") &&
         (descriptor.kind === "raw" || descriptor.kind === "events"),
     );
   const validRecords = [response.harnesses, response.paths].every(
     (value) => value && typeof value === "object" && !Array.isArray(value),
   );
+  const validFacts =
+    validRecords &&
+    Object.values(response.paths).every(
+      (facts) =>
+        facts &&
+        typeof facts === "object" &&
+        !Array.isArray(facts) &&
+        typeof facts.real === "string" &&
+        typeof facts.exists === "boolean" &&
+        (facts.toplevel === null || typeof facts.toplevel === "string") &&
+        Array.isArray(facts.remotes) &&
+        facts.remotes.every((remote) => typeof remote === "string"),
+    );
   if (
     !validDescriptors ||
     !validRecords ||
+    !validFacts ||
     !Array.isArray(response.warnings) ||
     response.warnings.some((note) => typeof note !== "string")
   ) {
@@ -436,34 +454,24 @@ async function fetchHost(host, pending, { cache, index, stats }) {
       return;
     }
     try {
-      // A session that grew (or shrank) between discover and fetch is accepted, but the
-      // descriptor has to catch up first: `evidenceKey` is the content signature, so
-      // analyzing the new bytes under the old one would cache the judgment against a
-      // session that no longer exists.
-      if (frame.header.kind === "raw") {
-        if (Number.isFinite(frame.header.mtimeMs)) transcript.mtimeMs = frame.header.mtimeMs;
-        transcript.bytes = frame.body.length;
-      } else if (typeof frame.header.contentSignature === "string") {
-        transcript.contentSignature = frame.header.contentSignature;
-      }
-      const written = cache.write(
-        index,
-        {
-          host,
-          harness: transcript.harness,
-          key,
-          kind: frame.header.kind,
-          mtimeMs: transcript.mtimeMs,
-          bytes: transcript.bytes,
-          contentSignature: transcript.contentSignature,
-          model: frame.header.model || null,
-        },
-        frame.body,
-      );
-      transcript.remote.cachePath = written.path;
-      outcomes.set(key, { ok: true });
-      stats.fetched += 1;
-      stats.bytes += written.bytes;
+      const metadata = {
+        host,
+        harness: transcript.harness,
+        key,
+        kind: frame.header.kind,
+        mtimeMs:
+          frame.header.kind === "raw" && Number.isFinite(frame.header.mtimeMs)
+            ? frame.header.mtimeMs
+            : transcript.mtimeMs,
+        bytes: frame.header.kind === "raw" ? frame.body.length : transcript.bytes,
+        contentSignature:
+          frame.header.kind === "events" && typeof frame.header.contentSignature === "string"
+            ? frame.header.contentSignature
+            : transcript.contentSignature,
+        model: frame.header.model || null,
+      };
+      const staged = cache.stage(host, transcript.harness, key, frame.body);
+      outcomes.set(key, { staged, metadata });
     } catch (err) {
       outcomes.set(key, { error: err.message });
     }
@@ -493,14 +501,29 @@ async function fetchHost(host, pending, { cache, index, stats }) {
   }
 
   const failure = classifySshFailure(call, { destination: host, timeoutMs: FETCH_TIMEOUT_MS });
+  const streamError = failure?.message || parseError || (!reader.ended ? "remote fetch incomplete" : null);
   for (const transcript of pending) {
     const outcome = outcomes.get(transcript.remote.key);
-    if (outcome?.ok) continue;
-    const reason = outcome?.error || parseError || failure?.message || "remote fetch incomplete";
+    if (outcome?.staged && !streamError) {
+      try {
+        const written = cache.commit(index, outcome.staged, outcome.metadata);
+        transcript.mtimeMs = outcome.metadata.mtimeMs;
+        transcript.bytes = outcome.metadata.bytes;
+        transcript.contentSignature = outcome.metadata.contentSignature;
+        transcript.remote.cachePath = written.path;
+        stats.fetched += 1;
+        stats.bytes += written.bytes;
+        continue;
+      } catch (err) {
+        outcome.error = err.message;
+      }
+    }
+    if (outcome?.staged) cache.discard(outcome.staged);
+    const reason = outcome?.error || streamError || "remote fetch incomplete";
     transcript.remoteError = `${host}: ${reason}`;
     stats.failed += 1;
   }
-  if (!reader.ended && !failure && !parseError && outcomes.size < pending.length) {
+  if (!reader.ended && !failure && !parseError) {
     warn(`${host}: the fetch stream ended early; the missing transcripts are retried next run`);
   }
 }

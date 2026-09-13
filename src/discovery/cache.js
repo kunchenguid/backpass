@@ -85,15 +85,18 @@ export class HostCache {
     return { ...entry, name, path: file };
   }
 
-  /** @returns {{ name: string, path: string, kind: string, bytes: number }} */
-  write(index, { host, harness, key, kind, mtimeMs, bytes, contentSignature = null, model = null }, body) {
+  stage(host, harness, key, body) {
     this.ensure();
     const name = entryName(host, harness, key);
     const file = path.join(this.root, name);
     const tmp = `${file}.tmp`;
     fs.writeFileSync(tmp, body, { mode: 0o600 });
-    fs.renameSync(tmp, file);
-    index.entries[name] = {
+    return { name, path: file, tmp, bytes: body.length };
+  }
+
+  commit(index, staged, { host, harness, key, kind, mtimeMs, bytes, contentSignature = null, model = null }) {
+    fs.renameSync(staged.tmp, staged.path);
+    index.entries[staged.name] = {
       host,
       harness,
       key,
@@ -102,10 +105,20 @@ export class HostCache {
       bytes: bytes ?? null,
       contentSignature,
       model,
-      cachedBytes: body.length,
+      cachedBytes: staged.bytes,
       usedAt: new Date().toISOString(),
     };
-    return { name, path: file, kind, bytes: body.length };
+    return { name: staged.name, path: staged.path, kind, bytes: staged.bytes };
+  }
+
+  discard(staged) {
+    fs.rmSync(staged.tmp, { force: true });
+  }
+
+  /** @returns {{ name: string, path: string, kind: string, bytes: number }} */
+  write(index, metadata, body) {
+    const staged = this.stage(metadata.host, metadata.harness, metadata.key, body);
+    return this.commit(index, staged, metadata);
   }
 
   /** Mark an entry as still in use, so pruning measures disuse rather than age. */

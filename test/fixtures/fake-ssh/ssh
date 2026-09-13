@@ -90,6 +90,12 @@ function runCommand() {
 
   const out = result.stdout ?? Buffer.alloc(0);
   const truncate = op === "fetch" && host.truncateFetch != null;
-  fs.writeSync(1, truncate ? out.subarray(0, host.truncateFetch) : out);
-  process.exit(result.status === null ? 255 : result.status);
+  let emitted = truncate ? out.subarray(0, host.truncateFetch) : out;
+  if (op === "fetch" && host.omitEndFrame) {
+    const terminator = Buffer.from('{"end":true}\n');
+    const end = emitted.lastIndexOf(terminator);
+    if (end !== -1) emitted = emitted.subarray(0, end);
+  }
+  fs.writeSync(1, emitted);
+  process.exit(op === "fetch" && host.fetchExitCode != null ? host.fetchExitCode : result.status === null ? 255 : result.status);
 }
