@@ -111,11 +111,12 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const argv = process.argv.slice(2);
-fs.appendFileSync(process.env.FAKE_ACPX_LOG, JSON.stringify({
-  argv,
-  cwd: process.cwd(),
-  PI_ACP_PI_COMMAND: process.env.PI_ACP_PI_COMMAND || null,
-  INITIAL_AGENT_MODE: process.env.INITIAL_AGENT_MODE || null,
+  fs.appendFileSync(process.env.FAKE_ACPX_LOG, JSON.stringify({
+    argv,
+    cwd: process.cwd(),
+    PI_ACP_PI_COMMAND: process.env.PI_ACP_PI_COMMAND || null,
+    BACKPASS_TRANSCRIPT_INSPECTOR_MANIFEST: process.env.BACKPASS_TRANSCRIPT_INSPECTOR_MANIFEST || null,
+    INITIAL_AGENT_MODE: process.env.INITIAL_AGENT_MODE || null,
   CODEX_CONFIG: process.env.CODEX_CONFIG || null,
   CODEX_PATH: process.env.CODEX_PATH || null,
 }) + "\\n");
@@ -421,6 +422,53 @@ test("a Pi session tool allowlist is applied to the process without changing def
     "read",
   ]);
   assert.deepEqual(spawned[0].slice(6), ["--mode", "rpc", "--no-themes"]);
+});
+
+test("a large Pi transcript loads the inspector extension and preserves the requested tools", async () => {
+  resetLogsAndSettings();
+  const manifestPath = path.join(binDir, "transcript-manifest.json");
+  fs.writeFileSync(manifestPath, JSON.stringify({ version: 1, ref: "test", records: [] }));
+  const session = await openSession({
+    agent: "pi",
+    model: "openai-codex/gpt-5.6-sol",
+    effort: "high",
+    tools: ["read", "grep"],
+    transcriptInspector: { manifestPath },
+    sessionName: "bp-pi-inspector",
+    cwd: workDir,
+  });
+  await session.close();
+
+  const spawned = jsonl(piLog);
+  const args = spawned[0];
+  const extensionAt = args.indexOf("--extension");
+  const toolsAt = args.indexOf("--tools");
+  assert.ok(extensionAt >= 0);
+  assert.match(args[extensionAt + 1], /pi-transcript-inspector\.js$/);
+  assert.equal(args[toolsAt + 1], "read,grep,backpass_inspect_transcript");
+  assert.ok(
+    acpxCalls().some((call) => call.BACKPASS_TRANSCRIPT_INSPECTOR_MANIFEST === manifestPath),
+    "the manifest path must stay invocation-scoped",
+  );
+});
+
+test("a large Pi transcript keeps the standard toolset when no allowlist is configured", async () => {
+  resetLogsAndSettings();
+  const manifestPath = path.join(binDir, "transcript-manifest-defaults.json");
+  fs.writeFileSync(manifestPath, JSON.stringify({ version: 1, ref: "test", records: [] }));
+  const session = await openSession({
+    agent: "pi",
+    model: "openai-codex/gpt-5.6-sol",
+    effort: "high",
+    transcriptInspector: { manifestPath },
+    sessionName: "bp-pi-inspector-defaults",
+    cwd: workDir,
+  });
+  await session.close();
+
+  const args = jsonl(piLog)[0];
+  assert.ok(args.includes("--extension"));
+  assert.equal(args.includes("--tools"), false, "omitting tools must preserve Pi's standard defaults");
 });
 
 test("a configured replacement Pi adapter is rejected before model or effort can be claimed", async () => {

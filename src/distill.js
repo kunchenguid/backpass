@@ -1,5 +1,6 @@
 import { redact } from "./redact.js";
 import { estimateTokens } from "./tokens.js";
+import { INSPECTOR_SESSION_CALLS, TRANSCRIPT_INSPECTOR_TOOL } from "./transcript-inspector.js";
 
 /**
  * Stage 0 of the pipeline (design section 3): turn a raw session log into a distilled
@@ -8,8 +9,9 @@ import { estimateTokens } from "./tokens.js";
  * The point is cheap-first analysis. Raw transcripts on this machine run to megabytes,
  * almost all of it tool-call noise. Distillation keeps what carries the loss signal -
  * what the human asked, what the agent said, and a one-line shape of each tool call -
- * and drops the rest. The trace ends with the raw transcript path so the analysis agent
- * can open the original when (and only when) a claim needs it.
+ * and drops the rest. Small traces end with the raw transcript path so the analysis agent
+ * can open the original when (and only when) a claim needs it. Large traces use the
+ * bounded inspector instead, because a generic reader can flood the model context.
  *
  * Adapters produce a normalized event stream; everything below is shared.
  */
@@ -139,13 +141,22 @@ export function distill(events, meta, options = {}) {
     .filter((l) => l !== null)
     .join("\n");
 
-  const footer = [
-    "",
-    "---",
-    `raw transcript: ${meta.rawPath}`,
-    "Tool calls above are one-line summaries and tool output is truncated. Open the raw",
-    "transcript only if a specific claim needs the full text.",
-  ].join("\n");
+  const footer = options.transcriptInspector
+    ? [
+        "",
+        "---",
+        `bounded transcript inspector: ${TRANSCRIPT_INSPECTOR_TOOL}`,
+        `transcript reference: ${options.transcriptInspector.ref}`,
+        "The raw transcript path is intentionally hidden for this large session.",
+        `Use ${TRANSCRIPT_INSPECTOR_TOOL} with a focused literal query when an exact quote is not in this trace. It allows at most ${INSPECTOR_SESSION_CALLS} queries; then synthesize from the trace.`,
+      ].join("\n")
+    : [
+        "",
+        "---",
+        `raw transcript: ${meta.rawPath}`,
+        "Tool calls above are one-line summaries and tool output is truncated. Open the raw",
+        "transcript only if a specific claim needs the full text.",
+      ].join("\n");
 
   const { body, elided } = capTrace(lines.join("\n").trim(), maxTraceTokens);
   const trace = `${header}\n${body}\n${footer}\n`;
@@ -164,8 +175,8 @@ export function distill(events, meta, options = {}) {
 
 /**
  * Long sessions still blow past what a cheap analysis pass should read. Keep the head
- * (the task as stated) and the tail (how it actually ended) and elide the middle - the
- * raw transcript path in the footer remains the escape hatch for anything in between.
+ * (the task as stated) and the tail (how it actually ended) and elide the middle. The
+ * footer keeps the appropriate bounded or raw evidence-access path for anything in between.
  */
 function capTrace(body, maxTraceTokens) {
   if (estimateTokens(body) <= maxTraceTokens) return { body, elided: false };

@@ -1,9 +1,16 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { UserError } from "./logger.js";
 import { resolveOnPath } from "./subprocess.js";
+import { TRANSCRIPT_INSPECTOR_TOOL } from "./transcript-inspector.js";
+
+const PI_TRANSCRIPT_INSPECTOR_EXTENSION = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "pi-transcript-inspector.js",
+);
 
 /**
  * Invocation-scoped model and effort overlays (`src/acpx.js` is the caller).
@@ -55,10 +62,17 @@ const SESSION_LOCAL_EFFORT_KEYS = { codex: "reasoning_effort", claude: "effort",
  */
 
 /**
- * @param {{ agent: string, model?: string | null, effort?: string | null, tools?: string[] | null, writeAccess?: boolean }} options
+ * @param {{ agent: string, model?: string | null, effort?: string | null, tools?: string[] | null, writeAccess?: boolean, transcriptInspector?: { manifestPath: string } | null }} options
  * @returns {HarnessInvocation}
  */
-export function prepareHarnessInvocation({ agent, model = null, effort = null, tools = null, writeAccess = false }) {
+export function prepareHarnessInvocation({
+  agent,
+  model = null,
+  effort = null,
+  tools = null,
+  writeAccess = false,
+  transcriptInspector = null,
+}) {
   const notes = [];
   const cleanups = [];
   const dispose = () => {
@@ -76,7 +90,7 @@ export function prepareHarnessInvocation({ agent, model = null, effort = null, t
   const requestedTools = Array.isArray(tools)
     ? [...new Set(tools.map((tool) => String(tool).trim()).filter(Boolean))]
     : null;
-  const overlay = Boolean(requestedModel || requestedEffort || requestedTools?.length);
+  const overlay = Boolean(requestedModel || requestedEffort || requestedTools?.length || transcriptInspector);
 
   if (agent === "jcode") {
     return jcodeInvocation({ requestedModel, requestedEffort, requestedTools, notes, cleanups, dispose });
@@ -88,7 +102,15 @@ export function prepareHarnessInvocation({ agent, model = null, effort = null, t
     let invocation;
     if (agent === "pi") {
       invocation = overlay
-        ? piInvocation({ requestedModel, requestedEffort, requestedTools, notes, cleanups, dispose })
+        ? piInvocation({
+            requestedModel,
+            requestedEffort,
+            requestedTools,
+            transcriptInspector,
+            notes,
+            cleanups,
+            dispose,
+          })
         : baseInvocation({ notes, dispose });
     } else if (agent === "grok") {
       invocation = grokInvocation({ requestedModel, requestedEffort, writeAccess, notes, cleanups, dispose });
@@ -136,17 +158,37 @@ function describeOverride(model, effort) {
   return bits.join(" and ");
 }
 
-function piInvocation({ requestedModel, requestedEffort, requestedTools, notes, cleanups, dispose }) {
+function piInvocation({
+  requestedModel,
+  requestedEffort,
+  requestedTools,
+  transcriptInspector,
+  notes,
+  cleanups,
+  dispose,
+}) {
   if (process.env.PI_ACP_PI_COMMAND) {
     throw new UserError(
-      "cannot safely apply Pi model, effort, or tool overrides when PI_ACP_PI_COMMAND replaces the proven Pi command",
-      "unset PI_ACP_PI_COMMAND or omit the model, effort, or tools override",
+      "cannot safely apply Pi model, effort, tool, or transcript-inspector overrides when PI_ACP_PI_COMMAND replaces the proven Pi command",
+      "unset PI_ACP_PI_COMMAND or omit the model, effort, tools, or large-transcript inspector override",
     );
   }
   const extra = [];
   if (requestedModel) extra.push("--model", requestedModel);
   if (requestedEffort) extra.push("--thinking", requestedEffort);
-  if (requestedTools?.length) extra.push("--tools", requestedTools.join(","));
+  if (transcriptInspector) {
+    if (!fs.existsSync(transcriptInspector.manifestPath)) {
+      throw new UserError(
+        "cannot load the Backpass transcript inspector manifest for Pi",
+        "retry the analysis so Backpass can recreate the temporary inspector manifest",
+      );
+    }
+    extra.push("--extension", PI_TRANSCRIPT_INSPECTOR_EXTENSION);
+  }
+  const processTools = requestedTools
+    ? [...new Set([...requestedTools, ...(transcriptInspector ? [TRANSCRIPT_INSPECTOR_TOOL] : [])])]
+    : null;
+  if (processTools?.length) extra.push("--tools", processTools.join(","));
   const real = resolveOnPath("pi");
   if (!real || (process.platform === "win32" && /\.(?:cmd|bat)$/i.test(real))) {
     throw new UserError(
@@ -157,7 +199,10 @@ function piInvocation({ requestedModel, requestedEffort, requestedTools, notes, 
   const { wrapperPath, dir } = writeArgvWrapper({ realCommand: real, extraArgs: extra, binName: "pi" });
   cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
   return {
-    env: { PI_ACP_PI_COMMAND: wrapperPath },
+    env: {
+      PI_ACP_PI_COMMAND: wrapperPath,
+      ...(transcriptInspector ? { BACKPASS_TRANSCRIPT_INSPECTOR_MANIFEST: transcriptInspector.manifestPath } : {}),
+    },
     acpxModel: null,
     setEffortKey: null,
     sessionMode: null,

@@ -43,6 +43,15 @@ test("the trace ends with the raw transcript path - the cheap-first escape hatch
   assert.match(trace, /raw transcript: \/home\/u\/\.claude\/projects\/x\/abc\.jsonl/);
 });
 
+test("a large trace names the bounded inspector instead of exposing its raw path", () => {
+  const { trace } = distill([{ kind: "message", role: "user", text: "hello there" }], META, {
+    transcriptInspector: { ref: "session-ref" },
+  });
+  assert.match(trace, /bounded transcript inspector: backpass_inspect_transcript/);
+  assert.match(trace, /transcript reference: session-ref/);
+  assert.doesNotMatch(trace, /raw transcript: \/home\/u\/\.claude/);
+});
+
 test("large tool output is truncated and its real size reported", () => {
   const { trace } = distill(
     [{ kind: "tool", name: "Bash", input: { command: "cat big.log" }, result: "x".repeat(50_000) }],

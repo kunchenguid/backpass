@@ -232,8 +232,12 @@ deterministically: user and assistant turns verbatim, each tool call collapsed t
 (`tool: Bash "npm test" -> 1 failing`), tool output truncated, injected harness scaffolding
 dropped, secrets redacted. Typical reduction is **96-99%**.
 
-The distilled trace ends with the path to the raw transcript, so the analysis agent can
-open the original when - and only when - a specific claim needs it.
+For ordinary-sized traces, the distilled trace ends with the path to the raw transcript,
+so the analysis agent can open the original when - and only when - a specific claim needs
+it. Large Pi traces hide that path and load a temporary `backpass_inspect_transcript`
+extension instead. It provides redacted literal search, caps each response at 8 KiB and
+the complete analysis session at 64 KiB, and allows at most six focused queries before the
+agent must synthesize from the trace.
 
 ### 3. Calculate loss - one cheap call per transcript
 
@@ -675,6 +679,13 @@ backpass analyze --analysis-agent pi --analysis-model gpt-5.6-luna \
 backpass propose --synthesis-agent pi --synthesis-model gpt-5.6-luna \
   --synthesis-effort max --synthesis-tools read,edit,write
 ```
+
+When no Pi `tools` list is configured, Backpass leaves Pi's standard toolset enabled.
+For a large analysis transcript, Backpass additionally loads a temporary
+`backpass_inspect_transcript` extension. It searches redacted transcript evidence by a
+focused literal query without exposing the raw transcript path, and caps each response at
+8 KiB and the whole analysis session at 64 KiB, with at most six queries. An explicit Pi
+allowlist is preserved and the bounded inspector is added to it for that invocation.
 
 That example is the project scope. User scope ignores `.backpassrc.json` and instead
 layers the `"user"` block in `$XDG_CONFIG_HOME/backpass/config.json` (default

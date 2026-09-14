@@ -13,6 +13,7 @@ import { evidenceKey, isEvidenceFresh, safeFileName } from "./state.js";
 import { emitProgress } from "./progress.js";
 import { UserError, color, info, warn } from "./logger.js";
 import { transcriptIdentity } from "./transcript.js";
+import { createTranscriptInspector, LARGE_TRANSCRIPT_BYTES } from "./transcript-inspector.js";
 
 /**
  * Stage 1 of the pipeline (design section 3): one cheap model call per transcript,
@@ -150,13 +151,16 @@ async function analyzeOne({
   slot = 0,
   openGapIndex = "(none yet)",
   skillIndex = "(this repo has no skills)",
+  selectedAgent = null,
 }) {
   const raw = await readTranscript(transcript);
-  const distilled = distill(raw.events, {
+  const rawBytes = Buffer.byteLength(JSON.stringify(raw.events), "utf8");
+  const traceMeta = {
     ...transcript,
     model: raw.model,
     rawPath: raw.rawPath,
-  });
+  };
+  const initialDistilled = distill(raw.events, traceMeta);
 
   emitProgress("analyze:lane", {
     slot,
@@ -166,66 +170,77 @@ async function analyzeOne({
     phase: "model",
     // Measure the input distill actually consumed, not `transcript.bytes`: that is a
     // discovery stat() size, which is a directory or 0 for several harnesses.
-    rawBytes: Buffer.byteLength(JSON.stringify(raw.events), "utf8"),
-    distilledBytes: Buffer.byteLength(distilled.trace, "utf8"),
+    rawBytes,
+    distilledBytes: Buffer.byteLength(initialDistilled.trace, "utf8"),
   });
 
   // Triviality filter. `minUserTurns` is the knob, but a session is only truly trivial
   // when the agent barely did anything either: an autonomous run has exactly one user
   // turn (the brief) followed by hundreds of agent turns, and it carries plenty of
   // signal. Skipping those would discard most of a real corpus.
-  const { userTurns, assistantTurns, toolCalls } = distilled.stats;
+  const { userTurns, assistantTurns, toolCalls } = initialDistilled.stats;
   if (userTurns < config.discovery.minUserTurns && assistantTurns < MIN_ASSISTANT_TURNS && toolCalls < MIN_TOOL_CALLS) {
     return {
       status: "skipped",
       reason: `trivial session (${userTurns} user turn(s), ${assistantTurns} agent turn(s), ${toolCalls} tool call(s))`,
+      distilled: initialDistilled,
+    };
+  }
+
+  const inspector =
+    selectedAgent === "pi" && rawBytes > LARGE_TRANSCRIPT_BYTES
+      ? createTranscriptInspector({ events: raw.events, ref: transcriptIdentity(transcript) })
+      : null;
+  const distilled = inspector ? distill(raw.events, traceMeta, { transcriptInspector: inspector }) : initialDistilled;
+
+  try {
+    const prompt = renderPrompt("analysis", {
+      MEMORY_PATH: memoryFile.path,
+      INSTRUCTION_INDEX: renderInstructionIndex(memoryFile),
+      SKILLS: skillIndex,
+      OPEN_GAPS: openGapIndex,
+      TRACE: distilled.trace,
+    });
+
+    const promptFile = promptPathFor(config.state, transcript);
+    fs.mkdirSync(path.dirname(promptFile), { recursive: true });
+    fs.writeFileSync(promptFile, prompt);
+
+    let ranWith = null;
+    const result = await config.agents.withFallthrough("analysis", async (pick) => {
+      ranWith = pick.agent;
+      const call = {
+        agent: pick.agent,
+        model: pick.model,
+        promptFile,
+        cwd: modelCwd || repo.root,
+        timeoutSeconds: config.timeoutSeconds,
+        promptRetries: config.promptRetries,
+        tools: pick.tools,
+        transcriptInspector: pick.agent === "pi" ? inspector : null,
+      };
+      // Route effortful calls through a fresh per-transcript session so each harness's
+      // invocation-scoped overlay or safe fallback is applied; otherwise one-shot is cheaper.
+      return runModelCall(call, pick, {
+        sessionName: () => `backpass-analysis-${process.pid}-${slot}-${++callCounter}`,
+      });
+    });
+    for (const note of result.notes || []) noteOnce(note);
+
+    const parsed = extractJson(result.text);
+    if (!parsed) {
+      throw new Error("analysis returned no parseable JSON");
+    }
+
+    return {
+      status: "ok",
+      evidence: sanitizeEvidence(parsed, memoryFile, distilled.trace),
+      usage: usageRecord(ranWith, result),
       distilled,
     };
+  } finally {
+    inspector?.dispose();
   }
-
-  const prompt = renderPrompt("analysis", {
-    MEMORY_PATH: memoryFile.path,
-    INSTRUCTION_INDEX: renderInstructionIndex(memoryFile),
-    SKILLS: skillIndex,
-    OPEN_GAPS: openGapIndex,
-    TRACE: distilled.trace,
-  });
-
-  const promptFile = promptPathFor(config.state, transcript);
-  fs.mkdirSync(path.dirname(promptFile), { recursive: true });
-  fs.writeFileSync(promptFile, prompt);
-
-  let ranWith = null;
-  const result = await config.agents.withFallthrough("analysis", async (pick) => {
-    ranWith = pick.agent;
-    const call = {
-      agent: pick.agent,
-      model: pick.model,
-      promptFile,
-      cwd: modelCwd || repo.root,
-      timeoutSeconds: config.timeoutSeconds,
-      promptRetries: config.promptRetries,
-      tools: pick.tools,
-    };
-    // Route effortful calls through a fresh per-transcript session so each harness's
-    // invocation-scoped overlay or safe fallback is applied; otherwise one-shot is cheaper.
-    return runModelCall(call, pick, {
-      sessionName: () => `backpass-analysis-${process.pid}-${slot}-${++callCounter}`,
-    });
-  });
-  for (const note of result.notes || []) noteOnce(note);
-
-  const parsed = extractJson(result.text);
-  if (!parsed) {
-    throw new Error("analysis returned no parseable JSON");
-  }
-
-  return {
-    status: "ok",
-    evidence: sanitizeEvidence(parsed, memoryFile, distilled.trace),
-    usage: usageRecord(ranWith, result),
-    distilled,
-  };
 }
 
 /**
@@ -378,6 +393,7 @@ export async function analyzeTranscripts({
         slot,
         openGapIndex,
         skillIndex,
+        selectedAgent: pick.agent,
       });
       if (result.status === "skipped") {
         summary.skipped += 1;

@@ -415,6 +415,7 @@ export async function execOneShot({
   model = null,
   effort = null,
   tools = null,
+  transcriptInspector = null,
   promptFile,
   cwd,
   timeoutSeconds = 300,
@@ -422,7 +423,7 @@ export async function execOneShot({
   approveReads = true,
   suppressReads = true,
 }) {
-  const invocation = prepareHarnessInvocation({ agent, model, effort, tools });
+  const invocation = prepareHarnessInvocation({ agent, model, effort, tools, transcriptInspector });
   const args = [
     ...baseArgs({ cwd, model: invocation.acpxModel, timeoutSeconds, approveReads, suppressReads }),
     "--prompt-retries",
@@ -488,12 +489,20 @@ export async function openSession({
   model = null,
   effort = null,
   tools = null,
+  transcriptInspector = null,
   sessionName,
   cwd,
   writeAccess = false,
   createTimeoutMs = SESSION_CREATE_TIMEOUT_MS,
 }) {
-  const invocation = prepareHarnessInvocation({ agent, model, effort, tools, writeAccess });
+  const invocation = prepareHarnessInvocation({
+    agent,
+    model,
+    effort,
+    tools,
+    transcriptInspector,
+    writeAccess,
+  });
   const notes = [...invocation.notes];
   const acpxAgentArgs = invocationAgentArgs(invocation, agent);
   // The adapter is already up once the session exists, so the later `set` calls do not
@@ -664,6 +673,7 @@ export async function sessionPrompt({
   model = null,
   effort = null,
   tools = null,
+  transcriptInspector = null,
   sessionName,
   promptFile,
   cwd,
@@ -675,7 +685,16 @@ export async function sessionPrompt({
 }) {
   let session;
   try {
-    session = await openSession({ agent, model, effort, tools, sessionName, cwd, createTimeoutMs });
+    session = await openSession({
+      agent,
+      model,
+      effort,
+      tools,
+      transcriptInspector,
+      sessionName,
+      cwd,
+      createTimeoutMs,
+    });
   } catch (err) {
     if (!(err instanceof AcpxError) || !err.unsupported) throw err;
     if (effort && effortOptionKey(agent)) {
@@ -696,6 +715,7 @@ export async function sessionPrompt({
       approveReads,
       suppressReads,
       tools,
+      transcriptInspector,
     });
     return { ...fallback, notes };
   }

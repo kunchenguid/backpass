@@ -31,10 +31,14 @@ omit `matchesGap`.
 
 ## The distilled session trace
 
-Tool calls are one-line summaries and tool output is truncated. The raw transcript path
-is at the end of the trace: open it ONLY if a specific claim you want to make cannot be
-verified from the distilled trace. Reading it is allowed but costs time, so do not do it
-by default. Set `usedRawTranscript` accordingly.
+Tool calls are one-line summaries and tool output is truncated. Small sessions may include
+the raw transcript path at the end of the trace: open it ONLY if a specific claim you want
+to make cannot be verified from the distilled trace. Reading it is allowed but costs time,
+so do not do it by default. Large sessions may instead expose the bounded
+`backpass_inspect_transcript` tool. Use that tool with a focused literal query when exact
+text is needed. It has a small fixed query budget, so make at most a few focused lookups,
+then synthesize. Do not use generic file tools to search for the hidden transcript path.
+Set `usedRawTranscript` to true when either raw access path is used.
 
 {{TRACE}}
 
