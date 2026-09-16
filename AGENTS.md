@@ -164,8 +164,9 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   where the advice for each terminal condition lives - never a blanket
   stronger-model/budget/max-edits line. A blank or unparseable first annotate turn is
   reported as `edit-empty`, not the generic `empty`/`unparseable` reason, when the edit
-  turn already left the staging copy byte-identical to the original - there was nothing to
-  annotate, so retrying burns no attempts. That check only fires on the loop's first turn;
+  turn left the staging copy and all in-scope files byte-identical to the original - a
+  stray out-of-scope write counts as touched, so it is never hidden behind `edit-empty` -
+  there was nothing to annotate, so retrying burns no attempts. That check only fires on the loop's first turn;
   a later turn's empty diff still means the model undid its own edit mid-annotation, which
   stays `editing`/`empty`/`unparseable`. It never overrides a _parseable_ answer, even
   `{edits: []}`, because an agent that changed nothing yielding an empty proposal is a
