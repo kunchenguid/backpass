@@ -719,6 +719,11 @@ block to inherit that role from the global config; set its fields to `null` only
 repo should explicitly use the auto-pick ladder instead of a global pin. `backpass init`
 leaves both blocks out so it preserves either inherited behavior.
 
+Repositories initialized by a release that wrote all-null role blocks keep those explicit
+overrides when backpass is upgraded. To inherit a global pin there, remove the corresponding
+all-null `analysis` or `synthesis` block from `.backpassrc.json`, then confirm it with
+`backpass status`.
+
 `discovery.hosts` is the one setting a repo file may not carry; it belongs in the personal
 configuration file named above. In user scope it defaults to that file's top-level list,
 so you name your machines once.
