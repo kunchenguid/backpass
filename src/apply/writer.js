@@ -437,6 +437,22 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
   }
   if (results.failed.length) return results;
 
+  // Skill paths were frozen into the proposal at propose time under whatever skillsDir
+  // was configured then; writing them now under a different one would silently ignore
+  // the current run's --skills-dir instead of writing where it says. Refuse rather than
+  // remap - a later apply should re-propose against the new location.
+  const proposedSkillsDir = proposal.config?.skillsDir;
+  const currentSkillsDir = config.skillsDir || CANONICAL_SKILLS_DIR;
+  if (plannedSkills.length && proposedSkillsDir && proposedSkillsDir !== currentSkillsDir) {
+    results.failed.push({
+      error:
+        `this proposal was generated with skillsDir=${proposedSkillsDir}; the current run is configured ` +
+        `with skillsDir=${currentSkillsDir} - re-run \`backpass propose\` with the new skillsDir, or apply ` +
+        "without overriding it",
+    });
+    return results;
+  }
+
   const existingSkillPaths = new Set(skillsNow.map((skill) => skill.path));
   let descriptionTokensProjected = descriptionTokensNow;
   for (const item of resolvedPlanned) {

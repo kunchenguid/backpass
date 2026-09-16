@@ -2090,6 +2090,48 @@ test("an accepted extract writes the skill the agent drafted, in the canonical l
   assert.ok(fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8").includes("See the release-signing skill."));
 });
 
+test("apply refuses a skillsDir that disagrees with the one baked into the proposal, rather than writing to the stale path", () => {
+  const skillText =
+    "---\nname: release-signing\ndescription: Load before tagging a release.\n---\n\n- Use Node 18 via nvm before running any script.\n\n## Steps\n\n1. sign\n";
+  const { proposal, repo, state } = gate({
+    edit: (root) => {
+      writeIn(root, "AGENTS.md", (t) =>
+        t.replace("- Use Node 18 via nvm before running any script.", "- See the release-signing skill."),
+      );
+      writeIn(root, ".agents/skills/release-signing/SKILL.md", skillText);
+    },
+    annotation: { edits: [claim(["H1", "H2"], { kind: "extract", title: "x" })] },
+  });
+  assert.equal(proposal.config.skillsDir, ".agents/skills");
+
+  const results = applyDecisions({
+    proposal,
+    decisions: { e1: "accepted" },
+    repo,
+    state,
+    config: { budgetTokens: 5000, skillsDir: "other/skills" },
+  });
+
+  assert.equal(results.written.length, 0, "a refused apply must write nothing");
+  assert.ok(
+    results.failed.some((f) => /skillsDir=\.agents\/skills/.test(f.error) && /skillsDir=other\/skills/.test(f.error)),
+    `expected a named skillsDir mismatch, got ${JSON.stringify(results.failed)}`,
+  );
+  assert.ok(
+    !fs.existsSync(path.join(repo.root, ".agents/skills/release-signing/SKILL.md")),
+    "nothing lands at the stale propose-time path",
+  );
+  assert.ok(
+    !fs.existsSync(path.join(repo.root, "other/skills/release-signing/SKILL.md")),
+    "nothing lands at the newly configured path either - a mismatch is refused, never remapped",
+  );
+  assert.equal(
+    fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8"),
+    MEMORY_TEXT,
+    "a refused apply must leave the memory file untouched",
+  );
+});
+
 test("a dry run reports what it would write without touching the file", () => {
   const { proposal, repo, state } = gate({
     edit: memoryEdit((t) => t.replace("- Use Node 18 via nvm before running any script.\n", "")),
