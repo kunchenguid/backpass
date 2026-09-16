@@ -73,3 +73,33 @@ test("a tracked .gitignore that already lists .backpass/ (from an older backpass
   const excludePath = path.join(dir, ".git", "info", "exclude");
   assert.match(fs.readFileSync(excludePath, "utf8"), /^\.backpass\/$/m);
 });
+
+test("init leaves agent roles unset so project scope inherits global pins", async () => {
+  const dir = initRepo();
+  const configHome = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-init-global-config-"));
+  const previous = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = configHome;
+  fs.mkdirSync(path.join(configHome, "backpass"), { recursive: true });
+  fs.writeFileSync(
+    path.join(configHome, "backpass", "config.json"),
+    JSON.stringify({
+      analysis: { agent: "claude", model: "claude-sonnet-5", effort: "medium" },
+      synthesis: { agent: "claude", model: "claude-opus-5", effort: "high" },
+    }),
+  );
+
+  try {
+    await runInit(dir);
+
+    const generated = JSON.parse(fs.readFileSync(path.join(dir, ".backpassrc.json"), "utf8"));
+    assert.equal("analysis" in generated, false);
+    assert.equal("synthesis" in generated, false);
+
+    const reloaded = loadConfig(dir);
+    assert.deepEqual(reloaded.analysis, { agent: "claude", model: "claude-sonnet-5", effort: "medium" });
+    assert.deepEqual(reloaded.synthesis, { agent: "claude", model: "claude-opus-5", effort: "high" });
+  } finally {
+    if (previous === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = previous;
+  }
+});

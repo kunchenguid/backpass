@@ -411,9 +411,8 @@ export function initialConfig() {
     // maxEditsPerRun stays unset so the adaptive cap applies; set it to pin a number.
     minGapEvidence: DEFAULT_CONFIG.minGapEvidence,
     maxTranscripts: DEFAULT_CONFIG.maxTranscripts,
-    // Agents stay unset so the ladder auto-pick keeps applying to initialized repos.
-    analysis: { agent: null, model: null, effort: null },
-    synthesis: { agent: null, model: null, effort: null },
+    // Agent roles stay unset so initialized repos inherit global pins, or the default
+    // auto-pick when no global pin exists.
     discovery: { harnesses: ALL_HARNESSES, since: "30d", worktreeGlobs: [], minUserTurns: 2 },
     jobs: DEFAULT_CONFIG.jobs,
   };

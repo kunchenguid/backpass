@@ -73,6 +73,25 @@ test("repo config overrides defaults, and CLI flags override both", () => {
   assert.equal(withFlags.analysis.model, "gpt-5.2");
 });
 
+test("repo null explicitly overrides a global agent pin with auto-pick", () => {
+  const configHome = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-config-global-pin-"));
+  const repo = tempRepo({ analysis: { agent: null, model: null, effort: null } });
+  const previous = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = configHome;
+  fs.mkdirSync(path.join(configHome, "backpass"), { recursive: true });
+  fs.writeFileSync(
+    path.join(configHome, "backpass", "config.json"),
+    JSON.stringify({ analysis: { agent: "claude", model: "claude-sonnet-5", effort: "medium" } }),
+  );
+
+  try {
+    assert.deepEqual(loadConfig(repo).analysis, { agent: null, model: null, effort: null });
+  } finally {
+    if (previous === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = previous;
+  }
+});
+
 test("skillsDir is normalized when the configuration loads", () => {
   const config = loadConfig(tempRepo({ skillsDir: ".claude\\skills\\" }));
   assert.equal(config.skillsDir, ".claude/skills");

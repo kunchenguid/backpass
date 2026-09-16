@@ -714,6 +714,11 @@ CLI flags on top:
 }
 ```
 
+The `analysis` and `synthesis` blocks shown above are explicit project overrides. Omit a
+block to inherit that role from the global config; set its fields to `null` only when this
+repo should explicitly use the auto-pick ladder instead of a global pin. `backpass init`
+leaves both blocks out so it preserves either inherited behavior.
+
 `discovery.hosts` is the one setting a repo file may not carry; it belongs in the personal
 configuration file named above. In user scope it defaults to that file's top-level list,
 so you name your machines once.
