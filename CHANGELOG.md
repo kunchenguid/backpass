@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.24](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.23...backpass-v0.1.24) (2026-09-16)
+
+
+### Bug Fixes
+
+* **config:** preserve global agent pins after init ([#137](https://github.com/kunchenguid/backpass/issues/137)) ([7d92241](https://github.com/kunchenguid/backpass/commit/7d922418138ea7089c5469130fa94ecbde2e87b4))
+
 ## [0.1.23](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.22...backpass-v0.1.23) (2026-09-16)
 
 
