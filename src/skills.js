@@ -385,8 +385,10 @@ function invalidSkillsDir(configuredDir) {
 function claudeSkillsDirWarning(claudeSkillsDir = CLAUDE_SKILLS_LINK, target = CLAUDE_SKILLS_LINK_TARGET) {
   return (
     `${claudeSkillsDir} is a real directory, not a symlink to ${target}; ` +
-    `left untouched. Claude will not see skills written to ${CANONICAL_SKILLS_DIR} until you ` +
-    `merge it in and replace it with the symlink (ln -s ${target} ${claudeSkillsDir}).`
+    `left untouched. Backpass writes new skills to ${CANONICAL_SKILLS_DIR}, which Claude will not load ` +
+    `through ${claudeSkillsDir}. To write directly to the existing directory, set ` +
+    `"skillsDir": "${claudeSkillsDir}" in .backpassrc.json; otherwise merge new skill directories manually ` +
+    `after checking for conflicts.`
   );
 }
 

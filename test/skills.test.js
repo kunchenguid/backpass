@@ -229,6 +229,9 @@ test("a real .claude/skills directory is warned about and never clobbered", () =
   assert.equal(resolved.dir, CANONICAL_SKILLS_DIR);
   assert.equal(resolved.warnings.length, 1);
   assert.match(resolved.warnings[0], /\.claude\/skills is a real directory/);
+  assert.match(resolved.warnings[0], /"skillsDir": "\.claude\/skills"/);
+  assert.match(resolved.warnings[0], /merge new skill directories manually/);
+  assert.doesNotMatch(resolved.warnings[0], /ln -s|replace it/);
 
   const result = writeSkill(root, SKILL);
   assert.equal(result.warnings.length, 1);
