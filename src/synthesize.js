@@ -353,15 +353,16 @@ async function annotateLoop({
   let saved = null;
   /** @type {{ reason: string, violations: string[] }} */
   let terminal;
-  // Whether the edit turn that preceded this loop left the staging copy untouched. Only
-  // the very first turn's measurement answers that question; a later remeasure reflects
-  // edits made during annotation instead, which the "editing" reason already covers.
+  // Whether the edit turn that preceded this loop left the staging copy untouched - a
+  // stray out-of-scope edit still counts as touched, so it is never hidden behind
+  // "edit-empty". Only the very first turn's measurement answers that question; a later
+  // remeasure reflects edits made during annotation instead, which "editing" already covers.
   let editMadeNoChanges = false;
 
   for (let turn = 1; ; turn += 1) {
     assertRepoUntouched(repo, fingerprint, workspace.root);
     const measured = measureWorkspace(workspace);
-    if (turn === 1) editMadeNoChanges = measured.changes.length === 0;
+    if (turn === 1) editMadeNoChanges = measured.changes.length === 0 && !(measured.stray || []).length;
 
     let prompt = renderPrompt("annotate", {
       ...common,
