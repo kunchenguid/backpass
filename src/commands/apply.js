@@ -15,6 +15,12 @@ import { describeTarget } from "../target.js";
  * terminal. `applyDecisions` owns the pre-write freshness, budget, and composition gates;
  * a failing gate records no rejections.
  */
+/** A run-level failure carries no `file`; only a per-edit one does. */
+export function formatFailureLine(failure) {
+  const location = failure.file ? ` ${failure.file}${failure.edit ? ` (${failure.edit})` : ""}` : "";
+  return `${color.red("failed")}${location}: ${failure.error}`;
+}
+
 export async function cmdApply(ctx) {
   const { config, repo } = ctx;
   const proposal = config.state.readProposal();
@@ -113,7 +119,7 @@ export async function cmdApply(ctx) {
   }
   for (const warning of results.warnings || []) warn(warning);
   for (const failure of results.failed) {
-    out(`  ${color.red("failed")} ${failure.file}${failure.edit ? ` (${failure.edit})` : ""}: ${failure.error}`);
+    out(`  ${formatFailureLine(failure)}`);
   }
 
   if (results.rejectionsRecorded) {

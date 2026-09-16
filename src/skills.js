@@ -22,7 +22,7 @@ import { estimateTokens } from "./tokens.js";
 
 export const BROAD_RELEVANCE_THRESHOLD = 0.2;
 
-function logicalSkillDir(repoRoot, skillsDir) {
+export function logicalSkillDir(repoRoot, skillsDir) {
   const absolute = path.isAbsolute(skillsDir) ? skillsDir : path.resolve(repoRoot, skillsDir);
   const relative = path.relative(path.resolve(repoRoot), absolute);
   if (relative === "") return ".";

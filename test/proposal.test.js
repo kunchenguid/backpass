@@ -2132,6 +2132,36 @@ test("apply refuses a skillsDir that disagrees with the one baked into the propo
   );
 });
 
+test("apply accepts a skillsDir spelled differently but naming the same directory as the proposal", () => {
+  const skillText =
+    "---\nname: release-signing\ndescription: Load before tagging a release.\n---\n\n- Use Node 18 via nvm before running any script.\n\n## Steps\n\n1. sign\n";
+  const { proposal, repo, state } = gate({
+    edit: (root) => {
+      writeIn(root, "AGENTS.md", (t) =>
+        t.replace("- Use Node 18 via nvm before running any script.", "- See the release-signing skill."),
+      );
+      writeIn(root, ".agents/skills/release-signing/SKILL.md", skillText);
+    },
+    annotation: { edits: [claim(["H1", "H2"], { kind: "extract", title: "x" })] },
+  });
+  assert.equal(proposal.config.skillsDir, ".agents/skills");
+
+  const results = applyDecisions({
+    proposal,
+    decisions: { e1: "accepted" },
+    repo,
+    state,
+    config: { budgetTokens: 5000, skillsDir: "./.agents/skills" },
+  });
+
+  assert.equal(
+    results.failed.length,
+    0,
+    `an equivalent spelling must not be refused: ${JSON.stringify(results.failed)}`,
+  );
+  assert.ok(fs.existsSync(path.join(repo.root, ".agents/skills/release-signing/SKILL.md")));
+});
+
 test("a dry run reports what it would write without touching the file", () => {
   const { proposal, repo, state } = gate({
     edit: memoryEdit((t) => t.replace("- Use Node 18 via nvm before running any script.\n", "")),

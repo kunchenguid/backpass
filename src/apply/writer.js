@@ -14,6 +14,7 @@ import {
   ensureSkillsLayout,
   loadProjectSkills,
   loadedCopies,
+  logicalSkillDir,
   parseFrontmatter,
   removeOwnedSkillPaths,
   resolveOverflowTarget,
@@ -443,7 +444,9 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
   // remap - a later apply should re-propose against the new location.
   const proposedSkillsDir = proposal.config?.skillsDir;
   const currentSkillsDir = config.skillsDir || CANONICAL_SKILLS_DIR;
-  if (plannedSkills.length && proposedSkillsDir && proposedSkillsDir !== currentSkillsDir) {
+  const skillsDirMismatch =
+    proposedSkillsDir && logicalSkillDir(repo.root, proposedSkillsDir) !== logicalSkillDir(repo.root, currentSkillsDir);
+  if (plannedSkills.length && skillsDirMismatch) {
     results.failed.push({
       error:
         `this proposal was generated with skillsDir=${proposedSkillsDir}; the current run is configured ` +

@@ -611,3 +611,18 @@ test("apply names a memory file left over budget without refusing the shrink", (
   assert.match(applied.output, /is still \d+ tokens over the 20-token budget/);
   assert.match(applied.output, /run `backpass` again for the next shrink step/);
 });
+
+test("a skillsDir mismatch failure prints its message without a placeholder location", () => {
+  const dir = initRepo();
+  const proposal = proposeExtractions(dir);
+  fs.writeFileSync(path.join(dir, ".backpassrc.json"), JSON.stringify({ skillsDir: "other/skills" }));
+
+  const applied = runApply(
+    dir,
+    proposal.edits.map((e) => e.id),
+  );
+
+  assert.equal(applied.status, 1, `a skillsDir mismatch must refuse the apply:\n${applied.output}`);
+  assert.doesNotMatch(applied.output, /undefined/, "a run-level failure must not print a placeholder location");
+  assert.match(applied.output, /this proposal was generated with skillsDir=/);
+});
