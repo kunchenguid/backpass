@@ -129,8 +129,12 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   every non-memory edit target still hashes to its `proposal.targetFiles` entry (same
   contract, so a hand-edited skill refuses the apply instead of being patched blind), the
   accepted subset clears `budgetGateKind` (`src/tokens.js`), every accepted edit for a file
-  composes against that file's one pre-write image, and every created skill target is still
-  absent. Any of them failing writes nothing and records no rejection. Accepted paths are
+  composes against that file's one pre-write image, every created skill target is still
+  absent, and, when the proposal carries any skill writes, the current run's resolved
+  `skillsDir` (defaulting to the canonical skills dir when unset) still matches
+  `proposal.config.skillsDir` - a mismatch refuses the apply naming both values rather than
+  writing to the stale propose-time path. Any of them failing writes nothing and records no
+  rejection. Accepted paths are
   resolved before mutation, and duplicate resolved targets refuse the whole apply. Each file
   is therefore applied whole or not at all. Skills and non-memory files land before the
   memory file; a later failure rolls back files, skills, and loading-layout entries created
