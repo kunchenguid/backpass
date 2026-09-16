@@ -2,6 +2,7 @@ import { analyzeTranscripts } from "../analyze.js";
 import { applyDecisions, writeBootstrapFiles } from "../apply/writer.js";
 import { bootstrapTargets, renderPointer, starterMemoryFile } from "../bootstrap.js";
 import { UserError, color, info, json, out, warn } from "../logger.js";
+import { formatFailureLine } from "./apply.js";
 import { resolveMemoryFiles } from "../memory.js";
 import { emitProgress } from "../progress.js";
 import { ProposalViolation } from "../proposal.js";
@@ -179,7 +180,7 @@ export function printBootstrap(result, config) {
     }
     for (const s of result.applied.skills) out(`  ${color.green("wrote")} ${s.path} (new skill)`);
     for (const f of result.applied.failed) {
-      out(`  ${color.red("failed")} ${f.file}${f.edit ? ` (${f.edit})` : ""}: ${f.error}`);
+      out(`  ${formatFailureLine(f)}`);
     }
   }
   out("");
