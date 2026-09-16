@@ -726,7 +726,9 @@ regular settings; its path and user-only settings include `memoryFiles`, `skills
 
 `skillsDir` defaults to `.agents/skills`. To use an existing harness-loaded directory
 instead, such as `.claude/skills`, configure that path; a missing configured directory
-falls back to the default. Backpass normalizes path separators and trailing slashes.
+falls back to the default. A real `.claude/skills` directory is preserved: configure
+`skillsDir` to write there directly, or manually merge newly created skill directories
+after checking for conflicts. Backpass normalizes path separators and trailing slashes.
 
 ```json
 {

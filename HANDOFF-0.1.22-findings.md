@@ -44,17 +44,17 @@ problem, but the command it hands over does not do it.
 On the three extended skills that carried `allowed-tools`, apply **dropped
 that key** and added `user-invocable: false` plus `metadata: internal: true`:
 
-| skill | before | after |
-|---|---|---|
-| `commit` | `allowed-tools: Read, Bash` | `user-invocable: false` |
-| `pre-pr` | `allowed-tools: Read, Grep, Glob, Bash, Agent` | `user-invocable: false` |
-| `worktree-setup` | `allowed-tools: Read, Bash` | `user-invocable: false` |
-| `spa-migration` | (neither key) | `user-invocable: false` added |
+| skill            | before                                         | after                         |
+| ---------------- | ---------------------------------------------- | ----------------------------- |
+| `commit`         | `allowed-tools: Read, Bash`                    | `user-invocable: false`       |
+| `pre-pr`         | `allowed-tools: Read, Grep, Glob, Bash, Agent` | `user-invocable: false`       |
+| `worktree-setup` | `allowed-tools: Read, Bash`                    | `user-invocable: false`       |
+| `spa-migration`  | (neither key)                                  | `user-invocable: false` added |
 
 Both halves are wrong. Dropping `allowed-tools` widens a skill's tool
 grant. Adding `user-invocable: false` disables the slash command that the
 skill's own untouched description tells the user to type — `commit`'s
-description reads *"Trigger … when the user says 'commit this'"*.
+description reads _"Trigger … when the user says 'commit this'"_.
 
 Expected: preserve every pre-existing frontmatter key when extending a
 skill, and set `user-invocable` only on a skill backpass creates.
@@ -63,11 +63,11 @@ skill, and set `user-invocable` only on a skill backpass creates.
 
 ## B. The `extract` gate accepts a proposal that loses what it moves
 
-### B1 — a moved *trigger* satisfies a line-preservation gate
+### B1 — a moved _trigger_ satisfies a line-preservation gate
 
 The gate requires an `extract` to carry every removed line into the skill.
 A removed line that is itself the trigger passes while losing its function:
-the always-loaded reminder becomes reachable only *after* the skill fires,
+the always-loaded reminder becomes reachable only _after_ the skill fires,
 and the skill's own `description` silently becomes the sole trigger.
 
 `url-inventory/SKILL.md` is the clean case. Its entire body is the line
@@ -81,8 +81,8 @@ Four CI-breaking gates were extracted this way (urls.txt, golden manifest,
 frontend-audit inventory, translation catalogs), plus the force-push gate.
 
 The same shape produces circular files: `commit/SKILL.md` now ends with
-*"invoke the `commit` skill before writing any commit message"*, and
-`spa-migration/SKILL.md` with *"Invoke the `spa-migration` skill …"*.
+_"invoke the `commit` skill before writing any commit message"_, and
+`spa-migration/SKILL.md` with _"Invoke the `spa-migration` skill …"_.
 
 Worth considering: detect a removed line that names the skill it is moving
 into, or that reads as an unconditional trigger, and either leave a
@@ -101,8 +101,8 @@ own provider check fixed everything.
 
 ### C1 — the empty-output hint rules out the actual fix
 
-`src/agents.js:271` — *"'empty-output' is never fixed by logging in - see
-`assertNonEmptyOutput` in acpx.js"* — and the user-facing hint follows it.
+`src/agents.js:271` — _"'empty-output' is never fixed by logging in - see
+`assertNonEmptyOutput` in acpx.js"_ — and the user-facing hint follows it.
 Here re-authenticating was exactly the fix, so the hint sent me looking at
 budgets and models first.
 
@@ -124,7 +124,7 @@ One run, one broken provider, two different outcomes decided by cache age.
 A stage that hits a real empty-output failure should invalidate that
 candidate's cached `ok` and re-enter selection rather than terminate.
 
-### C3 — an empty *edit* turn is reported as an annotation failure
+### C3 — an empty _edit_ turn is reported as an annotation failure
 
 The terminal message was:
 
@@ -135,7 +135,7 @@ The terminal message was:
 All true, and all about the annotate stage. The actual event was upstream:
 the **edit** turn produced nothing, `.backpass/synthesis/AGENTS.md` was
 byte-identical to the original, and `.backpass/prompts/synthesis-annotate-1.md`
-opens with *"(no changes - the staging copy is identical to the original)"*.
+opens with _"(no changes - the staging copy is identical to the original)"_.
 
 Naming that — "the edit turn made no changes" — costs one condition and
 points at the right stage.
