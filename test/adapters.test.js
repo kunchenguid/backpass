@@ -146,6 +146,28 @@ test("pi adapter reads the session header and drops thinking blocks", () => {
   assert.equal(toolCall.result, "nothing to commit");
 });
 
+test("pi adapter classifies omp sessions past the title record and reads model", () => {
+  const file = path.join(FIXTURES, "omp-session.jsonl");
+  const descriptor = pi.classify(candidateFor(file));
+  assert.equal(descriptor.id, "omp-5678");
+  assert.equal(descriptor.cwd, "/repo/demo");
+
+  const { events, model } = pi.read({ path: file });
+  assert.equal(model, "cursor/composer-2.5", "omp model_change carries model, not modelId");
+  const [toolCall] = tools(events);
+  assert.equal(toolCall.name, "bash");
+  assert.equal(toolCall.result, "nothing to commit");
+});
+
+function writeOmpSession(file, { id, cwd }) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(
+    file,
+    `${JSON.stringify({ type: "title", v: 1, title: "", updatedAt: "2026-08-27T00:00:00.000Z", pad: "  " })}\n` +
+      `${JSON.stringify({ type: "session", version: 3, id, timestamp: "2026-08-27T00:00:00.000Z", cwd })}\n`,
+  );
+}
+
 function writePiSession(file, { id, cwd }) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(
@@ -195,6 +217,14 @@ test("pi adapter enumerates standalone and BB-managed session roots without dupl
     id: "standalone",
     cwd: "/repo/demo",
   });
+  writeOmpSession(path.join(fakeHome, ".omp", "agent", "sessions", "-repo-demo", "omp-standalone.jsonl"), {
+    id: "omp-standalone",
+    cwd: "/repo/demo",
+  });
+  writeOmpSession(path.join(fakeHome, ".omp", "agent", "sessions", "-repo-demo", "omp-standalone", "Subagent.jsonl"), {
+    id: "omp-subagent",
+    cwd: "/repo/demo",
+  });
   writePiSession(path.join(piAgentDir, "sessions", "-repo-demo", "custom-agent.jsonl"), {
     id: "custom-agent",
     cwd: "/repo/demo",
@@ -228,8 +258,10 @@ test("pi adapter enumerates standalone and BB-managed session roots without dupl
         "custom-session.jsonl",
         "default-bb.jsonl",
         "direct-override.jsonl",
+        "omp-standalone.jsonl",
         "standalone.jsonl",
-      ],
+        "Subagent.jsonl",
+      ].sort(),
     );
   });
 
