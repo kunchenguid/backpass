@@ -268,13 +268,23 @@ function defaultSleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** "empty-output" is never fixed by logging in - see `assertNonEmptyOutput` in acpx.js. */
+/**
+ * "empty-output" is not always fixed by logging in - a genuinely blank, silent call
+ * can also be a quota/credits problem invisible to backpass. But when the harness did
+ * write something to stderr, that text is the actual diagnosis and belongs in front of
+ * this generic advice, not instead of it - see `assertNonEmptyOutput` in acpx.js.
+ */
 const EMPTY_OUTPUT_HINT = "check the provider account behind this model (quota, credits, a suspended key)";
 
-function hintFor(agent, verdict) {
+function emptyOutputHint(stderr) {
+  const line = firstLine(stderr);
+  return line ? `${EMPTY_OUTPUT_HINT} - stderr: ${line}` : EMPTY_OUTPUT_HINT;
+}
+
+function hintFor(agent, verdict, stderr) {
   if (verdict === "unauthenticated" && LOGIN_HINTS[agent]) return `-> run: ${LOGIN_HINTS[agent]}`;
   if (verdict === "unreachable") return `-> install the ${agent} CLI`;
-  if (verdict === "empty-output") return `-> ${EMPTY_OUTPUT_HINT}`;
+  if (verdict === "empty-output") return `-> ${emptyOutputHint(stderr)}`;
   return "";
 }
 
@@ -473,7 +483,7 @@ export class AgentResolver {
    * there is something to fall through to (the next `resolve(role)` walks on), false
    * when the pick was pinned by the user - then the error is theirs to see.
    */
-  async demote(role, pick, verdict, detail = "") {
+  async demote(role, pick, verdict, detail = "", stderr = "") {
     if (pick.pinned) return false;
     const key = candidateKey({ agent: pick.agent, model: pick.ladderModel });
     if (this.memo.get(key)?.verdict === "ok") {
@@ -485,6 +495,7 @@ export class AgentResolver {
         resolvedModel: null,
         checkedAt: new Date(this.now()).toISOString(),
         ...(authState === null ? {} : { authState }),
+        ...(stderr ? { stderr } : {}),
       };
       this.memo.set(key, entry);
       const cache = await this.loadCache();
@@ -510,7 +521,7 @@ export class AgentResolver {
         const verdict = isAcpxError ? classifyAcpxFailure(err) : null;
         if (isAcpxError && pick.pinned) throw pinnedFailureError(role, pick, verdict, err);
         if (!verdict) throw err;
-        await this.demote(role, pick, verdict, err.message);
+        await this.demote(role, pick, verdict, err.message, isAcpxError ? err.stderr : "");
       }
     }
   }
@@ -549,7 +560,7 @@ function pinnedFailureError(role, pick, verdict, err) {
   } else if (verdict === "unreachable") {
     hint = `install the ${pick.agent} CLI; ${pin}`;
   } else if (verdict === "empty-output") {
-    hint = `${EMPTY_OUTPUT_HINT}; ${pin}`;
+    hint = `${emptyOutputHint(err?.stderr)}; ${pin}`;
   } else if (verdict) {
     hint = pin;
   }
@@ -561,7 +572,7 @@ function exhaustedError(role, trail) {
   const width = Math.max(...trail.map((t) => t.model.length));
   const lines = trail.map((t) => {
     const label = VERDICT_LABELS[t.verdict] || t.verdict;
-    const hint = hintFor(t.agent, t.verdict);
+    const hint = hintFor(t.agent, t.verdict, t.stderr);
     return `  ${t.model.padEnd(width)}  ${t.agent.padEnd(9)} ${label}${t.detail ? ` (${t.detail})` : ""}${hint ? `  ${hint}` : ""}`;
   });
   // "log in" is only true advice when something in the trail is actually an auth

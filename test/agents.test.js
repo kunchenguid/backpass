@@ -92,8 +92,8 @@ function authRequired(agent) {
   });
 }
 
-function emptyOutput(agent, model) {
-  return new AcpxError(`${agent} (${model}) returned no output`, { emptyOutput: true });
+function emptyOutput(agent, model, stderr = "") {
+  return new AcpxError(`${agent} (${model}) returned no output`, { emptyOutput: true, stderr });
 }
 
 test("the ladders flatten model-outer, harness-inner, in the captain's order", () => {
@@ -544,6 +544,23 @@ test("a pinned agent that returns no output gets a provider-account hint, not a 
   );
 });
 
+test("a pinned agent's empty-output hint surfaces the harness's own stderr line", async () => {
+  const config = loadConfig(tmpRepo(), { synthesis: { agent: "claude", model: "claude-opus-5" } });
+  const { resolver } = resolverWith({}, { config });
+  await assert.rejects(
+    resolver.withFallthrough("synthesis", async () => {
+      throw emptyOutput("claude", "claude-opus-5", "provider error: credential expired, re-authenticate\n");
+    }),
+    (err) => {
+      assert.ok(err instanceof UserError);
+      assert.match(err.hint, /check the provider account/);
+      // The classification step must not have thrown this diagnostic text away.
+      assert.match(err.hint, /credential expired, re-authenticate/);
+      return true;
+    },
+  );
+});
+
 test("--no-auto-agent pins the pre-ladder defaults", async () => {
   const config = loadConfig(tmpRepo(), { autoAgent: false });
   const { resolver, calls } = resolverWith({}, { config });
@@ -598,6 +615,25 @@ test("an exhausted ladder that failed only on empty output points at the provide
       assert.doesNotMatch(err.hint, /log in/);
       assert.match(err.hint, /check the provider account/);
       assert.match(err.hint, /--synthesis-agent <agent> --synthesis-model <id>/);
+      return true;
+    },
+  );
+});
+
+test("an exhausted ladder's empty-output line surfaces the harness's own stderr", async () => {
+  const config = loadConfig(tmpRepo());
+  config.ladders.analysis = [{ model: "gpt-5.6-luna", agents: ["pi"] }];
+  const { resolver } = resolverWith({ "pi|gpt-5.6-luna": { resolvedModel: "gpt-5.6-luna" } }, { config });
+
+  await assert.rejects(
+    resolver.withFallthrough("analysis", async () => {
+      throw emptyOutput("pi", "gpt-5.6-luna", "provider error: credential expired, re-authenticate\n");
+    }),
+    (err) => {
+      assert.ok(err instanceof UserError);
+      assert.match(err.message, /returned no output/);
+      // Classification and fall-through must not have thrown this diagnostic away.
+      assert.match(err.message, /credential expired, re-authenticate/);
       return true;
     },
   );

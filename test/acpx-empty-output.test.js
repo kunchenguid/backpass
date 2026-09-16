@@ -27,3 +27,18 @@ test("assertNonEmptyOutput throws a classifiable AcpxError on blank text", () =>
     },
   );
 });
+
+test("a non-empty stderr on an empty-output call is not discarded by classification", () => {
+  const stderr = "provider error: credential expired, re-authenticate\n";
+  assert.throws(
+    () => assertNonEmptyOutput({ text: "", raw: "", stderr }, { agent: "pi", model: "openai/gpt-5.6-luna" }),
+    (err) => {
+      assert.ok(err instanceof AcpxError, String(err));
+      assert.equal(err.emptyOutput, true);
+      // The stderr must survive onto the error object, not just the verdict.
+      assert.equal(err.stderr, stderr);
+      assert.equal(classifyAcpxFailure(err), "empty-output");
+      return true;
+    },
+  );
+});
