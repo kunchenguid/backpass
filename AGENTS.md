@@ -162,7 +162,14 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   call, so an empty-only failure cannot leave an older proposal applicable.
   `synthesisFailureHint` in `src/commands/propose.js` is
   where the advice for each terminal condition lives - never a blanket
-  stronger-model/budget/max-edits line.
+  stronger-model/budget/max-edits line. A blank or unparseable first annotate turn is
+  reported as `edit-empty`, not the generic `empty`/`unparseable` reason, when the edit
+  turn already left the staging copy byte-identical to the original - there was nothing to
+  annotate, so retrying burns no attempts. That check only fires on the loop's first turn;
+  a later turn's empty diff still means the model undid its own edit mid-annotation, which
+  stays `editing`/`empty`/`unparseable`. It never overrides a _parseable_ answer, even
+  `{edits: []}`, because an agent that changed nothing yielding an empty proposal is a
+  success, not a failure (`VISION.md`).
 - **An extract is one measured memory change plus the skill(s) it pays for.** `anchoredHunks`
   merges adjacent removals, so extracting neighbouring sections yields one change and N
   skills - one honest accept/reject decision, since a merged change cannot be

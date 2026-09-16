@@ -70,6 +70,8 @@ const EMPTY_TURN_VIOLATION =
   "the synthesis harness ended its turn with no output at all - no JSON, no prose, no tool call";
 const UNPARSEABLE_VIOLATION = "synthesis answered with text, but not with a JSON object";
 const KEPT_EDITING_VIOLATION = "synthesis kept editing the staging copy instead of annotating the measured changes";
+const EDIT_EMPTY_VIOLATION =
+  "the synthesis edit turn left the staging copy byte-identical to the original, so its first annotate turn had nothing to describe";
 
 /**
  * The budget the prompts frame is the always-loaded surface: the memory file plus
@@ -303,6 +305,9 @@ function terminalMessage(reason, attempts, violations) {
   if (reason === "editing") {
     return `synthesis kept editing the staging copy instead of annotating it (${REMEASURE_TURNS} re-measurements)`;
   }
+  if (reason === "edit-empty") {
+    return "synthesis made no changes to the staging copy during the edit turn, so its first annotate turn had nothing to describe";
+  }
   return (
     `synthesis could not produce a valid proposal after ${Math.max(attempts - 1, 0)} re-prompt(s) ` +
     `(${violations.length} violation(s))`
@@ -348,10 +353,15 @@ async function annotateLoop({
   let saved = null;
   /** @type {{ reason: string, violations: string[] }} */
   let terminal;
+  // Whether the edit turn that preceded this loop left the staging copy untouched. Only
+  // the very first turn's measurement answers that question; a later remeasure reflects
+  // edits made during annotation instead, which the "editing" reason already covers.
+  let editMadeNoChanges = false;
 
   for (let turn = 1; ; turn += 1) {
     assertRepoUntouched(repo, fingerprint, workspace.root);
     const measured = measureWorkspace(workspace);
+    if (turn === 1) editMadeNoChanges = measured.changes.length === 0;
 
     let prompt = renderPrompt("annotate", {
       ...common,
@@ -397,8 +407,14 @@ async function annotateLoop({
     justRemeasured = false;
 
     // An empty turn is not a bad answer; it is no answer. Retry it once in a new session,
-    // because the accumulated context of this one is the likeliest reason it collapsed.
+    // because the accumulated context of this one is the likeliest reason it collapsed -
+    // unless the edit turn left nothing to describe in the first place, in which case a
+    // fresh session would be shown the same empty diff and retrying is pointless.
     if (isBlankOutput(result.text)) {
+      if (turn === 1 && editMadeNoChanges) {
+        terminal = { reason: "edit-empty", violations: [EDIT_EMPTY_VIOLATION] };
+        break;
+      }
       emptyTurns += 1;
       if (emptyTurns > EMPTY_TURN_RETRIES) {
         terminal = { reason: "empty", violations: [EMPTY_TURN_VIOLATION] };
@@ -417,6 +433,10 @@ async function annotateLoop({
     attempts += 1;
     const parsed = extractJson(result.text);
     if (!parsed) {
+      if (turn === 1 && editMadeNoChanges) {
+        terminal = { reason: "edit-empty", violations: [EDIT_EMPTY_VIOLATION] };
+        break;
+      }
       violationsToShow = [UNPARSEABLE_VIOLATION];
       if (attempts >= ANNOTATE_TURNS) {
         terminal = { reason: "unparseable", violations: violationsToShow };

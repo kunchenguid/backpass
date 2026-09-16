@@ -78,7 +78,7 @@ export function effectiveMaxEdits(memoryFile, config, alwaysLoadedExtraTokens = 
 /**
  * A synthesis run that ended without a valid proposal, carrying *why* it ended.
  *
- * `reason` is the terminal condition - "gates", "empty", "unparseable", "editing" - and
+ * `reason` is the terminal condition - "gates", "empty", "unparseable", "editing", "edit-empty" - and
  * `saved` is the last parseable-but-gated proposal written to disk, if any, with the
  * annotation attempt that produced it. They are separate because they can disagree: a run
  * whose last turn was empty still leaves an older rejected proposal on disk, and reporting

@@ -220,6 +220,9 @@ export function synthesisFailureHint(err) {
   if (err.reason === "editing") {
     return "the agent kept rewriting the staging copy instead of describing it; run `backpass propose` again to start fresh";
   }
+  if (err.reason === "edit-empty") {
+    return "the edit turn made no changes to the staging copy, so there was nothing for the annotation turn to describe; run `backpass propose` again, or pin a different harness with --synthesis-agent";
+  }
   const violations = err.violations || [];
   if (violations.some(isBudgetViolation)) {
     return "the edit set did not clear the budget gate: raise --budget, or let the shrink continue over more runs";
