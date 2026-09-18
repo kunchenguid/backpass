@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.25](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.24...backpass-v0.1.25) (2026-09-18)
+
+
+### Bug Fixes
+
+* **skills:** preserve real Claude skills directories ([#136](https://github.com/kunchenguid/backpass/issues/136)) ([158dcd6](https://github.com/kunchenguid/backpass/commit/158dcd6343291d90f4eb3119402aa58dcf128326))
+
 ## [0.1.24](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.23...backpass-v0.1.24) (2026-09-16)
 
 
