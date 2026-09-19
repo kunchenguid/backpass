@@ -103,6 +103,76 @@ test("skillsDir rejects malformed configuration values", () => {
   }
 });
 
+test("skillSearchPaths defaults to none and rejects non-array-of-strings values", () => {
+  assert.deepEqual(loadConfig(tempRepo()).skillSearchPaths, []);
+  for (const skillSearchPaths of ["~/.claude/skills", 42, [1], [{}], {}]) {
+    assert.throws(() => loadConfig(tempRepo({ skillSearchPaths })), UserError);
+  }
+});
+
+test("skillSearchPaths rejects degenerate roots: the empty string and the filesystem root", () => {
+  // An empty root, or the filesystem root, would mark everything read-only / nothing
+  // stageable - reject them loudly at config validation rather than enforcing them.
+  for (const bad of ["", "   ", "/", "//", "\\", "C:\\", "C:/", "C:"]) {
+    assert.throws(() => loadConfig(tempRepo({ skillSearchPaths: ["~/.claude/skills", bad] })), UserError);
+  }
+  // A specific directory under the root is fine.
+  assert.deepEqual(loadConfig(tempRepo({ skillSearchPaths: ["/srv/shared-skills"] })).skillSearchPaths, [
+    "/srv/shared-skills",
+  ]);
+});
+
+test("skillSearchPaths rejects a root that is the repo root, or an ancestor of it", () => {
+  // e.g. skillSearchPaths: ["~"] with the repo checked out under $HOME must never
+  // silently disable writes to the repo's own configured skills directory.
+  const parent = tempRepo();
+  const nested = path.join(parent, "nested-repo");
+  fs.mkdirSync(nested);
+
+  fs.writeFileSync(path.join(nested, CONFIG_FILENAME), JSON.stringify({ skillSearchPaths: [parent] }));
+  assert.throws(() => loadConfig(nested), UserError, "an ancestor of the repo root is rejected");
+
+  fs.writeFileSync(path.join(nested, CONFIG_FILENAME), JSON.stringify({ skillSearchPaths: [nested] }));
+  assert.throws(() => loadConfig(nested), UserError, "the repo root itself is rejected");
+
+  // A directory nested INSIDE the repo is a different shape and stays accepted.
+  fs.writeFileSync(
+    path.join(nested, CONFIG_FILENAME),
+    JSON.stringify({ skillSearchPaths: [path.join(nested, "vendor")] }),
+  );
+  assert.deepEqual(loadConfig(nested).skillSearchPaths, [path.join(nested, "vendor")]);
+});
+
+test("skillSearchPaths rejects a root that equals or contains the repo's own skillsDir", () => {
+  // skillsDir defaults to ".agents/skills". A search path of ".agents" contains it, and
+  // ".agents/skills" itself equals it - both would mark the repo's own write target
+  // read-only if they were not rejected the same way the repo-ancestor case already is.
+  const containing = tempRepo();
+  fs.writeFileSync(path.join(containing, CONFIG_FILENAME), JSON.stringify({ skillSearchPaths: [".agents"] }));
+  assert.throws(() => loadConfig(containing), UserError, "a root containing skillsDir is rejected");
+
+  const equal = tempRepo();
+  fs.writeFileSync(path.join(equal, CONFIG_FILENAME), JSON.stringify({ skillSearchPaths: [".agents/skills"] }));
+  assert.throws(() => loadConfig(equal), UserError, "a root equal to skillsDir is rejected");
+
+  // A sibling directory that does not overlap skillsDir stays accepted.
+  const sibling = tempRepo();
+  fs.writeFileSync(path.join(sibling, CONFIG_FILENAME), JSON.stringify({ skillSearchPaths: ["shared"] }));
+  assert.deepEqual(loadConfig(sibling).skillSearchPaths, ["shared"]);
+});
+
+test("skillSearchPaths expands ~ and feeds the read-only awareness list without touching skillsDir", () => {
+  const home = os.homedir();
+  const config = loadConfig(tempRepo({ skillSearchPaths: ["~/.hermes/skills-shared", "~/.claude/skills"] }));
+  // The write target is untouched; the search paths join the awareness roots, ~ expanded.
+  assert.equal(config.skillsDir, ".agents/skills");
+  assert.deepEqual(config.skillSearchPaths, ["~/.hermes/skills-shared", "~/.claude/skills"]);
+  assert.deepEqual(config.skillsDirs, [
+    path.join(home, ".hermes", "skills-shared"),
+    path.join(home, ".claude", "skills"),
+  ]);
+});
+
 test("--include-cursor-ide is the only way the deferred store is scanned", () => {
   const config = loadConfig(tempRepo(), { discovery: { includeCursorIde: true } });
   assert.ok(config.discovery.harnesses.includes("cursor-ide"));

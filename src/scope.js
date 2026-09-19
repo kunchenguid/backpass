@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { parseScopeKind, userStateDir } from "./config.js";
+import { expandHomePath, parseScopeKind, userStateDir } from "./config.js";
 import { associate as associateProject, associateRemote, globToRegExp } from "./discovery/association.js";
 import { UserError, info } from "./logger.js";
 import { gitProjectIdentity, gitToplevel, listWorktrees, normalizeRemote } from "./repo.js";
@@ -16,12 +16,7 @@ import { gitProjectIdentity, gitToplevel, listWorktrees, normalizeRemote } from 
  * `~/.config/backpass/user/` (0700). A run is exactly one scope, chosen by `--scope`.
  */
 
-export function expandUserPath(p, home = os.homedir()) {
-  if (typeof p !== "string") return p;
-  if (p === "~") return home;
-  if (p.startsWith("~/")) return path.join(home, p.slice(2));
-  return p;
-}
+export const expandUserPath = expandHomePath;
 
 /**
  * Path relative to `root` when it sits under it, otherwise the absolute path.
@@ -199,6 +194,7 @@ function resolveProjectScope(repo, config) {
     modelCwd: repo.root,
     memoryFiles: config.memoryFiles,
     skillDirs: config.skillsDirs || [],
+    skillSearchPaths: (config.skillSearchPaths || []).map((p) => expandUserPath(p)),
     overflowDir: config.skillsDir,
     associate: (descriptor, options = {}) => {
       const result = associateProject(descriptor, repo, {
@@ -231,6 +227,7 @@ function resolveUserScope(cwd, config, { strict = false, home = os.homedir(), as
   const memoryFiles = (config.memoryFiles || []).map((file) => pathInRoot(file, root, home));
   const overflowDir = pathInRoot(config.skillsDir || ".agents/skills", root, home);
   const skillDirs = (config.skillsDirs || []).map((dir) => pathInRoot(dir, root, home));
+  const skillSearchPaths = (config.skillSearchPaths || []).map((p) => expandUserPath(p, home));
   const repo = syntheticUserRepo(root);
   const stateDir = userStateDir();
   const associationCache = new Map();
@@ -275,6 +272,7 @@ function resolveUserScope(cwd, config, { strict = false, home = os.homedir(), as
     modelCwd: stateDir,
     memoryFiles,
     skillDirs,
+    skillSearchPaths,
     overflowDir,
     associate,
     associateRemote: (descriptor, { facts, host }) => associateUserRemote(descriptor, { facts, host, strict }),

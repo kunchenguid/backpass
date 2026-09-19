@@ -5,19 +5,24 @@ import os from "node:os";
 import path from "node:path";
 
 import { readMemoryFile } from "../src/memory.js";
-import { loadProjectSkills, loadSkills, skillDescriptionTokens } from "../src/skills.js";
+import { loadProjectSkills, loadSkills, resolveProjectSkillDirs, skillDescriptionTokens } from "../src/skills.js";
 import { estimateTokens } from "../src/tokens.js";
 import { State } from "../src/state.js";
 import {
-  isSkillFilePath,
+  READ_ONLY_SEARCH_PATH,
   STRAY_OUTSIDE_SURFACE,
+  STRAY_READ_ONLY_SEARCH_PATH,
   STRAY_UNWRITABLE,
+  canonicalizeSearchPathRoots,
+  isSkillFilePath,
   measureWorkspace,
   parseSkillFile,
   prepareWorkspace,
   repoFingerprint,
+  skillStagingRefusal,
   workspacePathFor,
 } from "../src/workspace.js";
+import { UserError } from "../src/logger.js";
 import { makeRepo, stageAndMeasure, writeIn } from "./helpers/staging.js";
 
 const AGENTS = "# M\n\n- one\n- two\n";
@@ -350,6 +355,231 @@ test("two links to one shared library are both billed, and exactly one of them i
       reason: "the same file is already staged as .agents/skills/database/SKILL.md",
     },
   ]);
+});
+
+test("a skill in an outside search path is loaded for awareness but never staged for writing", () => {
+  // The canonical library is a shared tree outside the repo, named by skillSearchPaths.
+  const shared = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-search-path-")));
+  fs.mkdirSync(path.join(shared, "db"));
+  fs.writeFileSync(path.join(shared, "db", "SKILL.md"), SKILL);
+
+  const repo = makeRepo({ "AGENTS.md": AGENTS });
+  const state = new State(repo.root).ensure();
+  const memoryFile = readMemoryFile(repo.root, "AGENTS.md");
+
+  // The search path joins the awareness roots (this is what config merges into skillsDirs).
+  const skillDirs = resolveProjectSkillDirs(repo.root, ".agents/skills", [shared]);
+  assert.ok(skillDirs.includes(shared), "the outside search path is an awareness root");
+  assert.deepEqual(
+    loadProjectSkills(repo.root, ".agents/skills", [shared]).map((s) => s.name),
+    ["db"],
+    "the shared skill is visible for reference/dedup awareness",
+  );
+
+  // Project scope (allowExternal false) must withhold the outside skill from staging, so
+  // synthesis can never emit an edit that writes into the shared library.
+  const workspace = prepareWorkspace({ state, repo, memoryFile, skillsDir: ".agents/skills", skillDirs });
+  assert.deepEqual([...workspace.originals.keys()], ["AGENTS.md"]);
+  assert.deepEqual(walkStaged(path.join(workspace.root, workspacePathFor(shared))), []);
+  assert.deepEqual(workspace.unstageable, [
+    { path: path.join(shared, "db"), reason: "resolves outside the repository" },
+  ]);
+});
+
+test("a configured search path stays read-only even in user scope, unlike an ordinary external skills dir", () => {
+  const shared = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-search-path-")));
+  fs.mkdirSync(path.join(shared, "db"));
+  fs.writeFileSync(path.join(shared, "db", "SKILL.md"), SKILL);
+
+  const repo = makeRepo({ "AGENTS.md": AGENTS });
+  const state = new State(repo.root).ensure();
+  const memoryFile = readMemoryFile(repo.root, "AGENTS.md");
+  const skillDirs = resolveProjectSkillDirs(repo.root, ".agents/skills", [shared]);
+
+  // `allowExternal` is what lets user scope write its own harness directories wherever
+  // they resolve; it must never reach a root the config named in `skillSearchPaths`.
+  const workspace = prepareWorkspace({
+    state,
+    repo,
+    memoryFile,
+    skillsDir: ".agents/skills",
+    skillDirs,
+    allowExternal: true,
+    searchPathRoots: [shared],
+  });
+  assert.deepEqual([...workspace.originals.keys()], ["AGENTS.md"]);
+  assert.deepEqual(walkStaged(path.join(workspace.root, workspacePathFor(shared))), []);
+  assert.deepEqual(workspace.unstageable, [{ path: path.join(shared, "db"), reason: READ_ONLY_SEARCH_PATH }]);
+
+  // `--target` asks this exact question before a run ever narrows to a name, and must
+  // get the same answer.
+  const refusal = skillStagingRefusal(repo.root, path.join(shared, "db", "SKILL.md"), {
+    allowExternal: true,
+    searchPathRoots: [shared],
+  });
+  assert.equal(refusal, READ_ONLY_SEARCH_PATH);
+});
+
+test("a file created under a search-path root during synthesis is reported stray, never a created skill", () => {
+  const shared = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-search-path-new-")));
+
+  const repo = makeRepo({ "AGENTS.md": AGENTS });
+  const state = new State(repo.root).ensure();
+  const memoryFile = readMemoryFile(repo.root, "AGENTS.md");
+  const skillDirs = resolveProjectSkillDirs(repo.root, ".agents/skills", [shared]);
+
+  const workspace = prepareWorkspace({
+    state,
+    repo,
+    memoryFile,
+    skillsDir: ".agents/skills",
+    skillDirs,
+    allowExternal: true,
+    searchPathRoots: [shared],
+  });
+  // The library is empty, so there is no pre-existing file to refuse in advance - only
+  // the created-file path can catch a model that writes a brand new one under the root.
+  writeIn(
+    workspace.root,
+    `${workspacePathFor(shared)}/new/SKILL.md`,
+    "---\nname: new\ndescription: New.\n---\n\nBody\n",
+  );
+  const measured = measureWorkspace(workspace);
+  assert.deepEqual(
+    measured.changes.filter((c) => c.kind === "created"),
+    [],
+  );
+  assert.deepEqual(measured.stray, [
+    { file: path.join(shared, "new", "SKILL.md"), reason: STRAY_READ_ONLY_SEARCH_PATH },
+  ]);
+});
+
+test("a RELATIVE search-path root resolves against the repo root, not the process working directory", () => {
+  // The read-only promise fails open if a relative root is canonicalised against
+  // `process.cwd()` (the tests run with cwd = the backpass checkout, never the tmp repo),
+  // because the real skill source resolves against the repo root and the two never match.
+  const repo = makeRepo({ "AGENTS.md": AGENTS, "shared/db/SKILL.md": SKILL });
+  assert.notEqual(fs.realpathSync(process.cwd()), fs.realpathSync(repo.root), "cwd must differ from the repo root");
+  const state = new State(repo.root).ensure();
+  const memoryFile = readMemoryFile(repo.root, "AGENTS.md");
+  const skillDirs = resolveProjectSkillDirs(repo.root, ".agents/skills", ["shared"]);
+
+  const workspace = prepareWorkspace({
+    state,
+    repo,
+    memoryFile,
+    skillsDir: ".agents/skills",
+    skillDirs,
+    allowExternal: true,
+    searchPathRoots: ["shared"],
+  });
+  assert.deepEqual(walkStaged(path.join(workspace.root, workspacePathFor("shared"))), []);
+  assert.deepEqual(workspace.unstageable, [{ path: "shared/db", reason: READ_ONLY_SEARCH_PATH }]);
+
+  // The canonicalisation itself resolves a relative root against the repo root.
+  const identities = canonicalizeSearchPathRoots(repo.root, ["shared"]);
+  assert.ok(identities.has(fs.realpathSync(path.join(repo.root, "shared"))));
+});
+
+test("a ~-prefixed search-path root is home-expanded at the --target refusal site", () => {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-home-")));
+  fs.mkdirSync(path.join(home, "shared", "db"), { recursive: true });
+  fs.writeFileSync(path.join(home, "shared", "db", "SKILL.md"), SKILL);
+  const repo = makeRepo({ "AGENTS.md": AGENTS });
+  const savedHome = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    // The --target path asks `skillStagingRefusal` with the raw configured root; a
+    // "~"-prefixed root must be home-expanded there or realpath throws and it is dropped.
+    const refusal = skillStagingRefusal(repo.root, path.join(home, "shared", "db", "SKILL.md"), {
+      allowExternal: true,
+      searchPathRoots: ["~/shared"],
+    });
+    assert.equal(refusal, READ_ONLY_SEARCH_PATH);
+  } finally {
+    if (savedHome === undefined) delete process.env.HOME;
+    else process.env.HOME = savedHome;
+  }
+});
+
+test("a search-path root that is an ancestor of the repo never makes the repo's own skillsDir read-only", () => {
+  // config.js validation rejects this shape at load time, but `canonicalizeSearchPathRoots`
+  // and `prepareWorkspace` are reachable directly, so the repo's own containment must win
+  // here too - e.g. skillSearchPaths: ["~"] with the repo checked out under $HOME.
+  const repo = makeRepo({ "AGENTS.md": AGENTS, ".agents/skills/db/SKILL.md": SKILL });
+  const ancestor = fs.realpathSync(os.tmpdir());
+  assert.ok(
+    fs.realpathSync(repo.root).startsWith(`${ancestor}${path.sep}`),
+    "the repo must be nested under the ancestor root for this test to be meaningful",
+  );
+
+  assert.equal(canonicalizeSearchPathRoots(repo.root, [ancestor]).size, 0);
+  assert.equal(canonicalizeSearchPathRoots(repo.root, [repo.root]).size, 0);
+
+  const state = new State(repo.root).ensure();
+  const memoryFile = readMemoryFile(repo.root, "AGENTS.md");
+  const skillDirs = resolveProjectSkillDirs(repo.root, ".agents/skills");
+
+  const workspace = prepareWorkspace({
+    state,
+    repo,
+    memoryFile,
+    skillsDir: ".agents/skills",
+    skillDirs,
+    searchPathRoots: [ancestor],
+  });
+  assert.deepEqual(workspace.unstageable, []);
+  assert.deepEqual(walkStaged(path.join(workspace.root, workspacePathFor(".agents/skills"))), ["db/SKILL.md"]);
+});
+
+test("a search-path root that equals or contains the repo's own skillsDir never makes it read-only", () => {
+  // config.js validation rejects this shape at load time, but `canonicalizeSearchPathRoots`
+  // and `prepareWorkspace` are reachable directly, so the repo's own skillsDir containment
+  // must win here too - e.g. skillSearchPaths: [".agents"] with skillsDir ".agents/skills".
+  const repo = makeRepo({ "AGENTS.md": AGENTS, ".agents/skills/db/SKILL.md": SKILL });
+
+  assert.equal(canonicalizeSearchPathRoots(repo.root, [".agents"], ".agents/skills").size, 0, "containing case");
+  assert.equal(canonicalizeSearchPathRoots(repo.root, [".agents/skills"], ".agents/skills").size, 0, "equal case");
+
+  const state = new State(repo.root).ensure();
+  const memoryFile = readMemoryFile(repo.root, "AGENTS.md");
+  const skillDirs = resolveProjectSkillDirs(repo.root, ".agents/skills");
+
+  const workspace = prepareWorkspace({
+    state,
+    repo,
+    memoryFile,
+    skillsDir: ".agents/skills",
+    skillDirs,
+    searchPathRoots: [".agents"],
+  });
+  assert.deepEqual(workspace.unstageable, []);
+  assert.deepEqual(walkStaged(path.join(workspace.root, workspacePathFor(".agents/skills"))), ["db/SKILL.md"]);
+});
+
+test("an unresolvable search-path root fails closed rather than being silently dropped", () => {
+  const repo = makeRepo({ "AGENTS.md": AGENTS, afile: "x" });
+  const state = new State(repo.root).ensure();
+  const memoryFile = readMemoryFile(repo.root, "AGENTS.md");
+  // `afile` is a regular file, so `afile/sub` cannot be canonicalised (ENOTDIR). The
+  // read-only promise must abort loudly, naming the config key, not vanish.
+  const badRoot = path.join(repo.root, "afile", "sub");
+  assert.throws(
+    () => canonicalizeSearchPathRoots(repo.root, [badRoot]),
+    (err) => err instanceof UserError && /skillSearchPaths/.test(err.message),
+  );
+  assert.throws(
+    () =>
+      prepareWorkspace({
+        state,
+        repo,
+        memoryFile,
+        skillsDir: ".agents/skills",
+        skillDirs: [".agents/skills"],
+        searchPathRoots: [badRoot],
+      }),
+    UserError,
+  );
 });
 
 test("a skill file linked out of the repo through an in-repo library is never staged", () => {

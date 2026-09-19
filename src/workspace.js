@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { canonicalizeSearchPathRoots } from "./config.js";
 import { anchoredHunks, countOccurrences, span } from "./diff.js";
 import { warn } from "./logger.js";
 import { parseMemoryUnits, readOnlyResolvedPath, resolveMemoryPath } from "./memory.js";
@@ -45,6 +46,7 @@ export function prepareWorkspace({
   skillDirs = [skillsDir],
   stagedSkills = null,
   allowExternal = false,
+  searchPathRoots = [],
 }) {
   const root = workspaceRoot(state);
   fs.rmSync(root, { recursive: true, force: true });
@@ -64,6 +66,10 @@ export function prepareWorkspace({
   // refusal there drops the whole round. Leaving it out of staging is what makes it
   // impossible for such a file to become an edit at all.
   const confineTo = confinementRoot(repo.root, allowExternal);
+  // A configured `skillSearchPaths` root is read-only in every scope, unlike the rest of
+  // `skillDirs` - `allowExternal` lets user scope write its own harness directories
+  // wherever they resolve, but must never reach a root the config promised to leave alone.
+  const searchPathIdentities = canonicalizeSearchPathRoots(repo.root, searchPathRoots, skillsDir);
   const skillMappings = skillDirs.map((logical) => ({
     logical,
     staged: workspacePathFor(logical),
@@ -76,7 +82,7 @@ export function prepareWorkspace({
     const confined = [];
     const toLogical = (relative) =>
       path.isAbsolute(sourceDir) ? path.join(sourceDir, relative) : path.posix.join(sourceDir, relative);
-    for (const relative of walkFiles(skillsSource, "", confineTo, confined)) {
+    for (const relative of walkFiles(skillsSource, "", confineTo, confined, searchPathIdentities)) {
       const from = path.join(skillsSource, relative);
       const logical = toLogical(relative);
       const identity = realPath(from);
@@ -86,7 +92,7 @@ export function prepareWorkspace({
       // drops the round, so staging declares it read-only instead of offering the edit.
       // It is decided for every loaded skill, before a narrowed run drops the ones it does
       // not write, so "backpass will never write this file" means the same thing on both.
-      const refusal = stagingRefusal(from, confineTo);
+      const refusal = stagingRefusal(from, confineTo, searchPathIdentities);
       if (refusal) {
         unstageable.push({ path: logical, reason: refusal, identity });
         continue;
@@ -125,7 +131,7 @@ export function prepareWorkspace({
       if (identity) stagedIdentities.set(identity, logical);
       stagedPaths.set(logical, staged);
     }
-    unstageable.push(...confined.map((relative) => ({ path: toLogical(relative), reason: READ_ONLY_OUTSIDE_REPO })));
+    unstageable.push(...confined.map(({ relative, reason }) => ({ path: toLogical(relative), reason })));
   }
   fs.mkdirSync(path.join(root, workspacePathFor(skillsDir)), { recursive: true });
 
@@ -139,6 +145,7 @@ export function prepareWorkspace({
     stagedPaths,
     originals,
     confineTo,
+    searchPathIdentities,
     unstageable,
     stagedIdentities,
   };
@@ -183,7 +190,7 @@ function withinRoot(root, resolved) {
   return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
 }
 
-function walkFiles(dir, prefix = "", confineTo = null, confined = []) {
+function walkFiles(dir, prefix = "", confineTo = null, confined = [], searchPathIdentities = null) {
   const out = [];
   let entries;
   try {
@@ -192,11 +199,13 @@ function walkFiles(dir, prefix = "", confineTo = null, confined = []) {
     return out;
   }
   // One rule for taking a file, wherever the walk reaches it: a path that resolves
-  // outside the root is named for the caller instead of staged, so the containment
-  // invariant cannot hold on one branch and not its sibling.
+  // outside the root, or inside a configured `skillSearchPaths` root, is named for the
+  // caller instead of staged, so the containment invariant cannot hold on one branch and
+  // not its sibling.
   const take = (absolute, relativePath) => {
-    if (!confineTo || withinRoot(confineTo, realPath(absolute))) out.push(relativePath);
-    else confined.push(relativePath);
+    const reason = confinementReason(confineTo, searchPathIdentities, realPath(absolute));
+    if (!reason) out.push(relativePath);
+    else confined.push({ relative: relativePath, reason });
   };
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
     const relative = prefix ? path.posix.join(prefix, entry.name) : entry.name;
@@ -210,8 +219,9 @@ function walkFiles(dir, prefix = "", confineTo = null, confined = []) {
       if (!identity) continue;
       // Pruned here, but named: the caller tells the model these are read-only rather
       // than letting a proposed edit to one be discarded without a reason.
-      if (!withinRoot(confineTo, identity)) {
-        confined.push(relative);
+      const reason = confinementReason(confineTo, searchPathIdentities, identity);
+      if (reason) {
+        confined.push({ relative, reason });
         continue;
       }
       // A link may point at anything - in the layout that motivated following links at
@@ -229,7 +239,7 @@ function walkFiles(dir, prefix = "", confineTo = null, confined = []) {
         if (prefix === "" && isFile(leaf)) take(leaf, path.posix.join(relative, SKILL_FILENAME));
         continue;
       }
-      out.push(...walkFiles(child, relative, confineTo, confined));
+      out.push(...walkFiles(child, relative, confineTo, confined, searchPathIdentities));
     } else if (target === "file") {
       take(path.join(dir, entry.name), relative);
     }
@@ -241,15 +251,45 @@ function walkFiles(dir, prefix = "", confineTo = null, confined = []) {
 const READ_ONLY_OUTSIDE_REPO = "resolves outside the repository";
 const READ_ONLY_UNREADABLE = "could not be read when the staging copy was built";
 const READ_ONLY_UNWRITABLE = "resolves to a location that cannot be written";
+/** A configured `skillSearchPaths` root: read-only in every scope, never subject to `allowExternal`. */
+export const READ_ONLY_SEARCH_PATH = "resolves inside a configured skillSearchPaths root";
+
+/** Re-exported so callers here need only import from one module; defined in `config.js`
+ * because `validate()` there must reuse it too (reject at load), not just this runtime
+ * (drop for direct callers). See its doc comment there for the full contract. */
+export { canonicalizeSearchPathRoots };
 
 /** The root a project-scope walk may not leave; user scope owns files anywhere. */
 function confinementRoot(repoRoot, allowExternal) {
   return allowExternal ? null : realPath(repoRoot) || path.resolve(repoRoot);
 }
 
+/** True when `identity` is one of `roots` or nested under one of them. */
+function isUnderAny(roots, identity) {
+  if (!identity) return false;
+  for (const root of roots) {
+    if (identity === root || identity.startsWith(`${root}${path.sep}`)) return true;
+  }
+  return false;
+}
+
+/**
+ * Why confinement refuses `identity`, or null when it may be walked/staged. Checked
+ * before `withinRoot` so a configured `skillSearchPaths` root is named for what it is
+ * even when it happens to sit inside the confined root (or, in user scope, when nothing
+ * is confined at all) - `allowExternal` must never blur into this promise.
+ */
+function confinementReason(confineTo, searchPathIdentities, identity) {
+  if (searchPathIdentities && isUnderAny(searchPathIdentities, identity)) return READ_ONLY_SEARCH_PATH;
+  if (!withinRoot(confineTo, identity)) return READ_ONLY_OUTSIDE_REPO;
+  return null;
+}
+
 /** Why staging withholds a skill file from the copy, or null when it can stage it. */
-function stagingRefusal(absolute, confineTo) {
-  if (!withinRoot(confineTo, realPath(absolute))) return READ_ONLY_OUTSIDE_REPO;
+function stagingRefusal(absolute, confineTo, searchPathIdentities = null) {
+  const identity = realPath(absolute);
+  const reason = confinementReason(confineTo, searchPathIdentities, identity);
+  if (reason) return reason;
   return readOnlyResolvedPath(absolute) ? READ_ONLY_UNWRITABLE : null;
 }
 
@@ -258,9 +298,14 @@ function stagingRefusal(absolute, confineTo) {
  * the copy will not hold could never emit an edit for it, so it is refused by name here
  * rather than after a synthesis turn that was told the file is the one it may write.
  */
-export function skillStagingRefusal(repoRoot, skillPath, { allowExternal = false } = {}) {
+export function skillStagingRefusal(
+  repoRoot,
+  skillPath,
+  { allowExternal = false, searchPathRoots = [], skillsDir = null } = {},
+) {
   const absolute = path.isAbsolute(skillPath) ? skillPath : path.join(repoRoot, skillPath);
-  return stagingRefusal(absolute, confinementRoot(repoRoot, allowExternal));
+  const searchPathIdentities = canonicalizeSearchPathRoots(repoRoot, searchPathRoots, skillsDir);
+  return stagingRefusal(absolute, confinementRoot(repoRoot, allowExternal), searchPathIdentities);
 }
 
 /** Why measurement dropped a file the model wrote: the note the human reads must say which. */
@@ -269,6 +314,8 @@ export const STRAY_OUTSIDE_REPO = "it resolves outside the repository, which pro
 export const strayAliasReason = (owner) => `it is the same file already staged as ${owner}`;
 export const STRAY_UNWRITABLE =
   "it resolves to a location that cannot be written, so staging withheld it from the copy";
+export const STRAY_READ_ONLY_SEARCH_PATH =
+  "it resolves inside a configured skillSearchPaths root, which stays read-only in every scope";
 
 /** A created file counts as a skill only in the layouts `loadSkills` reads. */
 export function isSkillFilePath(relative, skillsDir) {
@@ -426,6 +473,7 @@ export function measureWorkspace(workspace) {
     stagedPaths = new Map([...workspace.originals.keys()].map((file) => [file, workspacePathFor(file)])),
     originals,
     confineTo = null,
+    searchPathIdentities = new Set(),
     stagedIdentities = new Map(),
     unstageable = [],
   } = workspace;
@@ -476,6 +524,14 @@ export function measureWorkspace(workspace) {
       : path.posix.join(mapping.logical, inside);
     if (!isSkillFilePath(logical, skillDirs)) {
       stray.push({ file: logical, reason: STRAY_OUTSIDE_SURFACE });
+      continue;
+    }
+    // A mapping rooted in a configured `skillSearchPaths` directory is read-only in every
+    // scope: `confineTo` is null in user scope, so this has to be checked independently of
+    // it, before a file the model wrote there could be mistaken for a created skill.
+    const mappingIdentity = mapping.source ? realPath(mapping.source) : null;
+    if (mappingIdentity && searchPathIdentities.has(mappingIdentity)) {
+      stray.push({ file: logical, reason: STRAY_READ_ONLY_SEARCH_PATH });
       continue;
     }
     // Staging leaves out a skill that resolves outside the repository; measurement must

@@ -177,6 +177,28 @@ test("user skill discovery uses only configured harness roots", () => {
   );
 });
 
+test("a skill in an outside search path counts as existing, and never becomes the write target", () => {
+  const root = tmpRepo();
+  // The canonical library is a shared tree living outside the repo (e.g. ~/.claude/skills).
+  const shared = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-shared-skills-"));
+  const shSkill = path.join(shared, "xsearch-percall-row-ceiling", "SKILL.md");
+  fs.mkdirSync(path.dirname(shSkill), { recursive: true });
+  fs.writeFileSync(shSkill, "---\nname: xsearch-percall-row-ceiling\ndescription: cap rows per call\n---\n\nbody\n");
+
+  // Awareness: an AGENTS.md pointer to this skill resolves through the search path, so it
+  // is not dangling and backpass must not propose re-creating it in the repo.
+  const aware = loadProjectSkills(root, CANONICAL_SKILLS_DIR, [shared]);
+  assert.deepEqual(
+    aware.map((skill) => skill.name),
+    ["xsearch-percall-row-ceiling"],
+  );
+  assert.ok(path.isAbsolute(aware[0].path), "an outside skill keeps its absolute path");
+
+  // Read-only: the overflow write target is always the repo's own skillsDir, never a
+  // search path, whatever the search paths contain.
+  assert.equal(resolveOverflowTarget(root, CANONICAL_SKILLS_DIR).dir, CANONICAL_SKILLS_DIR);
+});
+
 test("project skill discovery includes separate canonical and Claude roots without double-counting symlinks", () => {
   const root = tmpRepo();
   const canonical = path.join(root, CANONICAL_SKILLS_DIR, "generated", "SKILL.md");

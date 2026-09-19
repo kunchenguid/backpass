@@ -739,6 +739,34 @@ test("a staged skill that resolves outside the repository is reported as such, n
   });
 });
 
+test("a skill reached only through skillSearchPaths is never staged, and a direct write to it is still caught by the fingerprint", async () => {
+  const shared = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-search-path-")));
+  fs.mkdirSync(path.join(shared, "db"));
+  fs.writeFileSync(path.join(shared, "db", "SKILL.md"), DB_SKILL);
+
+  // Unlike an ordinary withheld skill, a `skillSearchPaths` root carries a promise that
+  // must be enforceable: a direct write to it has to fail the run loudly, never be
+  // excused the way a skill staging withheld for other reasons is.
+  const searched = setup({ edit: {} }, { overrides: { skillSearchPaths: [shared] } });
+  const skillPath = path.join(shared, "db", "SKILL.md");
+  fs.writeFileSync(
+    process.env.FAKE_ACPX_SCRIPT,
+    JSON.stringify({
+      edit: { [skillPath]: { replace: [["Keep transactions short.", "Keep every transaction short."]] } },
+      annotations: [{ reply: { edits: [] } }],
+    }),
+  );
+
+  await assert.rejects(searched.run(), (err) => {
+    assert.ok(err instanceof UserError);
+    assert.ok(
+      err.message.includes(`${skillPath} changed during synthesis; that path resolves outside the repository`),
+      err.message,
+    );
+    return true;
+  });
+});
+
 test("a narrowed run does not fingerprint a skill linked into a store nothing may write", async () => {
   const store = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-narrowed-store-")));
   fs.mkdirSync(path.join(store, "db"));

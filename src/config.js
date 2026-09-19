@@ -47,6 +47,15 @@ export const DEFAULT_CONFIG = {
   memoryFiles: ["AGENTS.md", "CLAUDE.md"],
   budgetTokens: 5000,
   skillsDir: ".agents/skills",
+  /**
+   * Extra directories to consult for *existing* skills, alongside `skillsDir`, when
+   * deciding whether an AGENTS.md pointer already resolves, whether a failed trigger
+   * needs a description edit instead of duplicate content, and whether an extraction
+   * should point at a shared skill rather than create a new one. `~` is expanded. These
+   * are read-only awareness: writes always target only `skillsDir`, never a search path
+   * (a skill resolving outside the repo is withheld from the synthesis staging copy).
+   */
+  skillSearchPaths: [],
   /** `null` means adaptive: see `effectiveMaxEdits` in proposal.js. An integer pins it. */
   maxEditsPerRun: null,
   minGapEvidence: 2,
@@ -142,6 +151,87 @@ export const USER_CONFIG_DEFAULTS = {
   },
 };
 
+/** True for a filesystem root spelling: `/`, repeated separators, or a Windows volume root. */
+function isFilesystemRoot(p) {
+  const s = p.trim();
+  if (/^\/+$/.test(s) || /^\\+$/.test(s)) return true;
+  if (/^[A-Za-z]:[/\\]*$/.test(s)) return true;
+  return false;
+}
+
+/** True when `candidate` is `root`, or lies inside it. Both must already be resolved. */
+export function isAncestorOrEqual(root, candidate) {
+  return root === candidate || candidate.startsWith(`${root}${path.sep}`);
+}
+
+/** Expand a leading `~` to the home directory; other paths pass through unchanged. */
+export function expandHomePath(p, home = os.homedir()) {
+  if (typeof p !== "string") return p;
+  if (p === "~") return home;
+  if (p.startsWith("~/")) return path.join(home, p.slice(2));
+  return p;
+}
+
+/**
+ * Canonical identities of the configured `skillSearchPaths` roots, resolved EXACTLY the
+ * way a skill source is (`prepareWorkspace` builds a source with `path.join(repo.root, ...)`
+ * then compares `fs.realpathSync` identities): expand `~`, resolve a relative entry
+ * against the repository root - never the process working directory - then follow links.
+ * Building it any other way is how the read-only promise fails open: `fs.realpathSync` on a
+ * raw relative value resolves against `process.cwd()`, so it never matches the real source
+ * and the refusal never fires.
+ *
+ * Fail CLOSED: a configured root that exists but cannot be canonicalised raises a clear
+ * error naming `config.skillSearchPaths` rather than being dropped - silently discarding it
+ * would delete the promise instead of enforcing it. A not-yet-existing root (`ENOENT`)
+ * keeps its resolved absolute path as its identity: nothing can load from, or be written
+ * to, a directory that does not exist, so the promise stays whole either way.
+ *
+ * A root that is the repository itself, an ancestor of it (e.g. "~" with the repo checked
+ * out under $HOME), or that equals or contains the repo's own configured `skillsDir` (e.g.
+ * ".agents" covering ".agents/skills") is dropped rather than registered: `validate()`
+ * below rejects that shape at load time, but this function is also reachable directly
+ * (tests, future callers), and such a root would otherwise mark files backpass exists to
+ * write as "inside a search path" - the repo's own containment must win for its own files.
+ */
+export function canonicalizeSearchPathRoots(repoRoot, roots = [], skillsDir = null, home = os.homedir()) {
+  // Reference points (the repo root and its skillsDir) resolve leniently: any resolution
+  // failure falls back to the plain absolute path rather than aborting, since a not-yet-
+  // created skillsDir must still win its own containment check.
+  const resolveReference = (candidate) => {
+    const absolute = path.isAbsolute(candidate) ? candidate : path.resolve(repoRoot, candidate);
+    try {
+      return fs.realpathSync(absolute);
+    } catch {
+      return absolute;
+    }
+  };
+  const identities = new Set();
+  const repoIdentity = resolveReference(repoRoot);
+  const skillsIdentity = skillsDir ? resolveReference(skillsDir) : null;
+  for (const raw of roots) {
+    const expanded = expandHomePath(raw, home);
+    const absolute = path.isAbsolute(expanded) ? expanded : path.resolve(repoRoot, expanded);
+    let identity;
+    try {
+      identity = fs.realpathSync(absolute);
+    } catch (err) {
+      if (err && err.code === "ENOENT") {
+        identity = absolute;
+      } else {
+        throw new UserError(
+          `config.skillSearchPaths root "${raw}" cannot be resolved (${err.message})`,
+          "point it at a readable directory, or remove it from skillSearchPaths",
+        );
+      }
+    }
+    if (isAncestorOrEqual(identity, repoIdentity)) continue;
+    if (skillsIdentity && isAncestorOrEqual(identity, skillsIdentity)) continue;
+    identities.add(identity);
+  }
+  return identities;
+}
+
 export function parseScopeKind(value) {
   if (value === undefined || value === null || value === "") return "project";
   if (value === "project" || value === "user") return value;
@@ -222,7 +312,7 @@ export function sinceCutoff(since, now = Date.now()) {
   return window === null ? null : now - window;
 }
 
-function validate(config, { kind = "project" } = {}) {
+function validate(config, { kind = "project", repoRoot = null } = {}) {
   if (!Array.isArray(config.memoryFiles) || config.memoryFiles.length === 0) {
     throw new UserError("config.memoryFiles must be a non-empty array");
   }
@@ -245,6 +335,37 @@ function validate(config, { kind = "project" } = {}) {
   if (config.skillsDirs !== undefined) {
     if (!Array.isArray(config.skillsDirs) || config.skillsDirs.some((d) => typeof d !== "string")) {
       throw new UserError("config.skillsDirs must be an array of paths");
+    }
+  }
+  if (config.skillSearchPaths !== undefined) {
+    if (!Array.isArray(config.skillSearchPaths) || config.skillSearchPaths.some((d) => typeof d !== "string")) {
+      throw new UserError("config.skillSearchPaths must be an array of paths");
+    }
+    for (const entry of config.skillSearchPaths) {
+      if (!entry.trim()) {
+        throw new UserError("config.skillSearchPaths entries must be non-empty path strings");
+      }
+      // The filesystem root as a search path would mark every path read-only and leave
+      // nothing stageable - a degenerate value that must be rejected, not enforced.
+      if (isFilesystemRoot(entry)) {
+        throw new UserError(
+          `config.skillSearchPaths entry "${entry}" must not be the filesystem root`,
+          "name a specific shared skills directory",
+        );
+      }
+      // A root that is the repo itself, an ancestor of it (e.g. "~" with the repo checked
+      // out under $HOME), or that equals or contains the repo's own configured skillsDir
+      // (e.g. ".agents" covering ".agents/skills") would mark files backpass exists to
+      // write as "inside a search path" too - the same degenerate shape as the
+      // filesystem-root case above. `canonicalizeSearchPathRoots` is the one place that
+      // decides this, both here (reject at load) and at runtime (drop for direct callers) -
+      // never duplicate the comparison.
+      if (repoRoot && canonicalizeSearchPathRoots(repoRoot, [entry], config.skillsDir).size === 0) {
+        throw new UserError(
+          `config.skillSearchPaths entry "${entry}" must not be the repository root or its skillsDir, or an ancestor of either`,
+          "name a shared skills directory outside the repository",
+        );
+      }
     }
   }
   const includeProjects = config.discovery.includeProjects;
@@ -378,7 +499,13 @@ export function loadConfig(repoRoot, overrides = {}, { kind = "project" } = {}) 
   if (config.discovery.includeCursorIde && !config.discovery.harnesses.includes("cursor-ide")) {
     config.discovery.harnesses = [...config.discovery.harnesses, "cursor-ide"];
   }
-  return validate(config, { kind: scopeKind });
+  const validated = validate(config, { kind: scopeKind, repoRoot });
+  // `skillSearchPaths` is the read-side awareness key. It rides the existing `skillsDirs`
+  // awareness list (consulted after `skillsDir` in list order) rather than a second plumbing;
+  // `~` is expanded here so the loaders that join `repoRoot` never mishandle a home path.
+  const searchPaths = (validated.skillSearchPaths || []).map((p) => expandHomePath(p));
+  if (searchPaths.length) validated.skillsDirs = [...(validated.skillsDirs || []), ...searchPaths];
+  return validated;
 }
 
 /**

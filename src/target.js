@@ -71,7 +71,11 @@ export function resolveTarget(spec, scope) {
     const skill = skillMatches[0];
     // A targeted run writes exactly one file, and staging is what decides whether that
     // file can be in the copy at all. Ask it here so the refusal names its own cause.
-    const refusal = skillStagingRefusal(root, skill.path, { allowExternal: user });
+    const refusal = skillStagingRefusal(root, skill.path, {
+      allowExternal: user,
+      searchPathRoots: scope.skillSearchPaths || [],
+      skillsDir: scope.overflowDir,
+    });
     if (refusal) {
       throw new UserError(
         `--target ${spec} is at ${skill.path}, which ${refusal}`,

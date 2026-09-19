@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { extractJson, isBlankOutput, openSession, usageRecord } from "./acpx.js";
-import { userClaudeSkillsDir } from "./config.js";
+import { expandHomePath, userClaudeSkillsDir } from "./config.js";
 import { renderEvidenceForPrompt } from "./fold.js";
 import { renderInstructionIndex, resolveMemoryPath } from "./memory.js";
 import { renderPrompt, render, loadPrompt } from "./prompts.js";
@@ -17,7 +17,13 @@ import {
 import { isSuppressedByRejection } from "./state.js";
 import { SURFACE_TARGET } from "./target.js";
 import { emitProgress } from "./progress.js";
-import { measureWorkspace, prepareWorkspace, repoFingerprint, workspacePathFor } from "./workspace.js";
+import {
+  READ_ONLY_SEARCH_PATH,
+  measureWorkspace,
+  prepareWorkspace,
+  repoFingerprint,
+  workspacePathFor,
+} from "./workspace.js";
 import { UserError, color, info, warn } from "./logger.js";
 
 /**
@@ -149,7 +155,9 @@ function harnessCountsOf(transcripts) {
  * reaches that decision. An ordinary repository skill stays fingerprinted either way. A
  * fingerprinted path can still resolve outside the repository - that is the ordinary
  * user-scope layout - so a change there is reported for what it is rather than as a direct
- * repository edit.
+ * repository edit. A configured `skillSearchPaths` root is the one withheld reason that
+ * stays fingerprinted anyway: its read-only promise is not "backpass will never write
+ * this," it is "nothing may ever write this," so a change there must still fail the run.
  */
 function assertRepoUntouched(repo, before, workspaceRoot) {
   const after = repoFingerprint(repo, Object.keys(before));
@@ -224,6 +232,11 @@ function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts, scop
   for (const w of overflow.warnings) warn(w);
   const skillDirs = resolveProjectSkillDirs(repo.root, overflow.dir, config.skillsDirs || [], { exact: userScope });
   const skillFiles = loadProjectSkills(repo.root, overflow.dir, config.skillsDirs || [], { exact: userScope });
+  // `skillSearchPaths` rides `skillDirs` for awareness (config.js), but staging must
+  // refuse it unconditionally - unlike the rest of `skillDirs`, it is never writable, in
+  // no scope, so `prepareWorkspace` needs the raw roots to enforce that independently of
+  // `allowExternal`.
+  const searchPathRoots = (config.skillSearchPaths || []).map((p) => expandHomePath(p));
   // The budget is the whole always-loaded surface whatever the target: a skill target
   // moves it by that skill's description-line delta, nothing else changes.
   const descriptionTokens = skillDescriptionTokens(skillFiles);
@@ -259,6 +272,7 @@ function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts, scop
     overflow,
     skillDirs,
     skillFiles,
+    searchPathRoots,
     target,
     descriptionTokens,
     maxEdits,
@@ -497,6 +511,7 @@ export async function synthesizeProposal({
     overflow,
     skillDirs,
     skillFiles,
+    searchPathRoots,
     target,
     descriptionTokens,
     maxEdits,
@@ -523,6 +538,7 @@ export async function synthesizeProposal({
     skillDirs,
     stagedSkills,
     allowExternal: scope?.kind === "user",
+    searchPathRoots,
   };
   let workspace = prepareWorkspace(workspaceOptions);
   const stagedSkillsDir =
@@ -569,9 +585,19 @@ export async function synthesizeProposal({
   const editPromptFile = path.join(promptDir, "synthesis-edit.md");
   fs.writeFileSync(editPromptFile, renderPrompt("synthesis", editValues));
 
+  // A search-path skill is unstageable like any other read-only skill, but unlike the
+  // rest of them the read-only promise it carries must be enforceable: a direct write to
+  // it has to be detected, not silently excused the way an ordinary withheld skill is
+  // (design note above `assertRepoUntouched`). It stays in the fingerprint so a change
+  // there still fails the run loudly.
   const fingerprint = repoFingerprint(repo, [
     memoryFile.path,
-    ...skillFiles.filter((skill) => !readOnlyReason(skill.path)).map((skill) => skill.path),
+    ...skillFiles
+      .filter((skill) => {
+        const reason = readOnlyReason(skill.path);
+        return !reason || reason === READ_ONLY_SEARCH_PATH;
+      })
+      .map((skill) => skill.path),
   ]);
   const sessionName = `backpass-synth-${process.pid}`;
   const timeoutSeconds = Math.max(config.timeoutSeconds, 900);
