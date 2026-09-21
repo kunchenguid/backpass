@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.26](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.25...backpass-v0.1.26) (2026-09-21)
+
+
+### Features
+
+* **config:** add skillSearchPaths for read-only awareness of shared skill libraries ([#138](https://github.com/kunchenguid/backpass/issues/138)) ([2bade32](https://github.com/kunchenguid/backpass/commit/2bade325f15b0fb0ed087245e045a6979961f738))
+
 ## [0.1.25](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.24...backpass-v0.1.25) (2026-09-18)
 
 
