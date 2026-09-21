@@ -18,6 +18,7 @@ on:
     paths-ignore:
       - .release-please-manifest.json
       - CHANGELOG.md
+      - package.json
 
 permissions:
   contents: read
