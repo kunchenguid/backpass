@@ -66,3 +66,8 @@ jobs:
       # deliberate pull request.
       - name: Verify no-mistakes signature and pipeline attestation in PR body
         uses: kunchenguid/no-mistakes/.github/actions/require-no-mistakes@f6441c96c352a18b9cadcaef6b6c7017e9ac3970 # v1.80.1
+        with:
+          # kunchenguid is exempt from the gate itself (unlike the job-level
+          # bot skip above, which exists because a GITHUB_TOKEN PR's run never
+          # starts). See AGENTS.md.
+          exempt-authors: kunchenguid
