@@ -245,12 +245,67 @@ export function assertNonEmptyOutput(result, { agent, model }) {
 }
 
 /**
+ * Fraction of the configured `--timeout` budget a textless quiet exit must have
+ * consumed before it is read as acpx's own timeout kill rather than a silent provider
+ * failure. acpx starts its budget when the turn spawns, so the kill lands at or just
+ * past the full budget; the floor only absorbs start-up skew, never most of it.
+ */
+const BLANK_AT_BUDGET_FLOOR = 0.9;
+
+/**
+ * Name a clean exit that produced no text after consuming (almost) the whole
+ * `--timeout` budget as the acpx timeout kill it is - by timeout, not `empty-output`.
+ *
+ * backpass enforces the model budget with an outer kill of its own at budget + 30s
+ * (`result.timedOut`), but acpx enforces `--timeout` first: when the harness dies at
+ * the budget, `--format quiet` has the process exit clean with blank output, and the
+ * outer kill never fires. Read generically that blank result reaches
+ * `assertNonEmptyOutput` as a silent provider failure - an `empty-output` verdict
+ * whose hints point at exhausted credits - misreporting a timeout as a provider
+ * problem. Wall clock is the only remaining signal: a blank result that spent (almost)
+ * the whole budget is that kill; one clearly short of it keeps the empty-output
+ * diagnosis. Same contract as the session-create timeout: raised by name, before any
+ * generic handling, and deliberately not classifiable - a run never silently switches
+ * models after real work has started.
+ *
+ * Only for one-shot analysis calls (`execOneShot`, `sessionPrompt`). Synthesis's edit
+ * turn never reads its own text - edits land through tool calls, so blank there is
+ * normal even after a long turn - which is why this never runs inside `openSession`'s
+ * `prompt()`.
+ *
+ * @param {{ agent: string, label: "exec" | "session prompt", text?: string, stdout?: string,
+ *   stderr?: string, code?: number | null, elapsedMs: number, timeoutSeconds?: number }} call
+ */
+function assertNotAcpxBudgetKill({
+  agent,
+  label,
+  text,
+  stdout = "",
+  stderr = "",
+  code = null,
+  elapsedMs,
+  timeoutSeconds,
+}) {
+  if (!isBlankOutput(text)) return;
+  if (!(timeoutSeconds > 0)) return;
+  if (elapsedMs < timeoutSeconds * 1000 * BLANK_AT_BUDGET_FLOOR) return;
+  throw new AcpxError(`acpx ${agent} ${label} timed out after ${timeoutSeconds}s`, {
+    stdout,
+    stderr,
+    code,
+    timedOut: true,
+  });
+}
+
+/**
  * Run one model turn - a one-shot `exec` when no effort override is needed, or a
  * fresh named session when it is (`sessionName` is called only in that branch, so a
  * caller's own call counter advances only for calls that actually open a session) -
- * and reject blank output via `assertNonEmptyOutput`. Shared by `analyze.js` and
- * `consolidate.js`; call from inside a `withFallthrough` callback so a blank result
- * still falls through to the next candidate.
+ * and reject blank output via `assertNonEmptyOutput`. A blank result that consumed
+ * (almost) the whole `--timeout` budget is named a timeout first
+ * (`assertNotAcpxBudgetKill`), so acpx's own kill never reads as a provider failure.
+ * Shared by `analyze.js` and `consolidate.js`; call from inside a `withFallthrough`
+ * callback so a blank result still falls through to the next candidate.
  *
  * @param {Parameters<typeof execOneShot>[0]} call
  * @param {{ agent: string, model?: string | null, effort?: string | null }} pick
@@ -431,6 +486,7 @@ export async function execOneShot({
         "use a named session or omit the effort override",
       );
     }
+    const execStartedAt = Date.now();
     const result = await run(args, { timeoutMs: (timeoutSeconds + 30) * 1000, cwd, env: invocation.env });
     if (result.spawnError && result.spawnError.code === "ENOENT") throw notFoundError(result);
     if (result.timedOut) {
@@ -442,6 +498,16 @@ export async function execOneShot({
         result,
       );
     }
+    assertNotAcpxBudgetKill({
+      agent,
+      label: "exec",
+      text: stripAcpxNoise(result.stdout),
+      stdout: result.stdout,
+      stderr: result.stderr,
+      code: result.code,
+      elapsedMs: Date.now() - execStartedAt,
+      timeoutSeconds,
+    });
 
     const combined = `${result.stdout}\n${result.stderr}`;
     const usage = parseTokenLine(combined) ?? recoverUsageFromStore({ agent, promptFile, cwd, startedAt });
@@ -475,7 +541,7 @@ export async function execOneShot({
  * @returns {Promise<{ notes: string[],
  *   prompt: (options: { promptFile: string, timeoutSeconds?: number, promptRetries?: number,
  *     approveReads?: boolean, approveAll?: boolean, suppressReads?: boolean }) =>
- *     Promise<{ text: string, usage: Record<string, number> | null, raw: string, notes: string[] }>,
+ *     Promise<{ text: string, usage: Record<string, number> | null, raw: string, stderr: string, notes: string[] }>,
  *   close: () => Promise<void> }>}
  */
 export async function openSession({
@@ -689,8 +755,19 @@ export async function sessionPrompt({
     return { ...fallback, notes };
   }
 
+  const promptStartedAt = Date.now();
   try {
-    return await session.prompt({ promptFile, timeoutSeconds, promptRetries, approveReads, suppressReads });
+    const result = await session.prompt({ promptFile, timeoutSeconds, promptRetries, approveReads, suppressReads });
+    assertNotAcpxBudgetKill({
+      agent,
+      label: "session prompt",
+      text: result.text,
+      stdout: result.raw,
+      stderr: result.stderr,
+      elapsedMs: Date.now() - promptStartedAt,
+      timeoutSeconds,
+    });
+    return result;
   } finally {
     await session.close();
   }
