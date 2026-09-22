@@ -47,11 +47,14 @@ jobs:
     # - release-please[bot] opens the release PR when it uses its own app token
     # Other authors (human or bot) must raise PRs through `git push no-mistakes`.
     #
-    # These stay job-level rather than moving to the action's `exempt-authors`
-    # input on purpose: an in-job exemption still requires the run to start, and
-    # a GITHUB_TOKEN PR's run is created in action_required and never starts.
-    # Keeping the condition here preserves the exact verdict shape this
-    # repository's gate already produces for those authors.
+    # These three bot exemptions stay job-level rather than moving to the
+    # action's `exempt-authors` input on purpose: an in-job exemption still
+    # requires the run to start, and a GITHUB_TOKEN PR's run is created in
+    # action_required and never starts. Keeping the condition here preserves
+    # the exact verdict shape this repository's gate already produces for
+    # those authors. This is a different mechanism from the human exemption
+    # below: kunchenguid's runs do start, so that exemption can and does live
+    # in the action's `exempt-authors` input instead.
     if: >-
       github.event.pull_request.user.login != 'github-actions[bot]' &&
       github.event.pull_request.user.login != 'dependabot[bot]' &&
