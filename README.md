@@ -234,8 +234,9 @@ sessions under `~/.bb/pi-bridge-sessions/`. It also honors `PI_CODING_AGENT_DIR`
 set in backpass's environment. When roots overlap, backpass scans every applicable layout
 and reads each JSONL file once.
 
-Hermes collection includes CLI and ACP sessions only. Gateway, cron, and WhatsApp sessions
-are excluded because their recorded cwd belongs to the shared gateway process, not a project.
+Hermes collection includes CLI and ACP sessions, plus TUI sessions with an absolute
+`sessions.cwd`. Gateway, cron, and WhatsApp sessions are excluded because their recorded
+cwd belongs to a shared process, not a project.
 
 Association runs in four tiers:
 

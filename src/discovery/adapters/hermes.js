@@ -9,7 +9,8 @@ import { openReadOnly, safeJsonParse } from "./sqlite.js";
  *
  * Observed schema version 13 (upstream is 26; SELECT named columns so additive
  * columns are tolerated). v26 adds sessions.cwd; CLI rows leave system_prompt
- * NULL and store the project path there. ACP still snapshots cwd on
+ * NULL and store the project path there. TUI rows also use sessions.cwd;
+ * accept them only when it is absolute. ACP still snapshots cwd on
  * model_config. Prefer the cwd column when present, then the v13 paths:
  *   acp - model_config.cwd when it is an absolute path
  *   cli - first `Current working directory:` / `Working directory:` line in
@@ -28,7 +29,7 @@ import { openReadOnly, safeJsonParse } from "./sqlite.js";
 export const name = "hermes";
 export const sqliteBacked = true;
 
-const CLI_ACP = new Set(["cli", "acp"]);
+const INTERACTIVE_SOURCES = new Set(["cli", "acp", "tui"]);
 const JSON_PREFIX = "\x00json:";
 const CWD_LINE = /^(?:Current working directory|Working directory):\s*(.+)$/m;
 
@@ -108,7 +109,7 @@ export async function discover({ cutoffMs } = {}) {
                                WHERE m.session_id = s.id${activeFilter}),
                              s.started_at)) AS activity_at
            FROM sessions s
-          WHERE lower(s.source) IN ('cli', 'acp')
+          WHERE lower(s.source) IN ('cli', 'acp', 'tui')
             AND (? IS NULL OR
                  MAX(s.started_at,
                      COALESCE(s.ended_at, s.started_at),
@@ -122,7 +123,7 @@ export async function discover({ cutoffMs } = {}) {
     const out = [];
     for (const row of rows) {
       const source = String(row.source || "").toLowerCase();
-      if (!CLI_ACP.has(source)) continue;
+      if (!INTERACTIVE_SOURCES.has(source)) continue;
       const cwd = recoverCwd(row, source);
       if (!cwd) continue;
       const startedAt = toMs(row.started_at);

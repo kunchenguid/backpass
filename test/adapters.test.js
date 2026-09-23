@@ -644,7 +644,7 @@ test("hermes adapter recovers cli/acp cwd, skips gateway, converts seconds to ms
   });
 });
 
-test("hermes adapter recovers v26 cli cwd from sessions.cwd when system_prompt is null, and still skips cron", async () => {
+test("hermes adapter collects v26 interactive sessions with trustworthy cwd and skips shared sources", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-hermes-v26-"));
   writeHermesDb(dir, {
     cwdColumn: true,
@@ -664,11 +664,36 @@ test("hermes adapter recovers v26 cli cwd from sessions.cwd when system_prompt i
         started_at: 1_700_000_100,
       },
       {
+        id: "tui-v26",
+        source: "tui",
+        cwd: "/repo/demo",
+        started_at: 1_700_000_150,
+      },
+      {
+        id: "tui-relative",
+        source: "tui",
+        cwd: "repo/demo",
+        system_prompt: "Current working directory: /repo/demo\n",
+        started_at: 1_700_000_160,
+      },
+      {
+        id: "tui-no-cwd",
+        source: "tui",
+        model_config: JSON.stringify({ cwd: "/repo/demo" }),
+        started_at: 1_700_000_170,
+      },
+      {
         id: "cron-v26",
         source: "cron",
         cwd: "/repo/demo",
         system_prompt: "Current working directory: /repo/demo\n",
         started_at: 1_700_000_200,
+      },
+      {
+        id: "gateway-v26",
+        source: "gateway",
+        cwd: "/repo/demo",
+        started_at: 1_700_000_210,
       },
     ],
     messages: [
@@ -701,13 +726,16 @@ test("hermes adapter recovers v26 cli cwd from sessions.cwd when system_prompt i
     const found = await hermes.discover();
     assert.deepEqual(
       found.map((row) => row.id).sort(),
-      ["acp-v26", "cli-v26"],
-      "v26 cli/acp are kept; cron is skipped even when sessions.cwd is set",
+      ["acp-v26", "cli-v26", "tui-v26"],
+      "v26 TUI needs absolute sessions.cwd; shared sources remain excluded",
     );
     const cli = found.find((row) => row.id === "cli-v26");
     const acp = found.find((row) => row.id === "acp-v26");
+    const tui = found.find((row) => row.id === "tui-v26");
     assert.equal(cli.cwd, "/repo/demo");
     assert.equal(acp.cwd, "/repo/demo");
+    assert.equal(tui.cwd, "/repo/demo");
+    assert.equal(tui.extra.source, "tui");
     assert.equal(cli.startedAt, 1_700_000_000_000);
 
     const { events, model } = await hermes.read(cli);
