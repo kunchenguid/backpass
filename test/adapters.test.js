@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
+import { execFileSync } from "node:child_process";
 
 import * as claude from "../src/discovery/adapters/claude.js";
 import * as codex from "../src/discovery/adapters/codex.js";
@@ -14,6 +15,8 @@ import * as cursorCli from "../src/discovery/adapters/cursor-cli.js";
 import * as hermes from "../src/discovery/adapters/hermes.js";
 import { statOrNull } from "../src/discovery/adapters/shared.js";
 import { associate } from "../src/discovery/association.js";
+import { discoverTranscripts } from "../src/discovery/index.js";
+import { associateUser } from "../src/scope.js";
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
 
@@ -749,4 +752,60 @@ test("hermes adapter collects v26 interactive sessions with trustworthy cwd and 
     assert.equal(toolCall.input.command, "pwd");
     assert.equal(toolCall.result, "/repo/demo");
   });
+});
+
+test("normal discovery associates only trustworthy Hermes TUI sessions in project and user scope", async () => {
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-hermes-scope-")));
+  const repoRoot = path.join(dir, "project");
+  const otherRoot = path.join(dir, "other");
+  fs.mkdirSync(repoRoot);
+  fs.mkdirSync(otherRoot);
+  execFileSync("git", ["init", "-q", repoRoot]);
+  execFileSync("git", ["init", "-q", otherRoot]);
+  writeHermesDb(path.join(dir, "hermes"), {
+    cwdColumn: true,
+    sessions: [
+      { id: "tui-project", source: "tui", cwd: repoRoot, started_at: 1_700_000_000 },
+      { id: "tui-other", source: "tui", cwd: otherRoot, started_at: 1_700_000_001 },
+      { id: "tui-relative", source: "tui", cwd: "project", started_at: 1_700_000_002 },
+      {
+        id: "tui-fallback",
+        source: "tui",
+        model_config: JSON.stringify({ cwd: repoRoot }),
+        started_at: 1_700_000_003,
+      },
+      { id: "gateway-project", source: "gateway", cwd: repoRoot, started_at: 1_700_000_004 },
+      { id: "cron-project", source: "cron", cwd: repoRoot, started_at: 1_700_000_005 },
+      { id: "whatsapp-project", source: "whatsapp", cwd: repoRoot, started_at: 1_700_000_006 },
+    ],
+  });
+  const config = {
+    discovery: { since: "all", harnesses: ["hermes"], worktreeGlobs: [] },
+    state: { root: path.join(dir, "state"), readScanCache: () => ({}) },
+  };
+  const repo = { name: "project", worktrees: [repoRoot], remotes: [] };
+
+  try {
+    await withHermesHome(path.join(dir, "hermes"), async () => {
+      const project = await discoverTranscripts({ repo, config, strict: true });
+      assert.deepEqual(
+        project.transcripts.map((row) => row.nativeId),
+        ["tui-project"],
+      );
+      assert.equal(project.transcripts[0].association.tier, 1);
+      assert.equal(project.transcripts[0].interaction, "interactive");
+
+      const user = await discoverTranscripts({
+        repo,
+        config,
+        strict: true,
+        scope: { kind: "user", associate: associateUser },
+      });
+      assert.deepEqual(user.transcripts.map((row) => row.nativeId).sort(), ["tui-other", "tui-project"]);
+      assert.deepEqual(new Set(user.transcripts.map((row) => row.project)), new Set([repoRoot, otherRoot]));
+      assert.ok(user.transcripts.every((row) => row.association.tier === 1));
+    });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
