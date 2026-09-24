@@ -10,7 +10,6 @@ import { foldForRun } from "../src/commands/propose.js";
 import { foldEvidence, renderEvidenceForPrompt, renderEvidenceReport } from "../src/fold.js";
 import {
   gapEntryId,
-  normalizeGapLedgerSessions,
   ledgerGapObservations,
   mergeGapEntries,
   pruneGapLedger,
@@ -263,54 +262,34 @@ test("a legacy session-id observation migrates without counting the identity as 
   assert.equal(entry.sessions["stable-identity-s1"].firstObservedAt, firstObservedAt);
 });
 
-test("OMP ledger migration preserves selected order in one ledger pass", () => {
-  const ledger = {
-    version: 1,
-    entries: {
-      [gapEntryId(MEMORY_PATH, GAP)]: {
-        id: gapEntryId(MEMORY_PATH, GAP),
-        memoryPath: MEMORY_PATH,
-        proposedInstruction: GAP,
-        sessions: {
-          "parent-file": { firstObservedAt: "2026-08-01T00:00:00.000Z", project: "parent-project" },
-          "child-file": { firstObservedAt: "2026-08-02T00:00:00.000Z", project: "child-project" },
-        },
-      },
-    },
+test("an ambiguous legacy session id never migrates onto a selected session", async () => {
+  const h = harness({ gapLedgerMaxAge: "all" });
+  const evidenceFor = (transcript, gaps) => {
+    const result = record(transcript.id, gaps);
+    result.transcript = transcript;
+    result.key = evidenceKey(transcript, result.memoryHash);
+    return result;
   };
-  let ledgerPasses = 0;
-  const entries = ledger.entries;
-  ledger.entries = new Proxy(entries, {
-    ownKeys(target) {
-      ledgerPasses += 1;
-      return Reflect.ownKeys(target);
-    },
+  const shared = (identity) => ({
+    ...record("claude-shared", []).transcript,
+    nativeId: "shared",
+    identity,
+    path: `/claude/${identity}.jsonl`,
   });
-  const parent = {
-    id: "pi-parent",
-    identity: "parent-file",
-    corroborationIdentity: "pi-parent",
-    corroborationNativeId: "parent-native",
-    harness: "pi",
-    path: "/omp/sessions/parent.jsonl",
-    startedAt: Date.parse("2026-08-01T00:00:00.000Z"),
-  };
-  const child = {
-    id: "pi-child",
-    identity: "child-file",
-    corroborationIdentity: "pi-parent",
-    corroborationNativeId: "parent-native",
-    harness: "pi",
-    path: "/omp/sessions/parent/Subagent.jsonl",
-    startedAt: Date.parse("2026-08-02T00:00:00.000Z"),
-  };
+  const a = shared("session-a");
+  const b = shared("session-b");
+  const c = record("claude-c", []).transcript;
+  const ledger = { version: 1, entries: {} };
+  recordGapObservations(ledger, [record("claude-shared", [GAP]), record("claude-c", [GAP])]);
+  h.state.writeGapLedger(ledger);
+  h.state.writeEvidence(a, evidenceFor(a, []));
+  h.state.writeEvidence(b, evidenceFor(b, [GAP]));
 
-  normalizeGapLedgerSessions(ledger, [parent, child]);
-  assert.equal(ledgerPasses, 1, "the selected transcripts should share one ledger traversal");
+  const summary = await foldForRun(h.ctx, memoryFile(), "h1", [], [a, c]);
 
-  const [entry] = Object.values(ledger.entries);
-  assert.deepEqual(Object.keys(entry.sessions), ["pi-parent"]);
-  assert.equal(entry.sessions["pi-parent"].project, "parent-project");
+  assert.equal(summary.gaps.length, 0, "a sighting that may be B's must not corroborate A");
+  const [entry] = Object.values(h.state.readGapLedger().entries);
+  assert.deepEqual(Object.keys(entry.sessions).sort(), ["claude-c", "claude-shared"]);
 });
 
 test("a genuine one-off never graduates, however many runs see it", async () => {

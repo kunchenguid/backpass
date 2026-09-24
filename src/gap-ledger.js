@@ -261,37 +261,25 @@ export function recordGapObservations(ledger, evidenceRecords, options = {}) {
   }
   return recorded;
 }
-/** Re-key selected sessions in old ledgers when related transcript files now share an identity. */
-export function normalizeGapLedgerSessions(ledger, transcripts) {
+/**
+ * Re-key selected sessions in old ledgers when related transcript files now share an
+ * identity. A legacy `transcript.id` key migrates only when it is in `legacyIds`: the ids
+ * the fold proved belong to exactly one evidence identity, so an ambiguous id never moves
+ * another session's sighting onto a selected one.
+ */
+export function normalizeGapLedgerSessions(ledger, transcripts, { legacyIds = new Set() } = {}) {
   const selections = [];
-  const selectionsByAlias = new Map();
-
   for (const transcript of transcripts) {
     if (!(transcript?.corroborationIdentity || transcript?.identity || transcript?.id)) continue;
     const sessionIdentity = corroborationIdentityOf(transcript);
-    const aliases = sessionIdentityAliases(transcript, sessionIdentity);
-    if (!aliases.length) continue;
-
-    const index = selections.length;
-    selections.push({ transcript, sessionIdentity, aliases });
-    for (const alias of aliases) {
-      let indexes = selectionsByAlias.get(alias);
-      if (!indexes) selectionsByAlias.set(alias, (indexes = []));
-      indexes.push(index);
-    }
+    const aliases = sessionIdentityAliases(transcript, sessionIdentity).filter(
+      (alias) => alias !== transcript.id || legacyIds.has(alias),
+    );
+    if (aliases.length) selections.push({ transcript, sessionIdentity, aliases });
   }
 
-  if (!selections.length) return;
   for (const entry of Object.values(ledger.entries)) {
-    const pending = new Set();
-    for (const identity of Object.keys(entry.sessions)) {
-      const indexes = selectionsByAlias.get(identity);
-      if (indexes) for (const index of indexes) pending.add(index);
-    }
-
-    for (let index = 0; index < selections.length; index += 1) {
-      if (!pending.has(index)) continue;
-      const { transcript, sessionIdentity, aliases } = selections[index];
+    for (const { transcript, sessionIdentity, aliases } of selections) {
       if (!aliases.some((identity) => entry.sessions[identity])) continue;
       const priors = [entry.sessions[sessionIdentity], ...aliases.map((identity) => entry.sessions[identity])].filter(
         Boolean,
@@ -324,9 +312,6 @@ export function normalizeGapLedgerSessions(ledger, transcripts) {
         ...(projectRoot ? { projectRoot } : {}),
       };
       for (const alias of aliases) delete entry.sessions[alias];
-
-      const next = selectionsByAlias.get(sessionIdentity);
-      if (next) for (const nextIndex of next) if (nextIndex > index) pending.add(nextIndex);
     }
   }
 }
