@@ -6,6 +6,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
+import { resolveRepo } from "../src/repo.js";
+import { loadConfig } from "../src/config.js";
+import { discoverForRun } from "../src/commands/scan.js";
 import { State } from "../src/state.js";
 import { resolveMemoryFiles } from "../src/memory.js";
 import { foldForRun } from "../src/commands/propose.js";
@@ -307,4 +310,113 @@ test("old-hash leftover evidence cannot change the current fold's session count,
       assert.equal(revertedSummary.instructions.find((i) => i.instruction === "AG-001").positive, 1);
     });
   });
+});
+
+test("OMP analysis persists parent observer identity and fold restores it for legacy evidence", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-omp-fold-home-"));
+  const dir = initRepo(MEMORY);
+  const sessionRoot = path.join(home, ".omp", "agent", "sessions", "-repo-demo");
+  const parentName = "2026-08-27T00-00-00.000Z_parent-folder";
+  const childPath = path.join(sessionRoot, parentName, "Subagent.jsonl");
+
+  const writeOmpTranscript = (file, id) => {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const entries = [
+      { type: "title", v: 1, title: "" },
+      { type: "session", version: 3, id, timestamp: "2026-08-27T00:00:00.000Z", cwd: dir },
+      { type: "message", message: { role: "user", content: "Please build the project." } },
+      { type: "message", message: { role: "assistant", content: "Ran make build as instructed." } },
+      { type: "message", message: { role: "user", content: "Now run the tests too." } },
+      { type: "message", message: { role: "assistant", content: "Tests pass." } },
+    ];
+    fs.writeFileSync(file, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+  };
+
+  writeOmpTranscript(path.join(sessionRoot, `${parentName}.jsonl`), "parent-native");
+  writeOmpTranscript(path.join(sessionRoot, parentName, "Subagent.jsonl"), "child-native");
+
+  const analyzed = runAnalyze(dir, home);
+  assert.equal(analyzed.status, 0, analyzed.output);
+  assert.equal(analyzed.summary.analyzed, 2, "the real analyzer writes evidence for parent and child");
+
+  const previousHome = process.env.HOME;
+  const previousUserProfile = process.env.USERPROFILE;
+  process.env.HOME = home;
+  process.env.USERPROFILE = home;
+  try {
+    const repo = resolveRepo(dir);
+    const config = loadConfig(dir, { discovery: { harnesses: ["pi"], since: "all" } });
+    const state = new State(dir).ensure();
+    config.state = state;
+    const ctx = { repo, config, scope: null, strict: false, limit: null };
+    const { transcripts } = await discoverForRun(ctx);
+    assert.equal(transcripts.length, 2, "discovery returns both OMP transcripts");
+    assert.equal(new Set(transcripts.map((transcript) => transcript.corroborationIdentity)).size, 1);
+
+    const evidence = state.listEvidence();
+    assert.equal(evidence.length, 2);
+
+    const memoryFile = resolveMemoryFiles(dir, ["AGENTS.md", "CLAUDE.md"]).primary;
+    const memoryHash = evidence[0].memoryHash;
+    const foldCtx = { repo, config: { ...config, minGapEvidence: 2, gapLedgerMaxAge: "90d" }, scope: null };
+
+    const current = await foldForRun(foldCtx, memoryFile, memoryHash, [], transcripts);
+    assert.equal(current.gaps.length, 0, "parent and child count as one observer, below the two-session threshold");
+    const currentSessionIds = Object.values(state.readGapLedger().entries).flatMap((entry) =>
+      Object.keys(entry.sessions),
+    );
+    assert.deepEqual(currentSessionIds, [transcripts[0].corroborationIdentity]);
+    assert.ok(
+      evidence.every((record) =>
+        transcripts.some(
+          (transcript) =>
+            transcript.path === record.transcript.path &&
+            transcript.corroborationIdentity === record.transcript.corroborationIdentity,
+        ),
+      ),
+      "analysis persists the observer identity needed by later folds",
+    );
+
+    const childEvidence = evidence.find((record) => record.transcript.path === childPath);
+    assert.ok(childEvidence);
+    for (const field of [
+      "parentSessionId",
+      "corroborationIdentity",
+      "corroborationNativeId",
+      "corroborationStartedAt",
+    ]) {
+      delete childEvidence.transcript[field];
+    }
+    state.writeEvidence(childEvidence.transcript, childEvidence);
+
+    const reused = runAnalyze(dir, home);
+    assert.equal(reused.status, 0, reused.output);
+    assert.deepEqual([reused.summary.analyzed, reused.summary.cached], [0, 2]);
+    const reusedChild = state.listEvidence().find((record) => record.transcript.path === childPath);
+    assert.equal(reusedChild.transcript.parentSessionId, "parent-native");
+    assert.equal(reusedChild.transcript.corroborationIdentity, transcripts[0].corroborationIdentity);
+    assert.equal(reusedChild.transcript.corroborationNativeId, "parent-native");
+
+    state.writeGapLedger({ version: 1, entries: {} });
+    for (const record of evidence) {
+      const transcript = { ...record.transcript };
+      delete transcript.parentSessionId;
+      delete transcript.corroborationIdentity;
+      delete transcript.corroborationNativeId;
+      delete transcript.corroborationStartedAt;
+      state.writeEvidence(transcript, { ...record, transcript });
+    }
+
+    const legacy = await foldForRun(foldCtx, memoryFile, memoryHash, [], transcripts);
+    assert.equal(legacy.gaps.length, 0, "selected discovery metadata restores identity for older evidence");
+    const legacySessionIds = Object.values(state.readGapLedger().entries).flatMap((entry) =>
+      Object.keys(entry.sessions),
+    );
+    assert.deepEqual(legacySessionIds, [transcripts[0].corroborationIdentity]);
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = previousUserProfile;
+  }
 });

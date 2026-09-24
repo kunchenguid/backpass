@@ -749,6 +749,109 @@ test("evidence records carry the category and fold reports relevance per categor
     process.env.HOME = prevHome;
   }
 });
+test("OMP subagents share their parent identity and refresh cached relations", async () => {
+  const repo = initRepo();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-omp-discovery-"));
+  const sessionRoot = path.join(home, ".omp", "agent", "sessions", "-repo-demo");
+  const parentName = "2026-08-27T00-00-00.000Z_parent-folder";
+  const parentPath = path.join(sessionRoot, `${parentName}.jsonl`);
+  const childPath = path.join(sessionRoot, parentName, "Subagent.jsonl");
+  const header = (id) => [
+    { type: "title", v: 1, title: "" },
+    { type: "session", version: 3, id, timestamp: "2026-08-27T00:00:00.000Z", cwd: repo },
+  ];
+  writeJsonl(parentPath, header("parent-native"));
+  writeJsonl(childPath, header("child-native"));
+
+  const prevHome = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    const config = loadConfig(repo, { discovery: { harnesses: ["pi"], since: "all" } });
+    config.state = new State(repo).ensure();
+    const cache = config.state.readScanCache();
+    for (const candidate of pi.enumerate()) {
+      const descriptor = pi.classify(candidate);
+      delete descriptor.parentSessionId;
+      delete descriptor.parentSessionPath;
+      delete descriptor.parentSessionStartedAt;
+      cache.entries[`pi:${candidate.key}`] = {
+        mtimeMs: candidate.mtimeMs,
+        bytes: candidate.bytes,
+        descriptor,
+      };
+    }
+    config.state.writeScanCache(cache);
+
+    const repository = { name: "demo", root: repo, worktrees: [repo], remotes: [] };
+    const first = await discoverTranscripts({ repo: repository, config });
+    assert.equal(first.perHarness.pi.cached, 0, "the pre-relation cache must be reclassified");
+    const parent = first.transcripts.find((transcript) => transcript.nativeId === "parent-native");
+    const child = first.transcripts.find((transcript) => transcript.nativeId === "child-native");
+    assert.ok(parent && child);
+    assert.notEqual(parent.identity, child.identity, "the two files remain separately analyzable");
+    assert.equal(parent.corroborationIdentity, parent.identity);
+    assert.equal(child.corroborationIdentity, parent.identity);
+    assert.equal(parent.interaction, INTERACTIVE);
+    assert.equal(child.interaction, NON_INTERACTIVE);
+
+    const second = await discoverTranscripts({ repo: repository, config });
+    assert.equal(second.perHarness.pi.cached, 2, "the refreshed relation is safe to reuse");
+    assert.equal(
+      second.transcripts.find((transcript) => transcript.nativeId === "child-native").corroborationIdentity,
+      parent.identity,
+    );
+  } finally {
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+  }
+});
+
+test("Pi child cache is invalidated when its parent session appears", async () => {
+  const repo = initRepo();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-omp-parent-cache-"));
+  const sessionRoot = path.join(home, ".omp", "agent", "sessions", "-repo-demo");
+  const parentName = "2026-08-27T00-00-00.000Z_parent-folder";
+  const parentPath = path.join(sessionRoot, `${parentName}.jsonl`);
+  const childPath = path.join(sessionRoot, parentName, "Subagent.jsonl");
+  const header = (id) => [
+    { type: "title", v: 1, title: "" },
+    { type: "session", version: 3, id, timestamp: "2026-08-27T00:00:00.000Z", cwd: repo },
+  ];
+  writeJsonl(childPath, header("child-native"));
+
+  const prevHome = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    const config = loadConfig(repo, { discovery: { harnesses: ["pi"], since: "all" } });
+    config.state = new State(repo).ensure();
+    const repository = { name: "demo", root: repo, worktrees: [repo], remotes: [] };
+
+    const first = await discoverTranscripts({ repo: repository, config });
+    const childBeforeParent = first.transcripts.find((transcript) => transcript.nativeId === "child-native");
+    assert.ok(childBeforeParent);
+    assert.equal(childBeforeParent.parentSessionId, undefined);
+
+    writeJsonl(parentPath, header("parent-native"));
+    const second = await discoverTranscripts({ repo: repository, config });
+    const parent = second.transcripts.find((transcript) => transcript.nativeId === "parent-native");
+    const child = second.transcripts.find((transcript) => transcript.nativeId === "child-native");
+
+    assert.ok(parent && child);
+    assert.equal(child.parentSessionId, "parent-native");
+    assert.equal(child.corroborationIdentity, parent.identity);
+    assert.equal(second.perHarness.pi.cached, 0, "the child descriptor must be reclassified after its parent appears");
+
+    const third = await discoverTranscripts({ repo: repository, config });
+    assert.equal(third.perHarness.pi.cached, 2, "the refreshed parent relation is safe to reuse");
+    assert.equal(
+      third.transcripts.find((transcript) => transcript.nativeId === "child-native").corroborationIdentity,
+      parent.identity,
+    );
+  } finally {
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+  }
+});
 
 test("the sampler keeps both categories when a 98% non-interactive corpus exceeds the cap", () => {
   const interactive = Array.from({ length: 2 }, (_, i) => ({

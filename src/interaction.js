@@ -60,6 +60,7 @@ function claudeEntrypointIsNonInteractive(entrypoint) {
  * Explicit `transcript.interaction` is trusted when it is already one of the two labels.
  */
 export function classifyInteraction(transcript) {
+  if (transcript?.parentSessionId) return NON_INTERACTIVE;
   const stamped = transcript?.interaction;
   if (stamped === INTERACTIVE || stamped === NON_INTERACTIVE) return stamped;
 

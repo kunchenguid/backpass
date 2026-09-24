@@ -40,6 +40,56 @@ function scenario({ variant = {}, cwdOverride = null, sessionText = null } = {})
   };
 }
 
+test("remote OMP subagents keep their parent's corroboration identity", async () => {
+  const s = scenario();
+  const sessionDir = path.join(s.remoteHome, ".omp", "agent", "sessions", "-repo-demo");
+  const parentName = "2026-08-27T00-00-00.000Z_parent-folder";
+  const parentPath = path.join(sessionDir, `${parentName}.jsonl`);
+  const childPath = path.join(sessionDir, parentName, "Subagent.jsonl");
+  const writeSession = (file, id, timestamp) => {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(
+      file,
+      `${JSON.stringify({ type: "title", v: 1, title: "" })}\n` +
+        `${JSON.stringify({
+          type: "session",
+          version: 3,
+          id,
+          timestamp,
+          cwd: s.remoteClone,
+        })}\n`,
+    );
+  };
+  writeSession(parentPath, "parent-native", "2026-08-27T00:00:00.000Z");
+  writeSession(childPath, "child-native", "2026-08-27T00:01:00.000Z");
+
+  const piEnv = ["PI_CODING_AGENT_DIR", "PI_CODING_AGENT_SESSION_DIR", "BB_DATA_DIR", "BB_PI_BRIDGE_SESSION_DIR"];
+  const previous = Object.fromEntries(piEnv.map((key) => [key, process.env[key]]));
+  for (const key of piEnv) delete process.env[key];
+  let result;
+  try {
+    result = await withRemoteEnv({ localHome: s.localHome, hosts: s.hosts }, () =>
+      discoverProject(s.repoRoot, {
+        discovery: { hosts: ["mac-home"], harnesses: ["pi"], since: "all" },
+      }),
+    );
+  } finally {
+    for (const key of piEnv) {
+      if (previous[key] === undefined) delete process.env[key];
+      else process.env[key] = previous[key];
+    }
+  }
+
+  const parent = result.transcripts.find((transcript) => transcript.nativeId === "parent-native");
+  const child = result.transcripts.find((transcript) => transcript.nativeId === "child-native");
+  assert.ok(parent && child);
+  assert.notEqual(parent.identity, child.identity);
+  assert.equal(child.parentSessionId, "parent-native");
+  assert.equal(child.corroborationIdentity, parent.identity);
+  assert.equal(child.corroborationNativeId, "parent-native");
+  assert.equal(child.corroborationStartedAt, parent.startedAt);
+});
+
 test("host collection has plain progress without duplicating live progress", async () => {
   const plain = scenario();
   const lines = [];

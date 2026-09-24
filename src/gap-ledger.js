@@ -1,6 +1,7 @@
 import { parseMemoryUnits, similarity } from "./memory.js";
 import { parseSince } from "./config.js";
 import { sha256 } from "./state.js";
+import { corroborationIdentityOf } from "./transcript.js";
 
 /**
  * Durable gap corroboration across runs (`.backpass/gap-ledger.json`).
@@ -70,9 +71,11 @@ export function emptyGapLedger() {
  * cross-machine corroboration actually is: two machines hitting one gap, named.
  */
 export function gapSource(transcript = {}) {
-  const date = transcript.startedAt ? new Date(transcript.startedAt).toISOString().slice(0, 10) : "unknown date";
+  const startedAt = transcript.corroborationStartedAt ?? transcript.startedAt;
+  const date = startedAt ? new Date(startedAt).toISOString().slice(0, 10) : "unknown date";
   const host = transcript.host ? ` · ${transcript.host}` : "";
-  return `${transcript.harness} · ${sessionSourceId(transcript)} · ${date}${host}`;
+  const sourceId = transcript.corroborationNativeId || sessionSourceId(transcript);
+  return `${transcript.harness} · ${sourceId} · ${date}${host}`;
 }
 
 export function sessionSourceId(transcript = {}) {
@@ -162,6 +165,12 @@ export function findGapEntry(ledger, memoryPath, proposedInstruction) {
   return best;
 }
 
+function sessionIdentityAliases(transcript, sessionIdentity) {
+  return [...new Set([transcript.identity, transcript.id])].filter(
+    (identity) => identity && identity !== sessionIdentity,
+  );
+}
+
 /**
  * Fold this run's evidence into the ledger. One observation per (gap, session); a
  * session seen again replaces its own observation and keeps its first-seen timestamp.
@@ -175,8 +184,8 @@ export function recordGapObservations(ledger, evidenceRecords, options = {}) {
   for (const record of evidenceRecords) {
     if (!record || record.status !== "ok" || !record.memoryPath) continue;
     const transcript = record.transcript || {};
-    const sessionIdentity = transcript.identity || transcript.id;
-    if (!sessionIdentity) continue;
+    const sessionIdentity = corroborationIdentityOf(transcript);
+    if (!(transcript.corroborationIdentity || transcript.identity || transcript.id)) continue;
     for (const gap of record.gaps || []) {
       if (!gap || !gap.proposedInstruction) continue;
       // A citation from the analysis turn wins over word overlap: the model saw both
@@ -206,14 +215,15 @@ export function recordGapObservations(ledger, evidenceRecords, options = {}) {
           entry.proposedInstruction = gap.proposedInstruction;
         }
       }
-      const identityPrior = entry.sessions[sessionIdentity];
-      const aliasPrior = transcript.id && transcript.id !== sessionIdentity ? entry.sessions[transcript.id] : null;
-      const priors = [identityPrior, aliasPrior].filter(Boolean);
+      const aliases = sessionIdentityAliases(transcript, sessionIdentity);
+      const priors = [entry.sessions[sessionIdentity], ...aliases.map((identity) => entry.sessions[identity])].filter(
+        Boolean,
+      );
       const firstObservedAt = priors
         .map((observation) => observation.firstObservedAt || observation.observedAt)
         .filter((value) => Number.isFinite(Date.parse(value)))
         .sort((a, b) => Date.parse(a) - Date.parse(b))[0];
-      if (aliasPrior) delete entry.sessions[transcript.id];
+      for (const alias of aliases) delete entry.sessions[alias];
       const coveredBySkill =
         gap.coveredBySkill || priors.find((observation) => observation.coveredBySkill)?.coveredBySkill;
       const phrasings = [
@@ -228,7 +238,10 @@ export function recordGapObservations(ledger, evidenceRecords, options = {}) {
         firstObservedAt: firstObservedAt || observedAt,
         observedAt,
         sessionStartedAt:
-          transcript.startedAt ?? identityPrior?.sessionStartedAt ?? aliasPrior?.sessionStartedAt ?? null,
+          transcript.corroborationStartedAt ??
+          transcript.startedAt ??
+          priors.find((observation) => observation.sessionStartedAt)?.sessionStartedAt ??
+          null,
         memoryHash: record.memoryHash || null,
         source: gapSource(transcript),
         mistake: gap.mistake,
@@ -247,6 +260,75 @@ export function recordGapObservations(ledger, evidenceRecords, options = {}) {
     }
   }
   return recorded;
+}
+/** Re-key selected sessions in old ledgers when related transcript files now share an identity. */
+export function normalizeGapLedgerSessions(ledger, transcripts) {
+  const selections = [];
+  const selectionsByAlias = new Map();
+
+  for (const transcript of transcripts) {
+    if (!(transcript?.corroborationIdentity || transcript?.identity || transcript?.id)) continue;
+    const sessionIdentity = corroborationIdentityOf(transcript);
+    const aliases = sessionIdentityAliases(transcript, sessionIdentity);
+    if (!aliases.length) continue;
+
+    const index = selections.length;
+    selections.push({ transcript, sessionIdentity, aliases });
+    for (const alias of aliases) {
+      let indexes = selectionsByAlias.get(alias);
+      if (!indexes) selectionsByAlias.set(alias, (indexes = []));
+      indexes.push(index);
+    }
+  }
+
+  if (!selections.length) return;
+  for (const entry of Object.values(ledger.entries)) {
+    const pending = new Set();
+    for (const identity of Object.keys(entry.sessions)) {
+      const indexes = selectionsByAlias.get(identity);
+      if (indexes) for (const index of indexes) pending.add(index);
+    }
+
+    for (let index = 0; index < selections.length; index += 1) {
+      if (!pending.has(index)) continue;
+      const { transcript, sessionIdentity, aliases } = selections[index];
+      if (!aliases.some((identity) => entry.sessions[identity])) continue;
+      const priors = [entry.sessions[sessionIdentity], ...aliases.map((identity) => entry.sessions[identity])].filter(
+        Boolean,
+      );
+      const current = entry.sessions[sessionIdentity] || priors[0];
+      const firstObservedAt = priors
+        .map((observation) => observation.firstObservedAt || observation.observedAt)
+        .filter((value) => Number.isFinite(Date.parse(value)))
+        .sort((a, b) => Date.parse(a) - Date.parse(b))[0];
+      const coveredBySkill = priors.find((observation) => observation.coveredBySkill)?.coveredBySkill;
+      const project = current.project || priors.find((observation) => observation.project)?.project;
+      const projectRoot = current.projectRoot || priors.find((observation) => observation.projectRoot)?.projectRoot;
+
+      entry.sessions[sessionIdentity] = {
+        ...current,
+        ...(firstObservedAt ? { firstObservedAt } : {}),
+        sessionStartedAt: transcript.corroborationStartedAt ?? transcript.startedAt ?? current.sessionStartedAt ?? null,
+        source: gapSource(transcript),
+        phrasings: [
+          ...new Set([
+            entry.proposedInstruction,
+            ...priors.flatMap(
+              (observation) => observation.phrasings || [observation.proposedInstruction].filter(Boolean),
+            ),
+          ]),
+        ].filter(Boolean),
+        domain: priors.some((observation) => observation.domain !== "orchestration") ? "project" : "orchestration",
+        ...(coveredBySkill ? { coveredBySkill } : {}),
+        ...(project ? { project } : {}),
+        ...(projectRoot ? { projectRoot } : {}),
+      };
+      for (const alias of aliases) delete entry.sessions[alias];
+
+      const next = selectionsByAlias.get(sessionIdentity);
+      if (next) for (const nextIndex of next) if (nextIndex > index) pending.add(nextIndex);
+    }
+  }
 }
 
 /**
