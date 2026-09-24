@@ -213,15 +213,15 @@ It cannot be combined with
 
 backpass reads the local transcript stores of seven harnesses directly. No API, no upload.
 
-| Harness        | Store                                          | Repo tie                                            |
-| -------------- | ---------------------------------------------- | --------------------------------------------------- |
-| **claude**     | `~/.claude/projects/<munged-cwd>/<uuid>.jsonl` | per-line `cwd`                                      |
-| **codex**      | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | `cwd` + recorded `git.repository_url`               |
-| **pi**         | standalone and BB-managed Pi JSONL stores      | session-header `cwd`                                |
-| **opencode**   | `~/.local/share/opencode/opencode.db` (sqlite) | `session.directory`                                 |
-| **grok**       | `~/.grok/sessions/<encoded-cwd>/<uuid>/`       | `summary.json` `cwd` + `git_remotes`                |
-| **cursor CLI** | `~/.cursor/chats/<md5(cwd)>/<uuid>/`           | `meta.json` `cwd`                                   |
-| **hermes**     | `~/.hermes/state.db` (sqlite)                  | session cwd, with CLI prompt / ACP config fallbacks |
+| Harness        | Store                                           | Repo tie                                            |
+| -------------- | ----------------------------------------------- | --------------------------------------------------- |
+| **claude**     | `~/.claude/projects/<munged-cwd>/<uuid>.jsonl`  | per-line `cwd`                                      |
+| **codex**      | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`  | `cwd` + recorded `git.repository_url`               |
+| **pi**         | standalone, OMP, and BB-managed Pi JSONL stores | session-header `cwd`                                |
+| **opencode**   | `~/.local/share/opencode/opencode.db` (sqlite)  | `session.directory`                                 |
+| **grok**       | `~/.grok/sessions/<encoded-cwd>/<uuid>/`        | `summary.json` `cwd` + `git_remotes`                |
+| **cursor CLI** | `~/.cursor/chats/<md5(cwd)>/<uuid>/`            | `meta.json` `cwd`                                   |
+| **hermes**     | `~/.hermes/state.db` (sqlite)                   | session cwd, with CLI prompt / ACP config fallbacks |
 
 Claude collection covers `$CLAUDE_CONFIG_DIR/projects` alongside the default store, so a
 relocated config dir does not hide its sessions. The variable is read from backpass's own
@@ -230,10 +230,9 @@ for the backpass run too (`CLAUDE_CONFIG_DIR=~/.claude-work backpass`, or export
 
 Pi collection covers standalone sessions under `~/.pi/agent/sessions/`, OMP sessions under
 `~/.omp/agent/sessions/`, and BB-managed Pi sessions under `~/.bb/pi-bridge-sessions/`. It
-also honors `PI_CODING_AGENT_DIR`,
-`PI_CODING_AGENT_SESSION_DIR`, `BB_DATA_DIR`, and `BB_PI_BRIDGE_SESSION_DIR` when they are
-set in backpass's environment. When roots overlap, backpass scans every applicable layout
-and reads each JSONL file once.
+also honors `PI_CODING_AGENT_DIR`, `PI_CODING_AGENT_SESSION_DIR`, `BB_DATA_DIR`, and
+`BB_PI_BRIDGE_SESSION_DIR` when they are set in backpass's environment. When roots
+overlap, backpass scans every applicable layout and reads each JSONL file once.
 
 OMP nests subagent JSONL files below each parent session, and a subagent's own subagents
 one level further down. Backpass analyzes each file separately, but uses the root session as

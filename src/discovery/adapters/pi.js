@@ -25,10 +25,10 @@ import {
  * the root session. BB's Pi bridge writes the same JSONL shape directly under
  * `<bb-data-dir>/pi-bridge-sessions/`.
  *
- * Entries form a parent/child tree but arrive in
- * order, so a linear read is faithful. `model_change` / `thinking_level_change` records
- * give the model actually used (`modelId` on pi, `model` on omp). No remote is
- * recorded - dead worktrees reach tier 3 only.
+ * Entries form a parent/child tree but arrive in order, so a linear read is faithful.
+ * `model_change` / `thinking_level_change` records give the model actually used
+ * (`modelId` on pi, `model` on omp). No remote is recorded - dead worktrees reach tier 3
+ * only.
  */
 
 export const name = "pi";

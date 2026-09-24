@@ -35,10 +35,14 @@ import { corroborationIdentityOf } from "./transcript.js";
  *    afterward (majority orchestration withholds a cluster from proposals; a mixed
  *    cluster stays visible). A missing domain counts as project, so evidence from
  *    before the field existed keeps its old behavior.
- *  - Sessions are keyed by canonical transcript identity (with the legacy id as a fallback),
- *    so re-analyzing or re-sampling the same source session overwrites its observation and
- *    never adds a count. Persisted observations only contribute when that identity belongs
- *    to the current selected sample, so sessions outside the window or cap cannot skew fold.
+ *  - Sessions are keyed by corroboration identity (`corroborationIdentityOf`: the root
+ *    session's canonical identity for an OMP subagent, the transcript's own otherwise), so
+ *    re-analyzing or re-sampling the same source session, or a subagent of it, overwrites
+ *    its observation and never adds a count. An older per-file identity key migrates to
+ *    it; a legacy id key migrates only when the fold proved that id belongs to one
+ *    evidence identity (`legacyIds`). Persisted observations only contribute when that
+ *    identity belongs to the current selected sample, so sessions outside the window or
+ *    cap cannot skew fold.
  *  - A gap is a fact about its session: re-analysis that no longer mentions it is model
  *    noise, not the session changing, so observations are only ever replaced, not removed
  *    by absence. They retire in exactly two ways: the memory surface gains content

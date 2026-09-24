@@ -308,12 +308,12 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   Nothing is deleted automatically. Relevance still accrues to the memory-file alias until
   that copy is gone.
 - **Gap corroboration persists across runs through `.backpass/gap-ledger.json`**
-  (`src/gap-ledger.js`, wired in `foldForRun`): one sighting per (gap, transcript id), so a
-  session never counts twice. A run only folds ledger observations from its selected sample;
-  persisted sessions outside the cap cannot reintroduce a skewed corpus. Record this run's
-  evidence _before_ pruning - old evidence files stay on disk and would re-add an expired or
-  covered sighting otherwise. Uncorroborated gaps stay hidden; never surface singletons to
-  the prompt or report.
+  (`src/gap-ledger.js`, wired in `foldForRun`): one sighting per (gap, session under
+  `corroborationIdentityOf`), so a session never counts twice. A run only folds ledger
+  observations from its selected sample; persisted sessions outside the cap cannot
+  reintroduce a skewed corpus. Record this run's evidence _before_ pruning - old evidence
+  files stay on disk and would re-add an expired or covered sighting otherwise.
+  Uncorroborated gaps stay hidden; never surface singletons to the prompt or report.
 - **Gap identity is judged, not word-matched.** Bigram similarity cannot recognize real
   paraphrase (measured on production data: max cross-session score 0.34 vs the 0.45 bar),
   so it is only the fallback. The analysis turn cites open-gap ids (`matchesGap`, shown via

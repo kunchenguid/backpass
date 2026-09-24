@@ -7,8 +7,9 @@
  * Non-interactive is detected best-effort from per-harness metadata (codex
  * `originator: codex_exec` / `source: exec`, claude `entrypoint` values that start
  * with `sdk`, an OpenCode child `parent_id`, an OMP subagent's `parentSessionId`,
- * Hermes cron/gateway/whatsapp if they ever leak past discovery) and from cwd (a `.no-mistakes` path segment - pipeline
- * worktrees are one kind of non-interactive run, not their own category).
+ * Hermes cron/gateway/whatsapp if they ever leak past discovery) and from cwd (a
+ * `.no-mistakes` path segment - pipeline worktrees are one kind of non-interactive run,
+ * not their own category).
  */
 
 export const INTERACTIVE = "interactive";
@@ -57,7 +58,9 @@ function claudeEntrypointIsNonInteractive(entrypoint) {
 
 /**
  * Map a discovered transcript (or adapter descriptor) onto the two public categories.
- * Explicit `transcript.interaction` is trusted when it is already one of the two labels.
+ * A `parentSessionId` (an OMP subagent) is always non-interactive, even over a stamped
+ * label; otherwise an explicit `transcript.interaction` is trusted when it is already one
+ * of the two labels.
  */
 export function classifyInteraction(transcript) {
   if (transcript?.parentSessionId) return NON_INTERACTIVE;

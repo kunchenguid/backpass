@@ -42,8 +42,9 @@ export function getAdapter(harness) {
  * results are memoised in `.backpass/scan-cache.json` keyed by path + mtime + size. An
  * adapter may also export `cacheVersion` (bumped when its classification semantics
  * change) and `cacheDependency` (a fingerprint of other files a descriptor reads, such
- * as OMP ancestor sessions); a mismatch in either reclassifies the entry. Re-scans are then O(new files) - which matters: codex alone had 10,317 rollouts on
- * the machine this was designed against.
+ * as OMP ancestor sessions); a mismatch in either reclassifies the entry. Re-scans are
+ * then O(new files) - which matters: codex alone had 10,317 rollouts on the machine this
+ * was designed against.
  *
  * SQLite-backed stores (opencode, hermes, cursor IDE) answer the same question with one
  * indexed query, so they skip the cache entirely.
