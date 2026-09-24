@@ -218,6 +218,7 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   evidence answer for a rewrite. Keep that map keyed by the same unique labels.
   `sourceProjects` is empty without a project;
   `summary.sources` is the allowlist for both scopes.
+  OMP sessions live under `~/.omp/agent/sessions/` and are read by the pi adapter.
   OMP parent and subagent files (including a subagent's own subagents) remain separately
   sampled/analyzed, so relevance stays per file; their harm, non-compliance, gap floors,
   and evidence source labels share the root session's canonical identity. `normalizeGapLedgerSessions` migrates selected legacy
