@@ -16,15 +16,25 @@ import {
 
 /**
  * Pi writes standalone sessions under
- * `~/.pi/agent/sessions/<escaped-cwd>/<ISO-ts>_<uuid>.jsonl`. BB's Pi bridge writes the
- * same JSONL shape directly under `<bb-data-dir>/pi-bridge-sessions/`.
+ * `~/.pi/agent/sessions/<escaped-cwd>/<ISO-ts>_<uuid>.jsonl`. omp (Oh My Pi) uses the
+ * same JSONL shape under `~/.omp/agent/sessions/` and honors `PI_CODING_AGENT_DIR`, but
+ * prepends a fixed-width `{type:"title"}` record, so the `{type:"session", cwd, id}`
+ * entry is line 2 there. omp also writes subagent transcripts one level deeper, at
+ * `<escaped-cwd>/<session-id>/<Name>.jsonl`, and their own subagents at
+ * `<escaped-cwd>/<session-id>/<Name>/<Name>.<Child>.jsonl`; every descendant is related to
+ * the root session. BB's Pi bridge writes the same JSONL shape directly under
+ * `<bb-data-dir>/pi-bridge-sessions/`.
  *
- * Line 1 is `{type:"session", cwd, id}`. Entries form a parent/child tree but arrive in
- * order, so a linear read is faithful. `model_change` / `thinking_level_change` records
- * give the model actually used. No remote is recorded - dead worktrees reach tier 3 only.
+ * Entries form a parent/child tree but arrive in order, so a linear read is faithful.
+ * `model_change` / `thinking_level_change` records give the model actually used
+ * (`modelId` on pi, `model` on omp). No remote is recorded - dead worktrees reach tier 3
+ * only.
  */
 
 export const name = "pi";
+export const cacheVersion = 4;
+
+const SUBAGENT_DEPTH = 2;
 
 export function storeRoot() {
   return home(".pi", "agent", "sessions");
@@ -49,6 +59,7 @@ function realpathOrResolve(value) {
 function storeSpecs() {
   const specs = [
     { path: storeRoot(), direct: false, nested: true },
+    { path: home(".omp", "agent", "sessions"), direct: false, nested: true },
     { path: home(".bb", "pi-bridge-sessions"), direct: true, nested: false },
   ];
   const piAgentDir = expandEnvPath(process.env.PI_CODING_AGENT_DIR);
@@ -84,7 +95,7 @@ export function enumerate() {
   for (const spec of storeSpecs()) {
     const files = [
       ...(spec.direct ? listFiles(spec.path, ".jsonl") : []),
-      ...(spec.nested ? listDirs(spec.path).flatMap((dir) => listFiles(dir, ".jsonl")) : []),
+      ...(spec.nested ? listDirs(spec.path).flatMap((dir) => sessionFiles(dir, SUBAGENT_DEPTH)) : []),
     ];
     for (const file of files) {
       const key = realpathOrResolve(file);
@@ -98,11 +109,80 @@ export function enumerate() {
   return out;
 }
 
-export function classify(candidate) {
-  const [first] = readHeadLines(candidate.path, 1);
-  const entry = first && parseJsonLine(first);
+function sessionFiles(dir, depth) {
+  return [
+    ...listFiles(dir, ".jsonl"),
+    ...(depth > 0 ? listDirs(dir).flatMap((sub) => sessionFiles(sub, depth - 1)) : []),
+  ];
+}
+
+export function createScanContext() {
+  return { parentHeaders: new Map() };
+}
+
+function readSessionHeader(file) {
+  const [firstLine, secondLine] = readHeadLines(file, 2);
+  const first = parseJsonLine(firstLine);
+  return first?.type === "session" ? first : first?.type === "title" ? parseJsonLine(secondLine) : null;
+}
+
+function readParentSession(parentPath, scanContext) {
+  const cache = scanContext?.parentHeaders;
+  if (cache?.has(parentPath)) return cache.get(parentPath);
+  const stat = statOrNull(parentPath);
+  const entry = stat?.isFile() ? readSessionHeader(parentPath) : null;
+  const result =
+    entry?.type === "session"
+      ? {
+          entry,
+          stat,
+          fingerprint: JSON.stringify([
+            stat.dev,
+            stat.ino,
+            stat.mtimeMs,
+            stat.ctimeMs,
+            stat.size,
+            entry.id ?? null,
+            entry.cwd ?? null,
+            entry.timestamp ?? null,
+          ]),
+        }
+      : null;
+  cache?.set(parentPath, result);
+  return result;
+}
+
+function parentSessionPathFor(candidatePath) {
+  const sessionDir = path.dirname(candidatePath);
+  return path.join(path.dirname(sessionDir), `${path.basename(sessionDir)}.jsonl`);
+}
+
+function ancestorSessionPaths(candidatePath) {
+  const out = [];
+  let current = candidatePath;
+  for (let depth = 0; depth < SUBAGENT_DEPTH; depth += 1) {
+    current = parentSessionPathFor(current);
+    out.push(current);
+  }
+  return out;
+}
+
+/** @param {{ scanContext?: { parentHeaders: Map<string, { entry: any, stat: import("node:fs").Stats, fingerprint: string } | null> } }} [options] */
+export function cacheDependency(candidate, options = {}) {
+  return JSON.stringify(
+    ancestorSessionPaths(candidate.path).map(
+      (ancestorPath) => readParentSession(ancestorPath, options.scanContext)?.fingerprint ?? null,
+    ),
+  );
+}
+
+/** @param {{ scanContext?: { parentHeaders: Map<string, { entry: any, stat: import("node:fs").Stats, fingerprint: string } | null> } }} [options] */
+export function classify(candidate, options = {}) {
+  const { scanContext } = options;
+  const entry = readSessionHeader(candidate.path);
   if (!entry || entry.type !== "session" || !entry.cwd) return null;
-  return {
+
+  const descriptor = {
     id: entry.id || path.basename(candidate.path, ".jsonl"),
     cwd: entry.cwd,
     gitBranch: null,
@@ -111,6 +191,17 @@ export function classify(candidate) {
     model: null,
     interactionSignals: emptyInteractionSignals(),
   };
+
+  for (const ancestorPath of ancestorSessionPaths(candidate.path)) {
+    const ancestorInfo = readParentSession(ancestorPath, scanContext);
+    const ancestor = ancestorInfo?.entry;
+    if (!ancestor) continue;
+    descriptor.parentSessionId = ancestor.id || path.basename(ancestorPath, ".jsonl");
+    descriptor.parentSessionPath = ancestorPath;
+    descriptor.parentSessionStartedAt = ancestor.timestamp ? Date.parse(ancestor.timestamp) : ancestorInfo.stat.mtimeMs;
+  }
+
+  return descriptor;
 }
 
 export function read(ref) {
@@ -120,7 +211,7 @@ export function read(ref) {
 
   for (const entry of entries) {
     if (entry.type === "model_change") {
-      model = entry.modelId || model;
+      model = entry.modelId || entry.model || model;
       continue;
     }
     if (entry.type !== "message" || !entry.message) continue;

@@ -12,7 +12,7 @@ import { renderOpenGapIndex } from "./gap-ledger.js";
 import { evidenceKey, isEvidenceFresh, safeFileName } from "./state.js";
 import { emitProgress } from "./progress.js";
 import { UserError, color, info, warn } from "./logger.js";
-import { transcriptIdentity } from "./transcript.js";
+import { corroborationIdentityOf, transcriptIdentity } from "./transcript.js";
 
 /**
  * Stage 1 of the pipeline (design section 3): one cheap model call per transcript,
@@ -275,6 +275,10 @@ export async function analyzeTranscripts({
     harness: transcript.harness,
     id: transcript.id,
     identity: transcriptIdentity(transcript),
+    parentSessionId: transcript.parentSessionId || null,
+    corroborationIdentity: corroborationIdentityOf(transcript),
+    corroborationNativeId: transcript.corroborationNativeId || null,
+    corroborationStartedAt: transcript.corroborationStartedAt ?? null,
     path: transcript.path,
     mtimeMs: transcript.mtimeMs,
     bytes: transcript.bytes,

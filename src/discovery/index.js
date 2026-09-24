@@ -39,9 +39,12 @@ export function getAdapter(harness) {
  * Discovery (design section 2).
  *
  * For file-backed stores the expensive step is reading each transcript's header, so
- * results are memoised in `.backpass/scan-cache.json` keyed by path + mtime + size.
- * Re-scans are then O(new files) - which matters: codex alone had 10,317 rollouts on
- * the machine this was designed against.
+ * results are memoised in `.backpass/scan-cache.json` keyed by path + mtime + size. An
+ * adapter may also export `cacheVersion` (bumped when its classification semantics
+ * change) and `cacheDependency` (a fingerprint of other files a descriptor reads, such
+ * as OMP ancestor sessions); a mismatch in either reclassifies the entry. Re-scans are
+ * then O(new files) - which matters: codex alone had 10,317 rollouts on the machine this
+ * was designed against.
  *
  * SQLite-backed stores (opencode, hermes, cursor IDE) answer the same question with one
  * indexed query, so they skip the cache entirely.
@@ -309,8 +312,10 @@ function discoverFiles(
   { repo, config, cutoffMs, strict, stats, cache, markDirty, associateFn, stateDir, userFilter },
 ) {
   const candidates = adapter.enumerate({ cutoffMs, repo, config });
+  const scanContext = adapter.createScanContext?.();
   const out = [];
 
+  const hasCacheDependency = typeof adapter.cacheDependency === "function";
   for (const candidate of candidates) {
     if (cutoffMs && candidate.mtimeMs < cutoffMs) continue;
     stats.scanned += 1;
@@ -327,19 +332,31 @@ function discoverFiles(
 
     const cacheKey = `${adapter.name}:${candidate.key}`;
     const cached = cache.entries[cacheKey];
+    const cacheDependency = hasCacheDependency
+      ? adapter.cacheDependency(candidate, { repo, config, scanContext })
+      : undefined;
     let descriptor;
 
     if (
       cached &&
+      cached.cacheVersion === adapter.cacheVersion &&
       cached.mtimeMs === candidate.mtimeMs &&
       cached.bytes === candidate.bytes &&
+      (!hasCacheDependency || cached.cacheDependency === cacheDependency) &&
       hasInteractionSignals(cached.descriptor)
     ) {
       stats.cached += 1;
       descriptor = cached.descriptor;
     } else {
-      descriptor = adapter.classify(candidate, { repo, config }) || null;
-      cache.entries[cacheKey] = { mtimeMs: candidate.mtimeMs, bytes: candidate.bytes, descriptor };
+      descriptor = adapter.classify(candidate, { repo, config, scanContext }) || null;
+      const cacheEntry = {
+        cacheVersion: adapter.cacheVersion,
+        mtimeMs: candidate.mtimeMs,
+        bytes: candidate.bytes,
+        descriptor,
+      };
+      if (hasCacheDependency) cacheEntry.cacheDependency = cacheDependency;
+      cache.entries[cacheKey] = cacheEntry;
       markDirty();
     }
 
@@ -401,6 +418,21 @@ function toTranscript(adapter, row, association, id, { host = null, remote = nul
     remote,
   };
   transcript.identity = transcriptIdentity(transcript);
+  if (row.parentSessionId && row.parentSessionPath) {
+    transcript.parentSessionId = row.parentSessionId;
+    transcript.corroborationIdentity = transcriptIdentity({
+      ...transcript,
+      identity: null,
+      nativeId: row.parentSessionId,
+      path: row.parentSessionPath,
+    });
+    transcript.corroborationNativeId = row.parentSessionId;
+    transcript.corroborationStartedAt = row.parentSessionStartedAt ?? transcript.startedAt;
+  } else {
+    transcript.corroborationIdentity = transcript.identity;
+    transcript.corroborationNativeId = id;
+    transcript.corroborationStartedAt = transcript.startedAt;
+  }
   transcript.interaction = classifyInteraction(transcript);
   return transcript;
 }
