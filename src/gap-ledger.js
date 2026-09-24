@@ -165,20 +165,21 @@ export function findGapEntry(ledger, memoryPath, proposedInstruction) {
   return best;
 }
 
-function sessionIdentityAliases(transcript, sessionIdentity) {
+function sessionIdentityAliases(transcript, sessionIdentity, legacyIds) {
   return [...new Set([transcript.identity, transcript.id])].filter(
-    (identity) => identity && identity !== sessionIdentity,
+    (identity) => identity && identity !== sessionIdentity && (identity !== transcript.id || legacyIds.has(identity)),
   );
 }
 
 /**
  * Fold this run's evidence into the ledger. One observation per (gap, session); a
  * session seen again replaces its own observation and keeps its first-seen timestamp.
+ * A legacy `transcript.id` key is that session's only when it is in `legacyIds`.
  *
- * @param {{ now?: Date, skills?: unknown[] }} [options]
+ * @param {{ now?: Date, skills?: unknown[], legacyIds?: Set<string> }} [options]
  */
 export function recordGapObservations(ledger, evidenceRecords, options = {}) {
-  const { now = new Date() } = options;
+  const { now = new Date(), legacyIds = new Set() } = options;
   const observedAt = new Date(now).toISOString();
   let recorded = 0;
   for (const record of evidenceRecords) {
@@ -215,7 +216,7 @@ export function recordGapObservations(ledger, evidenceRecords, options = {}) {
           entry.proposedInstruction = gap.proposedInstruction;
         }
       }
-      const aliases = sessionIdentityAliases(transcript, sessionIdentity);
+      const aliases = sessionIdentityAliases(transcript, sessionIdentity, legacyIds);
       const priors = [entry.sessions[sessionIdentity], ...aliases.map((identity) => entry.sessions[identity])].filter(
         Boolean,
       );
@@ -272,9 +273,7 @@ export function normalizeGapLedgerSessions(ledger, transcripts, { legacyIds = ne
   for (const transcript of transcripts) {
     if (!(transcript?.corroborationIdentity || transcript?.identity || transcript?.id)) continue;
     const sessionIdentity = corroborationIdentityOf(transcript);
-    const aliases = sessionIdentityAliases(transcript, sessionIdentity).filter(
-      (alias) => alias !== transcript.id || legacyIds.has(alias),
-    );
+    const aliases = sessionIdentityAliases(transcript, sessionIdentity, legacyIds);
     if (aliases.length) selections.push({ transcript, sessionIdentity, aliases });
   }
 

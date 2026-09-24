@@ -81,7 +81,7 @@ export async function foldForRun(ctx, memoryFile, memoryHash, skills = [], trans
 
   const ledger = state.readGapLedger();
   normalizeGapLedgerSessions(ledger, transcripts, { legacyIds });
-  recordGapObservations(ledger, relevant, { skills });
+  recordGapObservations(ledger, relevant, { skills, legacyIds });
   // Consolidate after recording, so the pass sees this run's sightings too: two
   // sessions coining the same brand-new gap in one parallel fan-out can only line up
   // here. One bounded judged call; a failure degrades to lexical identity and the run
