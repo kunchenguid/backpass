@@ -1,6 +1,7 @@
 import { parseMemoryUnits, similarity } from "./memory.js";
 import { parseSince } from "./config.js";
 import { sha256 } from "./state.js";
+import { corroborationIdentityOf } from "./transcript.js";
 
 /**
  * Durable gap corroboration across runs (`.backpass/gap-ledger.json`).
@@ -70,9 +71,11 @@ export function emptyGapLedger() {
  * cross-machine corroboration actually is: two machines hitting one gap, named.
  */
 export function gapSource(transcript = {}) {
-  const date = transcript.startedAt ? new Date(transcript.startedAt).toISOString().slice(0, 10) : "unknown date";
+  const startedAt = transcript.corroborationStartedAt ?? transcript.startedAt;
+  const date = startedAt ? new Date(startedAt).toISOString().slice(0, 10) : "unknown date";
   const host = transcript.host ? ` · ${transcript.host}` : "";
-  return `${transcript.harness} · ${sessionSourceId(transcript)} · ${date}${host}`;
+  const sourceId = transcript.corroborationNativeId || sessionSourceId(transcript);
+  return `${transcript.harness} · ${sourceId} · ${date}${host}`;
 }
 
 export function sessionSourceId(transcript = {}) {
@@ -162,21 +165,41 @@ export function findGapEntry(ledger, memoryPath, proposedInstruction) {
   return best;
 }
 
+function sessionIdentityAliases(transcript, sessionIdentity, legacyIds) {
+  return [...new Set([transcript.identity, transcript.id])].filter(
+    (identity) => identity && identity !== sessionIdentity && (identity !== transcript.id || legacyIds.has(identity)),
+  );
+}
+
+function takePriorObservations(entry, sessionIdentity, aliases) {
+  const priors = [entry.sessions[sessionIdentity], ...aliases.map((identity) => entry.sessions[identity])].filter(
+    Boolean,
+  );
+  const firstObservedAt = priors
+    .map((observation) => observation.firstObservedAt || observation.observedAt)
+    .filter((value) => Number.isFinite(Date.parse(value)))
+    .sort((a, b) => Date.parse(a) - Date.parse(b))[0];
+  const coveredBySkill = priors.find((observation) => observation.coveredBySkill)?.coveredBySkill;
+  for (const alias of aliases) delete entry.sessions[alias];
+  return { priors, firstObservedAt, coveredBySkill };
+}
+
 /**
  * Fold this run's evidence into the ledger. One observation per (gap, session); a
  * session seen again replaces its own observation and keeps its first-seen timestamp.
+ * A legacy `transcript.id` key is that session's only when it is in `legacyIds`.
  *
- * @param {{ now?: Date, skills?: unknown[] }} [options]
+ * @param {{ now?: Date, skills?: unknown[], legacyIds?: Set<string> }} [options]
  */
 export function recordGapObservations(ledger, evidenceRecords, options = {}) {
-  const { now = new Date() } = options;
+  const { now = new Date(), legacyIds = new Set() } = options;
   const observedAt = new Date(now).toISOString();
   let recorded = 0;
   for (const record of evidenceRecords) {
     if (!record || record.status !== "ok" || !record.memoryPath) continue;
     const transcript = record.transcript || {};
-    const sessionIdentity = transcript.identity || transcript.id;
-    if (!sessionIdentity) continue;
+    const sessionIdentity = corroborationIdentityOf(transcript);
+    if (!(transcript.corroborationIdentity || transcript.identity || transcript.id)) continue;
     for (const gap of record.gaps || []) {
       if (!gap || !gap.proposedInstruction) continue;
       // A citation from the analysis turn wins over word overlap: the model saw both
@@ -206,16 +229,13 @@ export function recordGapObservations(ledger, evidenceRecords, options = {}) {
           entry.proposedInstruction = gap.proposedInstruction;
         }
       }
-      const identityPrior = entry.sessions[sessionIdentity];
-      const aliasPrior = transcript.id && transcript.id !== sessionIdentity ? entry.sessions[transcript.id] : null;
-      const priors = [identityPrior, aliasPrior].filter(Boolean);
-      const firstObservedAt = priors
-        .map((observation) => observation.firstObservedAt || observation.observedAt)
-        .filter((value) => Number.isFinite(Date.parse(value)))
-        .sort((a, b) => Date.parse(a) - Date.parse(b))[0];
-      if (aliasPrior) delete entry.sessions[transcript.id];
-      const coveredBySkill =
-        gap.coveredBySkill || priors.find((observation) => observation.coveredBySkill)?.coveredBySkill;
+      const prior = takePriorObservations(
+        entry,
+        sessionIdentity,
+        sessionIdentityAliases(transcript, sessionIdentity, legacyIds),
+      );
+      const { priors, firstObservedAt } = prior;
+      const coveredBySkill = gap.coveredBySkill || prior.coveredBySkill;
       const phrasings = [
         ...new Set([
           ...priors.flatMap(
@@ -228,14 +248,21 @@ export function recordGapObservations(ledger, evidenceRecords, options = {}) {
         firstObservedAt: firstObservedAt || observedAt,
         observedAt,
         sessionStartedAt:
-          transcript.startedAt ?? identityPrior?.sessionStartedAt ?? aliasPrior?.sessionStartedAt ?? null,
+          transcript.corroborationStartedAt ??
+          transcript.startedAt ??
+          priors.find((observation) => observation.sessionStartedAt)?.sessionStartedAt ??
+          null,
         memoryHash: record.memoryHash || null,
         source: gapSource(transcript),
         mistake: gap.mistake,
         quote: gap.quote,
         recurrenceRisk: gap.recurrenceRisk,
         phrasings,
-        domain: gap.domain === "orchestration" ? "orchestration" : "project",
+        domain:
+          gap.domain === "orchestration" &&
+          !priors.some((observation) => observation.observedAt === observedAt && observation.domain !== "orchestration")
+            ? "orchestration"
+            : "project",
         // A failed trigger: the analysis judged an existing skill's content to cover
         // this mistake. Absent when no skill covers it (including all pre-existing
         // observations), and absence never counts as a citation.
@@ -247,6 +274,50 @@ export function recordGapObservations(ledger, evidenceRecords, options = {}) {
     }
   }
   return recorded;
+}
+/**
+ * Re-key selected sessions in old ledgers when related transcript files now share an
+ * identity. A legacy `transcript.id` key migrates only when it is in `legacyIds`: the ids
+ * the fold proved belong to exactly one evidence identity, so an ambiguous id never moves
+ * another session's sighting onto a selected one.
+ */
+export function normalizeGapLedgerSessions(ledger, transcripts, { legacyIds = new Set() } = {}) {
+  const selections = [];
+  for (const transcript of transcripts) {
+    if (!(transcript?.corroborationIdentity || transcript?.identity || transcript?.id)) continue;
+    const sessionIdentity = corroborationIdentityOf(transcript);
+    const aliases = sessionIdentityAliases(transcript, sessionIdentity, legacyIds);
+    if (aliases.length) selections.push({ transcript, sessionIdentity, aliases });
+  }
+
+  for (const entry of Object.values(ledger.entries)) {
+    for (const { transcript, sessionIdentity, aliases } of selections) {
+      if (!aliases.some((identity) => entry.sessions[identity])) continue;
+      const { priors, firstObservedAt, coveredBySkill } = takePriorObservations(entry, sessionIdentity, aliases);
+      const current = priors[0];
+      const project = current.project || priors.find((observation) => observation.project)?.project;
+      const projectRoot = current.projectRoot || priors.find((observation) => observation.projectRoot)?.projectRoot;
+
+      entry.sessions[sessionIdentity] = {
+        ...current,
+        ...(firstObservedAt ? { firstObservedAt } : {}),
+        sessionStartedAt: transcript.corroborationStartedAt ?? transcript.startedAt ?? current.sessionStartedAt ?? null,
+        source: gapSource(transcript),
+        phrasings: [
+          ...new Set([
+            entry.proposedInstruction,
+            ...priors.flatMap(
+              (observation) => observation.phrasings || [observation.proposedInstruction].filter(Boolean),
+            ),
+          ]),
+        ].filter(Boolean),
+        domain: priors.some((observation) => observation.domain !== "orchestration") ? "project" : "orchestration",
+        ...(coveredBySkill ? { coveredBySkill } : {}),
+        ...(project ? { project } : {}),
+        ...(projectRoot ? { projectRoot } : {}),
+      };
+    }
+  }
 }
 
 /**

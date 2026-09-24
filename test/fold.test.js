@@ -507,6 +507,74 @@ test("harm-class negatives are counted per distinct session, and only explicit h
   assert.equal(rows.get("AG-001").negative, 4);
   assert.equal(rows.get("AG-002").harmSessions, 0, "non-compliance and unclassified never count as harm");
 });
+test("OMP subagents share corroboration while relevance remains per file", () => {
+  const startedAt = Date.parse("2026-08-01T00:00:00Z");
+  const parent = {
+    id: "pi-parent",
+    nativeId: "parent-native",
+    identity: "pi-file-parent",
+    corroborationIdentity: "pi-parent-session",
+    corroborationNativeId: "parent-native",
+    corroborationStartedAt: startedAt,
+    harness: "pi",
+    startedAt,
+    interaction: "interactive",
+  };
+  const child = {
+    id: "pi-child",
+    nativeId: "child-native",
+    identity: "pi-file-child",
+    parentSessionId: "parent-native",
+    corroborationIdentity: "pi-parent-session",
+    corroborationNativeId: "parent-native",
+    corroborationStartedAt: startedAt,
+    harness: "pi",
+    startedAt: startedAt + 1_000,
+    interaction: "non-interactive",
+  };
+  const independent = {
+    id: "pi-independent",
+    nativeId: "independent-native",
+    identity: "pi-file-independent",
+    corroborationIdentity: "pi-independent-session",
+    corroborationNativeId: "independent-native",
+    corroborationStartedAt: startedAt + 2_000,
+    harness: "pi",
+    startedAt: startedAt + 2_000,
+    interaction: "interactive",
+  };
+  const observed = (transcript) =>
+    record(transcript.id, {
+      transcript,
+      negative: [
+        { instruction: "AG-001", quote: `harm ${transcript.id}`, class: "harm" },
+        { instruction: "AG-002", quote: `ignored ${transcript.id}`, class: "non-compliance" },
+      ],
+      gaps: [{ proposedInstruction: "Read the deployment runbook first.", quote: `gap ${transcript.id}` }],
+    });
+
+  const parentAndChild = foldEvidence([observed(parent), observed(child)], { minGapEvidence: 2, memoryFile });
+  const oneObserver = new Map(parentAndChild.instructions.map((row) => [row.instruction, row]));
+  assert.equal(parentAndChild.gaps.length, 0, "parent and subagent cannot clear the two-session floor");
+  assert.equal(parentAndChild.totals.droppedGapSingletons, 1);
+  assert.equal(parentAndChild.sources.length, 1, "both files share one visible evidence source");
+  assert.equal(oneObserver.get("AG-001").harmSessions, 1);
+  assert.equal(oneObserver.get("AG-002").nonComplianceSessions, 1);
+  assert.equal(oneObserver.get("AG-001").sessions, 2, "relevance still measures both analyzed files");
+  assert.equal(oneObserver.get("AG-001").relevance, 1);
+
+  const independentlyCorroborated = foldEvidence([observed(parent), observed(child), observed(independent)], {
+    minGapEvidence: 2,
+    memoryFile,
+  });
+  const twoObservers = new Map(independentlyCorroborated.instructions.map((row) => [row.instruction, row]));
+  assert.equal(independentlyCorroborated.gaps.length, 1);
+  assert.equal(independentlyCorroborated.gaps[0].sessions, 2);
+  assert.equal(independentlyCorroborated.sources.length, 2);
+  assert.equal(twoObservers.get("AG-001").harmSessions, 2);
+  assert.equal(twoObservers.get("AG-002").nonComplianceSessions, 2);
+  assert.equal(twoObservers.get("AG-001").sessions, 3);
+});
 
 test("failed-trigger citations count per skill and reach the synthesis prompt with the cluster", () => {
   const covered = (id, phrasing) =>

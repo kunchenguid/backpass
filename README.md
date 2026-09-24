@@ -228,11 +228,17 @@ relocated config dir does not hide its sessions. The variable is read from backp
 environment: if you reach that profile through an alias that only prefixes `claude`, set it
 for the backpass run too (`CLAUDE_CONFIG_DIR=~/.claude-work backpass`, or export it).
 
-Pi collection covers standalone sessions under `~/.pi/agent/sessions/` and BB-managed Pi
-sessions under `~/.bb/pi-bridge-sessions/`. It also honors `PI_CODING_AGENT_DIR`,
+Pi collection covers standalone sessions under `~/.pi/agent/sessions/`, OMP sessions under
+`~/.omp/agent/sessions/`, and BB-managed Pi sessions under `~/.bb/pi-bridge-sessions/`. It
+also honors `PI_CODING_AGENT_DIR`,
 `PI_CODING_AGENT_SESSION_DIR`, `BB_DATA_DIR`, and `BB_PI_BRIDGE_SESSION_DIR` when they are
 set in backpass's environment. When roots overlap, backpass scans every applicable layout
 and reads each JSONL file once.
+
+OMP nests subagent JSONL files below each parent session, and a subagent's own subagents
+one level further down. Backpass analyzes each file separately, but uses the root session as
+their shared corroboration source; a session and its subagents cannot count as independent
+sessions.
 
 Hermes collection includes CLI and ACP sessions only. Gateway, cron, and WhatsApp sessions
 are excluded because their recorded cwd belongs to the shared gateway process, not a project.
@@ -267,12 +273,12 @@ sessions are excluded from the corpus (the `SELF` column in `backpass scan`).
 
 Every remaining session is labelled **interactive** or **non-interactive** (`src/interaction.js`).
 Codex `codex exec` / `originator: codex_exec`, Claude SDK, GitHub, action, and CI
-entrypoints, OpenCode child sessions (`parent_id`), and a cwd with a `.no-mistakes` path
-segment are non-interactive. Hermes gateway, cron, and WhatsApp sessions are classified the
-same way if they leak past collection's source filter. A no-mistakes pipeline run is just one
-kind of non-interactive session, not its own category. Missing harness metadata defaults to
-interactive. `backpass scan`, the proposal, and apply all print the mix so relevance is never
-silently computed against a robot-skewed pool.
+entrypoints, OpenCode child sessions (`parent_id`), OMP subagent transcripts, and a cwd
+with a `.no-mistakes` path segment are non-interactive. Hermes gateway, cron, and WhatsApp
+sessions are classified the same way if they leak past collection's source filter. A
+no-mistakes pipeline run is just one kind of non-interactive session, not its own category.
+Missing harness metadata defaults to interactive. `backpass scan`, the proposal, and apply
+all print the mix so relevance is never silently computed against a robot-skewed pool.
 
 ```sh
 backpass scan --since 7d --strict
