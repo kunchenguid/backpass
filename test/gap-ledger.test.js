@@ -244,6 +244,46 @@ test("a selected OMP child collapses legacy parent and child ledger sightings", 
   assert.deepEqual(Object.keys(Object.values(h.state.readGapLedger().entries)[0].sessions), [parentIdentity]);
 });
 
+test("an OMP parent and subagent sharing a root vote project in one run whatever the order", () => {
+  const startedAt = Date.parse("2026-08-01T00:00:00Z");
+  const rootIdentity = "pi-parent-session";
+  const observe = (id, domain) => {
+    const transcript = {
+      id,
+      nativeId: `${id}-native`,
+      identity: `pi-file-${id}`,
+      corroborationIdentity: rootIdentity,
+      corroborationNativeId: "parent-native",
+      corroborationStartedAt: startedAt,
+      harness: "pi",
+      startedAt,
+      interaction: "interactive",
+    };
+    const result = record(id, [{ proposedInstruction: GAP, domain }]);
+    result.transcript = transcript;
+    result.key = evidenceKey(transcript, result.memoryHash);
+    return result;
+  };
+  const parent = observe("pi-parent", "project");
+  const child = observe("pi-child", "orchestration");
+  const domainAfter = (records, ledger = { version: 1, entries: {} }, now = new Date(startedAt + DAY)) => {
+    recordGapObservations(ledger, records, { now });
+    const [entry] = Object.values(ledger.entries);
+    assert.deepEqual(Object.keys(entry.sessions), [rootIdentity]);
+    return { ledger, domain: entry.sessions[rootIdentity].domain };
+  };
+
+  assert.equal(domainAfter([parent, child]).domain, "project");
+  assert.equal(domainAfter([child, parent]).domain, "project");
+
+  const { ledger } = domainAfter([parent]);
+  assert.equal(
+    domainAfter([child], ledger, new Date(startedAt + 2 * DAY)).domain,
+    "orchestration",
+    "a later run still replaces the earlier vote",
+  );
+});
+
 test("a legacy session-id observation migrates without counting the identity as a second session", async () => {
   const h = harness();
   await run(h, [record("claude-s1", [GAP])]);

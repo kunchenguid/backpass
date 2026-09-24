@@ -249,7 +249,11 @@ export function recordGapObservations(ledger, evidenceRecords, options = {}) {
         quote: gap.quote,
         recurrenceRisk: gap.recurrenceRisk,
         phrasings,
-        domain: gap.domain === "orchestration" ? "orchestration" : "project",
+        domain:
+          gap.domain === "orchestration" &&
+          !priors.some((observation) => observation.observedAt === observedAt && observation.domain !== "orchestration")
+            ? "orchestration"
+            : "project",
         // A failed trigger: the analysis judged an existing skill's content to cover
         // this mistake. Absent when no skill covers it (including all pre-existing
         // observations), and absence never counts as a citation.
