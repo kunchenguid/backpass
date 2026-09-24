@@ -103,10 +103,11 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   reintroduce an index- or array-position-derived draw here.
 - **Corpus mix is two categories, never an unknown bucket.** `classifyInteraction` in
   `src/interaction.js` labels every session interactive or non-interactive from per-harness
-  signals (codex `originator`/`source`, claude `entrypoint`, OpenCode `parent_id`, Hermes
-  source, `.no-mistakes` cwd). A no-mistakes pipeline run is one kind of non-interactive
-  session. Missing metadata defaults to interactive. The mix is printed by scan/propose/apply
-  and stamped on evidence so fold relevance is reported per category.
+  signals (codex `originator`/`source`, claude `entrypoint`, OpenCode `parent_id`, OMP
+  subagent parent relation, Hermes source, and `.no-mistakes` cwd). A no-mistakes pipeline
+  run is one kind of non-interactive session. Missing metadata defaults to interactive. The
+  mix is printed by scan/propose/apply and stamped on evidence so fold relevance is reported
+  per category.
 - **Hermes is first-class but source-filtered.** `src/discovery/adapters/hermes.js` reads
   `~/.hermes/state.db` (`HERMES_HOME`). Only `cli` and `acp` sessions are ingested;
   gateway/cron rows share a process cwd and would pollute association. v26 stores CLI cwd
@@ -217,6 +218,10 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   evidence answer for a rewrite. Keep that map keyed by the same unique labels.
   `sourceProjects` is empty without a project;
   `summary.sources` is the allowlist for both scopes.
+  OMP parent and subagent files remain separately sampled/analyzed, so relevance stays
+  per file; their harm, non-compliance, gap floors, and evidence source labels share the
+  parent's canonical identity. `normalizeGapLedgerSessions` migrates selected legacy
+  per-file ledger keys before folding.
 - **Negative evidence has a sign the pipeline must not lose.** Analysis classifies every
   negative (`harm` / `non-compliance` / `irrelevant`, `sanitizeEvidence` drops other
   values) and `renderEvidenceForPrompt` renders the class AND the `effect` text with each

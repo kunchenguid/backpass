@@ -30,6 +30,7 @@ import {
  */
 
 export const name = "pi";
+export const cacheVersion = 3;
 
 export function storeRoot() {
   return home(".pi", "agent", "sessions");
@@ -110,22 +111,78 @@ export function enumerate() {
   return out;
 }
 
-export function classify(candidate) {
-  // omp prepends a fixed-width title record, so the session entry is not always line 1.
-  for (const line of readHeadLines(candidate.path, 8)) {
-    const entry = parseJsonLine(line);
-    if (!entry || entry.type !== "session" || !entry.cwd) continue;
-    return {
-      id: entry.id || path.basename(candidate.path, ".jsonl"),
-      cwd: entry.cwd,
-      gitBranch: null,
-      remotes: [],
-      startedAt: entry.timestamp ? Date.parse(entry.timestamp) : candidate.mtimeMs,
-      model: null,
-      interactionSignals: emptyInteractionSignals(),
-    };
+export function createScanContext() {
+  return { parentHeaders: new Map() };
+}
+
+function readSessionHeader(file) {
+  const [firstLine, secondLine] = readHeadLines(file, 2);
+  const first = parseJsonLine(firstLine);
+  return first?.type === "session" ? first : first?.type === "title" ? parseJsonLine(secondLine) : null;
+}
+
+function readParentSession(parentPath, scanContext) {
+  const cache = scanContext?.parentHeaders;
+  if (cache?.has(parentPath)) return cache.get(parentPath);
+  const stat = statOrNull(parentPath);
+  const entry = stat?.isFile() ? readSessionHeader(parentPath) : null;
+  const result =
+    entry?.type === "session"
+      ? {
+          entry,
+          stat,
+          fingerprint: JSON.stringify([
+            stat.dev,
+            stat.ino,
+            stat.mtimeMs,
+            stat.ctimeMs,
+            stat.size,
+            entry.id ?? null,
+            entry.cwd ?? null,
+            entry.timestamp ?? null,
+          ]),
+        }
+      : null;
+  cache?.set(parentPath, result);
+  return result;
+}
+
+function parentSessionPathFor(candidatePath) {
+  const sessionDir = path.dirname(candidatePath);
+  return path.join(path.dirname(sessionDir), `${path.basename(sessionDir)}.jsonl`);
+}
+
+/** @param {{ scanContext?: { parentHeaders: Map<string, { entry: any, stat: import("node:fs").Stats, fingerprint: string } | null> } }} [options] */
+export function cacheDependency(candidate, options = {}) {
+  return readParentSession(parentSessionPathFor(candidate.path), options.scanContext)?.fingerprint ?? null;
+}
+
+/** @param {{ scanContext?: { parentHeaders: Map<string, { entry: any, stat: import("node:fs").Stats, fingerprint: string } | null> } }} [options] */
+export function classify(candidate, options = {}) {
+  const { scanContext } = options;
+  const entry = readSessionHeader(candidate.path);
+  if (!entry || entry.type !== "session" || !entry.cwd) return null;
+
+  const descriptor = {
+    id: entry.id || path.basename(candidate.path, ".jsonl"),
+    cwd: entry.cwd,
+    gitBranch: null,
+    remotes: [],
+    startedAt: entry.timestamp ? Date.parse(entry.timestamp) : candidate.mtimeMs,
+    model: null,
+    interactionSignals: emptyInteractionSignals(),
+  };
+
+  const parentPath = parentSessionPathFor(candidate.path);
+  const parentInfo = readParentSession(parentPath, scanContext);
+  const parent = parentInfo?.entry;
+  if (parent?.type === "session" && parent.cwd === entry.cwd) {
+    descriptor.parentSessionId = parent.id || path.basename(parentPath, ".jsonl");
+    descriptor.parentSessionPath = parentPath;
+    descriptor.parentSessionStartedAt = parent.timestamp ? Date.parse(parent.timestamp) : parentInfo.stat.mtimeMs;
   }
-  return null;
+
+  return descriptor;
 }
 
 export function read(ref) {

@@ -309,8 +309,10 @@ function discoverFiles(
   { repo, config, cutoffMs, strict, stats, cache, markDirty, associateFn, stateDir, userFilter },
 ) {
   const candidates = adapter.enumerate({ cutoffMs, repo, config });
+  const scanContext = adapter.createScanContext?.();
   const out = [];
 
+  const hasCacheDependency = typeof adapter.cacheDependency === "function";
   for (const candidate of candidates) {
     if (cutoffMs && candidate.mtimeMs < cutoffMs) continue;
     stats.scanned += 1;
@@ -327,19 +329,31 @@ function discoverFiles(
 
     const cacheKey = `${adapter.name}:${candidate.key}`;
     const cached = cache.entries[cacheKey];
+    const cacheDependency = hasCacheDependency
+      ? adapter.cacheDependency(candidate, { repo, config, scanContext })
+      : undefined;
     let descriptor;
 
     if (
       cached &&
+      cached.cacheVersion === adapter.cacheVersion &&
       cached.mtimeMs === candidate.mtimeMs &&
       cached.bytes === candidate.bytes &&
+      (!hasCacheDependency || cached.cacheDependency === cacheDependency) &&
       hasInteractionSignals(cached.descriptor)
     ) {
       stats.cached += 1;
       descriptor = cached.descriptor;
     } else {
-      descriptor = adapter.classify(candidate, { repo, config }) || null;
-      cache.entries[cacheKey] = { mtimeMs: candidate.mtimeMs, bytes: candidate.bytes, descriptor };
+      descriptor = adapter.classify(candidate, { repo, config, scanContext }) || null;
+      const cacheEntry = {
+        cacheVersion: adapter.cacheVersion,
+        mtimeMs: candidate.mtimeMs,
+        bytes: candidate.bytes,
+        descriptor,
+      };
+      if (hasCacheDependency) cacheEntry.cacheDependency = cacheDependency;
+      cache.entries[cacheKey] = cacheEntry;
       markDirty();
     }
 
@@ -401,6 +415,21 @@ function toTranscript(adapter, row, association, id, { host = null, remote = nul
     remote,
   };
   transcript.identity = transcriptIdentity(transcript);
+  if (row.parentSessionId && row.parentSessionPath) {
+    transcript.parentSessionId = row.parentSessionId;
+    transcript.corroborationIdentity = transcriptIdentity({
+      ...transcript,
+      identity: null,
+      nativeId: row.parentSessionId,
+      path: row.parentSessionPath,
+    });
+    transcript.corroborationNativeId = row.parentSessionId;
+    transcript.corroborationStartedAt = row.parentSessionStartedAt ?? transcript.startedAt;
+  } else {
+    transcript.corroborationIdentity = transcript.identity;
+    transcript.corroborationNativeId = id;
+    transcript.corroborationStartedAt = transcript.startedAt;
+  }
   transcript.interaction = classifyInteraction(transcript);
   return transcript;
 }

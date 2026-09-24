@@ -87,6 +87,9 @@ async function descriptorFrom(adapter, row, id) {
       remotes: Array.isArray(row.remotes) ? row.remotes : [],
       title: row.title || null,
       startedAt: row.startedAt || null,
+      parentSessionId: row.parentSessionId,
+      parentSessionPath: row.parentSessionPath,
+      parentSessionStartedAt: row.parentSessionStartedAt,
       mtimeMs: row.mtimeMs || 0,
       bytes: row.bytes || 0,
       contentSignature,
@@ -122,10 +125,12 @@ async function discoverHarness(adapter, { cutoffMs }) {
     return { stats, descriptors: out, warnings };
   }
 
-  for (const candidate of adapter.enumerate({ cutoffMs })) {
+  const candidates = adapter.enumerate({ cutoffMs });
+  const scanContext = adapter.createScanContext?.();
+  for (const candidate of candidates) {
     if (cutoffMs && candidate.mtimeMs < cutoffMs) continue;
     stats.scanned += 1;
-    const classified = adapter.classify(candidate);
+    const classified = adapter.classify(candidate, { scanContext });
     if (!classified) continue;
     stats.classified += 1;
     const merged = { ...candidate, ...classified };

@@ -158,7 +158,62 @@ test("pi adapter classifies omp sessions past the title record and reads model",
   assert.equal(toolCall.name, "bash");
   assert.equal(toolCall.result, "nothing to commit");
 });
+test("pi adapter accepts only line one or line two after a title header", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-omp-header-"));
+  const title = JSON.stringify({ type: "title", v: 1, title: "" });
+  const session = JSON.stringify({ type: "session", version: 3, id: "late", cwd: "/repo/demo" });
+  const other = JSON.stringify({ type: "message", message: { role: "user", content: "hello" } });
+  const afterTitle = path.join(dir, "after-title.jsonl");
+  const afterOther = path.join(dir, "after-other.jsonl");
 
+  fs.writeFileSync(afterTitle, `${title}\n${other}\n${session}\n`);
+  fs.writeFileSync(afterOther, `${other}\n${session}\n`);
+
+  assert.equal(pi.classify(candidateFor(afterTitle)), null, "line three is outside the header");
+  assert.equal(pi.classify(candidateFor(afterOther)), null, "line two is a header only after a title record");
+});
+
+test("pi adapter links an OMP subagent to its sibling parent session", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-omp-parent-"));
+  const sessionDir = path.join(root, "-repo-demo");
+  const parentName = "2026-08-27T00-00-00.000Z_parent-folder";
+  const parentPath = path.join(sessionDir, `${parentName}.jsonl`);
+  const childPath = path.join(sessionDir, parentName, "Subagent.jsonl");
+  writeOmpSession(parentPath, { id: "parent-native", cwd: "/repo/demo" });
+  writeOmpSession(childPath, { id: "child-native", cwd: "/repo/demo" });
+
+  const child = pi.classify(candidateFor(childPath));
+  assert.equal(child.parentSessionId, "parent-native");
+  assert.equal(child.parentSessionPath, parentPath);
+  assert.equal(child.parentSessionStartedAt, Date.parse("2026-08-27T00:00:00.000Z"));
+  assert.equal(pi.classify(candidateFor(parentPath)).parentSessionId, undefined);
+});
+
+test("pi discovery checks a missing parent path once per scan", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-pi-parent-cache-"));
+  const sessionDir = path.join(root, "sessions", "-repo-demo");
+  const firstPath = path.join(sessionDir, "first.jsonl");
+  const secondPath = path.join(sessionDir, "second.jsonl");
+  writePiSession(firstPath, { id: "first", cwd: "/repo/demo" });
+  writePiSession(secondPath, { id: "second", cwd: "/repo/demo" });
+  const candidates = [candidateFor(firstPath), candidateFor(secondPath)];
+  const missingParentPath = path.join(root, "sessions", "-repo-demo.jsonl");
+  const scanContext = pi.createScanContext();
+  const originalStatSync = fs.statSync;
+  let parentProbes = 0;
+
+  fs.statSync = function (file, ...args) {
+    if (file === missingParentPath) parentProbes += 1;
+    return originalStatSync.call(this, file, ...args);
+  };
+  try {
+    for (const candidate of candidates) pi.classify(candidate, { scanContext });
+  } finally {
+    fs.statSync = originalStatSync;
+  }
+
+  assert.ok(parentProbes <= 1, "ordinary sessions in one store should not repeat the same missing-parent lookup");
+});
 function writeOmpSession(file, { id, cwd }) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(
