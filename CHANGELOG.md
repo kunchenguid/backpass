@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.27](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.26...backpass-v0.1.27) (2026-09-24)
+
+
+### Bug Fixes
+
+* **acpx:** report acpx budget kills as timeouts, not empty-output ([#145](https://github.com/kunchenguid/backpass/issues/145)) ([b295a2d](https://github.com/kunchenguid/backpass/commit/b295a2d1d999fa5272e498176dd2cfce752e094b))
+
 ## [0.1.26](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.25...backpass-v0.1.26) (2026-09-21)
 
 
