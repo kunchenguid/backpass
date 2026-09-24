@@ -5,3 +5,6 @@ node_modules/
 *.log
 package-lock.json
 graft/.cache/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/

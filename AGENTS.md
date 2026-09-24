@@ -221,8 +221,8 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   OMP sessions live under `~/.omp/agent/sessions/` and are read by the pi adapter.
   OMP parent and subagent files (including a subagent's own subagents) remain separately
   sampled/analyzed, so relevance stays per file; their harm, non-compliance, gap floors,
-  and evidence source labels share the root session's canonical identity. `normalizeGapLedgerSessions` migrates selected legacy
-  per-file ledger keys before folding.
+  and evidence source labels share the root session's canonical identity.
+  `normalizeGapLedgerSessions` migrates selected legacy per-file ledger keys before folding.
 - **Negative evidence has a sign the pipeline must not lose.** Analysis classifies every
   negative (`harm` / `non-compliance` / `irrelevant`, `sanitizeEvidence` drops other
   values) and `renderEvidenceForPrompt` renders the class AND the `effect` text with each
