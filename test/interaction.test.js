@@ -976,6 +976,51 @@ test("nested OMP subagents share the root identity once the root session appears
   }
 });
 
+test("OMP subagents running in another repo cwd still share the root identity", async () => {
+  const repo = initRepo();
+  const subdir = path.join(repo, "packages", "api");
+  fs.mkdirSync(subdir, { recursive: true });
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-omp-cwd-discovery-"));
+  const sessionRoot = path.join(home, ".omp", "agent", "sessions", "-repo-demo");
+  const rootName = "2026-08-27T00-00-00.000Z_root-folder";
+  const rootPath = path.join(sessionRoot, `${rootName}.jsonl`);
+  const childPath = path.join(sessionRoot, rootName, "Subagent.jsonl");
+  const grandchildPath = path.join(sessionRoot, rootName, "Subagent", "Subagent.Child.jsonl");
+  const header = (id, cwd) => [
+    { type: "title", v: 1, title: "" },
+    { type: "session", version: 3, id, timestamp: "2026-08-27T00:00:00.000Z", cwd },
+  ];
+  writeJsonl(rootPath, header("root-native", repo));
+  writeJsonl(childPath, header("child-native", subdir));
+  writeJsonl(grandchildPath, header("grandchild-native", subdir));
+
+  const prevHome = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    const config = loadConfig(repo, { discovery: { harnesses: ["pi"], since: "all" } });
+    config.state = new State(repo).ensure();
+    const repository = { name: "demo", root: repo, worktrees: [repo], remotes: [] };
+    const result = await discoverTranscripts({ repo: repository, config });
+    const byNativeId = (nativeId) => result.transcripts.find((transcript) => transcript.nativeId === nativeId);
+    const root = byNativeId("root-native");
+    const child = byNativeId("child-native");
+    const grandchild = byNativeId("grandchild-native");
+
+    assert.ok(root && child && grandchild, "a subagent in a repo subdirectory still maps to this repository");
+    assert.equal(child.cwd, subdir);
+    for (const descendant of [child, grandchild]) {
+      assert.equal(descendant.parentSessionId, "root-native");
+      assert.equal(descendant.corroborationIdentity, root.identity);
+      assert.equal(descendant.corroborationNativeId, "root-native");
+      assert.equal(descendant.interaction, NON_INTERACTIVE);
+    }
+    assert.equal(root.interaction, INTERACTIVE);
+  } finally {
+    if (prevHome === undefined) delete process.env.HOME;
+    else process.env.HOME = prevHome;
+  }
+});
+
 test("the sampler keeps both categories when a 98% non-interactive corpus exceeds the cap", () => {
   const interactive = Array.from({ length: 2 }, (_, i) => ({
     harness: "claude",

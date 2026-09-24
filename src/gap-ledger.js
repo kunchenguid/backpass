@@ -171,6 +171,19 @@ function sessionIdentityAliases(transcript, sessionIdentity, legacyIds) {
   );
 }
 
+function takePriorObservations(entry, sessionIdentity, aliases) {
+  const priors = [entry.sessions[sessionIdentity], ...aliases.map((identity) => entry.sessions[identity])].filter(
+    Boolean,
+  );
+  const firstObservedAt = priors
+    .map((observation) => observation.firstObservedAt || observation.observedAt)
+    .filter((value) => Number.isFinite(Date.parse(value)))
+    .sort((a, b) => Date.parse(a) - Date.parse(b))[0];
+  const coveredBySkill = priors.find((observation) => observation.coveredBySkill)?.coveredBySkill;
+  for (const alias of aliases) delete entry.sessions[alias];
+  return { priors, firstObservedAt, coveredBySkill };
+}
+
 /**
  * Fold this run's evidence into the ledger. One observation per (gap, session); a
  * session seen again replaces its own observation and keeps its first-seen timestamp.
@@ -216,17 +229,13 @@ export function recordGapObservations(ledger, evidenceRecords, options = {}) {
           entry.proposedInstruction = gap.proposedInstruction;
         }
       }
-      const aliases = sessionIdentityAliases(transcript, sessionIdentity, legacyIds);
-      const priors = [entry.sessions[sessionIdentity], ...aliases.map((identity) => entry.sessions[identity])].filter(
-        Boolean,
+      const prior = takePriorObservations(
+        entry,
+        sessionIdentity,
+        sessionIdentityAliases(transcript, sessionIdentity, legacyIds),
       );
-      const firstObservedAt = priors
-        .map((observation) => observation.firstObservedAt || observation.observedAt)
-        .filter((value) => Number.isFinite(Date.parse(value)))
-        .sort((a, b) => Date.parse(a) - Date.parse(b))[0];
-      for (const alias of aliases) delete entry.sessions[alias];
-      const coveredBySkill =
-        gap.coveredBySkill || priors.find((observation) => observation.coveredBySkill)?.coveredBySkill;
+      const { priors, firstObservedAt } = prior;
+      const coveredBySkill = gap.coveredBySkill || prior.coveredBySkill;
       const phrasings = [
         ...new Set([
           ...priors.flatMap(
@@ -284,15 +293,8 @@ export function normalizeGapLedgerSessions(ledger, transcripts, { legacyIds = ne
   for (const entry of Object.values(ledger.entries)) {
     for (const { transcript, sessionIdentity, aliases } of selections) {
       if (!aliases.some((identity) => entry.sessions[identity])) continue;
-      const priors = [entry.sessions[sessionIdentity], ...aliases.map((identity) => entry.sessions[identity])].filter(
-        Boolean,
-      );
-      const current = entry.sessions[sessionIdentity] || priors[0];
-      const firstObservedAt = priors
-        .map((observation) => observation.firstObservedAt || observation.observedAt)
-        .filter((value) => Number.isFinite(Date.parse(value)))
-        .sort((a, b) => Date.parse(a) - Date.parse(b))[0];
-      const coveredBySkill = priors.find((observation) => observation.coveredBySkill)?.coveredBySkill;
+      const { priors, firstObservedAt, coveredBySkill } = takePriorObservations(entry, sessionIdentity, aliases);
+      const current = priors[0];
       const project = current.project || priors.find((observation) => observation.project)?.project;
       const projectRoot = current.projectRoot || priors.find((observation) => observation.projectRoot)?.projectRoot;
 
@@ -314,7 +316,6 @@ export function normalizeGapLedgerSessions(ledger, transcripts, { legacyIds = ne
         ...(project ? { project } : {}),
         ...(projectRoot ? { projectRoot } : {}),
       };
-      for (const alias of aliases) delete entry.sessions[alias];
     }
   }
 }

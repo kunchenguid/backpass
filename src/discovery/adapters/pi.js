@@ -32,7 +32,7 @@ import {
  */
 
 export const name = "pi";
-export const cacheVersion = 3;
+export const cacheVersion = 4;
 
 const SUBAGENT_DEPTH = 2;
 
@@ -195,7 +195,7 @@ export function classify(candidate, options = {}) {
   for (const ancestorPath of ancestorSessionPaths(candidate.path)) {
     const ancestorInfo = readParentSession(ancestorPath, scanContext);
     const ancestor = ancestorInfo?.entry;
-    if (ancestor?.cwd !== entry.cwd) continue;
+    if (!ancestor) continue;
     descriptor.parentSessionId = ancestor.id || path.basename(ancestorPath, ".jsonl");
     descriptor.parentSessionPath = ancestorPath;
     descriptor.parentSessionStartedAt = ancestor.timestamp ? Date.parse(ancestor.timestamp) : ancestorInfo.stat.mtimeMs;
