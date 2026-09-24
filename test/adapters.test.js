@@ -207,6 +207,28 @@ test("pi adapter links a second-level OMP subagent to the root session", () => {
   assert.equal(grandchild.parentSessionStartedAt, Date.parse("2026-08-27T00:00:00.000Z"));
 });
 
+test("pi adapter links OMP subagents by nested path even when their cwd differs", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-omp-cwd-"));
+  const sessionDir = path.join(root, "-repo-demo");
+  const parentName = "2026-08-27T00-00-00.000Z_parent-folder";
+  const parentPath = path.join(sessionDir, `${parentName}.jsonl`);
+  const childPath = path.join(sessionDir, parentName, "Subagent.jsonl");
+  const grandchildPath = path.join(sessionDir, parentName, "Subagent", "Subagent.Child.jsonl");
+  writeOmpSession(parentPath, { id: "parent-native", cwd: "/repo/demo" });
+  writeOmpSession(childPath, { id: "child-native", cwd: "/repo/demo/packages/api" });
+  writeOmpSession(grandchildPath, { id: "grandchild-native", cwd: "/worktrees/demo-isolated" });
+
+  const child = pi.classify(candidateFor(childPath));
+  assert.equal(child.cwd, "/repo/demo/packages/api", "association still uses the subagent's own cwd");
+  assert.equal(child.parentSessionId, "parent-native");
+  assert.equal(child.parentSessionPath, parentPath);
+
+  const grandchild = pi.classify(candidateFor(grandchildPath));
+  assert.equal(grandchild.cwd, "/worktrees/demo-isolated");
+  assert.equal(grandchild.parentSessionId, "parent-native");
+  assert.equal(grandchild.parentSessionPath, parentPath);
+});
+
 test("pi discovery checks a missing parent path once per scan", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-pi-parent-cache-"));
   const sessionDir = path.join(root, "sessions", "-repo-demo");
