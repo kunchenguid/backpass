@@ -292,6 +292,41 @@ test("an ambiguous legacy session id never migrates onto a selected session", as
   assert.deepEqual(Object.keys(entry.sessions).sort(), ["claude-c", "claude-shared"]);
 });
 
+test("a selected session recording a gap never inherits an ambiguous legacy id's sighting", async () => {
+  const h = harness();
+  const shared = (identity) => ({
+    ...record("claude-shared", []).transcript,
+    nativeId: "shared",
+    identity,
+    path: `/claude/${identity}.jsonl`,
+  });
+  const a = shared("session-a");
+  const b = shared("session-b");
+  const evidenceFor = (transcript, gaps) => {
+    const result = record(transcript.id, gaps);
+    result.transcript = transcript;
+    result.key = evidenceKey(transcript, result.memoryHash);
+    return result;
+  };
+  const ledger = { version: 1, entries: {} };
+  const bFirstObservedAt = new Date(Date.now() - 80 * DAY);
+  recordGapObservations(ledger, [record("claude-shared", [GAP])], { now: bFirstObservedAt });
+  h.state.writeGapLedger(ledger);
+  h.state.writeEvidence(a, evidenceFor(a, [GAP]));
+  h.state.writeEvidence(b, evidenceFor(b, [GAP]));
+
+  const summary = await foldForRun(h.ctx, memoryFile(), "h1", [], [a]);
+
+  assert.equal(summary.gaps.length, 0, "B's sighting must not corroborate A");
+  const [entry] = Object.values(h.state.readGapLedger().entries);
+  assert.deepEqual(Object.keys(entry.sessions).sort(), ["claude-shared", "session-a"]);
+  assert.equal(entry.sessions["claude-shared"].firstObservedAt, bFirstObservedAt.toISOString());
+  assert.ok(
+    Date.parse(entry.sessions["session-a"].firstObservedAt) > bFirstObservedAt.getTime(),
+    "A's fresh sighting keeps its own first-seen time",
+  );
+});
+
 test("a genuine one-off never graduates, however many runs see it", async () => {
   const h = harness();
   for (let i = 0; i < 5; i += 1) {
