@@ -218,9 +218,9 @@ list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches
   evidence answer for a rewrite. Keep that map keyed by the same unique labels.
   `sourceProjects` is empty without a project;
   `summary.sources` is the allowlist for both scopes.
-  OMP parent and subagent files remain separately sampled/analyzed, so relevance stays
-  per file; their harm, non-compliance, gap floors, and evidence source labels share the
-  parent's canonical identity. `normalizeGapLedgerSessions` migrates selected legacy
+  OMP parent and subagent files (including a subagent's own subagents) remain separately
+  sampled/analyzed, so relevance stays per file; their harm, non-compliance, gap floors,
+  and evidence source labels share the root session's canonical identity. `normalizeGapLedgerSessions` migrates selected legacy
   per-file ledger keys before folding.
 - **Negative evidence has a sign the pipeline must not lose.** Analysis classifies every
   negative (`harm` / `non-compliance` / `irrelevant`, `sanitizeEvidence` drops other

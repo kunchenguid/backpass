@@ -189,6 +189,24 @@ test("pi adapter links an OMP subagent to its sibling parent session", () => {
   assert.equal(pi.classify(candidateFor(parentPath)).parentSessionId, undefined);
 });
 
+test("pi adapter links a second-level OMP subagent to the root session", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-omp-nested-"));
+  const sessionDir = path.join(root, "-repo-demo");
+  const parentName = "2026-08-27T00-00-00.000Z_parent-folder";
+  const parentPath = path.join(sessionDir, `${parentName}.jsonl`);
+  const childPath = path.join(sessionDir, parentName, "Subagent.jsonl");
+  const grandchildPath = path.join(sessionDir, parentName, "Subagent", "Subagent.Child.jsonl");
+  writeOmpSession(parentPath, { id: "parent-native", cwd: "/repo/demo" });
+  writeOmpSession(childPath, { id: "child-native", cwd: "/repo/demo" });
+  writeOmpSession(grandchildPath, { id: "grandchild-native", cwd: "/repo/demo" });
+
+  const grandchild = pi.classify(candidateFor(grandchildPath));
+  assert.equal(grandchild.id, "grandchild-native");
+  assert.equal(grandchild.parentSessionId, "parent-native");
+  assert.equal(grandchild.parentSessionPath, parentPath);
+  assert.equal(grandchild.parentSessionStartedAt, Date.parse("2026-08-27T00:00:00.000Z"));
+});
+
 test("pi discovery checks a missing parent path once per scan", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-pi-parent-cache-"));
   const sessionDir = path.join(root, "sessions", "-repo-demo");
@@ -280,6 +298,19 @@ test("pi adapter enumerates standalone and BB-managed session roots without dupl
     id: "omp-subagent",
     cwd: "/repo/demo",
   });
+  writeOmpSession(
+    path.join(
+      fakeHome,
+      ".omp",
+      "agent",
+      "sessions",
+      "-repo-demo",
+      "omp-standalone",
+      "Subagent",
+      "Subagent.Child.jsonl",
+    ),
+    { id: "omp-nested-subagent", cwd: "/repo/demo" },
+  );
   writePiSession(path.join(piAgentDir, "sessions", "-repo-demo", "custom-agent.jsonl"), {
     id: "custom-agent",
     cwd: "/repo/demo",
@@ -315,6 +346,7 @@ test("pi adapter enumerates standalone and BB-managed session roots without dupl
         "direct-override.jsonl",
         "omp-standalone.jsonl",
         "standalone.jsonl",
+        "Subagent.Child.jsonl",
         "Subagent.jsonl",
       ].sort(),
     );

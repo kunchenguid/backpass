@@ -20,8 +20,10 @@ import {
  * same JSONL shape under `~/.omp/agent/sessions/` and honors `PI_CODING_AGENT_DIR`, but
  * prepends a fixed-width `{type:"title"}` record, so the `{type:"session", cwd, id}`
  * entry is line 2 there. omp also writes subagent transcripts one level deeper, at
- * `<escaped-cwd>/<session-id>/<Name>.jsonl`. BB's Pi bridge writes the same JSONL shape
- * directly under `<bb-data-dir>/pi-bridge-sessions/`.
+ * `<escaped-cwd>/<session-id>/<Name>.jsonl`, and their own subagents at
+ * `<escaped-cwd>/<session-id>/<Name>/<Name>.<Child>.jsonl`; every descendant is related to
+ * the root session. BB's Pi bridge writes the same JSONL shape directly under
+ * `<bb-data-dir>/pi-bridge-sessions/`.
  *
  * Entries form a parent/child tree but arrive in
  * order, so a linear read is faithful. `model_change` / `thinking_level_change` records
@@ -31,6 +33,8 @@ import {
 
 export const name = "pi";
 export const cacheVersion = 3;
+
+const SUBAGENT_DEPTH = 2;
 
 export function storeRoot() {
   return home(".pi", "agent", "sessions");
@@ -91,13 +95,7 @@ export function enumerate() {
   for (const spec of storeSpecs()) {
     const files = [
       ...(spec.direct ? listFiles(spec.path, ".jsonl") : []),
-      ...(spec.nested
-        ? listDirs(spec.path).flatMap((dir) => [
-            ...listFiles(dir, ".jsonl"),
-            // omp nests subagent transcripts one level below the session files.
-            ...listDirs(dir).flatMap((sub) => listFiles(sub, ".jsonl")),
-          ])
-        : []),
+      ...(spec.nested ? listDirs(spec.path).flatMap((dir) => sessionFiles(dir, SUBAGENT_DEPTH)) : []),
     ];
     for (const file of files) {
       const key = realpathOrResolve(file);
@@ -109,6 +107,13 @@ export function enumerate() {
     }
   }
   return out;
+}
+
+function sessionFiles(dir, depth) {
+  return [
+    ...listFiles(dir, ".jsonl"),
+    ...(depth > 0 ? listDirs(dir).flatMap((sub) => sessionFiles(sub, depth - 1)) : []),
+  ];
 }
 
 export function createScanContext() {
@@ -152,9 +157,23 @@ function parentSessionPathFor(candidatePath) {
   return path.join(path.dirname(sessionDir), `${path.basename(sessionDir)}.jsonl`);
 }
 
+function ancestorSessionPaths(candidatePath) {
+  const out = [];
+  let current = candidatePath;
+  for (let depth = 0; depth < SUBAGENT_DEPTH; depth += 1) {
+    current = parentSessionPathFor(current);
+    out.push(current);
+  }
+  return out;
+}
+
 /** @param {{ scanContext?: { parentHeaders: Map<string, { entry: any, stat: import("node:fs").Stats, fingerprint: string } | null> } }} [options] */
 export function cacheDependency(candidate, options = {}) {
-  return readParentSession(parentSessionPathFor(candidate.path), options.scanContext)?.fingerprint ?? null;
+  return JSON.stringify(
+    ancestorSessionPaths(candidate.path).map(
+      (ancestorPath) => readParentSession(ancestorPath, options.scanContext)?.fingerprint ?? null,
+    ),
+  );
 }
 
 /** @param {{ scanContext?: { parentHeaders: Map<string, { entry: any, stat: import("node:fs").Stats, fingerprint: string } | null> } }} [options] */
@@ -173,13 +192,13 @@ export function classify(candidate, options = {}) {
     interactionSignals: emptyInteractionSignals(),
   };
 
-  const parentPath = parentSessionPathFor(candidate.path);
-  const parentInfo = readParentSession(parentPath, scanContext);
-  const parent = parentInfo?.entry;
-  if (parent?.type === "session" && parent.cwd === entry.cwd) {
-    descriptor.parentSessionId = parent.id || path.basename(parentPath, ".jsonl");
-    descriptor.parentSessionPath = parentPath;
-    descriptor.parentSessionStartedAt = parent.timestamp ? Date.parse(parent.timestamp) : parentInfo.stat.mtimeMs;
+  for (const ancestorPath of ancestorSessionPaths(candidate.path)) {
+    const ancestorInfo = readParentSession(ancestorPath, scanContext);
+    const ancestor = ancestorInfo?.entry;
+    if (ancestor?.cwd !== entry.cwd) continue;
+    descriptor.parentSessionId = ancestor.id || path.basename(ancestorPath, ".jsonl");
+    descriptor.parentSessionPath = ancestorPath;
+    descriptor.parentSessionStartedAt = ancestor.timestamp ? Date.parse(ancestor.timestamp) : ancestorInfo.stat.mtimeMs;
   }
 
   return descriptor;

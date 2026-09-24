@@ -27,12 +27,14 @@ import { pruneHostCache } from "../discovery/cache.js";
  * the evidence files that fed an expired sighting are still on disk and would re-add it),
  * then cluster from the ledger.
  *
- * Evidence is filtered to selected transcript identities, the current memory hash, and
- * the analysis-index cache key. Current discovery metadata is overlaid on persisted
- * records for folding, restoring observer and interaction details for legacy evidence
- * without admitting records outside this run's sample. Folding leftover records would
- * inflate `analyzedSessions` beyond the sampled corpus or score positional instruction
- * aliases against an index they never saw.
+ * Evidence is filtered to selected transcript identities, the current memory hash and
+ * analysis-index cache key, and a valid interaction category. Reanalysis rewrites a
+ * transcript's evidence when an input changes, but records outside this run's window or
+ * cap remain on disk. Folding those records would inflate `analyzedSessions` beyond the
+ * sampled corpus or score positional instruction aliases against an index they never saw.
+ * Legacy records stay excluded until ordinary discovery and analysis backfill them.
+ * Current discovery's corroboration fields are overlaid on admitted records, so a
+ * subagent analyzed before its parent appeared still folds under the parent's identity.
  */
 export async function foldForRun(ctx, memoryFile, memoryHash, skills = [], transcripts = []) {
   const { state, minGapEvidence, gapLedgerMaxAge } = ctx.config;
@@ -46,11 +48,13 @@ export async function foldForRun(ctx, memoryFile, memoryHash, skills = [], trans
     identitiesByLegacyId.get(legacyId).add(transcriptIdentity(record.transcript));
   }
   const selectedGapSessions = new Set(selectedByIdentity.keys());
+  const legacyIds = new Set();
   for (const transcript of transcripts) {
     selectedGapSessions.add(corroborationIdentityOf(transcript));
     const identities = identitiesByLegacyId.get(transcript.id);
     if (identities?.size === 1 && identities.has(transcriptIdentity(transcript))) {
       selectedGapSessions.add(transcript.id);
+      legacyIds.add(transcript.id);
     }
   }
   const relevant = [];
@@ -59,18 +63,24 @@ export async function foldForRun(ctx, memoryFile, memoryHash, skills = [], trans
     if (
       record.memoryPath !== memoryFile.path ||
       record.memoryHash !== memoryHash ||
+      (record.transcript?.interaction !== INTERACTIVE && record.transcript?.interaction !== NON_INTERACTIVE) ||
       !currentTranscript ||
       !isEvidenceFresh(record, currentTranscript, memoryHash)
     ) {
       continue;
     }
-    const transcript = { ...record.transcript, ...currentTranscript };
-    if (transcript.interaction !== INTERACTIVE && transcript.interaction !== NON_INTERACTIVE) continue;
+    const transcript = {
+      ...record.transcript,
+      parentSessionId: currentTranscript.parentSessionId || null,
+      corroborationIdentity: corroborationIdentityOf(currentTranscript),
+      corroborationNativeId: currentTranscript.corroborationNativeId || null,
+      corroborationStartedAt: currentTranscript.corroborationStartedAt ?? null,
+    };
     relevant.push({ ...record, transcript });
   }
 
   const ledger = state.readGapLedger();
-  normalizeGapLedgerSessions(ledger, transcripts);
+  normalizeGapLedgerSessions(ledger, transcripts, { legacyIds });
   recordGapObservations(ledger, relevant, { skills });
   // Consolidate after recording, so the pass sees this run's sightings too: two
   // sessions coining the same brand-new gap in one parallel fan-out can only line up
