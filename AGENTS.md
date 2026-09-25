@@ -6,397 +6,78 @@ evidence-backed edits to `AGENTS.md` / `CLAUDE.md` under a token budget.
 
 ## Orientation
 
-- `VISION.md` is the acceptance policy: what a change must be true to, and its closing
-  accept/resist tests. It is self-sufficient; run that test against `VISION.md` alone.
-- `README.md` documents the user-facing surface; `src/cli.js` is the authoritative flag list.
-- The pipeline is one stage per module, in order: `src/discovery/` -> `src/sample.js` (cap) -> `src/distill.js` ->
-  `src/analyze.js` -> `src/consolidate.js` (gap-identity merge, inside `foldForRun`) -> `src/fold.js` ->
-  `src/synthesize.js` (with `src/workspace.js` + `src/diff.js`) ->
-  `src/proposal.js` -> `src/apply/`. Each module's header comment explains its role; read those
-  before changing a stage.
-- **User-facing step names are the training-loop terms**, not the module names: discover =
-  "collect samples", analyze = "calculate loss", fold = "aggregate gradients", synthesize =
-  "gradient descent" (`STAGE_LABELS` in `src/tui/render.js`). Internal keys, event names, and
-  the typed subcommands (`scan`, `analyze`, `propose`) keep their short names; only what the
-  user reads changes. Never introduce a multi-word subcommand.
-- Zero runtime dependencies, ESM, no build step. Node >= 22.5 (for `node:sqlite`).
-- pnpm is the package manager; `pnpm run check` runs lint, format:check, typecheck, and
-  tests. All tests are offline and use fixtures under `test/fixtures/`. Supply-chain
-  settings (release-age cooldown, build-script deny) live in `pnpm-workspace.yaml`.
-- Releases are automated by release-please (`.github/workflows/release-please.yml`,
-  npm trusted publishing). Never hand-edit `CHANGELOG.md` or
-  `.release-please-manifest.json`; CI guards reject PRs that touch them.
-- `.github/workflows/no-mistakes-required.yml` is a thin caller of the shared
-  `kunchenguid/no-mistakes/.github/actions/require-no-mistakes` composite action, pinned
-  to an immutable commit SHA and never `@main`. Enforcement logic and tests live upstream
-  in the no-mistakes repository; change enforcement there, never by copying it locally,
-  and bump the pin in a deliberate separate PR. This repo still owns the `on:`,
-  `concurrency`, `permissions`, job name, and author-exemption `if:`. The action binds the
-  attestation to the head SHA, so a PR whose body no-mistakes did not rewrite for the
-  current head goes red by contract: push through `git push no-mistakes`.
+- `VISION.md` is the acceptance policy; run its closing accept/resist test against `VISION.md` alone.
+- `README.md` documents the user-facing surface and how each stage works; `src/cli.js` is the authoritative flag list.
+- Pipeline, one stage per module: `src/discovery/` -> `src/sample.js` -> `src/distill.js` -> `src/analyze.js` ->
+  `src/consolidate.js` + `src/fold.js` -> `src/synthesize.js` (`src/workspace.js`, `src/diff.js`) ->
+  `src/proposal.js` -> `src/apply/`. Read a module's header comment before changing its stage.
+- User-facing step names are training-loop terms (`STAGE_LABELS` in `src/tui/render.js`); internal keys and
+  subcommands (`scan`, `analyze`, `propose`) keep short names. Never introduce a multi-word subcommand.
+- Zero runtime dependencies, ESM, no build step, Node >= 22.5 (`node:sqlite`). pnpm; `pnpm run check` runs
+  lint, format:check, typecheck, and offline tests (fixtures under `test/fixtures/`).
+- Releases are release-please; never hand-edit `CHANGELOG.md` or `.release-please-manifest.json`.
+- `.github/workflows/no-mistakes-required.yml` calls the upstream `require-no-mistakes` action pinned to a
+  commit SHA (never `@main`); change enforcement upstream, bump the pin in a separate PR, and push through
+  `git push no-mistakes` (see `CONTRIBUTING.md`).
 
-## Sharp edges
+## Hard invariants
 
-- **User-scope runs are a separate triple.** See README's User-level memory section
-  for user-facing paths and defaults. Association, filters, and the synthetic homedir
-  repo live in `src/scope.js`; user state never enters `<repo>/.backpass/`.
-  `minGapProjects` defaults to 1 (the gate exists; cross-project corroboration is not
-  required). A project-scoped run never writes a user-level file.
-- **`--target` is a write surface, not a second scope or a second budget.** `resolveTarget`
-  in `src/target.js` accepts only an exact configured memory-file entry or an exact loaded
-  skill name; every other spelling errors with the valid names - never add a basename,
-  directory, path, or glob match. A skill target keeps the primary memory file as the file
-  under audit, so analysis, evidence, hashes, and the always-loaded budget are unchanged;
-  only staging (`stagedSkills` in `prepareWorkspace`) and the `buildProposal` gate narrow.
-  `TARGET_COMMANDS` lists where the flag applies; everything else rejects it.
-- **SSH hosts are a collection tier, not a second scope.** `src/discovery/hosts.js` runs
-  three remote commands per configured host - locate Node/git, probe `discover`, probe
-  `fetch` - over one explicit ControlMaster that is opened before locate and closed after
-  fetch or at command teardown; the descriptors join the one corpus with the same tiers, sample and
-  cap. `src/discovery/remote/ssh.js` is the sole ssh spawn boundary (constant option set,
-  destination/node-path refusal, `classifySshFailure`, `BACKPASS_SSH_BIN`), and a Windows
-  shim refusal must be raised by name there like every other spawn. Nothing installs on
-  the remote: `src/discovery/remote/bundle.js` ships `PROBE_MANIFEST` plus the request as
-  one stdin program, so a stray import in a manifest module breaks every host at once -
-  `test/remote-bundle.test.js` runs the probe from a directory holding only the manifest.
-  The payload never reaches the remote shell; the refused node path is the only variable
-  command text and is single-quoted. The locate snippet and loader bodies carry no single
-  quote, backslash, or `!`. Remote tiers have no tier 1
-  (nothing over there is this clone); facts come from `remote/git-facts.js`, computed
-  where the paths are real, and `associateRemote` applies the local rules to them. Hosts
-  are personal configuration: `discovery.hosts` in `.backpassrc.json` is a `UserError` by
-  construction, which is what keeps the feature inside VISION's "never someone else's
-  transcripts". Every host is fail-soft with a named message; host keys are never
-  auto-accepted and `StrictHostKeyChecking=no` is never suggested.
-- **A remote session's content is fetched, cached, and read through the same adapter.**
-  `prefetchRemoteTranscripts` runs before the analysis pool for exactly the pending
-  sampled transcripts. File-backed stores send the raw file so `rawPath` still names a
-  real local file and the analysis escape hatch survives the trip; SQLite stores send the
-  adapter's events, since there is no per-session file. `src/discovery/cache.js` hashes
-  (host, harness, key) into a name so an untrusted remote path can never steer a write,
-  writes tmp+rename, and prunes at 30 days unused. A short frame fails that one transcript
-  with `remote fetch incomplete` and refetches next run - never a truncated session
-  analyzed as a whole one. Identity is `ssh://<host>/<path>` (`transcriptSource`), evidence
-  labels carry the host (`gapSource`), and one session present on two machines is kept
-  once, local copy first.
-- **Sibling clones are a live-path tier, not a recorded-remote one.** `git worktree
-list` only sees this clone. `attachSiblingClones` in `src/repo.js` also searches the
-  parent of each worktree (and `discovery.cloneRoots`) for other checkouts that share a
-  remote, read-only, so Claude sessions whose cwd is a sibling clone still attach
-  (tier 1.5). A second full clone with no overlapping remote is never associated.
-- **Transcript formats are undocumented and drift.** File adapters in
-  `src/discovery/adapters/` are pinned by golden fixtures in `test/fixtures/`; SQLite
-  adapters (opencode, hermes) build tiny temp databases in tests. When a harness changes
-  its on-disk shape, fix the adapter and its fixture/test together. Adapters must stay
-  fail-soft: an unreadable store warns and is skipped, never throws.
-- **`src/sample.js` sampling is deterministic and sticky, never seeded from `Math.random()`.**
-  Past `maxTranscripts`, each transcript's draw (`sampleUnit`) is a hash of its own canonical
-  identity (`transcriptIdentity`: harness + native id + durable source, never array position
-  or title) and `config.seed` - never a shared PRNG stream stepped once per transcript. That
-  prevents reruns from randomly reshuffling the sample (cache reuse is proven in
-  `test/sample-reuse.test.js`, not by reading source) and keeps a transcript's draw stable
-  as the corpus grows. Recency weights may still evolve with wall-clock time. A top-`count`
-  selection by fixed per-transcript draw means inserting new transcripts can only displace
-  existing ones, never reshuffle their draws. When the mixed corpus exceeds the cap,
-  `mixAllocations` is proportional-with-floor (20%, clipped to category availability), not
-  a forced 50/50 split - see `src/interaction.js` for the two public categories. Never
-  reintroduce an index- or array-position-derived draw here.
-- **Corpus mix is two categories, never an unknown bucket.** `classifyInteraction` in
-  `src/interaction.js` labels every session interactive or non-interactive from per-harness
-  signals (codex `originator`/`source`, claude `entrypoint`, OpenCode `parent_id`, Hermes
-  source, `.no-mistakes` cwd). A no-mistakes pipeline run is one kind of non-interactive
-  session. Missing metadata defaults to interactive. The mix is printed by scan/propose/apply
-  and stamped on evidence so fold relevance is reported per category.
-- **Hermes is first-class but source-filtered.** `src/discovery/adapters/hermes.js` reads
-  `~/.hermes/state.db` (`HERMES_HOME`). Only `cli` and `acp` sessions are ingested;
-  gateway/cron rows share a process cwd and would pollute association. v26 stores CLI cwd
-  on `sessions.cwd` (system_prompt is often NULL); ACP still uses `model_config.cwd`.
-  Timestamps are epoch seconds and must be converted to ms. Message content is read as
-  BLOB because node:sqlite truncates TEXT at the `\x00json:` NUL. There is no JSONL fallback.
-- **The live progress view is an enhancement layer, never a dependency.** Pipeline stages
-  emit events through `src/progress.js`; `src/tui/` renders them on stderr during the
-  default run and buffers/replays the plain logger lines on teardown. Every path must
-  behave identically when it is inactive (non-TTY, CI, NO_COLOR, --quiet, --json) - plain
-  line output on stderr and clean stdout are the contract. Rendering logic stays pure
-  (`src/tui/render.js`) so it is testable as text.
-- **`src/apply/writer.js` is the only module that writes to the repo.** Keep it that way -
-  every other stage is read-only analysis, which is what makes a run safe to interrupt.
-  Bootstrap (`src/commands/bootstrap.js`, a repo with no memory file) is the one run that
-  writes without the apply gate, and it only ever creates files, never overwrites.
-  For proposals carrying a memory-file hash, nothing is written until the gates pass:
-  the memory file still exists and hashes to `proposal.memoryFile.hash` (`memoryFileSnapshot`,
-  using `memoryTextHash` from `src/memory.js` so the check and the proposal cannot disagree),
-  every non-memory edit target still hashes to its `proposal.targetFiles` entry (same
-  contract, so a hand-edited skill refuses the apply instead of being patched blind), the
-  accepted subset clears `budgetGateKind` (`src/tokens.js`), every accepted edit for a file
-  composes against that file's one pre-write image, every created skill target is still
-  absent, and, when the proposal carries any skill writes, the current run's resolved
-  `skillsDir` (defaulting to the canonical skills dir when unset) still matches
-  `proposal.config.skillsDir` - a mismatch refuses the apply naming both values rather than
-  writing to the stale propose-time path. Any of them failing writes nothing and records no
-  rejection. Accepted paths are
-  resolved before mutation, and duplicate resolved targets refuse the whole apply. Each file
-  is therefore applied whole or not at all. Skills and non-memory files land before the
-  memory file; a later failure rolls back files, skills, and loading-layout entries created
-  by the round. A rollback never overwrites a file whose identity or contents changed after
-  this round committed it - that conflict is reported and the concurrent version is kept.
-- **Synthesis edits natively, in a staging copy, never by describing text.** The agent
-  gets `--approve-all` with `cwd` = `.backpass/synthesis/` (`prepareWorkspace`), which holds
-  only the memory file and the skills dir; backpass measures the copy (`measureWorkspace`,
-  `anchoredHunks`) and the agent annotates the measured changes by id, initially in the
-  same session. Synthesis sessions request `writeAccess`; analysis remains read-only.
-  `src/harness-invoke.js` owns the per-harness write-capability contract. The model never
-  supplies `find` text - every hunk is cut from the raw
-  file, widened until unique, so a hunk can only go stale by the file itself changing after
-  the proposal, which apply refuses rather than part-applies. Never pass
-  `approveAll` with the repo as `cwd`; the repo is fingerprinted and a harness that
-  writes there fails the run loudly. Staging withholds a loaded skill it could never write -
-  one resolving outside the repository, or into a location nothing may write - naming the
-  reason in the skill index, and the fingerprint follows staging: a withheld file is one
-  backpass has guaranteed it will never write, so a third party's edit to it must not abort
-  the run. Staging and the fingerprint must stay in step.
-- **Annotate-loop outcomes stay distinct** (`annotateLoop` in `src/synthesize.js`): a
-  moved staging tree is re-measured without spending an `ANNOTATE_TURNS` attempt (bounded
-  by `REMEASURE_TURNS`); no adapter text is retried once in a new session; and only a
-  non-empty answer spends an annotation attempt. Only a parseable, gate-rejected answer
-  writes a rejected `proposal.json` during the loop, stamped with `attempt`.
-  `ProposalViolation` carries `reason` and the `saved` proposal's own attempt/violations
-  so a later empty turn is never reported as that proposal's author. A new synthesis clears
-  the prior proposal before its first model
-  call, so an empty-only failure cannot leave an older proposal applicable.
-  `synthesisFailureHint` in `src/commands/propose.js` is
-  where the advice for each terminal condition lives - never a blanket
-  stronger-model/budget/max-edits line. A blank or unparseable first annotate turn is
-  reported as `edit-empty`, not the generic `empty`/`unparseable` reason, when the edit
-  turn left the staging copy and all in-scope files byte-identical to the original - a
-  stray out-of-scope write counts as touched, so it is never hidden behind `edit-empty` -
-  there was nothing to annotate, so retrying burns no attempts. That check only fires on the loop's first turn;
-  a later turn's empty diff still means the model undid its own edit mid-annotation, which
-  stays `editing`/`empty`/`unparseable`. It never overrides a _parseable_ answer, even
-  `{edits: []}`, because an agent that changed nothing yielding an empty proposal is a
-  success, not a failure (`VISION.md`).
-- **An extract is one measured memory change plus the skill(s) it pays for.** `anchoredHunks`
-  merges adjacent removals, so extracting neighbouring sections yields one change and N
-  skills - one honest accept/reject decision, since a merged change cannot be
-  half-accepted. `buildProposal` allows N skills only when they share ONE memory hunk;
-  separately measured skills must stay separate edits. An extract may create `SKILL.md`
-  or extend an existing one when the staged file still has every prior line plus every
-  line the memory hunks remove (`normalizeRecoveryLine`). A `move` is the same verbatim
-  carry inside the memory file: normalized removed and added line multisets must match
-  exactly, so repositioning cannot smuggle additions and does not hit the harm floor.
-  Edits carry `skills: []` for
-  created files; read them through `editSkills` (`src/skills.js`), which also understands
-  the pre-0.1.8 single `skill`. Writer apply splits a multi-file extract by hunk `file`
-  (`filesOfEdit` / `sliceEditForFile` in `src/proposal.js`).
-- **Extraction and deletion never share one decision.** `measureWorkspace` splits a pure
-  removal that mixes skill-carried and vanishing text at that boundary (`splitRemovalHunk`;
-  a split that cannot anchor uniquely keeps the merged hunk instead of guessing). In
-  `buildProposal`, an extract's skills must carry every line its memory hunks remove
-  (dash-and-whitespace-folded, `normalizeRecoveryLine`), and any other edit whose hunk only
-  deletes memory-file text is a removal whatever its kind: each deleted unit needs
-  `minGapEvidence` distinct sessions of `class: "harm"` negatives (`harmSessions` in the
-  fold). Extract and move skip that floor because the text never leaves the always-loaded
-  surface. The same floor covers skill files, where no evidence can attribute at all, so a
-  pure deletion inside a skill file is refused outright - skill content is rewritten or
-  extracted, never dropped. Non-compliance never satisfies the floor; the >= 20%-relevance
-  placement table stays prompt guidance by the captain's explicit decision - do not harden it.
-- **One session floor covers the whole always-loaded surface.** Every edit whose kind is
-  not `extract` or `move` must quote `minGapEvidence` distinct sessions - add, rewrite and
-  remove alike. `buildProposal` discards empty quote text, then counts canonical non-empty
-  source labels from the edit's own `evidence` that also appear in `summary.sources`
-  (the labels this run's fold issued; `gapSource` / `disambiguateSourceLabels` in
-  `src/gap-ledger.js`, folded in `src/fold.js`). Labels must remain one-to-one with
-  canonical sessions; `test/proposal.test.js` covers the evidence-floor contract. The
-  model's `transcripts` field is not read. A misspelled or date-shifted label is not a second session. Sourceless quotes
-  remain visible as `unknown source` but do not count. There is no shape predicate
-  separating an additive rewrite from a tightening, so a one-session tightening is
-  refused too. Never reintroduce a lexical-overlap, token-growth, or other text classifier
-  here. In user scope the same edits also clear `minGapProjects` (unchanged default),
-  counted by `countedEvidenceProjects` from cited gap clusters and from
-  `summary.sourceProjects`, the fold's source -> project map that lets instruction-row
-  evidence answer for a rewrite. Keep that map keyed by the same unique labels.
-  `sourceProjects` is empty without a project;
-  `summary.sources` is the allowlist for both scopes.
-- **Negative evidence has a sign the pipeline must not lose.** Analysis classifies every
-  negative (`harm` / `non-compliance` / `irrelevant`, `sanitizeEvidence` drops other
-  values) and `renderEvidenceForPrompt` renders the class AND the `effect` text with each
-  quote. Records from before the class existed carry none, and none never counts as harm.
-- **A quote must be findable in the trace it claims to come from.** `sanitizeEvidence`
-  (`src/analyze.js`) drops any evidence item whose quote is not a whitespace-folded
-  substring of the distilled trace, counting the drops into `summary.quotesNotInTrace` so a
-  paraphrasing model reads as that rather than as a clean repo. Only the literal boolean
-  `usedRawTranscript === true` opts out, because then the quote may come from text the
-  distiller elided. Consequence for tests: a fake agent must quote real text from the
-  session it analyzes - invented quotes are exactly what the gate rejects. Analysis
-  semantics changed, so `ANALYSIS_INDEX_VERSION` (`src/state.js`) was bumped; bump it again
-  for any future change to what analysis accepts.
-- **Skill target/load-layout rules live in `src/skills.js`.** Preserve an existing configured
-  harness-loaded directory; a bare `skills/` directory is never auto-detected. A harness loads
-  what a path resolves to, so a symlinked directory under the loaded dir is a skill: entry types
-  are stat'd (`isDirectoryEntry`), fail-soft, and a broken or cyclic link reads as absent. One
-  library reached through k links is k loaded entries, billed k times - `loadedCopies` multiplies
-  a description-line delta by that count in both `buildProposal` and the writer's projection.
-  `skillSearchPaths` (config) is read-only awareness for skills that live outside the repo
-  (a shared/fleet library); `loadConfig` expands `~` and folds it into the existing
-  `skillsDirs` awareness list (consulted after `skillsDir`), so every read site already sees
-  it. Writes never target a search path: `resolveOverflowTarget` only returns `skillsDir`,
-  and a skill resolving outside the repo is withheld from the synthesis staging copy in
-  every scope, including user scope where `allowExternal` would otherwise let staging reach
-  any external root (`confinementReason`/`canonicalizeSearchPathRoots` in `src/workspace.js`).
-  A search-path skill still rides the synthesis fingerprint unlike an ordinary withheld
-  skill, so a direct write to one fails the run instead of escaping detection
-  (`assertRepoUntouched` in `src/synthesize.js`). A configured root that equals or contains
-  the repo root or `skillsDir` is rejected at config validation and dropped by
-  `canonicalizeSearchPathRoots`, so the repo's own files can never be marked read-only by
-  their own search path.
-- **Memory resolution is pointer-aware** (`resolveMemoryFiles` in `src/memory.js`): the
-  first configured file is canonical, a `@AGENTS.md`-only CLAUDE.md is a pointer, and a
-  second full file is warned about, never silently ignored or double-written.
-- **Oversized paragraphs split for attribution only.** `parseMemoryUnits` still emits one
-  positional `AG-nnn` per paragraph or list item (apply, reanchor, and the removal floor
-  stay line-oriented). Eligible prose above `ATTRIBUTION_SPLIT_TOKENS` can also get
-  `AG-nnn.m` parts at high-confidence sentence boundaries; ambiguous spans conservatively remain
-  unsplit. The instruction index and fold use those parts so evidence cannot smear across a
-  blob, and synthesis is told to restructure repeated non-compliance into list items rather
-  than bold-label it. See `src/memory.js` and `renderEvidenceForPrompt` in `src/fold.js`.
-- **The apply surface's funnel band is presentation, and its counters must stay that way.**
-  `templates/apply.html` draws one band from findings to edits proposed on one scale, in two
-  lanes (an existing instruction, a missing one), each drop named in plain words. It is fed by
-  display-only counters - `reportOnlyByReason` and `instructionsWithNegatives` in the fold's
-  `totals`, plus the instruction-outcome counters in `buildProposal` - that no gate may ever
-  read; changing what the band shows must never change what is proposed or refused.
-  A proposal lacking them falls back to the classic stat row rather than inventing zeros.
-- **Never trust model-reported numbers.** Token deltas, budget projections and an edit's
-  session count are measured in `src/proposal.js` from the actual text and quotes; the
-  synthesis model's own figures are ignored.
-  Usage accounting comes from acpx's `[acpx] tokens:` stderr line, which acpx prints
-  when the ACP adapter returns usage (codex, claude do; pi-acp does not), with one
-  harness-store fallback: pi's per-turn usage is read back from its own session file,
-  located by the prompt text (`recoverUsageFromStore` in `src/acpx.js`). Records are
-  `{ agent, usage|null }` (`usageRecord` in `src/acpx.js`) and `src/commands/usage.js` is
-  the one place that prints them - never `n/a`: nothing when no call ran, the harness by
-  name when it stayed silent.
-- **Fold and this-run gap-ledger ingest require selected, current evidence.**
-  The run hash (`primaryMemoryFile` in `src/commands/analyze.js`) is `memorySurfaceHash`:
-  the memory-set hash extended with every skill's description line - a description edit
-  invalidates cached evidence, a skill-body edit never does, and a repo without skills
-  keeps the plain set hash. The always-loaded budget gate measures the same surface
-  (memory file + description lines; bodies stay free until triggered), so a repo with
-  many skills re-tunes `budgetTokens` once - accepted by the captain's explicit decision.
-  `foldForRun` (`src/commands/propose.js`) matches evidence to the selected sample by
-  canonical `transcriptIdentity`, then requires the current memory path, surface hash,
-  transcript signature, `ANALYSIS_INDEX_VERSION`, and a valid interaction stamp through
-  `isEvidenceFresh`. The same selection bounds this run's gap-ledger observations, so an
-  old record outside the window or cap cannot overwhelm the sampled corpus. Folding does
-  not migrate, rewrite, or delete excluded evidence; ordinary discovery and analysis
-  backfill legacy records when selected. `analyzeTranscripts` separately reports
-  `summary.staleMemoryHash` and names the old/new hash on stderr, so a full reanalysis
-  without `--force` after a memory edit reads as "the file changed," not as a broken cache.
-- **Cross-surface duplication is report-only.** `crossSurfaceDuplicates` (`src/overlap.js`)
-  flags memory-file units whose text substantially overlaps a skill description or body
-  (Dice >= 0.6, same bar as gap coverage). Fold renders each overlap once in the evidence,
-  including an oversized parent that has no instruction row, and `backpass status` lists it.
-  Description overlap duplicates always-loaded tokens and can guide a shrink to drop the
-  memory-file copy. Body overlap is only placement evidence: a
-  skill body loads on trigger, so its memory copy may be the only always-loaded coverage.
-  Nothing is deleted automatically. Relevance still accrues to the memory-file alias until
-  that copy is gone.
-- **Gap corroboration persists across runs through `.backpass/gap-ledger.json`**
-  (`src/gap-ledger.js`, wired in `foldForRun`): one sighting per (gap, transcript id), so a
-  session never counts twice. A run only folds ledger observations from its selected sample;
-  persisted sessions outside the cap cannot reintroduce a skewed corpus. Record this run's
-  evidence _before_ pruning - old evidence files stay on disk and would re-add an expired or
-  covered sighting otherwise. Uncorroborated gaps stay hidden; never surface singletons to
-  the prompt or report.
-- **Gap identity is judged, not word-matched.** Bigram similarity cannot recognize real
-  paraphrase (measured on production data: max cross-session score 0.34 vs the 0.45 bar),
-  so it is only the fallback. The analysis turn cites open-gap ids (`matchesGap`, shown via
-  `renderOpenGapIndex`; an invalid citation falls back, never fails), and, with at least two
-  open entries, `foldForRun` runs ONE consolidation call (`src/consolidate.js`) that merges paraphrased entries
-  (`mergeGapEntries`) - record, consolidate, prune, in that order. Consolidation failure
-  degrades to lexical identity with a warning, never an abort. Gaps also carry `domain`;
-  `orchestration` sightings (mistakes caused by the external harness or tooling that
-  orchestrated the task, not by this repo) are counted in
-  `totals.orchestrationGapSightings` and travel into clustering as votes. Cluster
-  domain is decided after grouping (`src/fold.js`): withhold a cluster from a
-  proposal only when a majority of its sightings vote orchestration (ties stay
-  project). Mixed clusters always appear in the evidence report with total and
-  orchestration sighting counts, so one inconsistent classifier call cannot drop a real
-  recurrence below `minGapEvidence`. There is deliberately no orchestrator-memory
-  write path. When this repository IS that orchestrating tool, those mistakes are
-  `project` (`src/prompts/analysis.md`).
-  A gap may also carry `coveredBySkill`: the analysis (shown every skill's name and
-  trigger line) judged an existing skill's content to cover the mistake - a failed
-  trigger. The fold counts those citations per skill onto the cluster
-  (`failedTriggerSkill`/`failedTriggerSessions`) so synthesis fixes the description
-  with real cross-session evidence, and skill content joins `pruneGapLedger` coverage
-  so a gap resolved by a skill retires instead of aging out.
-- **backpass must never analyze itself.** Its own acpx calls are filed by each harness
-  under the repo's cwd, a tier-1 match. Every prompt starts with `SELF_SESSION_SENTINEL`
-  (`src/prompts.js`) and discovery drops transcripts whose first user message begins with
-  it (`src/discovery/self.js`) before sampling. Keep the sentinel on every model-facing
-  prompt; the triviality filter is not a substitute.
-- **A Windows shim refusal must be raised by name, before any generic handling.** On
-  Windows every spawn of an npm `.cmd` goes through `windowsShimLaunch` (`src/subprocess.js`),
-  which refuses an argument no quoting can neutralise (`%VAR%`, a double quote, a newline)
-  rather than passing it to cmd.exe. That refusal arrives as a result with `code: null` and
-  `spawnError.code === "ERR_WINDOWS_SHIM_UNSAFE_ARG"`, so any boundary that inspects the
-  result generically first degrades it into "no session support", "exit null" or "failed to
-  open the apply surface" - none of which names the refused value. Two rounds of this change
-  were spent chasing that degradation at two separate boundaries. Today `run` in `src/acpx.js`
-  is the single funnel for every model call and `openApplySurface` in `src/apply/lavish.js`
-  covers apply; a new spawn boundary must raise it the same way.
-- **acpx is alpha.** All model invocation is isolated behind `src/acpx.js` so an upstream
-  CLI change has one blast radius. v1 uses plain `exec` and named sessions only; acpx flows
-  are deferred until they are stable upstream. The one sanctioned exception is the
-  per-harness native status table in `src/agents.js` (`claude auth status`, `opencode models`).
-  Grok overlays ride acpx `--agent`; that hatch has no `-s` of its own (acpx 0.13.x:
-  `unknown option '-s'`), so `openSession`'s `prompt()` sends the `prompt` subcommand
-  before `-s` when `acpxAgentCommand` is set. Built-in agents keep the implicit form.
-- **Only acpx session creation gets the adapter cold-start budget.** Built-in adapters may
-  launch through a package-exec bridge, so `sessions new` uses
-  `SESSION_CREATE_TIMEOUT_MS`; probe status/close retain `PROBE_TIMEOUT_MS` (including its
-  per-agent override), and open sessions keep their shorter post-create limits. Handle
-  `result.timedOut` before generic non-zero exits so a stalled create is never reported as
-  missing session support. `test/acpx-session-create-timeout.test.js` covers both contracts.
-- **Model and effort overrides are invocation-scoped.** Never ACP `set model` / Pi
-  `set thought_level` (those rewrite `~/.pi/agent/settings.json`) and never edit-then-restore
-  harness defaults. `src/harness-invoke.js` owns the harness overlay mechanisms and
-  `src/acpx.js` owns verification and fallback. An unproven overlay must stop rather than
-  pretend. Preserve the current spawn when no override is requested.
-- **Agent auto-pick is probe-then-verify, never probe-only.** `src/agents.js` walks each
-  role's ladder with a zero-token probe, but the claude adapter cannot be pre-verified by
-  acpx (sessions succeed while logged out), so every real call runs under
-  `AgentResolver.withFallthrough`, which demotes a candidate on a classifiable failure
-  (`classifyAcpxFailure`). Effortful calls go through `sessionPrompt` so the overlay in
-  `src/harness-invoke.js` can apply. Verdicts cache in `.backpass/agent-probe-cache.json`;
-  Pi and OpenCode entries carry `providerAuthState`, so credential changes invalidate them.
-  A probe miss retries once with backoff (`probeAndRecord` in `src/agents.js`); a timeout,
-  a bare `exit N`, or an empty advertised-model list is never written as a negative cache
-  hit, so a busy harness cannot poison the next run.
-- **An ambiguous advertised model is ranked by auth class, never guessed.** Pi (and any
-  harness that lists `provider/id`) can advertise the same bare ladder id under a
-  subscription provider and an API-key provider - classic case: `openai-codex/gpt-5.6-luna`
-  vs `openai/gpt-5.6-luna` when `OPENAI_API_KEY` is set. `resolveModelId` prefers the
-  subscription-backed prefix using `src/provider-auth.js` (Pi provider definitions plus
-  `auth.json` `type`; OpenCode's own auth file, where `openai` is ChatGPT OAuth). Prefix
-  semantics are harness-specific. An unrankable collision is a loud `model-unavailable`
-  that names the ids and tells the user to pass a provider-qualified id - never a silent
-  pick, and never "model not advertised" with the ids hidden. The probe trail prints a
-  winning tie-break.
-- **The Lavish apply surface is chatty and its output is YAML-quoted.** `lavish-axi poll`
-  can return feedback that is not a decision vector (a comment, a queued layout report) any
-  number of times before the real one; `pollDecisions` in `src/apply/lavish.js` announces
-  each wait state once and never per cycle. Session URLs are printed as `url: "http://..."`,
-  so parse them with `extractUrl`, never a bare `\S+`. Browser launch is best effort
-  (`src/apply/browser.js`): the printed URL is the contract. `test/fixtures/fake-lavish/`
-  stands in for the CLI via `BACKPASS_LAVISH_BIN` in tests. `injectPayload` in
-  `src/apply/lavish.js` must splice the templated `<script>` tag into `apply.html` with a
-  function replacer, never a string one: a string second argument to `String.prototype.replace`
-  interprets `$&`, `` $` ``, `$'`, and `$$` in it as replacement patterns, and the spliced
-  text embeds untrusted proposal/evidence prose that can contain those sequences verbatim.
-- Cursor IDE support is deliberately deferred to v1.1 (`--include-cursor-ide`, best effort);
-  see the header of `src/discovery/adapters/cursor-ide.js` for why.
+Each owning file's comments and tests hold the detail; read them before touching the area.
+
+- **Only `src/apply/writer.js` writes to the repo**; every other stage is read-only. Apply writes nothing unless
+  every hash, budget, composition, skill-dir, and target gate passes, and each file lands whole or not at all.
+  Bootstrap (`src/commands/bootstrap.js`) only ever creates files.
+- **Synthesis edits a staging copy** (`.backpass/synthesis/`, `prepareWorkspace`). Never pass `approveAll` with
+  the repo as `cwd`; the repo is fingerprinted, and staging and the fingerprint must stay in step. The model
+  never supplies `find` text; hunks are cut from the raw file (`anchoredHunks`).
+- **Never trust model-reported numbers.** Token deltas, budgets, and session counts are measured in
+  `src/proposal.js`; usage comes from acpx's stderr line or a harness store (`src/acpx.js`), printed only by
+  `src/commands/usage.js`.
+- **Evidence floors live in `buildProposal`** (`src/proposal.js`): every non-`extract`/`move` edit needs
+  `minGapEvidence` distinct sessions from `summary.sources`; deletions need `harm`-class sessions; a pure
+  deletion inside a skill file is refused. Extraction and deletion never share one decision. Never add a
+  lexical or text-shape classifier to these gates, and non-compliance never counts as harm.
+- **Quotes must be found in the trace they cite** (`sanitizeEvidence` in `src/analyze.js`), so fake agents in
+  tests must quote real session text. Bump `ANALYSIS_INDEX_VERSION` (`src/state.js`) for any change to what
+  analysis accepts.
+- **Sampling is deterministic and sticky** (`src/sample.js`): a per-transcript hash of `transcriptIdentity` and
+  `config.seed`, never `Math.random()` or an index/position-derived draw.
+- **Corpus mix is interactive vs non-interactive, never an unknown bucket** (`src/interaction.js`).
+- **backpass must never analyze itself**: keep `SELF_SESSION_SENTINEL` (`src/prompts.js`) at the start of every
+  model-facing prompt (`src/discovery/self.js` drops those sessions).
+- **Gap evidence**: one ledger sighting per (gap, transcript) (`src/gap-ledger.js`); record before pruning;
+  never surface uncorroborated singletons; gap identity is judged by the consolidation call, with bigram
+  similarity only as fallback; there is no orchestrator-memory write path.
+- **Fold uses only selected, fresh evidence** (`foldForRun` in `src/commands/propose.js`, `isEvidenceFresh`).
+- **Presentation never gates**: the apply funnel counters and cross-surface duplicates (`src/overlap.js`) are
+  report-only.
+- **Scopes and targets**: user-scope state never enters `<repo>/.backpass/` and a project run never writes a
+  user file (`src/scope.js`). `--target` accepts only an exact configured memory file or skill name
+  (`src/target.js`), never a basename, directory, or glob.
+- **SSH hosts** (`src/discovery/hosts.js`): `src/discovery/remote/ssh.js` is the only ssh spawn boundary; nothing
+  installs remotely and the probe bundle must stay self-contained (`PROBE_MANIFEST`); `discovery.hosts` in a
+  repo's `.backpassrc.json` is an error; host keys are never auto-accepted. Remote cache names are hashed
+  (`src/discovery/cache.js`) and a short fetch is never analyzed as a whole session.
+- **Adapters drift and must stay fail-soft**: fix an adapter and its golden fixture together
+  (`src/discovery/adapters/`). Hermes ingests only `cli`/`acp` sessions (see its header).
+- **Skills** (`src/skills.js`): a bare `skills/` dir is never auto-detected; writes never target
+  `skillSearchPaths`; search-path and out-of-repo skills are withheld from staging (`src/workspace.js`).
+- **Memory resolution is pointer-aware** (`resolveMemoryFiles` in `src/memory.js`); a second full file is warned
+  about, never silently ignored or double-written.
+- **Spawns**: a Windows shim refusal (`ERR_WINDOWS_SHIM_UNSAFE_ARG`, `src/subprocess.js`) must be raised by name
+  before any generic result handling at every spawn boundary. All model calls go through `src/acpx.js`
+  (acpx is alpha); only session creation gets the cold-start timeout, and `result.timedOut` is handled before
+  generic exits.
+- **Model and effort overrides are invocation-scoped** (`src/harness-invoke.js`): never ACP `set model` or Pi
+  `set thought_level`, never edit-then-restore harness defaults.
+- **Agent auto-pick is probe-then-verify** (`src/agents.js`, `AgentResolver.withFallthrough`); a timeout or bare
+  exit is never cached as a negative probe. An ambiguous advertised model is ranked by auth class
+  (`src/provider-auth.js`) or fails loudly, never guessed.
+- **Lavish apply surface** (`src/apply/lavish.js`): parse URLs with `extractUrl`, and splice the payload with a
+  function replacer, never a string one (untrusted text can contain `$&`).
+- **The live TUI is an enhancement layer** (`src/tui/`): output must be identical with it inactive (non-TTY, CI,
+  `NO_COLOR`, `--quiet`, `--json`), with clean stdout.
+- Cursor IDE support is deferred; see the header of `src/discovery/adapters/cursor-ide.js`.
 
 ## Maintaining this file
 
