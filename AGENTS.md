@@ -28,15 +28,17 @@ Each owning file's comments and tests hold the detail; read them before touching
   every hash, budget, composition, skill-dir, and target gate passes, and each file lands whole or not at all.
   Bootstrap (`src/commands/bootstrap.js`) only ever creates files.
 - **Synthesis edits a staging copy** (`.backpass/synthesis/`, `prepareWorkspace`). Never pass `approveAll` with
-  the repo as `cwd`; the repo is fingerprinted, and staging and the fingerprint must stay in step. The model
-  never supplies `find` text; hunks are cut from the raw file (`anchoredHunks`).
+  the repo as `cwd`; staging and the fingerprint stay in step except `skillSearchPaths` skills are withheld
+  but fingerprinted: a direct write fails `assertRepoUntouched` (`src/synthesize.js`). Keep that protection.
+  The model never supplies `find` text; hunks are cut from the raw file (`anchoredHunks`).
 - **Never trust model-reported numbers.** Token deltas, budgets, and session counts are measured in
   `src/proposal.js`; usage comes from acpx's stderr line or a harness store (`src/acpx.js`), printed only by
   `src/commands/usage.js`.
 - **Evidence floors live in `buildProposal`** (`src/proposal.js`): every non-`extract`/`move` edit needs
   `minGapEvidence` distinct sessions from `summary.sources`; deletions need `harm`-class sessions; a pure
   deletion inside a skill file is refused. Extraction and deletion never share one decision. Never add a
-  lexical or text-shape classifier to these gates, and non-compliance never counts as harm.
+  lexical or text-shape classifier to these gates, and non-compliance never counts as harm. The >= 20%
+  relevance placement table (`src/prompts/synthesis.md`) stays prompt guidance, never a `buildProposal` gate.
 - **Quotes must be found in the trace they cite** (`sanitizeEvidence` in `src/analyze.js`), so fake agents in
   tests must quote real session text. Bump `ANALYSIS_INDEX_VERSION` (`src/state.js`) for any change to what
   analysis accepts.
