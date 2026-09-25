@@ -311,8 +311,9 @@ weights still evolve as transcripts age, so the selected set can change over tim
 equally reproducible sample.
 
 Each distilled trace goes to a cheap model with the memory file, the project skill index,
-and a rubric. It returns strict JSON: which instructions helped, which were violated, and
-what mistakes no current instruction covers. Every negative carries a class - `harm` (following the instruction
+an index of this session's direct instructions, and a rubric. It returns strict JSON: which
+instructions helped, which were violated, and what mistakes no memory instruction covers.
+Every negative carries a class - `harm` (following the instruction
 caused damage), `non-compliance` (the agent ignored it), or `irrelevant` - because those
 argue for opposite fates: harm argues against an instruction, non-compliance argues for
 reinforcing it. Every gap carries a domain - `orchestration` when the mistake was caused
@@ -321,6 +322,18 @@ task, `project` for every other mistake (including when this repository is the
 orchestrating tool) - and the
 analysis is shown the ledger's open gaps so it can cite an existing gap id instead of
 coining a paraphrase of it.
+
+Much of what governs a session comes from the user directly rather than from a memory file,
+so those instructions are addressable too. The user's own task message (`TASK-1`) and each
+later steering turn (`STEER-<turn>`) become citable instruction sources with their own
+authority, alongside the memory-file ids. Only the authoritative part of a user turn counts:
+fenced blocks and quoted lines are pasted evidence, never instructions, and assistant or tool
+text never becomes one. The index points at a turn already in the trace instead of repeating
+its text - or says that turn was elided from the trace, when the session was long enough to
+be capped - and only the ids and their metadata persist in the evidence record. Direct
+instructions are session authority, not durable memory, so a mistake covered only by one is
+still reported as a gap - the user had to say it in this session, and the next session starts
+without it - and their citations do not score a memory-file instruction.
 
 **Every claim must carry a verbatim quote, and the quote must be in the trace.** Quoteless
 items are discarded - the single most important defence against a model confabulating

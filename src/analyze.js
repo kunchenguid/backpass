@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { extractJson, runModelCall, usageRecord } from "./acpx.js";
+import { directiveMetadata, extractDirectives, renderDirectiveIndex } from "./directives.js";
 import { distill } from "./distill.js";
 import { classifyInteraction } from "./interaction.js";
 import { readTranscript } from "./discovery/index.js";
@@ -59,7 +60,7 @@ function foldSpace(text) {
  * `quotesNotInTrace` counts what the trace check rejected, so a run whose analysis model
  * paraphrases everything reads as that rather than as a clean repo.
  */
-export function sanitizeEvidence(parsed, memoryFile = null, trace = null) {
+export function sanitizeEvidence(parsed, memoryFile = null, trace = null, directiveIds = null) {
   const clean = {
     positive: [],
     negative: [],
@@ -70,6 +71,11 @@ export function sanitizeEvidence(parsed, memoryFile = null, trace = null) {
   if (!parsed || typeof parsed !== "object") return clean;
 
   const validInstructions = memoryFile ? new Set(instructionUnits(memoryFile).map((unit) => unit.id)) : null;
+  // Direct task/steering spans are session-scoped instruction sources alongside the
+  // memory index; a citation of one is addressable evidence, not a stale reference.
+  if (validInstructions && Array.isArray(directiveIds)) {
+    for (const id of directiveIds) validInstructions.add(id);
+  }
   const foldedTrace = typeof trace === "string" && !clean.usedRawTranscript ? foldSpace(trace) : null;
   const hasQuote = (item) => {
     if (typeof item?.quote !== "string" || item.quote.trim().length < 8) return false;
@@ -183,10 +189,12 @@ async function analyzeOne({
     };
   }
 
+  const directives = extractDirectives(distilled.turns);
   const prompt = renderPrompt("analysis", {
     MEMORY_PATH: memoryFile.path,
     INSTRUCTION_INDEX: renderInstructionIndex(memoryFile),
     SKILLS: skillIndex,
+    DIRECTIVES: renderDirectiveIndex(directives),
     OPEN_GAPS: openGapIndex,
     TRACE: distilled.trace,
   });
@@ -219,9 +227,18 @@ async function analyzeOne({
     throw new Error("analysis returned no parseable JSON");
   }
 
+  const evidence = sanitizeEvidence(
+    parsed,
+    memoryFile,
+    distilled.trace,
+    directives.map((span) => span.id),
+  );
   return {
     status: "ok",
-    evidence: sanitizeEvidence(parsed, memoryFile, distilled.trace),
+    // The record carries this session's directive span metadata - ids, turn, authority
+    // and lifetime, never envelope text - so a cited TASK-1 / STEER-N id stays
+    // resolvable in persisted evidence (see `src/directives.js`).
+    evidence: { ...evidence, directives: directiveMetadata(directives) },
     usage: usageRecord(ranWith, result),
     distilled,
   };

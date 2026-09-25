@@ -2,6 +2,7 @@ import fs from "node:fs";
 
 import { loadConfig } from "./config.js";
 import { classifyInteraction, INTERACTIVE, NON_INTERACTIVE } from "./interaction.js";
+import { isDirectiveId } from "./directives.js";
 import { findInstructionUnit, instructionUnits, resolveMemoryFiles, similarity } from "./memory.js";
 import {
   GAP_COVERED_THRESHOLD,
@@ -115,12 +116,15 @@ export function foldEvidence(
     const source = recordSources[index];
     sources.add(source);
     if (record.transcript.project) sourceProjects[source] = record.transcript.project;
+    const sessionIdentity = record.transcript.identity || record.transcript.id;
 
     for (const polarity of ["positive", "negative"]) {
       for (const item of record[polarity] || []) {
+        // A direct task/steering cite is session authority, not memory content, so it
+        // never becomes a memory-instruction row; the gap sightings carry recurrence.
+        if (isDirectiveId(item.instruction)) continue;
         const entry = touch(item.instruction);
         entry[polarity] += 1;
-        const sessionIdentity = record.transcript.identity || record.transcript.id;
         const category = classifyInteraction(record.transcript);
         entry.sessions.add(sessionIdentity);
         entry.sessionsByInteraction[category].add(sessionIdentity);

@@ -1,0 +1,15 @@
+[
+  {
+    "kind": "message",
+    "role": "user",
+    "text": "Migrate the auth module to the new token API.\n\n> previous assistant said: I will keep using the old session API\n> tool output was: Error: 401 Unauthorized at auth.js:12\n\n```\nError: 401 Unauthorized\n    at refreshSession (auth.js:12:8)\n```\n\nKeep the public function names unchanged."
+  },
+  { "kind": "message", "role": "assistant", "text": "On it - migrating to the token API now." },
+  { "kind": "tool", "name": "Bash", "input": { "command": "npm test" }, "result": "ok" },
+  { "kind": "message", "role": "user", "text": "thanks" },
+  {
+    "kind": "message",
+    "role": "user",
+    "text": "Actually, keep the old refresh-token flow as well for the mobile client."
+  }
+]
