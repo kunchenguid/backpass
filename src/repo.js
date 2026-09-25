@@ -58,11 +58,14 @@ export function listWorktrees(root) {
   } catch {
     return [realpathOrSelf(root)];
   }
-  const paths = [];
+  // Always include the repo root. For a main worktree whose git dir lives
+  // elsewhere (`.git` file → e.g. ~/repo.git, via `git init --separate-git-dir`),
+  // `git worktree list --porcelain` reports the git dir path instead of the
+  // working tree, so tier-1 association would never match a session cwd.
+  const paths = [realpathOrSelf(root)];
   for (const line of raw.split("\n")) {
     if (line.startsWith("worktree ")) paths.push(realpathOrSelf(line.slice("worktree ".length)));
   }
-  if (!paths.length) paths.push(realpathOrSelf(root));
   return [...new Set(paths)];
 }
 

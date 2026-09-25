@@ -6,7 +6,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 
 import { associate } from "../src/discovery/association.js";
-import { attachSiblingClones, ensureLocalExclude, resolveRepo } from "../src/repo.js";
+import { attachSiblingClones, ensureLocalExclude, listWorktrees, resolveRepo } from "../src/repo.js";
 
 function git(args, cwd) {
   execFileSync("git", args, { cwd, stdio: "ignore" });
@@ -246,4 +246,21 @@ test("a non-git directory is skipped gracefully, without creating anything", () 
   assert.equal(result.status, "no-git");
   assert.equal(fs.existsSync(path.join(dir, ".git")), false);
   assert.equal(fs.existsSync(path.join(dir, ".gitignore")), false);
+});
+
+test("listWorktrees includes the repo root when the git dir lives outside the working tree", () => {
+  // `git init --separate-git-dir` leaves a `.git` *file* in the working tree pointing at an
+  // external git dir. For that layout `git worktree list --porcelain` reports the git dir
+  // path, not the working tree, so association tier 1 never matched a session cwd.
+  const dir = initRepo();
+  const gitDir = tempDir("backpass-gitdir-");
+  fs.rmdirSync(gitDir);
+  git(["init", "-q", "--separate-git-dir", gitDir], dir);
+  assert.ok(fs.statSync(path.join(dir, ".git")).isFile(), "main worktree .git is a file");
+
+  const worktrees = listWorktrees(dir);
+
+  assert.ok(worktrees.includes(fs.realpathSync(dir)), `expected ${dir} in ${JSON.stringify(worktrees)}`);
+  const hit = associate({ cwd: dir }, { worktrees });
+  assert.equal(hit?.tier, 1);
 });
