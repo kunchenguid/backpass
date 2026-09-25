@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.28](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.27...backpass-v0.1.28) (2026-09-25)
+
+
+### Bug Fixes
+
+* **redact:** stop secret redaction from eating benign tool arguments ([#153](https://github.com/kunchenguid/backpass/issues/153)) ([7bd9150](https://github.com/kunchenguid/backpass/commit/7bd9150cf281cb56fc8e7cae1441a7a7fd26f042))
+
 ## [0.1.27](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.26...backpass-v0.1.27) (2026-09-24)
 
 
