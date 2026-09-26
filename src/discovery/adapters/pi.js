@@ -16,12 +16,17 @@ import {
 
 /**
  * Pi writes standalone sessions under
- * `~/.pi/agent/sessions/<escaped-cwd>/<ISO-ts>_<uuid>.jsonl`. BB's Pi bridge writes the
- * same JSONL shape directly under `<bb-data-dir>/pi-bridge-sessions/`.
+ * `~/.pi/agent/sessions/<escaped-cwd>/<ISO-ts>_<uuid>.jsonl`. omp (Oh My Pi) uses the
+ * same JSONL shape under `~/.omp/agent/sessions/` and honors `PI_CODING_AGENT_DIR`, but
+ * prepends a fixed-width `{type:"title"}` record, so the `{type:"session", cwd, id}`
+ * entry is line 2 there. omp also writes subagent transcripts one level deeper, at
+ * `<escaped-cwd>/<session-id>/<Name>.jsonl`. BB's Pi bridge writes the same JSONL shape
+ * directly under `<bb-data-dir>/pi-bridge-sessions/`.
  *
- * Line 1 is `{type:"session", cwd, id}`. Entries form a parent/child tree but arrive in
+ * Entries form a parent/child tree but arrive in
  * order, so a linear read is faithful. `model_change` / `thinking_level_change` records
- * give the model actually used. No remote is recorded - dead worktrees reach tier 3 only.
+ * give the model actually used (`modelId` on pi, `model` on omp). No remote is
+ * recorded - dead worktrees reach tier 3 only.
  */
 
 export const name = "pi";
@@ -49,6 +54,7 @@ function realpathOrResolve(value) {
 function storeSpecs() {
   const specs = [
     { path: storeRoot(), direct: false, nested: true },
+    { path: home(".omp", "agent", "sessions"), direct: false, nested: true },
     { path: home(".bb", "pi-bridge-sessions"), direct: true, nested: false },
   ];
   const piAgentDir = expandEnvPath(process.env.PI_CODING_AGENT_DIR);
@@ -84,7 +90,13 @@ export function enumerate() {
   for (const spec of storeSpecs()) {
     const files = [
       ...(spec.direct ? listFiles(spec.path, ".jsonl") : []),
-      ...(spec.nested ? listDirs(spec.path).flatMap((dir) => listFiles(dir, ".jsonl")) : []),
+      ...(spec.nested
+        ? listDirs(spec.path).flatMap((dir) => [
+            ...listFiles(dir, ".jsonl"),
+            // omp nests subagent transcripts one level below the session files.
+            ...listDirs(dir).flatMap((sub) => listFiles(sub, ".jsonl")),
+          ])
+        : []),
     ];
     for (const file of files) {
       const key = realpathOrResolve(file);
@@ -99,18 +111,21 @@ export function enumerate() {
 }
 
 export function classify(candidate) {
-  const [first] = readHeadLines(candidate.path, 1);
-  const entry = first && parseJsonLine(first);
-  if (!entry || entry.type !== "session" || !entry.cwd) return null;
-  return {
-    id: entry.id || path.basename(candidate.path, ".jsonl"),
-    cwd: entry.cwd,
-    gitBranch: null,
-    remotes: [],
-    startedAt: entry.timestamp ? Date.parse(entry.timestamp) : candidate.mtimeMs,
-    model: null,
-    interactionSignals: emptyInteractionSignals(),
-  };
+  // omp prepends a fixed-width title record, so the session entry is not always line 1.
+  for (const line of readHeadLines(candidate.path, 8)) {
+    const entry = parseJsonLine(line);
+    if (!entry || entry.type !== "session" || !entry.cwd) continue;
+    return {
+      id: entry.id || path.basename(candidate.path, ".jsonl"),
+      cwd: entry.cwd,
+      gitBranch: null,
+      remotes: [],
+      startedAt: entry.timestamp ? Date.parse(entry.timestamp) : candidate.mtimeMs,
+      model: null,
+      interactionSignals: emptyInteractionSignals(),
+    };
+  }
+  return null;
 }
 
 export function read(ref) {
@@ -120,7 +135,7 @@ export function read(ref) {
 
   for (const entry of entries) {
     if (entry.type === "model_change") {
-      model = entry.modelId || model;
+      model = entry.modelId || entry.model || model;
       continue;
     }
     if (entry.type !== "message" || !entry.message) continue;
