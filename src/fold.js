@@ -428,7 +428,7 @@ export function clusterGapObservations(observations, { checkProjectCoverage = fa
       project: obs.project || null,
       projectCovered,
       coveredBySkills: new Set(obs.coveredBySkill ? [obs.coveredBySkill] : []),
-      gapIds: new Set(obs.gapId ? [obs.gapId] : []),
+      gapIds: new Set(observationGapIds(obs)),
     };
     if (cluster) {
       const sessionItem = cluster.items.find((candidate) => candidate.sessionId === obs.sessionId);
@@ -436,7 +436,7 @@ export function clusterGapObservations(observations, { checkProjectCoverage = fa
         if (obs.coveredBySkill) sessionItem.coveredBySkills.add(obs.coveredBySkill);
         if (observationDomain(obs) !== "orchestration") sessionItem.domain = "project";
         if (projectCovered) sessionItem.projectCovered = true;
-        if (obs.gapId) sessionItem.gapIds.add(obs.gapId);
+        for (const id of observationGapIds(obs)) sessionItem.gapIds.add(id);
       } else {
         cluster.items.push(item);
       }
@@ -463,6 +463,11 @@ export function clusterGapObservations(observations, { checkProjectCoverage = fa
     );
   }
   return clusters;
+}
+
+function observationGapIds(obs) {
+  if (Array.isArray(obs.gapIds)) return obs.gapIds.filter(Boolean);
+  return obs.gapId ? [obs.gapId] : [];
 }
 
 /** Stable ledger entry ids on a cluster: the union of item ids, never a hash of current phrasing. */

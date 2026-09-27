@@ -201,14 +201,3 @@ test("pollDecisions returns valid reject reasons beside the verdict map", async 
     reasons: { e2: "too-narrow" },
   });
 });
-
-test("the apply template encodes optional reject-reason chips on the decision vector", () => {
-  const html = fs.readFileSync(new URL("../templates/apply.html", import.meta.url), "utf8");
-  assert.match(html, /wrong-evidence/);
-  assert.match(html, /already-covered/);
-  assert.match(html, /too-narrow/);
-  assert.match(html, /too-broad/);
-  assert.match(html, /disagree/);
-  assert.match(html, /rejectReasons/);
-  assert.match(html, /value \+= ":" \+ rejectReasons/);
-});

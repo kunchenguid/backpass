@@ -17,7 +17,7 @@ import {
 import { foldEvidence, renderEvidenceForPrompt, renderEvidenceReport } from "../src/fold.js";
 import { estimateTokens } from "../src/tokens.js";
 import { loadProjectSkills, skillDescriptionTokens } from "../src/skills.js";
-import { parseMemoryUnits } from "../src/memory.js";
+import { parseMemoryUnits, unitHash } from "../src/memory.js";
 import { isSuppressedByRejection, recordRejection, State } from "../src/state.js";
 import { applyDecisions } from "../src/apply/writer.js";
 import { injectPayload, parseDecisions, renderApplySurface } from "../src/apply/lavish.js";
@@ -1748,7 +1748,9 @@ test("a rewrite of overlapping instruction units stays suppressed at equal sessi
     edit: memoryEdit((t) => t.replace("include its URL.", "include its full URL.")),
     annotation: { edits: [claim(["H1"], { kind: "rewrite", title: "expand url" })] },
   });
-  assert.ok(first.proposal.edits[0].instructionIds.includes("AG-001"));
+  assert.deepEqual(first.proposal.edits[0].instructionIds, [
+    unitHash("- Whenever a PR is mentioned, include its URL."),
+  ]);
   const rejections = recordRejection(first.proposal.edits[0], { version: 1, entries: {} });
 
   const reworded = gate({
@@ -1759,6 +1761,33 @@ test("a rewrite of overlapping instruction units stays suppressed at equal sessi
   assert.equal(reworded.proposal.edits.length, 0);
 });
 
+test("a unit added above a rejected rewrite neither shifts suppression onto its neighbour nor loses the original", () => {
+  const first = gate({
+    edit: memoryEdit((t) => t.replace("include its URL.", "include its full URL.")),
+    annotation: { edits: [claim(["H1"], { kind: "rewrite", title: "expand url" })] },
+  });
+  const rejections = recordRejection(first.proposal.edits[0], { version: 1, entries: {} });
+  const shifted = MEMORY_TEXT.replace("## Rules\n\n", "## Rules\n\n- Never hand-edit CHANGELOG.md.\n");
+
+  const neighbour = gate({
+    text: shifted,
+    edit: memoryEdit((t) =>
+      t.replace("Never hand-edit CHANGELOG.md.", "Never hand-edit CHANGELOG.md or the manifest."),
+    ),
+    annotation: { edits: [claim(["H1"], { kind: "rewrite", title: "widen changelog rule" })] },
+    context: { rejections, isSuppressed: isSuppressedByRejection },
+  });
+  assert.equal(neighbour.proposal.edits.length, 1, "a different instruction now in the same position");
+
+  const original = gate({
+    text: shifted,
+    edit: memoryEdit((t) => t.replace("include its URL.", "include the complete pull request URL.")),
+    annotation: { edits: [claim(["H1"], { kind: "rewrite", title: "expand url again" })] },
+    context: { rejections, isSuppressed: isSuppressedByRejection },
+  });
+  assert.equal(original.proposal.edits.length, 0, "the rejected instruction moved down one position");
+});
+
 test("annotate instruction names the hunks do not touch are not stored and do not suppress", () => {
   const first = gate({
     edit: memoryEdit((t) => t.replace("Prefer small commits.", "Prefer tiny commits.")),
@@ -1766,9 +1795,9 @@ test("annotate instruction names the hunks do not touch are not stored and do no
       edits: [claim(["H1"], { kind: "rewrite", title: "tighten commits", instructions: ["AG-001", "AG-002"] })],
     },
   });
-  assert.deepEqual(first.proposal.edits[0].instructionIds, ["AG-002"]);
+  assert.deepEqual(first.proposal.edits[0].instructionIds, [unitHash("- Prefer small commits.")]);
   const rejections = recordRejection(first.proposal.edits[0], { version: 1, entries: {} });
-  assert.deepEqual(Object.values(rejections.entries)[0].instructionIds, ["AG-002"]);
+  assert.deepEqual(Object.values(rejections.entries)[0].instructionIds, [unitHash("- Prefer small commits.")]);
 
   const other = gate({
     edit: memoryEdit((t) => t.replace("include its URL.", "include its full URL.")),

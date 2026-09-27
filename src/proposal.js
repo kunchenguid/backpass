@@ -327,14 +327,15 @@ function uniqueMatchingGapIds(edit, summary) {
 }
 
 /**
- * Instruction units the memory-file hunks actually touch, using the same range
- * intersection as removal evidence. Annotate `instructions` never widen this set.
+ * Content hashes of the instruction units the memory-file hunks actually touch, using the
+ * same range intersection as removal evidence. Positional aliases shift whenever a unit
+ * is added above, so they never persist. Annotate `instructions` never widen this set.
  */
 function measuredInstructionIds(memoryHunks, memoryFile) {
   const measured = new Set();
   if (!memoryFile?.units) return [];
   for (const hunk of memoryHunks) {
-    for (const unit of unitsRemovedBy(hunk, memoryFile)) measured.add(unit.id);
+    for (const unit of unitsRemovedBy(hunk, memoryFile)) measured.add(unit.hash);
   }
   return [...measured];
 }
