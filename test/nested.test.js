@@ -151,6 +151,22 @@ test("a nested directory keeps the root pair's pointer model: a pointer is refus
   assert.match(pointer.error?.message ?? "", /apps\/web\/CLAUDE\.md is only a pointer to apps\/web\/AGENTS\.md/);
 });
 
+test("nested sibling warnings ignore an unrelated root memory basename", () => {
+  const repo = makeRepo({
+    "README.md": "# Root memory\n",
+    "apps/api/AGENTS.md": "# API memory\n",
+    "apps/api/README.md": "# API documentation\n",
+  });
+  const { result, lines } = captureWarnings(() =>
+    reportNestedMemoryFiles(
+      resolveNestedMemoryFiles(repo.root, { memoryFiles: ["README.md"], nestedMemoryFiles: [API.path] }),
+    ),
+  );
+  assert.deepEqual(result.map((weight) => weight.path), [API.path]);
+  assert.deepEqual(result[0].separate, []);
+  assert.deepEqual(lines, []);
+});
+
 // ---------- where a session worked ----------
 
 test("structured tool paths use their call workdir; cwd only places sessions without paths", () => {

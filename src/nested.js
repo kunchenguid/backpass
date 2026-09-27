@@ -113,16 +113,11 @@ export function applyNestedMemoryConfig(repoRoot, config) {
  * @returns {{ path: string, dir: string, file: object | null, pointerTo: string | null, separate: object[] }[]}
  */
 export function resolveNestedMemoryFiles(repoRoot, config) {
-  const rootNames = [
-    ...new Set([
-      ...config.memoryFiles.map((entry) => path.posix.basename(pathInRoot(entry, repoRoot))),
-      "AGENTS.md",
-      "CLAUDE.md",
-    ]),
-  ];
   return (config.nestedMemoryFiles || []).map((relative) => {
     const dir = path.posix.dirname(relative);
-    const siblings = rootNames.map((name) => path.posix.join(dir, name)).filter((sibling) => sibling !== relative);
+    const siblings = ["AGENTS.md", "CLAUDE.md"]
+      .map((name) => path.posix.join(dir, name))
+      .filter((sibling) => sibling !== relative);
     const resolved = resolveMemoryFiles(repoRoot, [relative, ...siblings]);
     const file = resolved.all.find((candidate) => candidate.path === relative) || null;
     if (!file) return { path: relative, dir, file: null, pointerTo: null, separate: [] };
