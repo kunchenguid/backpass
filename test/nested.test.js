@@ -48,7 +48,7 @@ const ATTRIBUTION = new Map([
   ["web-1", ["apps/web/checkout.tsx"]],
   ["web-2", ["apps/web"]],
   ["both", ["apps/api/src/orders.ts", "apps/web/checkout.tsx"]],
-  ["root-and-api", ["", "apps/api/src/orders.ts"]],
+  ["root-file-and-api", ["README.md", "apps/api/src/orders.ts"]],
   ["root", [""]],
   ["remote", null],
 ]);
@@ -153,7 +153,7 @@ test("a nested directory keeps the root pair's pointer model: a pointer is refus
 
 // ---------- where a session worked ----------
 
-test("a session worked where its cwd and its tool calls' path fields point, never where its shell text mentions", () => {
+test("structured tool paths use their call workdir; cwd only places sessions without paths", () => {
   const repo = makeRepo({ "apps/api/src/orders.ts": "", "apps/web/checkout.tsx": "" });
   const roots = checkoutRoots(repo);
   const events = [
@@ -161,9 +161,10 @@ test("a session worked where its cwd and its tool calls' path fields point, neve
     { kind: "tool", name: "read", input: { path: "apps/web/checkout.tsx" } },
     {
       kind: "tool",
-      name: "exec_command",
-      input: { cmd: "cat apps/docs/README.md", workdir: path.join(repo.root, "packages/ui") },
+      name: "read",
+      input: { path: "button.ts", workdir: path.join(repo.root, "packages/ui") },
     },
+    { kind: "tool", name: "exec_command", input: { cmd: "cat apps/docs/README.md", workdir: repo.root } },
     {
       kind: "tool",
       name: "apply_patch",
@@ -174,14 +175,21 @@ test("a session worked where its cwd and its tool calls' path fields point, neve
     { kind: "message", role: "user", text: "look at apps/admin too" },
   ];
   assert.deepEqual(workedPaths({ cwd: repo.root }, events, roots), [
-    "",
     "apps/api/src/new.ts",
     "apps/api/src/orders.ts",
     "apps/web/checkout.tsx",
     "libs/core/index.ts",
-    "packages/ui",
+    "packages/ui/button.ts",
   ]);
   assert.deepEqual(workedPaths({ cwd: path.join(repo.root, "apps/api") }, [], roots), ["apps/api"]);
+  assert.deepEqual(
+    workedPaths({ cwd: repo.root }, [{ kind: "tool", input: { path: "src/orders.ts", cwd: "apps/api" } }], roots),
+    ["apps/api/src/orders.ts"],
+  );
+  assert.deepEqual(
+    workedPaths({ cwd: repo.root }, [{ kind: "tool", input: { command: "pwd", workdir: "apps/api" } }], roots),
+    [""],
+  );
 });
 
 test("attribution reads a local session once, and never places a session that ran on another machine", async () => {
@@ -204,14 +212,14 @@ test("attribution reads a local session once, and never places a session that ra
   const unreadable = { ...local, id: "pi-s3", nativeId: "s3", path: `${sessionPath}.missing` };
 
   const first = await attributeTranscripts([local, remote, unreadable], repo, state);
-  assert.deepEqual(first.get(transcriptIdentity(local)), ["", "apps/api/src/orders.ts"]);
+  assert.deepEqual(first.get(transcriptIdentity(local)), ["apps/api/src/orders.ts"]);
   assert.equal(first.get(transcriptIdentity(remote)), null, "a session from another machine is never placed");
   assert.deepEqual(first.get(transcriptIdentity(unreadable)), [""], "no readable tool call: the cwd alone places it");
 
   // Same content signature: the cached placement stands without reading the file again.
   fs.rmSync(sessionPath);
   const second = await attributeTranscripts([local], repo, state);
-  assert.deepEqual(second.get(transcriptIdentity(local)), ["", "apps/api/src/orders.ts"]);
+  assert.deepEqual(second.get(transcriptIdentity(local)), ["apps/api/src/orders.ts"]);
 });
 
 test("attribution cache changes when a sibling checkout becomes known", async () => {
@@ -220,17 +228,34 @@ test("attribution cache changes when a sibling checkout becomes known", async ()
   const sibling = path.join(repo.root, "sibling");
   fs.mkdirSync(sibling);
   const sessionPath = path.join(repo.root, "session.jsonl");
-  fs.writeFileSync(sessionPath, [
-    { type: "session", version: 3, id: "roots", timestamp: new Date().toISOString(), cwd: sibling },
-    { type: "message", message: { role: "assistant", content: [
-      { type: "toolCall", id: "t1", name: "edit", arguments: { path: "apps/api/handler.ts" } },
-    ] } },
-  ].map((entry) => JSON.stringify(entry)).join("\n") + "\n");
-  const transcript = { harness: "pi", id: "pi-roots", nativeId: "roots", path: sessionPath, cwd: sibling, mtimeMs: 1, bytes: 2 };
+  fs.writeFileSync(
+    sessionPath,
+    [
+      { type: "session", version: 3, id: "roots", timestamp: new Date().toISOString(), cwd: sibling },
+      {
+        type: "message",
+        message: {
+          role: "assistant",
+          content: [{ type: "toolCall", id: "t1", name: "edit", arguments: { path: "apps/api/handler.ts" } }],
+        },
+      },
+    ]
+      .map((entry) => JSON.stringify(entry))
+      .join("\n") + "\n",
+  );
+  const transcript = {
+    harness: "pi",
+    id: "pi-roots",
+    nativeId: "roots",
+    path: sessionPath,
+    cwd: sibling,
+    mtimeMs: 1,
+    bytes: 2,
+  };
   const first = await attributeTranscripts([transcript], repo, state);
-  assert.deepEqual(first.get(transcriptIdentity(transcript)), ["sibling", "sibling/apps/api/handler.ts"]);
+  assert.deepEqual(first.get(transcriptIdentity(transcript)), ["sibling/apps/api/handler.ts"]);
   const second = await attributeTranscripts([transcript], { ...repo, siblingWorktrees: [sibling] }, state);
-  assert.deepEqual(second.get(transcriptIdentity(transcript)), ["", "apps/api/handler.ts"]);
+  assert.deepEqual(second.get(transcriptIdentity(transcript)), ["apps/api/handler.ts"]);
 });
 
 // ---------- which file owns a lesson ----------
@@ -243,7 +268,7 @@ test("a lesson belongs to the most specific named file every session behind it w
   assert.equal(owner(["api-1", "web-1"]), null, "two unrelated directories are cross-cutting");
   assert.equal(owner(["both"]), null, "one session in two unrelated directories is cross-cutting too");
   assert.equal(owningFile(["both"], [API], ATTRIBUTION), null);
-  assert.equal(owningFile(["root-and-api"], [API], ATTRIBUTION), null);
+  assert.equal(owningFile(["root-file-and-api"], [API], ATTRIBUTION), null);
   assert.equal(owner(["api-1", "remote"]), null, "a session nobody could place keeps the lesson at the root");
   assert.equal(owner(["root"]), null);
   assert.equal(owner([]), null);
@@ -309,20 +334,29 @@ test("the fold keeps only the gap clusters this file owns, and names where the o
 });
 
 test("mixed-directory sessions never enter a nested analysis corpus or own its gap", async () => {
-  const transcripts = ["api-1", "both", "root-and-api"].map((identity) => ({ identity }));
+  const transcripts = ["api-1", "both", "root-file-and-api"].map((identity) => ({ identity }));
   const { corpora } = await nestedCorpora({}, [API], transcripts, ATTRIBUTION);
-  assert.deepEqual(corpora[0].transcripts.map((item) => item.identity), ["api-1"]);
-  const records = [evidenceRecord("both", API_GAP), evidenceRecord("root-and-api", API_GAP)];
+  assert.deepEqual(
+    corpora[0].transcripts.map((item) => item.identity),
+    ["api-1"],
+  );
+  const records = [evidenceRecord("both", API_GAP), evidenceRecord("root-file-and-api", API_GAP)];
   const route = routingFor([API], ATTRIBUTION, "AGENTS.md", null);
   assert.equal(foldEvidence(records, { minGapEvidence: 2, route }).gaps.length, 1);
   assert.equal(foldEvidence(records, { minGapEvidence: 2, route: { ...route, weight: API.path } }).gaps.length, 0);
 });
 
 test("bounded quotes retain evidence of a root-owned cross-directory cluster", () => {
-  const records = [...Array.from({ length: 6 }, (_, index) => evidenceRecord(`api-${index}`, API_GAP)), evidenceRecord("web-1", API_GAP)];
+  const records = [
+    ...Array.from({ length: 6 }, (_, index) => evidenceRecord(`api-${index}`, API_GAP)),
+    evidenceRecord("web-1", API_GAP),
+  ];
   const attribution = new Map(records.map((record) => [record.transcript.identity, ["apps/api/a.ts"]]));
   attribution.set("web-1", ["apps/web/b.ts"]);
-  const root = foldEvidence(records, { minGapEvidence: 2, route: routingFor([API, WEB], attribution, "AGENTS.md", null) });
+  const root = foldEvidence(records, {
+    minGapEvidence: 2,
+    route: routingFor([API, WEB], attribution, "AGENTS.md", null),
+  });
   assert.equal(root.gaps.length, 1);
   assert.equal(root.gaps[0].quotes.length, 6);
   assert.ok(root.gaps[0].quotes.some((quote) => quote.source.includes("web-1")));

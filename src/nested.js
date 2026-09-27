@@ -34,21 +34,21 @@ import { transcriptIdentity } from "./transcript.js";
  *   state      its own `.backpass/nested/<file>/` - evidence, gap ledger, prompts, staging -
  *              sharing only the rejections a human recorded at apply
  *
- * Where a session worked is deterministic: its cwd plus the paths its tool calls name in
- * structured fields (and the file headers of an apply_patch body), resolved against the
- * checkouts of this repository that discovery already knows. Nothing is read out of
- * shell command text. A session that ran on another machine, or whose paths resolve to no
- * known checkout, worked nowhere in particular and feeds only the root file: a wrong
- * attribution is worse evidence than none.
+ * Where a session worked is deterministic: the paths its tool calls name in structured
+ * fields (and the file headers of an apply_patch body), resolved against the checkouts
+ * of this repository that discovery already knows. Without paths, its cwd is used.
+ * Nothing is read out of shell command text. A session that ran on another machine,
+ * or whose paths resolve to no known checkout, worked nowhere in particular and feeds
+ * only the root file: a wrong attribution is worse evidence than none.
  *
  * With `nestedMemoryFiles` unset nothing here runs, and a run is exactly the
  * single-primary run it always was.
  */
 
-export const ATTRIBUTION_VERSION = 1;
+export const ATTRIBUTION_VERSION = 2;
 
 /** Tool-input fields that name a file or directory a session worked in. */
-const PATH_FIELDS = ["file_path", "filePath", "notebook_path", "path", "workdir", "cwd"];
+const PATH_FIELDS = ["file_path", "filePath", "notebook_path", "path"];
 /** File headers of the apply_patch grammar (Codex); each names one file the patch touches. */
 const PATCH_FILE = /^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$/gm;
 
@@ -110,7 +110,13 @@ export function applyNestedMemoryConfig(repoRoot, config) {
  * @returns {{ path: string, dir: string, file: object | null, pointerTo: string | null, separate: object[] }[]}
  */
 export function resolveNestedMemoryFiles(repoRoot, config) {
-  const rootNames = [...new Set([...config.memoryFiles.map((entry) => path.posix.basename(pathInRoot(entry, repoRoot))), "AGENTS.md", "CLAUDE.md"])];
+  const rootNames = [
+    ...new Set([
+      ...config.memoryFiles.map((entry) => path.posix.basename(pathInRoot(entry, repoRoot))),
+      "AGENTS.md",
+      "CLAUDE.md",
+    ]),
+  ];
   return (config.nestedMemoryFiles || []).map((relative) => {
     const dir = path.posix.dirname(relative);
     const siblings = rootNames.map((name) => path.posix.join(dir, name)).filter((sibling) => sibling !== relative);
@@ -231,37 +237,42 @@ export function repoRelative(absolute, roots) {
 /** The paths a session's tool calls name, as recorded. */
 export function toolPaths(events) {
   const out = [];
-  const patchFiles = (text) => {
+  const patchFiles = (text, workdir) => {
     if (!text.includes("*** Begin Patch")) return;
-    for (const match of text.matchAll(PATCH_FILE)) out.push(match[1].trim());
+    for (const match of text.matchAll(PATCH_FILE)) out.push({ raw: match[1].trim(), workdir });
   };
   for (const event of events || []) {
     if (event?.kind !== "tool") continue;
     const input = event.input;
     if (typeof input === "string") {
-      patchFiles(input);
+      patchFiles(input, null);
       continue;
     }
     if (!input || typeof input !== "object") continue;
+    const workdir =
+      [input.workdir, input.cwd].find((value) => typeof value === "string" && value.trim())?.trim() || null;
     for (const key of PATH_FIELDS) {
-      if (typeof input[key] === "string" && input[key].trim()) out.push(input[key].trim());
+      if (typeof input[key] === "string" && input[key].trim()) out.push({ raw: input[key].trim(), workdir });
     }
-    for (const value of Object.values(input)) if (typeof value === "string") patchFiles(value);
+    for (const value of Object.values(input)) if (typeof value === "string") patchFiles(value, workdir);
   }
   return out;
 }
 
 /**
- * Where one session worked, as sorted repo-relative paths: its cwd and every tool path,
- * a relative one resolved against the cwd the harness resolves it against. Paths outside
- * every known checkout are dropped.
+ * Where one session worked, as sorted repo-relative paths from tool calls, falling back
+ * to its cwd when no tool paths are recorded. Paths outside known checkouts are dropped.
  */
 export function workedPaths(transcript, events, roots) {
   const cwd = transcript.cwd || null;
   const out = new Set();
-  for (const raw of [...(cwd ? [cwd] : []), ...toolPaths(events)]) {
-    if (raw.startsWith("~") || (!path.isAbsolute(raw) && !cwd)) continue;
-    const relative = repoRelative(path.resolve(cwd || "", raw), roots);
+  const named = toolPaths(events);
+  if (!named.length && cwd) named.push({ raw: cwd, workdir: null });
+  for (const { raw, workdir } of named) {
+    if (raw.startsWith("~") || workdir?.startsWith("~")) continue;
+    const base = workdir ? path.resolve(cwd || "", workdir) : cwd;
+    if (!path.isAbsolute(raw) && !base) continue;
+    const relative = repoRelative(path.resolve(base || "", raw), roots);
     if (relative !== null) out.add(relative);
   }
   return [...out].sort();
@@ -279,8 +290,13 @@ export async function attributeTranscripts(transcripts, repo, state) {
   const roots = checkoutRoots(repo);
   const cachePath = path.join(state.root, "nested", "attribution.json");
   const cache = state.readJsonFile(cachePath, null);
-  const prior = cache?.version === ATTRIBUTION_VERSION && cache.roots?.length === roots.length &&
-    cache.roots.every((root, index) => root === roots[index]) && cache.entries ? cache.entries : {};
+  const prior =
+    cache?.version === ATTRIBUTION_VERSION &&
+    cache.roots?.length === roots.length &&
+    cache.roots.every((root, index) => root === roots[index]) &&
+    cache.entries
+      ? cache.entries
+      : {};
   const entries = {};
   const attribution = new Map();
   for (const transcript of transcripts) {
