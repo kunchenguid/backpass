@@ -120,14 +120,7 @@ async function runProposalCore(ctx, precomputed) {
   const transcripts = precomputed?.transcripts || capTranscripts(await discoverForRun(ctx), config).transcripts;
   const weights = precomputed ? (precomputed.nested || []).map((entry) => entry.weight) : memory.nested || [];
   const { corpora, attribution } = await nestedCorpora(ctx, weights, transcripts, precomputed?.attribution);
-  const nestedHasCorpus = corpora.some((corpus) => corpus.transcripts.length > 0);
-  const routing = (weight) =>
-    corpora.length
-      ? {
-          ...routingFor(weights, attribution, file.path, weight),
-          allowUnchangedRoot: weight === null && nestedHasCorpus,
-        }
-      : null;
+  const routing = (weight) => (corpora.length ? routingFor(weights, attribution, file.path, weight) : null);
 
   const foldStarted = Date.now();
   const summary = await foldForRun(ctx, file, hash, skills ?? [], transcripts, { route: routing(null) });
@@ -148,6 +141,13 @@ async function runProposalCore(ctx, precomputed) {
     );
   }
 
+  const passes = [];
+  for (const corpus of corpora) {
+    passes.push(
+      await proposeNested(ctx, { skills: skills ?? [], corpus, routing, rootOwnedGaps: summary.rootOwnedGaps }),
+    );
+  }
+  const rootRouting = routing(null);
   const { proposal: rootProposal } = await synthesizeProposal({
     memoryFile: file,
     summary,
@@ -155,16 +155,10 @@ async function runProposalCore(ctx, precomputed) {
     repo,
     transcripts,
     scope: ctx.scope,
-    routing: routing(null),
+    routing: rootRouting && { ...rootRouting, allowUnchangedRoot: passes.some((pass) => pass.proposal !== null) },
   });
 
   accountForConsolidationUsage(rootProposal, summary);
-  const passes = [];
-  for (const corpus of corpora) {
-    passes.push(
-      await proposeNested(ctx, { skills: skills ?? [], corpus, routing, rootOwnedGaps: summary.rootOwnedGaps }),
-    );
-  }
   const proposal = passes.length ? mergeNestedProposals(rootProposal, passes) : rootProposal;
   config.state.writeProposal(proposal);
   return { proposal, summary, memoryFile: file };

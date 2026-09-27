@@ -290,8 +290,8 @@ test("a named nested file learns only from its subtree, and each lesson lands in
   assert.deepEqual(
     edits.map((entry) => [entry.memory, entry.lessons, entry.budgetCount, entry.nestedRule]),
     [
-      ["AGENTS.md", [WEB_GAP], "surface", false],
       ["apps/api/AGENTS.md", [API_GAP], "file", true],
+      ["AGENTS.md", [WEB_GAP], "surface", false],
     ],
   );
 
@@ -346,7 +346,7 @@ test("a gap spanning API and web is proposed only in root, not again from its AP
   assert.deepEqual(proposal.nested[0].edits, []);
   assert.deepEqual(
     result.log.filter((entry) => entry.turn === "edit").map((entry) => entry.lessons),
-    [[API_GAP], []],
+    [[], [API_GAP]],
   );
 });
 
@@ -411,6 +411,27 @@ test("an unchanged over-budget root permits nested training but not an unconfigu
   const root = run(unconfigured, noGapHome, []);
   assert.equal(root.status, 1, root.output);
   assert.match(root.output, /this run must shrink it/);
+});
+
+test("an untrained nested corpus cannot exempt an unchanged over-budget root", () => {
+  const dir = makeMonorepo({ config: { budgetTokens: 1 } });
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-nested-untrained-home-"));
+  writeSession(home, "api-one", dir, { quote: "Review the file.", file: "apps/api/src/routes/orders.ts" });
+  writeSession(home, "api-two", dir, { quote: "Review the file.", file: "apps/api/src/routes/orders.ts" });
+  const analyzed = run(dir, home, ["analyze"]);
+  assert.equal(analyzed.status, 0, analyzed.output);
+  fs.writeFileSync(
+    path.join(dir, ".backpassrc.json"),
+    `${JSON.stringify({ budgetTokens: 1, nestedMemoryFiles: ["apps/api/AGENTS.md"] })}\n`,
+  );
+
+  const proposed = run(dir, home, ["propose"]);
+  assert.equal(proposed.status, 1, proposed.output);
+  assert.match(proposed.output, /this run must shrink it/);
+  assert.deepEqual(
+    proposed.log.filter((entry) => entry.turn === "edit").map((entry) => entry.memory),
+    ["AGENTS.md"],
+  );
 });
 
 test("a subdirectory file listed only in memoryFiles still gets the consolidate warning; named as nested, it does not", () => {
