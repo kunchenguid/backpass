@@ -562,7 +562,7 @@ test("an oversized non-compliance blob synthesizes as a list-item restructure, n
                   },
                   {
                     polarity: "negative",
-                    text: "the same blob's second sentence was skipped again",
+                    text: "ignored sentence two again on the follow-up session",
                     source: summary.sources[1],
                   },
                 ],

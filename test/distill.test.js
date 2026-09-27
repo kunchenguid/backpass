@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { distill, isBoilerplate } from "../src/distill.js";
 import { redact } from "../src/redact.js";
 import { estimateTokens } from "../src/tokens.js";
-import { sanitizeEvidence } from "../src/analyze.js";
+import { locateQuote, sanitizeEvidence } from "../src/analyze.js";
 import { parseMemoryUnits } from "../src/memory.js";
 
 const META = {
@@ -189,6 +189,47 @@ test("split paragraphs accept only sentence-part attribution targets", () => {
   );
 });
 
+test("a quote that matches the distilled trace keeps a window sliced from that string", () => {
+  const trace = [
+    "### turn 3 · assistant",
+    "the agent posted the full URL",
+    "",
+    "### turn 4 · user",
+    "it used a  bare #2731",
+    "  reference in the follow-up",
+    "",
+  ].join("\n");
+  const clean = sanitizeEvidence(
+    {
+      positive: [{ instruction: "AG-001", quote: "the agent posted the full URL" }],
+      negative: [{ instruction: "AG-004", quote: "it used a bare #2731 reference", class: "harm" }],
+      gaps: [{ proposedInstruction: "Post full URLs.", quote: "posted the full URL" }],
+    },
+    null,
+    trace,
+  );
+
+  assert.equal(clean.positive.length, 1);
+  assert.equal(clean.positive[0].before, "### turn 3 · assistant\n");
+  assert.equal(clean.positive[0].after, "\n\n### turn 4 · user\nit used a  bare #2731\n  reference in the follow-up\n");
+  assert.equal(clean.positive[0].locator.turn, 3);
+  assert.equal(clean.positive[0].locator.role, "assistant");
+  assert.equal(typeof clean.positive[0].locator.foldedOffset, "number");
+  assert.ok(!clean.positive[0].before.includes("the agent posted"));
+  assert.ok(trace.includes(clean.positive[0].before + "the agent posted the full URL" + clean.positive[0].after));
+
+  assert.equal(clean.negative[0].locator.turn, 4);
+  assert.equal(clean.negative[0].locator.role, "user");
+  assert.ok(clean.negative[0].before.includes("turn 4"));
+  assert.ok(clean.negative[0].after.includes("in the follow-up"));
+  assert.equal(clean.gaps[0].locator.turn, 3);
+
+  const located = locateQuote(trace, "the agent posted the full URL");
+  assert.deepEqual(located.locator, clean.positive[0].locator);
+  assert.equal(located.before, clean.positive[0].before);
+  assert.equal(located.after, clean.positive[0].after);
+});
+
 test("a quote that is not in the distilled trace is a paraphrase and is discarded", () => {
   const trace = "turn 3\n  the agent posted the full URL\n\nturn 4\n  it used a  bare #2731\n  reference\n";
   const clean = sanitizeEvidence(
@@ -232,9 +273,12 @@ test("the trace check is skipped when the model read the raw transcript", () => 
   const clean = sanitizeEvidence(
     { positive: [{ instruction: "AG-001", quote: "text the distiller elided" }], usedRawTranscript: true },
     null,
-    "nothing here matches",
+    "### turn 1 · user\nnothing here matches\n",
   );
   assert.equal(clean.positive.length, 1);
+  assert.equal(clean.positive[0].locator, undefined);
+  assert.equal(clean.positive[0].before, undefined);
+  assert.equal(clean.positive[0].after, undefined);
 });
 
 test("sanitizeEvidence tolerates a malformed model response", () => {

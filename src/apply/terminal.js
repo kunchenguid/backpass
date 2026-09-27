@@ -82,7 +82,13 @@ export function renderEdit(edit, index, total) {
     out.push(color.dim(`  evidence (${edit.transcripts} transcript(s)):`));
     for (const quote of edit.evidence.slice(0, 4)) {
       const mark = quote.polarity === "positive" ? color.green("+") : color.red("-");
-      out.push(`    ${mark} "${quote.text.replace(/\s+/g, " ").slice(0, 200)}"`);
+      const quoted = `"${String(quote.text).replace(/\s+/g, " ").slice(0, 200)}"`;
+      out.push(`    ${mark} ${quoted}`);
+      if (typeof quote.before === "string" && typeof quote.after === "string") {
+        out.push(`      ${color.dim(String(quote.before).replace(/\s+/g, " "))}`);
+        out.push(`      ${quoted}`);
+        out.push(`      ${color.dim(String(quote.after).replace(/\s+/g, " "))}`);
+      }
       out.push(`      ${color.dim(quote.source)}`);
     }
   }
