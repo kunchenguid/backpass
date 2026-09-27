@@ -766,7 +766,7 @@ export function buildProposal(rawResult, context) {
       `applying every proposed edit leaves ${surfaceLabel} at ${budget.projected} tokens, ` +
         `${budget.over} over the ${config.budgetTokens}-token budget`,
     );
-  } else if (gate === "shrink") {
+  } else if (gate === "shrink" && !(routing?.allowUnchangedRoot && accepted.length === 0)) {
     violations.push(
       `${surfaceLabel} is already ${budget.current - config.budgetTokens} tokens over the ` +
         `${config.budgetTokens}-token budget, so this run must shrink it, but the proposed edits ` +

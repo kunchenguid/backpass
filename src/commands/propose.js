@@ -120,7 +120,14 @@ async function runProposalCore(ctx, precomputed) {
   const transcripts = precomputed?.transcripts || capTranscripts(await discoverForRun(ctx), config).transcripts;
   const weights = precomputed ? (precomputed.nested || []).map((entry) => entry.weight) : memory.nested || [];
   const { corpora, attribution } = await nestedCorpora(ctx, weights, transcripts, precomputed?.attribution);
-  const routing = (weight) => (corpora.length ? routingFor(weights, attribution, file.path, weight) : null);
+  const nestedHasCorpus = corpora.some((corpus) => corpus.transcripts.length > 0);
+  const routing = (weight) =>
+    corpora.length
+      ? {
+          ...routingFor(weights, attribution, file.path, weight),
+          allowUnchangedRoot: weight === null && nestedHasCorpus,
+        }
+      : null;
 
   const foldStarted = Date.now();
   const summary = await foldForRun(ctx, file, hash, skills ?? [], transcripts, { route: routing(null) });

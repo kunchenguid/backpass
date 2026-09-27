@@ -347,6 +347,45 @@ test("with no nested file named, a run trains the root file from every session, 
   assert.doesNotMatch(result.output, /nested memory file|\(nested\)|^ {2}nested /m);
 });
 
+test("an unchanged over-budget root permits nested training but not an unconfigured or edited root", () => {
+  const named = makeMonorepo({
+    config: { budgetTokens: 1, nestedBudgetTokens: 2000, nestedMemoryFiles: ["apps/api/AGENTS.md"] },
+  });
+  const apiHome = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-nested-api-home-"));
+  writeSession(apiHome, "api-one", named, { quote: API_QUOTE, file: "apps/api/src/routes/orders.ts" });
+  writeSession(apiHome, "api-two", named, { quote: API_QUOTE, file: "apps/api/src/routes/orders.ts" });
+  const nested = run(named, apiHome, []);
+  assert.equal(nested.status, 0, nested.output);
+  const proposal = readJson(path.join(named, ".backpass", "proposal.json"));
+  assert.deepEqual(
+    proposal.edits.map((edit) => edit.file),
+    ["apps/api/AGENTS.md"],
+  );
+  assert.ok(proposal.budget.startedOverBudget);
+  assert.equal(proposal.budget.delta, 0);
+
+  const editedRoot = makeMonorepo({
+    config: { budgetTokens: 1, nestedBudgetTokens: 2000, nestedMemoryFiles: ["apps/api/AGENTS.md"] },
+  });
+  const edited = run(editedRoot, makeCorpus(editedRoot), []);
+  assert.equal(edited.status, 1, edited.output);
+  assert.match(edited.output, /this run must shrink it/);
+
+  const unconfigured = makeMonorepo({ config: { budgetTokens: 1 } });
+  const noGapHome = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-nested-no-gap-home-"));
+  writeSession(noGapHome, "plain-one", unconfigured, {
+    quote: "Review the file.",
+    file: "apps/api/src/routes/orders.ts",
+  });
+  writeSession(noGapHome, "plain-two", unconfigured, {
+    quote: "Review the file.",
+    file: "apps/api/src/routes/orders.ts",
+  });
+  const root = run(unconfigured, noGapHome, []);
+  assert.equal(root.status, 1, root.output);
+  assert.match(root.output, /this run must shrink it/);
+});
+
 test("a subdirectory file listed only in memoryFiles still gets the consolidate warning; named as nested, it does not", () => {
   const listed = makeMonorepo({ config: { memoryFiles: ["AGENTS.md", "apps/api/AGENTS.md"] } });
   const home = makeCorpus(listed);
