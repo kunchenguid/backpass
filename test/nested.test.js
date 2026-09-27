@@ -180,7 +180,10 @@ test("a deeper nested analysis includes every loaded ancestor in its hash and co
     second.nested.find((weight) => weight.path === WEB.path).hash,
     first.nested.find((weight) => weight.path === WEB.path).hash,
   );
-  assert.match(renderAlsoLoaded(second.file, second.nested.find((weight) => weight.path === DB.path)), /# Changed API rule/);
+  assert.match(
+    renderAlsoLoaded(second.file, second.nested.find((weight) => weight.path === DB.path)),
+    /# Changed API rule/,
+  );
 });
 
 test("nested sibling warnings ignore an unrelated root memory basename", () => {
@@ -249,8 +252,18 @@ test("relative tool paths require an absolute recorded base, not the backpass pr
     { kind: "tool", input: "*** Begin Patch\n*** Update File: apps/api/src/orders.ts\n*** End Patch" },
   ];
   assert.deepEqual(workedPaths({}, relative, roots), []);
-  assert.deepEqual(workedPaths({}, [{ kind: "tool", input: { path: "src/orders.ts", workdir: path.join(repo.root, "apps/api") } }], roots), ["apps/api/src/orders.ts"]);
-  assert.deepEqual(workedPaths({}, [{ kind: "tool", input: { path: path.join(repo.root, "apps/api/src/orders.ts"), workdir: "apps/api" } }], roots), ["apps/api/src/orders.ts"]);
+  assert.deepEqual(
+    workedPaths({}, [{ kind: "tool", input: { path: "src/orders.ts", workdir: path.join(repo.root, "apps/api") } }], roots),
+    ["apps/api/src/orders.ts"],
+  );
+  assert.deepEqual(
+    workedPaths(
+      {},
+      [{ kind: "tool", input: { path: path.join(repo.root, "apps/api/src/orders.ts"), workdir: "apps/api" } }],
+      roots,
+    ),
+    ["apps/api/src/orders.ts"],
+  );
   assert.deepEqual(workedPaths({ cwd: repo.root }, relative, roots), ["apps/api/src/orders.ts"]);
   assert.deepEqual(workedPaths({ cwd: "apps/api" }, relative, roots), []);
 });
@@ -554,10 +567,12 @@ test("a rewrite stays with the file whose text it changes, whoever's sessions ba
 test("a separate addition in a mixed rewrite routes to its deepest owner", () => {
   const initialText = `# Memory\n\n- Rewrite this line.\n${Array.from({ length: 20 }, (_, i) => `- Existing rule ${i}.\n`).join("")}`;
   const change = (text) => text.replace("Rewrite this line", "Clarify this line") + "- Run the contract tests first.\n";
-  for (const [memoryPath, weight, weights, sessions, owner] of [
+  /** @type {[string, string | null, { path: string, dir: string }[], string[], string][]} */
+  const cases = [
     ["AGENTS.md", null, [API, DB], ["api-1", "api-2"], API.path],
     [API.path, API.path, [API, DB], ["db-1", "db-2"], DB.path],
-  ]) {
+  ];
+  for (const [memoryPath, weight, weights, sessions, owner] of cases) {
     const result = routedGate({ memoryPath, weight, weights, sessions, kind: "rewrite", initialText, change });
     assert.equal(result.proposal.edits.length, 0);
     assert.ok(result.violations.some((violation) => violation.includes(`it belongs in ${owner}`)));

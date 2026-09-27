@@ -237,7 +237,9 @@ test("root and nested synthesis both refuse direct writes to the other memory fi
             }),
       (err) =>
         err instanceof UserError &&
-        err.message.includes(`synthesis changed ${pass === "root" ? nestedPath : "AGENTS.md"} in the repository directly`),
+        err.message.includes(
+          `synthesis changed ${pass === "root" ? nestedPath : "AGENTS.md"} in the repository directly`,
+        ),
     );
     assert.equal(fs.readFileSync(target, "utf8"), "# Direct write\n");
   }

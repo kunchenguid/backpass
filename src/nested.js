@@ -155,7 +155,10 @@ export function reportNestedMemoryFiles(weights) {
  * as already loaded, and the skills, so a change to either re-judges the nested evidence.
  */
 export function nestedSurfaceHash(rootFile, weight, skills) {
-  return memorySurfaceHash(memorySetHash([rootFile, ...weight.ancestors.map((ancestor) => ancestor.file), weight.file]), skills);
+  return memorySurfaceHash(
+    memorySetHash([rootFile, ...weight.ancestors.map((ancestor) => ancestor.file), weight.file]),
+    skills,
+  );
 }
 
 export function nestedStateDir(rootState, weightPath) {

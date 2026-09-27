@@ -627,7 +627,9 @@ export async function synthesizeProposal({
   // (design note above `assertRepoUntouched`). It stays in the fingerprint so a change
   // there still fails the run loudly.
   const fingerprint = repoFingerprint(repo, [
-    ...new Set([memoryFile.path, ...config.memoryFiles, ...(config.nestedMemoryFiles || []), routing?.rootPath].filter(Boolean)),
+    ...new Set(
+      [memoryFile.path, ...config.memoryFiles, ...(config.nestedMemoryFiles || []), routing?.rootPath].filter(Boolean),
+    ),
     ...skillFiles
       .filter((skill) => {
         const reason = readOnlyReason(skill.path);
