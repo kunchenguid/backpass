@@ -192,6 +192,21 @@ test("structured tool paths use their call workdir; cwd only places sessions wit
   );
 });
 
+test("relative tool paths require an absolute recorded base, not the backpass process cwd", () => {
+  const repo = makeRepo({ "apps/api/AGENTS.md": "# API\n" });
+  const roots = checkoutRoots(repo);
+  const relative = [
+    { kind: "tool", input: { path: "apps/api/src/orders.ts" } },
+    { kind: "tool", input: { path: "src/orders.ts", workdir: "apps/api" } },
+    { kind: "tool", input: "*** Begin Patch\n*** Update File: apps/api/src/orders.ts\n*** End Patch" },
+  ];
+  assert.deepEqual(workedPaths({}, relative, roots), []);
+  assert.deepEqual(workedPaths({}, [{ kind: "tool", input: { path: "src/orders.ts", workdir: path.join(repo.root, "apps/api") } }], roots), ["apps/api/src/orders.ts"]);
+  assert.deepEqual(workedPaths({}, [{ kind: "tool", input: { path: path.join(repo.root, "apps/api/src/orders.ts"), workdir: "apps/api" } }], roots), ["apps/api/src/orders.ts"]);
+  assert.deepEqual(workedPaths({ cwd: repo.root }, relative, roots), ["apps/api/src/orders.ts"]);
+  assert.deepEqual(workedPaths({ cwd: "apps/api" }, relative, roots), []);
+});
+
 test("out-of-repo paths do not make in-repo API work cross-cutting", async () => {
   const repo = makeRepo({ "apps/api/AGENTS.md": "# API\n" });
   const paths = workedPaths(
@@ -407,11 +422,15 @@ function routedGate({
   change = (text) => `${text}- Run the contract tests first.\n`,
   kind = "add",
   routing = true,
+  weights = [API, WEB],
+  initialText = null,
 }) {
   const repo = makeRepo({
     "AGENTS.md": "# Root\n\n- Use pnpm for every package script.\n",
     "apps/api/AGENTS.md": "# API\n\n- Handlers live in src/routes.\n",
+    "apps/api/db/AGENTS.md": "# Database\n\n- Migrations live in db.\n",
   });
+  if (initialText !== null) writeIn(repo.root, memoryPath, initialText);
   const staged = stageAndMeasure({ repo, memoryPath, edit: (root) => writeIn(root, memoryPath, change) });
   const labels = [...ATTRIBUTION.keys()].map(labelOf);
   const summary = {
@@ -425,7 +444,7 @@ function routedGate({
     {
       edits: [
         {
-          changes: ["H1"],
+          changes: staged.measured.changes.map((change) => change.id),
           kind,
           title: "contract tests",
           evidence: sessions.map((id) => ({ polarity: "negative", text: `${id} hit it`, source: labelOf(id) })),
@@ -438,7 +457,7 @@ function routedGate({
       repo,
       summary,
       measured: staged.measured,
-      routing: routing ? routingFor([API, WEB], ATTRIBUTION, "AGENTS.md", weight) : null,
+      routing: routing ? routingFor(weights, ATTRIBUTION, "AGENTS.md", weight) : null,
     },
   );
 }
@@ -482,6 +501,30 @@ test("a rewrite stays with the file whose text it changes, whoever's sessions ba
     change: (text) => text.replace("every package script", "every package script, including the api's"),
   });
   assert.deepEqual(rewrite.violations, []);
+});
+
+test("a separate addition in a mixed rewrite routes to its deepest owner", () => {
+  const initialText = `# Memory\n\n- Rewrite this line.\n${Array.from({ length: 20 }, (_, i) => `- Existing rule ${i}.\n`).join("")}`;
+  const change = (text) => text.replace("Rewrite this line", "Clarify this line") + "- Run the contract tests first.\n";
+  for (const [memoryPath, weight, weights, sessions, owner] of [
+    ["AGENTS.md", null, [API, DB], ["api-1", "api-2"], API.path],
+    [API.path, API.path, [API, DB], ["db-1", "db-2"], DB.path],
+  ]) {
+    const result = routedGate({ memoryPath, weight, weights, sessions, kind: "rewrite", initialText, change });
+    assert.equal(result.proposal.edits.length, 0);
+    assert.ok(result.violations.some((violation) => violation.includes(`it belongs in ${owner}`)));
+  }
+  const correct = routedGate({
+    memoryPath: API.path,
+    weight: API.path,
+    weights: [API, DB],
+    sessions: ["api-1", "api-2"],
+    kind: "rewrite",
+    initialText,
+    change,
+  });
+  assert.deepEqual(correct.violations, []);
+  assert.equal(correct.proposal.edits[0].hunks.length, 2, "the rewrite and addition are separate measured hunks");
 });
 
 // ---------- each nested file has its own budget ----------

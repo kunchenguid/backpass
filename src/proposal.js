@@ -588,7 +588,7 @@ export function buildProposal(rawResult, context) {
     // whose directory every session behind it worked in (`src/nested.js`). Measured from
     // the edit's own quote sources, like the floor above; a rewrite or removal stays with
     // the file whose text it changes.
-    if (routing && !preservesAlwaysLoaded(edit.kind) && onlyAdds) {
+    if (routing && !preservesAlwaysLoaded(edit.kind) && hunks.some((h) => h.added > 0 && h.removed === 0)) {
       const sessions = [
         ...new Set(
           edit.evidence.map((item) => summary?.sourceSessions?.[normalizeSourceLabel(item.source)]).filter(Boolean),

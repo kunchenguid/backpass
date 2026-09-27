@@ -37,8 +37,10 @@ import { transcriptIdentity } from "./transcript.js";
  * Where a session worked is deterministic: the paths its tool calls name in structured
  * fields (and the file headers of an apply_patch body), resolved against the checkouts
  * of this repository that discovery already knows. Paths outside known checkouts are
- * ignored: only in-repo paths define directory scope. Without paths, its cwd is used.
- * Nothing is read out of shell command text. A session that ran on another machine,
+ * ignored: only in-repo paths define directory scope. A nested file trains only when
+ * every in-repo work path stays under its subtree: editing apps/api/src/orders.ts and
+ * reading README.md is cross-cutting and feeds only the root file. Without paths, its
+ * cwd is used. Nothing is read out of shell command text. A session that ran on another machine,
  * or whose paths resolve to no known checkout, worked nowhere in particular and feeds
  * only the root file: a wrong attribution is worse evidence than none.
  *
@@ -46,7 +48,7 @@ import { transcriptIdentity } from "./transcript.js";
  * single-primary run it always was.
  */
 
-export const ATTRIBUTION_VERSION = 2;
+export const ATTRIBUTION_VERSION = 3;
 
 /** Tool-input fields that name a file or directory a session worked in. */
 const PATH_FIELDS = ["file_path", "filePath", "notebook_path", "path"];
@@ -265,13 +267,13 @@ export function toolPaths(events) {
  * to its cwd when no tool paths are recorded. Paths outside known checkouts are dropped.
  */
 export function workedPaths(transcript, events, roots) {
-  const cwd = transcript.cwd || null;
+  const cwd = path.isAbsolute(transcript.cwd || "") ? transcript.cwd : null;
   const out = new Set();
   const named = toolPaths(events);
   if (!named.length && cwd) named.push({ raw: cwd, workdir: null });
   for (const { raw, workdir } of named) {
     if (raw.startsWith("~") || workdir?.startsWith("~")) continue;
-    const base = workdir ? path.resolve(cwd || "", workdir) : cwd;
+    const base = workdir ? (path.isAbsolute(workdir) ? workdir : cwd ? path.resolve(cwd, workdir) : null) : cwd;
     if (!path.isAbsolute(raw) && !base) continue;
     const relative = projectWorkPath(path.resolve(base || "", raw), roots);
     if (relative !== null) out.add(relative);

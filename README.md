@@ -620,8 +620,10 @@ weight of its own; a missing file is reported, never created:
   alone locates work only when no structured paths exist; shell command text and a tool
   workdir alone are not work paths. Paths outside this repository's known checkouts are
   ignored: only in-repo paths define directory scope. A nested file is audited only
-  against sessions whose in-repo work stays under its directory, with the root file shown
-  as already loaded, and keeps its own evidence, gap ledger, and staging copy under
+  against sessions whose every in-repo work path stays under its directory. A session
+  editing `apps/api/src/orders.ts` that also reads `README.md` is cross-cutting and feeds
+  only the root file. The nested pass sees the root file as already loaded and keeps its
+  own evidence, gap ledger, and staging copy under
   `.backpass/nested/`. A session collected over ssh, or one with no in-repo work path,
   is placed nowhere and feeds only the root file.
 - **Routing.** A new instruction belongs to the most specific named file whose directory
