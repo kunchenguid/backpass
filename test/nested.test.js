@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { loadConfig } from "../src/config.js";
-import { nestedCorpora } from "../src/commands/analyze.js";
+import { nestedCorpora, primaryMemoryFile } from "../src/commands/analyze.js";
 import { foldEvidence, renderEvidenceForPrompt } from "../src/fold.js";
 import { setLoggerSink } from "../src/logger.js";
 import { buildProposal } from "../src/proposal.js";
@@ -20,6 +20,7 @@ import {
   nestedContext,
   owningFile,
   reportNestedMemoryFiles,
+  renderAlsoLoaded,
   resolveNestedMemoryFiles,
   routingFor,
   workedPaths,
@@ -149,6 +150,37 @@ test("a nested directory keeps the root pair's pointer model: a pointer is refus
     ),
   );
   assert.match(pointer.error?.message ?? "", /apps\/web\/CLAUDE\.md is only a pointer to apps\/web\/AGENTS\.md/);
+});
+
+test("a deeper nested analysis includes every loaded ancestor in its hash and context", () => {
+  const repo = makeRepo({
+    "AGENTS.md": "# Root rule\n",
+    [API.path]: "# API rule\n",
+    [DB.path]: "# Database rule\n",
+    [WEB.path]: "# Web rule\n",
+  });
+  const config = loadConfig(repo.root, { nestedMemoryFiles: [DB.path, WEB.path, API.path] });
+  const first = primaryMemoryFile(repo, config);
+  const db = first.nested.find((weight) => weight.path === DB.path);
+  const api = first.nested.find((weight) => weight.path === API.path);
+  assert.deepEqual(db.ancestors.map((ancestor) => ancestor.path), [API.path]);
+  const context = renderAlsoLoaded(first.file, db);
+  const rootAt = context.indexOf("### Root memory file: AGENTS.md");
+  const apiAt = context.indexOf(`### Ancestor memory file: ${API.path}`);
+  assert.ok(rootAt >= 0 && rootAt < apiAt);
+  assert.match(context, /# Root rule/);
+  assert.match(context, /# API rule/);
+  assert.ok(!context.includes("# Web rule") && !context.includes("# Database rule"));
+
+  writeIn(repo.root, API.path, "# Changed API rule\n");
+  const second = primaryMemoryFile(repo, config);
+  assert.notEqual(second.nested.find((weight) => weight.path === DB.path).hash, db.hash);
+  assert.notEqual(second.nested.find((weight) => weight.path === API.path).hash, api.hash);
+  assert.equal(
+    second.nested.find((weight) => weight.path === WEB.path).hash,
+    first.nested.find((weight) => weight.path === WEB.path).hash,
+  );
+  assert.match(renderAlsoLoaded(second.file, second.nested.find((weight) => weight.path === DB.path)), /# Changed API rule/);
 });
 
 test("nested sibling warnings ignore an unrelated root memory basename", () => {

@@ -154,8 +154,8 @@ export function reportNestedMemoryFiles(weights) {
  * The hash a nested file's evidence is keyed to. The analysis prompt shows the root file
  * as already loaded, and the skills, so a change to either re-judges the nested evidence.
  */
-export function nestedSurfaceHash(rootFile, file, skills) {
-  return memorySurfaceHash(memorySetHash([rootFile, file]), skills);
+export function nestedSurfaceHash(rootFile, weight, skills) {
+  return memorySurfaceHash(memorySetHash([rootFile, ...weight.ancestors.map((ancestor) => ancestor.file), weight.file]), skills);
 }
 
 export function nestedStateDir(rootState, weightPath) {
@@ -189,12 +189,19 @@ export function nestedContext(ctx, weight) {
 
 /** The root text as the nested analysis prompt shows it: loaded, but not under audit. */
 export function renderAlsoLoaded(rootFile, weight) {
+  const loaded = [
+    `### Root memory file: ${rootFile.path}\n\n${rootFile.text.trim()}`,
+    ...weight.ancestors.map((ancestor) =>
+      `### Ancestor memory file: ${ancestor.path}\n\n${ancestor.file.text.trim()}`,
+    ),
+  ];
   return (
     `\n\n## Also loaded in this session - not under audit\n\n` +
     `${weight.path} is a nested memory file: harnesses load it on top of the root memory file ` +
-    `below, and only when a session works under ${weight.dir}/. The root file is audited in its own ` +
-    `pass, so never attribute evidence to it, and a mistake it already covers is not a gap here.\n\n` +
-    `### Root memory file: ${rootFile.path}\n\n${rootFile.text.trim()}`
+    `and any named ancestor files below, and only when a session works under ${weight.dir}/. ` +
+    `Those files are audited in their own passes, so never attribute evidence to them, and ` +
+    `a mistake they already cover is not a gap here.\n\n` +
+    loaded.join("\n\n")
   );
 }
 

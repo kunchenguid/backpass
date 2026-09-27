@@ -60,10 +60,14 @@ export function primaryMemoryFile(repo, config, scope = null) {
   const skills = loadProjectSkills(repo.root, overflow.dir, config.skillsDirs || [], { exact: userScope });
   // Nested memory files are weights of their own, named in `nestedMemoryFiles` - never a
   // separate root file to consolidate (`src/nested.js`).
-  const nested = reportNestedMemoryFiles(resolveNestedMemoryFiles(repo.root, config)).map((weight) => ({
-    ...weight,
-    hash: nestedSurfaceHash(resolved.primary, weight.file, skills),
-  }));
+  const named = reportNestedMemoryFiles(resolveNestedMemoryFiles(repo.root, config));
+  const nested = named.map((weight) => {
+    const ancestors = named
+      .filter((candidate) => weight.dir.startsWith(`${candidate.dir}/`))
+      .sort((a, b) => a.dir.length - b.dir.length);
+    const layered = { ...weight, ancestors };
+    return { ...layered, hash: nestedSurfaceHash(resolved.primary, layered, skills) };
+  });
   return {
     file: resolved.primary,
     all: resolved.all,
