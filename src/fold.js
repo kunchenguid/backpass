@@ -50,7 +50,7 @@ import { crossSurfaceDuplicates } from "./overlap.js";
 
 /**
  * @param {object[]} evidenceRecords
- * @param {{ minGapEvidence?: number, minGapProjects?: number, checkProjectCoverage?: boolean, memoryFile?: object|null, gapObservations?: object[]|null, skills?: object[], route?: { weight: string|null, rootPath: string, ownerOf: (sessionIds: string[]) => string|null }|null }} [options]
+ * @param {{ minGapEvidence?: number, minGapProjects?: number, checkProjectCoverage?: boolean, memoryFile?: object|null, gapObservations?: object[]|null, skills?: object[], route?: { weight: string|null, rootPath: string, ownerOf: (sessionIds: string[]) => string|null, rootOwnedGaps?: { sessionId: string, quote: string }[][] }|null }} [options]
  */
 export function foldEvidence(
   evidenceRecords,
