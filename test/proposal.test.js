@@ -568,9 +568,9 @@ test("a quote counts as a session only when the fold issued its source label", (
         claim(["H1"], {
           kind: "rewrite",
           title: "two fold-issued sessions",
-          evidence: summary.sources.map((source, i) => ({
+          evidence: summary.sources.map((source) => ({
             polarity: "negative",
-            text: `quote ${i}`,
+            text: summary.instructions[0].quotes.find((quote) => quote.source === source).text,
             source,
           })),
         }),
@@ -590,9 +590,287 @@ test("a quote counts as a session only when the fold issued its source label", (
   });
   assert.equal(unissued.proposal.edits.length, 0);
   assert.ok(
-    unissued.violations.some((v) => /backed by 0 session\(s\); 2 are required/.test(v)),
+    unissued.violations.some((v) => /not a unique fold-issued quote from that source/.test(v)),
     unissued.violations.join("\n"),
   );
+});
+
+test("an invented quote with a fold-issued source is a violation, not a session", () => {
+  const foldRecord = (id, day, quote) => ({
+    status: "ok",
+    transcript: { id, harness: "claude", startedAt: Date.parse(`2026-08-${day}T00:00:00Z`) },
+    positive: [],
+    negative: [{ instruction: "AG-001", quote, effect: "the rule was skipped", class: "non-compliance" }],
+    gaps: [],
+  });
+  const summary = foldEvidence(
+    [
+      foldRecord("b859b8f3deadbeef", "18", "the agent posted the full URL"),
+      foldRecord("c0ffee00deadbeef", "19", "the PR was named without a link"),
+    ],
+    { memoryFile: { units: parseMemoryUnits(MEMORY_TEXT) }, minGapEvidence: 2 },
+  );
+  const [first, second] = summary.sources;
+  const { proposal, violations } = gate({
+    edit: memoryEdit(REWRITE_SHAPES["append a sentence"]),
+    annotation: {
+      edits: [
+        claim(["H1"], {
+          kind: "rewrite",
+          title: "paraphrase with real labels",
+          evidence: [
+            { polarity: "negative", text: "the agent shared the complete link", source: first },
+            { polarity: "negative", text: "the pull request had no hyperlink", source: second },
+          ],
+        }),
+      ],
+    },
+    context: { summary },
+  });
+  assert.equal(proposal.edits.length, 0);
+  assert.ok(
+    violations.some((v) => /not a unique fold-issued quote from that source/.test(v)),
+    violations.join("\n"),
+  );
+});
+
+test("a unique catalog substring inherits polarity, class, and locator", () => {
+  const locator = { foldedOffset: 4, turn: 3, role: "assistant" };
+  const foldRecord = (id, day, quote, extra) => ({
+    status: "ok",
+    transcript: { id, harness: "claude", startedAt: Date.parse(`2026-08-${day}T00:00:00Z`) },
+    positive: [],
+    negative: [
+      {
+        instruction: "AG-001",
+        quote,
+        effect: "the rule caused a bad merge",
+        class: "harm",
+        ...extra,
+      },
+    ],
+    gaps: [],
+  });
+  const summary = foldEvidence(
+    [
+      foldRecord("b859b8f3deadbeef", "18", "the agent posted the full URL in the comment", {
+        locator,
+        before: "### turn 3 · assistant\n",
+        after: " and then continued",
+      }),
+      foldRecord("c0ffee00deadbeef", "19", "the PR was named without a link"),
+    ],
+    { memoryFile: { units: parseMemoryUnits(MEMORY_TEXT) }, minGapEvidence: 2 },
+  );
+  const [first, second] = summary.sources;
+  const { proposal, violations } = gate({
+    edit: memoryEdit(REWRITE_SHAPES["append a sentence"]),
+    annotation: {
+      edits: [
+        claim(["H1"], {
+          kind: "rewrite",
+          title: "cite a shorter span",
+          evidence: [
+            { polarity: "positive", text: "posted the full URL", source: first },
+            { polarity: "negative", text: "the PR was named without a link", source: second },
+          ],
+        }),
+      ],
+    },
+    context: { summary },
+  });
+  assert.deepEqual(violations, [], violations.join("\n"));
+  assert.equal(proposal.edits[0].transcripts, 2);
+  const inherited = proposal.edits[0].evidence.find((item) => item.source === first);
+  assert.equal(inherited.polarity, "negative");
+  assert.equal(inherited.class, "harm");
+  assert.equal(inherited.text, "posted the full URL");
+  assert.deepEqual(inherited.locator, locator);
+  assert.equal(inherited.before, "### turn 3 · assistant\nthe agent ");
+  assert.equal(inherited.after, " in the comment and then continued");
+});
+
+test("a catalog quote copied with its display ellipsis still binds", () => {
+  const long = `the agent posted the full URL ${"and kept explaining the change ".repeat(10)}until the end`;
+  const foldRecord = (id, day, quote) => ({
+    status: "ok",
+    transcript: { id, harness: "claude", startedAt: Date.parse(`2026-08-${day}T00:00:00Z`) },
+    positive: [],
+    negative: [{ instruction: "AG-001", quote, effect: "the rule was skipped", class: "harm" }],
+    gaps: [],
+  });
+  const summary = foldEvidence(
+    [
+      foldRecord("b859b8f3deadbeef", "18", long),
+      foldRecord("c0ffee00deadbeef", "19", "the PR was named without a link"),
+    ],
+    { memoryFile: { units: parseMemoryUnits(MEMORY_TEXT) }, minGapEvidence: 2 },
+  );
+  const [first, second] = summary.sources;
+  const rendered = renderEvidenceForPrompt(summary);
+  const shown = `${long.slice(0, 240)}...`;
+  assert.ok(rendered.includes(shown), rendered);
+  const { proposal, violations } = gate({
+    edit: memoryEdit(REWRITE_SHAPES["append a sentence"]),
+    annotation: {
+      edits: [
+        claim(["H1"], {
+          kind: "rewrite",
+          title: "copy the displayed quote",
+          evidence: [
+            { polarity: "negative", text: shown, source: first },
+            { polarity: "negative", text: "the PR was named without a link", source: second },
+          ],
+        }),
+      ],
+    },
+    context: { summary },
+  });
+  assert.deepEqual(violations, [], violations.join("\n"));
+  assert.equal(proposal.edits[0].transcripts, 2);
+  assert.equal(proposal.edits[0].evidence.find((item) => item.source === first).text, long.slice(0, 240).trimEnd());
+});
+
+test("an instruction quote and a gap quote with the same text bind as one match", () => {
+  const edit = memoryEdit((text) => `${text}- Include the full pull request URL.\n`);
+  const shared = "it used a bare #2731 reference in the pull request body";
+  const summary = {
+    analyzedSessions: 3,
+    sources: [QUOTE[0].source, QUOTE[1].source],
+    totals: { positive: 0, negative: 1, gapClusters: 1 },
+    instructions: [
+      {
+        instruction: "AG-001",
+        quotes: [
+          { polarity: "negative", text: shared, source: QUOTE[0].source, class: "harm" },
+          { polarity: "negative", text: QUOTE[1].text, source: QUOTE[1].source },
+        ],
+      },
+    ],
+    gaps: [
+      {
+        proposedInstruction: "Include the full pull request URL.",
+        sessions: 3,
+        projects: 2,
+        quotes: [{ text: shared, source: QUOTE[0].source }],
+      },
+    ],
+  };
+  const { proposal, violations } = gate({
+    edit,
+    annotation: {
+      edits: [
+        claim(["H1"], {
+          kind: "add",
+          evidence: [
+            { polarity: "negative", text: shared, source: QUOTE[0].source },
+            { polarity: "negative", text: QUOTE[1].text, source: QUOTE[1].source },
+          ],
+        }),
+      ],
+    },
+    config: config({ minGapProjects: 2 }),
+    context: { summary, scope: { kind: "user" } },
+  });
+  assert.deepEqual(violations, [], violations.join("\n"));
+  assert.equal(proposal.edits[0].evidence.find((item) => item.source === QUOTE[0].source).class, "harm");
+  assert.equal(proposal.edits[0].projects, 2);
+});
+
+test("a substring that matches two catalog quotes from the same source is a violation", () => {
+  const foldRecord = (id, day, quotes) => ({
+    status: "ok",
+    transcript: { id, harness: "claude", startedAt: Date.parse(`2026-08-${day}T00:00:00Z`) },
+    positive: quotes.filter((q) => q.polarity === "positive"),
+    negative: quotes.filter((q) => q.polarity === "negative"),
+    gaps: [],
+  });
+  const summary = foldEvidence(
+    [
+      foldRecord("b859b8f3deadbeef", "18", [
+        {
+          polarity: "positive",
+          instruction: "AG-001",
+          quote: "the agent posted the full URL and then continued",
+        },
+        {
+          polarity: "negative",
+          instruction: "AG-001",
+          quote: "the agent posted the full URL without checking",
+          class: "harm",
+        },
+      ]),
+      foldRecord("c0ffee00deadbeef", "19", [
+        { polarity: "negative", instruction: "AG-001", quote: "the PR was named without a link", class: "harm" },
+      ]),
+    ],
+    { memoryFile: { units: parseMemoryUnits(MEMORY_TEXT) }, minGapEvidence: 2 },
+  );
+  const [first, second] = summary.sources;
+  const { proposal, violations } = gate({
+    edit: memoryEdit(REWRITE_SHAPES["append a sentence"]),
+    annotation: {
+      edits: [
+        claim(["H1"], {
+          kind: "rewrite",
+          title: "ambiguous span",
+          evidence: [
+            { polarity: "negative", text: "the agent posted the full URL", source: first },
+            { polarity: "negative", text: "the PR was named without a link", source: second },
+          ],
+        }),
+      ],
+    },
+    context: { summary },
+  });
+  assert.equal(proposal.edits.length, 0);
+  assert.ok(
+    violations.some((v) => /matches 2 fold-issued quotes from that source/.test(v)),
+    violations.join("\n"),
+  );
+});
+
+test("countedEvidenceProjects credits a unique substring of a gap quote", () => {
+  const edit = memoryEdit((text) => `${text}- Include the full pull request URL.\n`);
+  const longGap = "it used a bare #2731 reference in the pull request body";
+  const summary = {
+    analyzedSessions: 3,
+    sources: [QUOTE[0].source, QUOTE[1].source],
+    totals: { positive: 0, negative: 0, gapClusters: 1 },
+    instructions: [
+      {
+        instruction: "AG-001",
+        quotes: [{ polarity: "negative", text: QUOTE[1].text, source: QUOTE[1].source }],
+      },
+    ],
+    gaps: [
+      {
+        proposedInstruction: "Include the full pull request URL.",
+        sessions: 3,
+        projects: 2,
+        quotes: [{ text: longGap, source: QUOTE[0].source }],
+      },
+    ],
+  };
+
+  const { proposal, violations } = gate({
+    edit,
+    annotation: {
+      edits: [
+        claim(["H1"], {
+          kind: "add",
+          evidence: [
+            { polarity: "negative", text: "it used a bare #2731 reference", source: QUOTE[0].source },
+            { polarity: "negative", text: QUOTE[1].text, source: QUOTE[1].source },
+          ],
+        }),
+      ],
+    },
+    config: config({ minGapProjects: 2 }),
+    context: { summary, scope: { kind: "user" } },
+  });
+  assert.deepEqual(violations, [], violations.join("\n"));
+  assert.equal(proposal.edits[0].projects, 2);
 });
 
 test("on the r1 dry-run corpus, only the edit whose second source was never issued is refused", () => {
@@ -663,10 +941,13 @@ test("on the r1 dry-run corpus, only the edit whose second source was never issu
     },
   ];
 
+  const quoteBySource = new Map(
+    summary.instructions.flatMap((row) => row.quotes.map((quote) => [quote.source, quote.text])),
+  );
   for (const item of cases) {
     const evidence = item.sources.map((source, i) => ({
       polarity: "negative",
-      text: `${item.name} quote ${i}`,
+      text: quoteBySource.get(source) || `${item.name} quote ${i}`,
       source,
     }));
     const { proposal, violations } = gate({
@@ -2181,6 +2462,33 @@ test("a dry run reports what it would write without touching the file", () => {
   assert.equal(fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8"), MEMORY_TEXT, "dry run must not write");
 });
 
+test("injectPayload keeps quote windows in the apply HTML payload", () => {
+  const template = "<html><head><title>t</title></head><body></body></html>";
+  const payload = {
+    edits: [
+      {
+        title: "spell out the URL",
+        evidence: [
+          {
+            polarity: "negative",
+            text: "it used a bare #2731 reference",
+            source: "claude · abc · 2026-08-18",
+            before: "### turn 3 · assistant\nthen ",
+            after: " in the follow-up",
+          },
+        ],
+      },
+    ],
+  };
+  const html = injectPayload(template, payload, "0.1.0");
+  const parsed = extractInjectedPayload(html);
+  assert.equal(parsed.edits[0].evidence[0].text, "it used a bare #2731 reference");
+  assert.equal(parsed.edits[0].evidence[0].before, "### turn 3 · assistant\nthen ");
+  assert.equal(parsed.edits[0].evidence[0].after, " in the follow-up");
+  assert.ok(html.includes("it used a bare #2731 reference"));
+  assert.ok(html.includes("in the follow-up"));
+});
+
 test("the apply surface receives one payload, with markup in the data neutralised", () => {
   const template = "<html><head><title>t</title></head><body></body></html>";
   const html = injectPayload(template, { edits: [{ title: "</script><img onerror=alert(1)>" }] }, "0.1.0");
@@ -2261,6 +2569,42 @@ test("renderApplySurface writes one valid document through the real template", (
   assert.equal((html.match(/<\/head>/gi) || []).length, 1, "injection point must not duplicate");
 
   assert.deepEqual(extractInjectedPayload(html), { ...payload, toolVersion: "0.1.0" });
+});
+
+test("the apply HTML card expands a quote window from the injected payload", () => {
+  const rendered = renderTemplateScript({
+    generatedAt: "2026-08-01T00:00:00.000Z",
+    repo: { name: "demo" },
+    memoryFile: { path: "AGENTS.md" },
+    stats: { harnessCounts: {}, transcripts: 2, positive: 0, negative: 1, gapClusters: 0 },
+    config: { maxEditsPerRun: 5, minGapEvidence: 2 },
+    budget: { current: 10, projected: 12, capTokens: 100, descriptionTokens: 0, mode: "cap" },
+    edits: [
+      {
+        id: "e1",
+        kind: "rewrite",
+        title: "spell out the URL",
+        file: "AGENTS.md",
+        targetsMemoryFile: true,
+        transcripts: 1,
+        hunks: [],
+        evidence: [
+          {
+            polarity: "negative",
+            text: "it used a bare #2731 reference",
+            source: "claude · abc · 2026-08-18",
+            before: "### turn 3 · assistant\nthen ",
+            after: " in the follow-up",
+          },
+        ],
+      },
+    ],
+  });
+  const card = rendered.textOf(rendered.nodes.get("edits"));
+  assert.match(card, /it used a bare #2731 reference/);
+  assert.match(card, /### turn 3 · assistant/);
+  assert.match(card, /in the follow-up/);
+  assert.match(card, /claude · abc · 2026-08-18/);
 });
 
 // Runs the real template's own script against a DOM stub small enough to keep the
@@ -2622,6 +2966,53 @@ test("terminal review labels every file in a multi-file extraction", () => {
   assert.match(output, /--- \.agents\/skills\/setup\/SKILL\.md ---/);
 });
 
+test("terminal review prints a distilled quote window only when one is present", () => {
+  const withWindow = renderEdit(
+    {
+      kind: "rewrite",
+      title: "spell out the URL",
+      file: "AGENTS.md",
+      targetsMemoryFile: true,
+      transcripts: 2,
+      hunks: [{ file: "AGENTS.md", lines: [{ type: "ins", text: "- include the full URL" }] }],
+      evidence: [
+        {
+          polarity: "negative",
+          text: "it used a bare #2731 reference",
+          source: "claude · abc · 2026-08-18",
+          before: "### turn 3 · assistant\nthen ",
+          after: " in the follow-up",
+        },
+      ],
+    },
+    0,
+    1,
+  );
+  assert.match(withWindow, /it used a bare #2731 reference/);
+  assert.match(withWindow, /### turn 3 · assistant/);
+  assert.match(withWindow, /in the follow-up/);
+  assert.match(withWindow, /claude · abc · 2026-08-18/);
+  assert.equal((withWindow.match(/it used a bare #2731 reference/g) || []).length, 1);
+
+  const withoutWindow = renderEdit(
+    {
+      kind: "rewrite",
+      title: "legacy quote",
+      file: "AGENTS.md",
+      targetsMemoryFile: true,
+      transcripts: 1,
+      hunks: [{ file: "AGENTS.md", lines: [{ type: "ins", text: "- include the full URL" }] }],
+      evidence: [{ polarity: "negative", text: "it used a bare #2731 reference", source: "claude · abc · 2026-08-18" }],
+    },
+    0,
+    1,
+  );
+  assert.match(withoutWindow, /it used a bare #2731 reference/);
+  assert.match(withoutWindow, /claude · abc · 2026-08-18/);
+  assert.doesNotMatch(withoutWindow, /turn 3/);
+  assert.equal((withoutWindow.match(/it used a bare #2731 reference/g) || []).length, 1);
+});
+
 test("the decision vector from the review surface is parsed back into decisions", () => {
   const ids = ["e1", "e2", "e3"];
   assert.deepEqual(parseDecisions("BACKPASS_DECISIONS e1=accepted e2=rejected e3=accepted", ids), {
@@ -2845,9 +3236,9 @@ test("sentence-level harm clears removal of its oversized parent paragraph", () 
         claim(["H1"], {
           kind: "remove",
           title: "remove the harmful paragraph",
-          evidence: summary.sources.map((source, i) => ({
+          evidence: summary.sources.map((source) => ({
             polarity: "negative",
-            text: `harm quote ${i}`,
+            text: summary.instructions.flatMap((row) => row.quotes).find((quote) => quote.source === source).text,
             source,
           })),
         }),

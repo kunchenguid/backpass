@@ -615,6 +615,47 @@
       .evidence .quote.positive {
         border-left-color: var(--accent);
       }
+      .evidence .quote-window {
+        margin: 0;
+      }
+      .evidence .quote-window summary {
+        cursor: pointer;
+        color: inherit;
+        font-family: inherit;
+        font-size: inherit;
+        letter-spacing: 0;
+        list-style: none;
+      }
+      .evidence .quote-window summary::-webkit-details-marker {
+        display: none;
+      }
+      .evidence .quote-window summary::before {
+        content: "> ";
+        color: var(--faint);
+        font-family: var(--mono);
+        font-size: 10.5px;
+      }
+      .evidence .quote-window[open] summary::before {
+        content: "v ";
+      }
+      .evidence .window {
+        margin-top: 8px;
+        font-family: var(--mono);
+        font-size: 12px;
+        line-height: 1.65;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .evidence .window .before,
+      .evidence .window .after {
+        color: var(--faint);
+      }
+      .evidence .quote.negative .window .hit {
+        color: var(--reject);
+      }
+      .evidence .quote.positive .window .hit {
+        color: var(--accent);
+      }
 
       .decide {
         display: flex;
@@ -1266,11 +1307,20 @@
               ),
             );
             edit.evidence.forEach(function (q) {
-              var quote = el(
-                "div",
-                "quote " + (q.polarity === "positive" ? "positive" : "negative"),
-                "“" + q.text + "”",
-              );
+              var quote = el("div", "quote " + (q.polarity === "positive" ? "positive" : "negative"));
+              var hasWindow = typeof q.before === "string" && typeof q.after === "string";
+              if (hasWindow) {
+                var nest = el("details", "quote-window");
+                nest.appendChild(el("summary", null, "“" + q.text + "”"));
+                var win = el("div", "window");
+                win.appendChild(el("span", "before", q.before));
+                win.appendChild(el("span", "hit", q.text));
+                win.appendChild(el("span", "after", q.after));
+                nest.appendChild(win);
+                quote.appendChild(nest);
+              } else {
+                quote.appendChild(document.createTextNode("“" + q.text + "”"));
+              }
               quote.appendChild(el("span", "src", q.source));
               det.appendChild(quote);
             });

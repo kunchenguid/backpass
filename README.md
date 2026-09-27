@@ -437,7 +437,8 @@ Then mechanical gates run, and they are not negotiable:
   of an extract
 - a move's normalized removed and added line multisets match exactly, so it repositions
   text one-for-one without smuggling additions or triggering the harm floor
-- every edit carries a verbatim quote
+- every edit carries a verbatim quote, and each quote must be a fold-issued catalog quote for
+  its source, or a unique substring of one; invented, paraphrased, or ambiguous quotes are refused
 - the post-edit always-loaded surface must fit the budget, or shrink if already over it, measured from the staged files
 
 An extraction is the `SKILL.md` (created, or an existing skill file that still carries
@@ -534,7 +535,8 @@ changed since the proposal measured it, exactly as it refuses a drifted memory f
 
 `backpass apply` is the only command that writes. It serves a review surface through
 [`lavish-axi`](https://github.com/kunchenguid/lavish-axi): one card per edit with the diff,
-the evidence quotes and their sources, a live budget gauge, and ACCEPT / REJECT. Above them
+the evidence quotes and their sources (with the surrounding distilled-trace context when
+analysis located the quote), a live budget gauge, and ACCEPT / REJECT. Above them
 one funnel band runs from every finding the analysis recorded down to the edits proposed.
 Blue and amber lanes distinguish existing-instruction work from missing-instruction work;
 the final row counts edits by their measured shape, while the earlier rows count findings

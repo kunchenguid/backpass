@@ -40,8 +40,10 @@ Each owning file's comments and tests hold the detail; read them before touching
   lexical or text-shape classifier to these gates, and non-compliance never counts as harm. The >= 20%
   relevance placement table (`src/prompts/synthesis.md`) stays prompt guidance, never a `buildProposal` gate.
 - **Quotes must be found in the trace they cite** (`sanitizeEvidence` in `src/analyze.js`), so fake agents in
-  tests must quote real session text. Bump `ANALYSIS_INDEX_VERSION` (`src/state.js`) for any change to what
-  analysis accepts.
+  tests must quote real session text. Annotate quotes must be a unique fold-catalog substring from that
+  source (`buildProposal` in `src/proposal.js`). Apply shows the distilled window when a locator exists;
+  a missing window does not refuse an edit. Bump `ANALYSIS_INDEX_VERSION` (`src/state.js`) for any change
+  to what analysis accepts.
 - **Sampling is deterministic and sticky** (`src/sample.js`): a per-transcript hash of `transcriptIdentity` and
   `config.seed`, never `Math.random()` or an index/position-derived draw.
 - **Corpus mix is interactive vs non-interactive, never an unknown bucket** (`src/interaction.js`).
