@@ -612,13 +612,15 @@ it never writes a file you did not name:
 With the list unset, a run is exactly the single-file run described above. With it set, a
 run over the whole surface trains every named file as a weight of its own:
 
-- **Evidence per subtree.** A session worked where its cwd and the paths its tool calls
-  name point (file paths, working directories, the file headers of an apply_patch),
-  resolved against this repository's known checkouts; nothing is read out of shell command
-  text. A nested file is audited only against the sessions that worked under its directory,
-  with the root file shown as already loaded, and keeps its own evidence, gap ledger, and
-  staging copy under `.backpass/nested/`. A session collected over ssh, or one whose paths
-  resolve to no known checkout, is placed nowhere and feeds only the root file.
+- **Evidence per subtree.** Structured tool-call file paths (including apply_patch file
+  headers) locate work, resolved against the call's workdir or the session cwd. The cwd
+  alone locates work only when no structured paths exist; shell command text and a tool
+  workdir alone are not work paths. Paths outside this repository's known checkouts are
+  ignored: only in-repo paths define directory scope. A nested file is audited only
+  against sessions whose in-repo work stays under its directory, with the root file shown
+  as already loaded, and keeps its own evidence, gap ledger, and staging copy under
+  `.backpass/nested/`. A session collected over ssh, or one with no in-repo work path,
+  is placed nowhere and feeds only the root file.
 - **Routing.** A new instruction belongs to the most specific named file whose directory
   every session behind it worked in: a lesson from two `apps/api` sessions goes to
   `apps/api/AGENTS.md`, and one seen in both `apps/api` and `apps/web` goes to the root.

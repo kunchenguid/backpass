@@ -192,6 +192,26 @@ test("structured tool paths use their call workdir; cwd only places sessions wit
   );
 });
 
+test("out-of-repo paths do not make in-repo API work cross-cutting", async () => {
+  const repo = makeRepo({ "apps/api/AGENTS.md": "# API\n" });
+  const paths = workedPaths(
+    { cwd: repo.root },
+    [
+      { kind: "tool", input: { path: "apps/api/handler.ts" } },
+      { kind: "tool", input: { path: "/etc/hosts" } },
+    ],
+    checkoutRoots(repo),
+  );
+  assert.deepEqual(paths, ["apps/api/handler.ts"]);
+  const attribution = new Map([["api", paths]]);
+  assert.equal(owningFile(["api"], [API], attribution), API.path);
+  const { corpora } = await nestedCorpora({}, [API], [{ identity: "api" }], attribution);
+  assert.deepEqual(
+    corpora[0].transcripts.map((item) => item.identity),
+    ["api"],
+  );
+});
+
 test("attribution reads a local session once, and never places a session that ran on another machine", async () => {
   const repo = makeRepo({ "AGENTS.md": "# root\n" });
   const state = new State(repo.root).ensure();
@@ -571,7 +591,7 @@ test("apply holds each nested file to its own budget, and writes nothing when th
     decisions: { e1: "accepted" },
     repo: over.repo,
     state: over.state,
-    config: { budgetTokens: 5000, nestedBudgetTokens: 20 },
+    config: { budgetTokens: 5000, nestedBudgetTokens: 20, nestedMemoryFiles: [API.path] },
   });
   assert.equal(refused.written.length, 0);
   assert.match(
@@ -589,7 +609,7 @@ test("apply holds each nested file to its own budget, and writes nothing when th
     decisions: { e1: "accepted" },
     repo: within.repo,
     state: within.state,
-    config: { budgetTokens: 5000, nestedBudgetTokens: 200 },
+    config: { budgetTokens: 5000, nestedBudgetTokens: 200, nestedMemoryFiles: [API.path] },
   });
   assert.deepEqual(written.failed, []);
   assert.deepEqual(
@@ -597,4 +617,38 @@ test("apply holds each nested file to its own budget, and writes nothing when th
     [[API.path, 200]],
   );
   assert.match(fs.readFileSync(path.join(within.repo.root, API.path), "utf8"), /Run the api contract tests/);
+});
+
+test("apply refuses a saved nested write after the named scope is removed", () => {
+  const { repo, proposal, state } = mergedProposal();
+  const before = fs.readFileSync(path.join(repo.root, API.path), "utf8");
+  const result = applyDecisions({
+    proposal,
+    decisions: { e1: "accepted" },
+    repo,
+    state,
+    config: { budgetTokens: 5000, nestedBudgetTokens: 200, nestedMemoryFiles: [] },
+  });
+  assert.deepEqual(result.written, []);
+  assert.match(result.failed[0]?.error ?? "", /apps\/api\/AGENTS\.md is no longer named in nestedMemoryFiles/);
+  assert.equal(fs.readFileSync(path.join(repo.root, API.path), "utf8"), before);
+});
+
+test("nested-only apply is not blocked by an unchanged over-budget root", () => {
+  const { repo, proposal, state } = mergedProposal();
+  const rootBefore = fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8");
+  const result = applyDecisions({
+    proposal,
+    decisions: { e1: "accepted" },
+    repo,
+    state,
+    config: { budgetTokens: 1, nestedBudgetTokens: 200, nestedMemoryFiles: [API.path] },
+  });
+  assert.deepEqual(result.failed, []);
+  assert.deepEqual(
+    result.written.map((item) => item.file),
+    [API.path],
+  );
+  assert.equal(fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8"), rootBefore);
+  assert.match(fs.readFileSync(path.join(repo.root, API.path), "utf8"), /Run the api contract tests/);
 });

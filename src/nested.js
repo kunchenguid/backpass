@@ -36,7 +36,8 @@ import { transcriptIdentity } from "./transcript.js";
  *
  * Where a session worked is deterministic: the paths its tool calls name in structured
  * fields (and the file headers of an apply_patch body), resolved against the checkouts
- * of this repository that discovery already knows. Without paths, its cwd is used.
+ * of this repository that discovery already knows. Paths outside known checkouts are
+ * ignored: only in-repo paths define directory scope. Without paths, its cwd is used.
  * Nothing is read out of shell command text. A session that ran on another machine,
  * or whose paths resolve to no known checkout, worked nowhere in particular and feeds
  * only the root file: a wrong attribution is worse evidence than none.
@@ -223,8 +224,8 @@ export function checkoutRoots(repo) {
   return [...new Set(roots.map(realpathDeepest))].sort((a, b) => b.length - a.length);
 }
 
-/** Repo-relative POSIX path of `absolute`, or null when it is in no known checkout. */
-export function repoRelative(absolute, roots) {
+/** Only in-repo work paths count toward directory attribution. */
+export function projectWorkPath(absolute, roots) {
   const real = realpathDeepest(absolute);
   for (const root of roots) {
     const relative = path.relative(root, real);
@@ -272,7 +273,7 @@ export function workedPaths(transcript, events, roots) {
     if (raw.startsWith("~") || workdir?.startsWith("~")) continue;
     const base = workdir ? path.resolve(cwd || "", workdir) : cwd;
     if (!path.isAbsolute(raw) && !base) continue;
-    const relative = repoRelative(path.resolve(base || "", raw), roots);
+    const relative = projectWorkPath(path.resolve(base || "", raw), roots);
     if (relative !== null) out.add(relative);
   }
   return [...out].sort();

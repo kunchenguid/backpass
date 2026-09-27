@@ -469,7 +469,7 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
     0,
   );
   const memoryPlan = resolvedPlanned.find((item) => item.relative === proposal.memoryFile.path);
-  if (accepted.length) {
+  if (memoryPlan || plannedSkills.length || resolvedPlanned.some((item) => existingSkillPaths.has(item.relative))) {
     const budgetFailure = acceptedSubsetBudgetFailure({
       proposal,
       capTokens: config.budgetTokens,
@@ -489,6 +489,13 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
   for (const nested of proposal.nested || []) {
     const plan = resolvedPlanned.find((item) => item.relative === nested.memoryFile.path);
     if (!plan) continue;
+    if (!config.nestedMemoryFiles?.includes(plan.relative)) {
+      results.failed.push({
+        file: plan.relative,
+        error: `${plan.relative} is no longer named in nestedMemoryFiles; re-run \`backpass propose\` with the current scope`,
+      });
+      continue;
+    }
     const capTokens = config.nestedBudgetTokens ?? config.budgetTokens;
     const budget = budgetStatus(plan.before, plan.text, capTokens);
     const gate = budgetGateKind(budget);
