@@ -141,7 +141,7 @@ export async function nestedCorpora(ctx, weights, transcripts, attribution = nul
 
 /**
  * Analyze every nested memory file against its own corpus, in its own state, with the
- * root file shown as already loaded. Nothing runs when no nested file is named.
+ * root and named ancestor files shown as already loaded. Nothing runs when no nested file is named.
  */
 async function analyzeNested(ctx, { file, skills, weights, transcripts }) {
   const { corpora, attribution } = await nestedCorpora(ctx, weights, transcripts);

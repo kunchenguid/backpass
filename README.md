@@ -406,8 +406,9 @@ A high-reasoning synthesis run turns the aggregated gradients into concrete edit
 REMOVE, REWRITE, EXTRACT→SKILL, or MOVE. The agent does not describe edits for backpass to
 splice in - it makes them, with its harness's own file tools, in a **staging copy** of the
 memory file and project skills under `.backpass/synthesis/` (the repo itself is read-only
-to it, for grounding). backpass then diffs the copy against the original and shows the agent the
-measured changes by id; the agent annotates each one with a title, rationale, and the
+to it, for grounding). Named nested files use their own staging copies and do not stage skills
+(see [Nested memory files](#10-nested-memory-files-in-a-monorepo)). backpass then diffs
+against the originals and shows the agent the measured changes by id; the agent annotates each one with a title, rationale, and the
 verbatim evidence behind it. Nothing textual is ever taken from the model: every hunk's
 text is copied out of your file by construction, so an edit can never "not appear" in it.
 Then mechanical gates run, and they are not negotiable:
@@ -483,9 +484,10 @@ pass optimizes under.
 **Default: 5,000 estimated tokens (~20KB)** for the always-loaded surface, configurable.
 The estimator is bytes/4 - harness-neutral, ±15%.
 
-The gated number is the **memory file plus every skill's `description:` line** - that is
-what an agent actually pays on every session. Skill bodies stay free until triggered and
-never compete for this budget. Every entry the harness loads counts, including one that is
+For the root file, the gated number is the **memory file plus every skill's
+`description:` line** - that is what an agent pays on every session. Named nested
+files have separate file-only budgets (see [Nested memory files](#10-nested-memory-files-in-a-monorepo)).
+Skill bodies stay free until triggered and never compete for the root budget. Every entry the harness loads counts, including one that is
 a symlink into a shared library: a harness loads what the path resolves to, so one library
 reached through several links is loaded - and billed - once per link, and an edit to its
 description line costs that many times its delta. (A repo that already carries many skills
@@ -582,8 +584,9 @@ backpass apply --dry-run   # show what would be written
 ### 9. Which file is the weights
 
 `memoryFiles` is an ordered list (default `["AGENTS.md", "CLAUDE.md"]`); the first one
-that exists is the file a run optimizes, so **AGENTS.md is canonical**. Resolution is
-pointer-aware:
+that exists is the root file a run optimizes, so **AGENTS.md is canonical**. Named
+[nested files](#10-nested-memory-files-in-a-monorepo) are additional weights, not
+separate root files. Resolution is pointer-aware:
 
 - `CLAUDE.md` containing only `@AGENTS.md` (the standard import) is a pointer: optimizing
   AGENTS.md covers both harness families and the pointer stays valid. Nothing to report.
@@ -622,9 +625,10 @@ weight of its own; a missing file is reported, never created:
   ignored: only in-repo paths define directory scope. A nested file is audited only
   against sessions whose every in-repo work path stays under its directory. A session
   editing `apps/api/src/orders.ts` that also reads `README.md` is cross-cutting and feeds
-  only the root file. The nested pass sees the root file as already loaded and keeps its
-  own evidence, gap ledger, and staging copy under
-  `.backpass/nested/`. A session collected over ssh, or one with no in-repo work path,
+  only the root file. The nested pass sees the root file and any named ancestor nested
+  files (outermost first) as already loaded, and keeps its own evidence, gap ledger, and
+  staging copy under `.backpass/nested/`. A change to any of those loaded files re-judges
+  the nested evidence. A session collected over ssh, or one with no in-repo work path,
   is placed nowhere and feeds only the root file.
 - **Routing.** A new instruction belongs to the most specific named file whose directory
   every session behind it worked in: a lesson from two `apps/api` sessions goes to
@@ -645,8 +649,8 @@ weight of its own; a missing file is reported, never created:
   floor, remembered rejections, and `apply` as the only writer are unchanged.
 
 Each nested directory keeps the pointer model above: name its canonical file, and a
-sibling `CLAUDE.md` that only imports it needs nothing, while a sibling with content of its
-own is warned about. An entry that is only a pointer is refused. A file listed in both
+sibling `AGENTS.md` or `CLAUDE.md` that only imports it needs nothing, while a sibling
+with content of its own is warned about. An entry that is only a pointer is refused. A file listed in both
 `memoryFiles` and `nestedMemoryFiles` is nested. `--target` and `--memory-file` name
 exactly the files a run trains, so neither trains a nested file.
 

@@ -21,11 +21,12 @@ import { transcriptIdentity } from "./transcript.js";
  *
  * Memory in a monorepo is layered. The root file loads in every session, and a file such
  * as `apps/api/AGENTS.md` loads on top of it only when a session works under `apps/api/`.
+ * Deeper files also load named ancestor files, outermost first.
  * A surface run trains every file named in `nestedMemoryFiles` as a weight of its own -
  * nothing is ever discovered, so what a run writes is always a file a human named:
  *
  *   evidence   only the sessions that worked under the file's directory, judged against
- *              that file with the root file shown as already loaded
+ *              that file with the root and named ancestor files shown as already loaded
  *   routing    a new instruction belongs to the most specific named file whose directory
  *              every session behind it worked in (`owningFile`); evidence that spans
  *              unrelated directories, or any session that cannot be placed, stays with
@@ -151,8 +152,9 @@ export function reportNestedMemoryFiles(weights) {
 }
 
 /**
- * The hash a nested file's evidence is keyed to. The analysis prompt shows the root file
- * as already loaded, and the skills, so a change to either re-judges the nested evidence.
+ * The hash a nested file's evidence is keyed to. The analysis prompt shows the root
+ * and named ancestor files as already loaded, plus the skills; a change to any of them
+ * re-judges the nested evidence.
  */
 export function nestedSurfaceHash(rootFile, weight, skills) {
   return memorySurfaceHash(
@@ -190,7 +192,7 @@ export function nestedContext(ctx, weight) {
   };
 }
 
-/** The root text as the nested analysis prompt shows it: loaded, but not under audit. */
+/** The root and named ancestor texts as nested analysis shows them: loaded, not under audit. */
 export function renderAlsoLoaded(rootFile, weight) {
   const loaded = [
     `### Root memory file: ${rootFile.path}\n\n${rootFile.text.trim()}`,
