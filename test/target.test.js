@@ -31,7 +31,16 @@ const SUMMARY = {
   analyzedSessions: 4,
   totals: { positive: 0, negative: 2, gapClusters: 0 },
   sources: QUOTE.map((q) => q.source),
-  instructions: [],
+  instructions: [
+    {
+      instruction: "AG-001",
+      positive: 0,
+      negative: 2,
+      harmSessions: 4,
+      sessions: 4,
+      quotes: QUOTE,
+    },
+  ],
 };
 
 function projectScope(files = {}) {

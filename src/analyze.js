@@ -40,9 +40,109 @@ function noteOnce(note) {
 /** Negative evidence carries one of these classes; anything else is dropped as unjudged. */
 export const NEGATIVE_CLASSES = ["harm", "non-compliance", "irrelevant"];
 
-/** Whitespace-insensitive form used to check a quote against the trace it claims to come from. */
-function foldSpace(text) {
-  return String(text).replace(/\s+/g, " ").trim();
+/** Distilled characters kept on each side of a located quote. */
+const QUOTE_WINDOW = 120;
+
+/** Heading the distiller writes above each kept message (`src/distill.js`). */
+const TURN_HEADING = /^### turn (\d+) · (\S+)\s*$/;
+
+/**
+ * Whitespace-insensitive form used to check a quote against the trace it claims to come from.
+ * The mapped form is what `locateQuote` walks so a folded hit can be sliced from the raw string.
+ */
+export function foldSpace(text) {
+  return foldSpaceMapped(text).folded;
+}
+
+/**
+ * Fold whitespace the same way `foldSpace` does, and remember which original index produced
+ * each folded character so a later slice can come from the distilled trace, not the model.
+ *
+ * @param {unknown} text
+ * @returns {{ folded: string, indexMap: number[] }}
+ */
+function foldSpaceMapped(text) {
+  const raw = String(text);
+  let start = 0;
+  let end = raw.length;
+  while (start < end && /\s/.test(raw[start])) start += 1;
+  while (end > start && /\s/.test(raw[end - 1])) end -= 1;
+  let folded = "";
+  /** @type {number[]} */
+  const indexMap = [];
+  let pendingSpace = false;
+  let pendingSpaceIndex = -1;
+  for (let i = start; i < end; i += 1) {
+    if (/\s/.test(raw[i])) {
+      if (folded.length) {
+        pendingSpace = true;
+        pendingSpaceIndex = pendingSpaceIndex === -1 ? i : pendingSpaceIndex;
+      }
+      continue;
+    }
+    if (pendingSpace) {
+      folded += " ";
+      indexMap.push(pendingSpaceIndex);
+      pendingSpace = false;
+      pendingSpaceIndex = -1;
+    }
+    folded += raw[i];
+    indexMap.push(i);
+  }
+  return { folded, indexMap };
+}
+
+/**
+ * After a quote has already passed the folded-trace check, recover a window of the
+ * distilled string around that hit. Quotes that only passed via `usedRawTranscript`
+ * are not located: there is no distilled span to show.
+ *
+ * @param {string} trace
+ * @param {string} quote
+ * @returns {{ locator: { foldedOffset: number, turn?: number, role?: string }, before: string, after: string } | null}
+ */
+export function locateQuote(trace, quote) {
+  if (typeof trace !== "string" || typeof quote !== "string") return null;
+  const foldedQuote = foldSpace(quote);
+  if (!foldedQuote) return null;
+  const { folded, indexMap } = foldSpaceMapped(trace);
+  const foldedOffset = folded.indexOf(foldedQuote);
+  if (foldedOffset < 0 || foldedOffset + foldedQuote.length > indexMap.length) return null;
+  const startOrig = indexMap[foldedOffset];
+  const endOrig = indexMap[foldedOffset + foldedQuote.length - 1] + 1;
+  /** @type {{ foldedOffset: number, turn?: number, role?: string }} */
+  const locator = { foldedOffset };
+  const heading = headingBefore(trace, startOrig);
+  if (heading) {
+    locator.turn = heading.turn;
+    locator.role = heading.role;
+  }
+  return {
+    locator,
+    before: trace.slice(Math.max(0, startOrig - QUOTE_WINDOW), startOrig),
+    after: trace.slice(endOrig, endOrig + QUOTE_WINDOW),
+  };
+}
+
+/** @param {string} trace @param {number} offset */
+function headingBefore(trace, offset) {
+  const prefix = trace.slice(0, offset);
+  let found = null;
+  for (const line of prefix.split("\n")) {
+    const match = TURN_HEADING.exec(line);
+    if (match) found = { turn: Number(match[1]), role: match[2] };
+  }
+  return found;
+}
+
+/** Copy a mechanical locator onto a stored evidence item when the trace check found it. */
+function attachLocator(entry, quote, trace, usedRawTranscript) {
+  if (usedRawTranscript || typeof trace !== "string") return;
+  const located = locateQuote(trace, quote);
+  if (!located) return;
+  entry.locator = located.locator;
+  entry.before = located.before;
+  entry.after = located.after;
 }
 
 /**
@@ -93,6 +193,7 @@ export function sanitizeEvidence(parsed, memoryFile = null, trace = null) {
       // rule caused harm" downstream. Only an explicit judged value is kept; records
       // from before the field existed simply carry none, and none never counts as harm.
       if (key === "negative" && NEGATIVE_CLASSES.includes(item.class)) entry.class = item.class;
+      attachLocator(entry, entry.quote, trace, clean.usedRawTranscript);
       clean[key].push(entry);
     }
   }
@@ -106,6 +207,7 @@ export function sanitizeEvidence(parsed, memoryFile = null, trace = null) {
       quote: item.quote.trim().slice(0, 600),
       domain: item.domain === "orchestration" ? "orchestration" : "project",
     };
+    attachLocator(gap, gap.quote, trace, clean.usedRawTranscript);
     if (typeof item.matchesGap === "string" && /^[0-9a-f]{16}$/.test(item.matchesGap.trim())) {
       gap.matchesGap = item.matchesGap.trim();
     }

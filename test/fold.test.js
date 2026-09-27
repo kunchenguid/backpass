@@ -41,6 +41,87 @@ test("evidence is grouped per instruction with session-level relevance", () => {
   assert.equal(row.relevance, 0.5);
 });
 
+test("fold copies distilled locators onto instruction-row and in-run gap quotes", () => {
+  const locator = { foldedOffset: 12, turn: 3, role: "assistant" };
+  const context = { locator, before: "### turn 3 · assistant\n", after: " and then continued" };
+  const summary = foldEvidence(
+    [
+      record("s1", {
+        negative: [
+          {
+            instruction: "AG-001",
+            quote: "the agent posted the full URL",
+            effect: "the rule was skipped",
+            class: "harm",
+            ...context,
+          },
+        ],
+        gaps: [
+          {
+            proposedInstruction: "Post full URLs.",
+            quote: "posted the full URL",
+            mistake: "the link was omitted",
+            recurrenceRisk: "high",
+            ...context,
+          },
+        ],
+      }),
+      record("s2", {
+        gaps: [
+          {
+            proposedInstruction: "Post full URLs.",
+            quote: "named the PR without a link",
+            mistake: "same miss",
+            recurrenceRisk: "high",
+          },
+        ],
+      }),
+    ],
+    { memoryFile, minGapEvidence: 2 },
+  );
+
+  const instructionQuote = summary.instructions.find((row) => row.instruction === "AG-001").quotes[0];
+  assert.deepEqual(instructionQuote.locator, locator);
+  assert.equal(instructionQuote.before, context.before);
+  assert.equal(instructionQuote.after, context.after);
+
+  const [locatedGap, bareGap] = summary.gaps[0].quotes;
+  assert.deepEqual(locatedGap.locator, locator);
+  assert.equal(locatedGap.before, context.before);
+  assert.equal(locatedGap.after, context.after);
+  assert.equal(bareGap.locator, undefined);
+  assert.equal(bareGap.before, undefined);
+});
+
+test("ledger-only gap observations without locators still cluster", () => {
+  const phrasing = "Always vendor the lockfile.";
+  const summary = foldEvidence([record("s-silent")], {
+    memoryFile,
+    minGapEvidence: 2,
+    gapObservations: [
+      {
+        proposedInstruction: phrasing,
+        quote: "committed without the lockfile",
+        mistake: "skipped it",
+        source: "claude · s1 · 2026-08-01",
+        sessionId: "s1",
+        project: "repo-a",
+      },
+      {
+        proposedInstruction: phrasing,
+        quote: "left the lockfile untracked",
+        mistake: "skipped it again",
+        source: "claude · s2 · 2026-08-02",
+        sessionId: "s2",
+        project: "repo-b",
+      },
+    ],
+  });
+  assert.equal(summary.gaps.length, 1);
+  assert.equal(summary.gaps[0].sessions, 2);
+  assert.ok(summary.gaps[0].quotes.every((quote) => quote.locator === undefined));
+});
+
 test("fold lists every analyzed session source even when the record has no project", () => {
   const quoted = record("alpha1", { positive: [{ instruction: "AG-001", quote: "q1" }] });
   const silent = record("beta2", {});

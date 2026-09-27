@@ -49,6 +49,21 @@ import { crossSurfaceDuplicates } from "./overlap.js";
  */
 
 /**
+ * Locator fields analysis attached after a distilled-trace hit. Ledger-only rows omit them.
+ *
+ * @param {object} [item]
+ * @returns {{ locator?: { foldedOffset: number, turn?: number, role?: string }, before?: string, after?: string }}
+ */
+function quoteContext(item) {
+  if (!item) return {};
+  const out = {};
+  if (item.locator) out.locator = item.locator;
+  if (typeof item.before === "string") out.before = item.before;
+  if (typeof item.after === "string") out.after = item.after;
+  return out;
+}
+
+/**
  * @param {object[]} evidenceRecords
  * @param {{ minGapEvidence?: number, minGapProjects?: number, checkProjectCoverage?: boolean, memoryFile?: object|null, gapObservations?: object[]|null, skills?: object[], route?: { weight: string|null, rootPath: string, ownerOf: (sessionIds: string[]) => string|null, rootOwnedGaps?: { sessionId: string, quote: string }[][] }|null }} [options]
  */
@@ -149,6 +164,7 @@ export function foldEvidence(
           moment: item.moment,
           class: polarity === "negative" ? (item.class ?? null) : undefined,
           source,
+          ...quoteContext(item),
         });
         if (polarity === "positive") positiveCount += 1;
         else negativeCount += 1;
@@ -167,6 +183,7 @@ export function foldEvidence(
         project: record.transcript.project || null,
         projectRoot: record.transcript.projectRoot || null,
         ...(gap.coveredBySkill ? { coveredBySkill: gap.coveredBySkill } : {}),
+        ...quoteContext(gap),
       });
     }
   }
@@ -252,6 +269,7 @@ export function foldEvidence(
         text: i.quote,
         effect: i.mistake,
         source: i.source,
+        ...quoteContext(i),
       })),
       orchestrationSightings: vote.orchestrationSightings,
       mixed: vote.mixed,
@@ -425,6 +443,7 @@ export function clusterGapObservations(observations, { checkProjectCoverage = fa
       project: obs.project || null,
       projectCovered,
       coveredBySkills: new Set(obs.coveredBySkill ? [obs.coveredBySkill] : []),
+      ...quoteContext(obs),
     };
     if (cluster) {
       const sessionItem = cluster.items.find((candidate) => candidate.sessionId === obs.sessionId);

@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import { foldSpace } from "./analyze.js";
 import { renderHunkLines } from "./diff.js";
 import { normalizeSourceLabel } from "./gap-ledger.js";
 import { mixFromCounts } from "./interaction.js";
@@ -105,16 +106,27 @@ export class ProposalViolation extends Error {
   }
 }
 
-function normalizeEdit(raw, index, knownSources = null) {
+/** Analysis refuses quotes shorter than this; a shortened catalog citation must clear it too. */
+const MIN_CATALOG_SUBSTRING = 8;
+
+function normalizeEdit(raw, index, knownSources = null, catalog = [], violations = null) {
   const kind = String(raw?.kind || "").toLowerCase();
   const refs = Array.isArray(raw?.changes) ? raw.changes : Array.isArray(raw?.hunks) ? raw.hunks : [];
   const normalizedEvidence = normalizeEvidence(raw?.evidence);
-  const evidence = normalizedEvidence.map((item) => ({
+  const id = `e${index + 1}`;
+  const displayEvidence = normalizedEvidence.map((item) => ({
     ...item,
     source: item.source.trim() || "unknown source",
   }));
+  // When this run issued source labels, every annotate quote must uniquely match a
+  // fold-emitted catalog quote from that source. Invented text with a real label is
+  // not a session, and two catalog hits from the same source are not first-match.
+  const catalogBound = knownSources && violations;
+  const evidence = catalogBound
+    ? bindCatalogEvidence(displayEvidence, catalog, knownSources, id, violations)
+    : displayEvidence;
   return {
-    id: `e${index + 1}`,
+    id,
     kind,
     changeIds: refs.map((c) => String(c).trim().toUpperCase()).filter(Boolean),
     title: String(raw?.title || "").trim() || "(untitled edit)",
@@ -122,9 +134,10 @@ function normalizeEdit(raw, index, knownSources = null) {
     instructions: Array.isArray(raw?.instructions) ? raw.instructions.map(String) : [],
     evidence,
     // Corroboration is measured from the edit's normalized quotes, never from a
-    // model-reported count. When the fold handed over this run's source labels,
-    // only those labels count - a typed-but-never-issued source is not a session.
-    transcripts: countSources(normalizedEvidence, knownSources),
+    // model-reported count. Empty sources stay visible as "unknown source" but do
+    // not count; when the fold handed over this run's source labels, only those
+    // labels count - a typed-but-never-issued source is not a session.
+    transcripts: countSources(catalogBound ? evidence : normalizedEvidence, knownSources),
   };
 }
 
@@ -144,6 +157,94 @@ function countSources(evidence, known = null) {
   const labels = new Set(evidence.map((e) => normalizeSourceLabel(e?.source)).filter(Boolean));
   if (!known) return labels.size;
   return [...labels].filter((label) => known.has(label)).length;
+}
+
+/** Fold-emitted quotes only: instruction rows and eligible gap clusters, each already capped at six. */
+function foldCatalog(summary) {
+  /** @type {object[]} */
+  const quotes = [];
+  for (const row of summary?.instructions || []) {
+    for (const quote of row.quotes || []) quotes.push(quote);
+  }
+  for (const gap of summary?.gaps || []) {
+    for (const quote of gap.quotes || []) quotes.push(quote);
+  }
+  return quotes;
+}
+
+function catalogQuoteKey(quote) {
+  return `${normalizeSourceLabel(quote?.source)}\n${foldSpace(quote?.text)}\n${quote?.polarity || ""}`;
+}
+
+function isCatalogSubstring(itemText, catalogText) {
+  const item = foldSpace(itemText);
+  const catalog = foldSpace(catalogText);
+  if (!item || !catalog.includes(item)) return false;
+  if (item === catalog) return true;
+  return item.length >= MIN_CATALOG_SUBSTRING;
+}
+
+/**
+ * Catalog quotes from one source that contain the annotate text. Duplicates of the same
+ * folded text and polarity count once; a positive and a negative that share a span stay two.
+ */
+function matchingCatalogQuotes(item, catalog, knownSources) {
+  const source = normalizeSourceLabel(item?.source);
+  if (!source) return [];
+  if (knownSources && !knownSources.has(source)) return [];
+  const seen = new Set();
+  const matches = [];
+  for (const candidate of catalog) {
+    if (normalizeSourceLabel(candidate?.source) !== source) continue;
+    if (!isCatalogSubstring(item?.text, candidate?.text)) continue;
+    const key = catalogQuoteKey(candidate);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    matches.push(candidate);
+  }
+  return matches;
+}
+
+function bindCatalogQuote(item, match) {
+  const polarity =
+    match.polarity === "positive" || match.polarity === "negative" || match.polarity === "neutral"
+      ? match.polarity
+      : item.polarity === "neutral"
+        ? "negative"
+        : item.polarity;
+  const bound = {
+    polarity,
+    text: item.text,
+    source: item.source,
+  };
+  if (match.class) bound.class = match.class;
+  if (match.locator) bound.locator = match.locator;
+  if (typeof match.before === "string") bound.before = match.before;
+  if (typeof match.after === "string") bound.after = match.after;
+  return bound;
+}
+
+function bindCatalogEvidence(items, catalog, knownSources, editId, violations) {
+  const resolved = [];
+  for (const item of items) {
+    const matches = matchingCatalogQuotes(item, catalog, knownSources);
+    if (matches.length === 0) {
+      violations.push(
+        `edit ${editId} evidence quote is not a unique fold-issued quote from that source ` +
+          `("${foldSpace(item.text).slice(0, 80)}"); cite a verbatim quote from the evidence catalog`,
+      );
+      continue;
+    }
+    if (matches.length > 1) {
+      violations.push(
+        `edit ${editId} evidence quote matches ${matches.length} fold-issued quotes from that source ` +
+          `("${foldSpace(item.text).slice(0, 80)}"); cite a longer unique span`,
+      );
+      continue;
+    }
+    resolved.push(bindCatalogQuote(item, matches[0]));
+  }
+  return resolved;
 }
 
 /** The del-line texts of a hunk that are not carried by `lineCounts` (blank lines ignored). */
@@ -307,9 +408,15 @@ export function renderChangesForPrompt(measured, memoryFile) {
  * deltas, the projected budget, and even whether an edit is an addition are measured.
  */
 function countedEvidenceProjects(edit, summary) {
-  const quoted = new Set(edit.evidence.map((item) => `${item.source || ""}\n${item.text || ""}`));
+  const catalog = foldCatalog(summary);
   const byGap = (summary?.gaps || [])
-    .filter((gap) => gap.quotes?.some((quote) => quoted.has(`${quote.source || ""}\n${quote.text || ""}`)))
+    .filter((gap) =>
+      (edit.evidence || []).some((item) => {
+        const matches = matchingCatalogQuotes(item, catalog, null);
+        if (matches.length !== 1) return false;
+        return (gap.quotes || []).some((quote) => catalogQuoteKey(quote) === catalogQuoteKey(matches[0]));
+      }),
+    )
     .map((gap) => gap.projects || 0);
   // Gap clusters carry their own project count, but an edit that rewrites or reinforces
   // an existing instruction quotes instruction-row evidence, which carries none. The fold
@@ -345,7 +452,8 @@ export function buildProposal(rawResult, context) {
   const knownSources = Array.isArray(summary?.sources)
     ? new Set(summary.sources.map(normalizeSourceLabel).filter(Boolean))
     : null;
-  const edits = rawEdits.map((raw, i) => normalizeEdit(raw, i, knownSources));
+  const catalog = foldCatalog(summary);
+  const edits = rawEdits.map((raw, i) => normalizeEdit(raw, i, knownSources, catalog, violations));
   const changesById = new Map(measured.changes.map((c) => [c.id, c]));
 
   // Skill description lines are always loaded, so they sit under the same cap as the
