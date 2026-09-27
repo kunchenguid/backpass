@@ -110,7 +110,7 @@ export function applyNestedMemoryConfig(repoRoot, config) {
  * @returns {{ path: string, dir: string, file: object | null, pointerTo: string | null, separate: object[] }[]}
  */
 export function resolveNestedMemoryFiles(repoRoot, config) {
-  const rootNames = [...new Set(config.memoryFiles.map((entry) => path.posix.basename(pathInRoot(entry, repoRoot))))];
+  const rootNames = [...new Set([...config.memoryFiles.map((entry) => path.posix.basename(pathInRoot(entry, repoRoot))), "AGENTS.md", "CLAUDE.md"])];
   return (config.nestedMemoryFiles || []).map((relative) => {
     const dir = path.posix.dirname(relative);
     const siblings = rootNames.map((name) => path.posix.join(dir, name)).filter((sibling) => sibling !== relative);
@@ -279,7 +279,8 @@ export async function attributeTranscripts(transcripts, repo, state) {
   const roots = checkoutRoots(repo);
   const cachePath = path.join(state.root, "nested", "attribution.json");
   const cache = state.readJsonFile(cachePath, null);
-  const prior = cache?.version === ATTRIBUTION_VERSION && cache.entries ? cache.entries : {};
+  const prior = cache?.version === ATTRIBUTION_VERSION && cache.roots?.length === roots.length &&
+    cache.roots.every((root, index) => root === roots[index]) && cache.entries ? cache.entries : {};
   const entries = {};
   const attribution = new Map();
   for (const transcript of transcripts) {
@@ -300,7 +301,7 @@ export async function attributeTranscripts(transcripts, repo, state) {
     if (paths) entries[identity] = { content, paths };
     attribution.set(identity, paths);
   }
-  state.writeJsonFile(cachePath, { version: ATTRIBUTION_VERSION, entries });
+  state.writeJsonFile(cachePath, { version: ATTRIBUTION_VERSION, roots, entries });
   return attribution;
 }
 
@@ -309,7 +310,7 @@ function isWithin(relative, dir) {
 }
 
 export function workedUnder(paths, dir) {
-  return Array.isArray(paths) && paths.some((relative) => isWithin(relative, dir));
+  return Array.isArray(paths) && paths.length > 0 && paths.every((relative) => isWithin(relative, dir));
 }
 
 /**

@@ -161,8 +161,7 @@ async function runProposalCore(ctx, precomputed) {
 
 /**
  * One nested memory file's step, in its own state: fold its corpus, then synthesize
- * against it under its own budget. A file whose evidence leaves nothing to act on skips
- * the synthesis call and says why; a failed synthesis fails the run, named by file.
+ * against it under its own budget. A failed synthesis fails the run, named by file.
  */
 async function proposeNested(ctx, { skills, corpus, routing }) {
   const { weight, transcripts } = corpus;
@@ -178,10 +177,6 @@ async function proposeNested(ctx, { skills, corpus, routing }) {
   nested.config.state.writeSummary(pass.summary);
   if (!pass.summary.analyzedSessions) {
     pass.skipped = "its sessions are not analyzed yet; run `backpass analyze`";
-    return pass;
-  }
-  if (!pass.summary.gaps.length && !pass.summary.instructions.some((row) => row.negative > 0)) {
-    pass.skipped = "no gap cluster or negative evidence cleared the thresholds";
     return pass;
   }
   try {

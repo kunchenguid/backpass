@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { loadConfig } from "../src/config.js";
+import { nestedCorpora } from "../src/commands/analyze.js";
 import { foldEvidence, renderEvidenceForPrompt } from "../src/fold.js";
 import { setLoggerSink } from "../src/logger.js";
 import { buildProposal } from "../src/proposal.js";
@@ -40,13 +41,14 @@ const DB = { path: "apps/api/db/AGENTS.md", dir: "apps/api/db" };
 const WEB = { path: "apps/web/AGENTS.md", dir: "apps/web" };
 
 const ATTRIBUTION = new Map([
-  ["api-1", ["", "apps/api/src/orders.ts"]],
+  ["api-1", ["apps/api/src/orders.ts"]],
   ["api-2", ["apps/api/routes/index.ts"]],
   ["db-1", ["apps/api/db/schema.sql"]],
-  ["db-2", ["README.md", "apps/api/db/migrate.ts"]],
+  ["db-2", ["apps/api/db/migrate.ts"]],
   ["web-1", ["apps/web/checkout.tsx"]],
   ["web-2", ["apps/web"]],
   ["both", ["apps/api/src/orders.ts", "apps/web/checkout.tsx"]],
+  ["root-and-api", ["", "apps/api/src/orders.ts"]],
   ["root", [""]],
   ["remote", null],
 ]);
@@ -134,6 +136,12 @@ test("a nested directory keeps the root pair's pointer model: a pointer is refus
     lines.join("\n"),
   );
   assert.ok(lines.some((line) => /nested memory file apps\/docs\/AGENTS\.md does not exist/.test(line)));
+  const singleRoot = captureWarnings(() =>
+    reportNestedMemoryFiles(
+      resolveNestedMemoryFiles(repo.root, { memoryFiles: ["AGENTS.md"], nestedMemoryFiles: ["apps/api/AGENTS.md"] }),
+    ),
+  );
+  assert.ok(singleRoot.lines.some((line) => /apps\/api\/CLAUDE\.md is a separate memory file/.test(line)));
 
   const pointer = captureWarnings(() =>
     reportNestedMemoryFiles(
@@ -206,6 +214,25 @@ test("attribution reads a local session once, and never places a session that ra
   assert.deepEqual(second.get(transcriptIdentity(local)), ["", "apps/api/src/orders.ts"]);
 });
 
+test("attribution cache changes when a sibling checkout becomes known", async () => {
+  const repo = makeRepo({ "AGENTS.md": "# root\n" });
+  const state = new State(repo.root).ensure();
+  const sibling = path.join(repo.root, "sibling");
+  fs.mkdirSync(sibling);
+  const sessionPath = path.join(repo.root, "session.jsonl");
+  fs.writeFileSync(sessionPath, [
+    { type: "session", version: 3, id: "roots", timestamp: new Date().toISOString(), cwd: sibling },
+    { type: "message", message: { role: "assistant", content: [
+      { type: "toolCall", id: "t1", name: "edit", arguments: { path: "apps/api/handler.ts" } },
+    ] } },
+  ].map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+  const transcript = { harness: "pi", id: "pi-roots", nativeId: "roots", path: sessionPath, cwd: sibling, mtimeMs: 1, bytes: 2 };
+  const first = await attributeTranscripts([transcript], repo, state);
+  assert.deepEqual(first.get(transcriptIdentity(transcript)), ["sibling", "sibling/apps/api/handler.ts"]);
+  const second = await attributeTranscripts([transcript], { ...repo, siblingWorktrees: [sibling] }, state);
+  assert.deepEqual(second.get(transcriptIdentity(transcript)), ["", "apps/api/handler.ts"]);
+});
+
 // ---------- which file owns a lesson ----------
 
 test("a lesson belongs to the most specific named file every session behind it worked under, else to the root", () => {
@@ -215,6 +242,8 @@ test("a lesson belongs to the most specific named file every session behind it w
   assert.equal(owner(["db-1", "api-1"]), API.path, "sessions spread over apps/api fall back to apps/api");
   assert.equal(owner(["api-1", "web-1"]), null, "two unrelated directories are cross-cutting");
   assert.equal(owner(["both"]), null, "one session in two unrelated directories is cross-cutting too");
+  assert.equal(owningFile(["both"], [API], ATTRIBUTION), null);
+  assert.equal(owningFile(["root-and-api"], [API], ATTRIBUTION), null);
   assert.equal(owner(["api-1", "remote"]), null, "a session nobody could place keeps the lesson at the root");
   assert.equal(owner(["root"]), null);
   assert.equal(owner([]), null);
@@ -277,6 +306,26 @@ test("the fold keeps only the gap clusters this file owns, and names where the o
   const unrouted = foldEvidence(records, { minGapEvidence: 2 });
   assert.equal(unrouted.gaps.length, 2);
   assert.ok(!("routedGaps" in unrouted) && !("sourceSessions" in unrouted), "no routing, no new summary fields");
+});
+
+test("mixed-directory sessions never enter a nested analysis corpus or own its gap", async () => {
+  const transcripts = ["api-1", "both", "root-and-api"].map((identity) => ({ identity }));
+  const { corpora } = await nestedCorpora({}, [API], transcripts, ATTRIBUTION);
+  assert.deepEqual(corpora[0].transcripts.map((item) => item.identity), ["api-1"]);
+  const records = [evidenceRecord("both", API_GAP), evidenceRecord("root-and-api", API_GAP)];
+  const route = routingFor([API], ATTRIBUTION, "AGENTS.md", null);
+  assert.equal(foldEvidence(records, { minGapEvidence: 2, route }).gaps.length, 1);
+  assert.equal(foldEvidence(records, { minGapEvidence: 2, route: { ...route, weight: API.path } }).gaps.length, 0);
+});
+
+test("bounded quotes retain evidence of a root-owned cross-directory cluster", () => {
+  const records = [...Array.from({ length: 6 }, (_, index) => evidenceRecord(`api-${index}`, API_GAP)), evidenceRecord("web-1", API_GAP)];
+  const attribution = new Map(records.map((record) => [record.transcript.identity, ["apps/api/a.ts"]]));
+  attribution.set("web-1", ["apps/web/b.ts"]);
+  const root = foldEvidence(records, { minGapEvidence: 2, route: routingFor([API, WEB], attribution, "AGENTS.md", null) });
+  assert.equal(root.gaps.length, 1);
+  assert.equal(root.gaps[0].quotes.length, 6);
+  assert.ok(root.gaps[0].quotes.some((quote) => quote.source.includes("web-1")));
 });
 
 test("a failed skill trigger stays with the root file, which owns the skill layer", () => {

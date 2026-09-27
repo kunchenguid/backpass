@@ -247,7 +247,7 @@ export function foldEvidence(
       projects: cluster.projects.size,
       projectCoveredSessions: cluster.projectCoveredSessions.size,
       recurrenceRisk: highestRisk(eligibleItems),
-      quotes: eligibleItems.slice(0, 6).map((i) => ({ text: i.quote, effect: i.mistake, source: i.source })),
+      quotes: representativeGapItems(eligibleItems, route).map((i) => ({ text: i.quote, effect: i.mistake, source: i.source })),
       orchestrationSightings: vote.orchestrationSightings,
       mixed: vote.mixed,
       majorityOrchestration: vote.majorityOrchestration,
@@ -507,6 +507,18 @@ function observationDomain(obs) {
  * Cluster domain is a majority of per-sighting votes, not a pre-filter. Ties (including
  * 1 of 2) stay project so one inconsistent analysis call cannot kill a real recurrence.
  */
+function representativeGapItems(items, route) {
+  const selected = items.slice(0, 6);
+  if (!route || items.length <= 6) return selected;
+  const owner = route.ownerOf(items.map((item) => item.sessionId));
+  if (route.ownerOf(selected.map((item) => item.sessionId)) === owner) return selected;
+  for (const item of items.slice(6)) {
+    const candidate = [...selected.slice(0, -1), item];
+    if (route.ownerOf(candidate.map((entry) => entry.sessionId)) === owner) return candidate;
+  }
+  return selected;
+}
+
 function clusterDomainVote(items) {
   const orchestrationSightings = items.filter((item) => item.domain === "orchestration").length;
   const sightings = items.length;
