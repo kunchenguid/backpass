@@ -437,7 +437,7 @@ Then mechanical gates run, and they are not negotiable:
 - a move's normalized removed and added line multisets match exactly, so it repositions
   text one-for-one without smuggling additions or triggering the harm floor
 - every edit carries a verbatim quote
-- the post-edit always-loaded surface must fit the budget, measured from the staged files
+- the post-edit always-loaded surface must fit the budget, or shrink if already over it, measured from the staged files
 
 An extraction is the `SKILL.md` (created, or an existing skill file that still carries
 every prior line plus the extracted ones) plus the memory-file change that pays for it.
@@ -612,7 +612,8 @@ it never writes a file you did not name:
 ```
 
 With the list unset, a run is exactly the single-file run described above. With it set, a
-run over the whole surface trains every named file as a weight of its own:
+run over the whole surface trains each existing named file with analyzed sessions as a
+weight of its own; a missing file is reported, never created:
 
 - **Evidence per subtree.** Structured tool-call file paths (including apply_patch file
   headers) locate work, resolved against the call's workdir or the session cwd. The cwd
@@ -630,8 +631,12 @@ run over the whole surface trains every named file as a weight of its own:
   addition in the wrong file. A rewrite or removal stays with the file whose text it
   changes, and a failed skill trigger stays with the root, which owns the skill layer.
 - **A budget per file.** Each nested file is held to `nestedBudgetTokens` (`budgetTokens`
-  when unset), at propose and again at apply. Skills belong to the root surface, so a
-  nested run neither edits a skill nor extracts into one.
+  when unset), at propose and again at apply. An unchanged root over budget does not block
+  a combined proposal if at least one nested file actually runs synthesis with analyzed
+  evidence; if every nested file is skipped, the normal root shrink gate still applies.
+  Root edits must still clear that gate, and a nested edit must clear its own file's gate.
+  Skills belong to the root surface, so a nested run neither edits a skill nor extracts
+  into one.
 - **One review.** The proposal and `backpass apply` cover every file, each edit labeled
   with its file and each nested file with its own budget. Apply refuses a saved nested
   edit if that file is no longer named in the current config. The two-session evidence
