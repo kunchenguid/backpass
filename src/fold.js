@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { loadConfig } from "./config.js";
 import { classifyInteraction, INTERACTIVE, NON_INTERACTIVE } from "./interaction.js";
 import { findInstructionUnit, instructionUnits, resolveMemoryFiles, similarity } from "./memory.js";
+import { rootOwnsGap } from "./nested.js";
 import {
   GAP_COVERED_THRESHOLD,
   GAP_SIMILARITY_THRESHOLD,
@@ -247,7 +248,11 @@ export function foldEvidence(
       projects: cluster.projects.size,
       projectCoveredSessions: cluster.projectCoveredSessions.size,
       recurrenceRisk: highestRisk(eligibleItems),
-      quotes: representativeGapItems(eligibleItems, route).map((i) => ({ text: i.quote, effect: i.mistake, source: i.source })),
+      quotes: representativeGapItems(eligibleItems, route).map((i) => ({
+        text: i.quote,
+        effect: i.mistake,
+        source: i.source,
+      })),
       orchestrationSightings: vote.orchestrationSightings,
       mixed: vote.mixed,
       majorityOrchestration: vote.majorityOrchestration,
@@ -256,10 +261,15 @@ export function foldEvidence(
     };
   });
 
+  const owners = route
+    ? gapClusters.map((cluster, index) =>
+        allDecided[index].failedTriggerSkill ? null : route.ownerOf([...cluster.sessions]),
+      )
+    : null;
   const routedGaps = [];
   const decided = route
     ? allDecided.filter((cluster, index) => {
-        const owner = cluster.failedTriggerSkill ? null : route.ownerOf([...gapClusters[index].sessions]);
+        const owner = rootOwnsGap(gapClusters[index].items, route.rootOwnedGaps) ? null : owners[index];
         if (owner === route.weight) return true;
         if (cluster.sessions >= minGapEvidence && !cluster.majorityOrchestration) {
           routedGaps.push({
@@ -332,6 +342,11 @@ export function foldEvidence(
     oversized: oversizedRestructureTargets(memoryFile, parentNonComplianceSessions, minGapEvidence),
   };
   if (route) {
+    if (route.weight === null) {
+      summary.rootOwnedGaps = gapClusters
+        .filter((cluster, index) => owners[index] === null && cluster.sessions.size >= minGapEvidence)
+        .map((cluster) => cluster.items.map((item) => ({ sessionId: item.sessionId, quote: item.quote })));
+    }
     summary.routedGaps = routedGaps;
     summary.sourceSessions = sourceSessionsOf(issuedSources, usable, persistedObservations);
   }

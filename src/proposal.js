@@ -6,6 +6,7 @@ import { mixFromCounts } from "./interaction.js";
 import { memoryTextHash } from "./memory.js";
 import { editSkills, loadedCopies, parseFrontmatter, skillDescriptionTokens } from "./skills.js";
 import { budgetGateKind, budgetStatus, estimateTokens } from "./tokens.js";
+import { rootOwnsGap } from "./nested.js";
 import { isSkillFilePath, normalizeRecoveryLine, recoveredLineCounts } from "./workspace.js";
 
 /**
@@ -593,7 +594,13 @@ export function buildProposal(rawResult, context) {
           edit.evidence.map((item) => summary?.sourceSessions?.[normalizeSourceLabel(item.source)]).filter(Boolean),
         ),
       ];
-      const owner = routing.ownerOf(sessions) ?? routing.rootPath;
+      const sightings = edit.evidence.map((item) => ({
+        sessionId: summary?.sourceSessions?.[normalizeSourceLabel(item.source)],
+        quote: item.text,
+      }));
+      const owner = rootOwnsGap(sightings, routing.rootOwnedGaps)
+        ? routing.rootPath
+        : (routing.ownerOf(sessions) ?? routing.rootPath);
       const here = routing.weight ?? routing.rootPath;
       if (owner !== here) {
         violations.push(

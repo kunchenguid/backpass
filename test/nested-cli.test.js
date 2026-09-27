@@ -64,6 +64,7 @@ const lessons = ${JSON.stringify([
     { gap: API_GAP, quote: API_QUOTE },
     { gap: WEB_GAP, quote: WEB_QUOTE },
   ])};
+if (process.env.FAKE_SHARED_GAP) lessons[1].gap = lessons[0].gap;
 
 if (prompt.includes("You are auditing one past agent session")) {
   const audited = /## The memory file under audit: (\\S+)/.exec(prompt)[1];
@@ -88,8 +89,12 @@ if (prompt.includes("You are consolidating the gap ledger")) {
 if (prompt.includes("You are performing the synthesis step")) {
   const memory = /## Current memory file: (\\S+)/.exec(prompt)[1];
   const pairs = [...prompt.matchAll(/"([^"]+)" \\((pi · [^)]+)\\)/g)].map((m) => ({ text: m[1], source: m[2] }));
-  const shown = lessons.filter((lesson) => prompt.includes(":: " + lesson.gap));
-  state.shown[memory] = shown.map((lesson) => ({ ...lesson, evidence: pairs.filter((pair) => pair.text === lesson.quote) }));
+  const shown = lessons.filter((lesson, index) =>
+    prompt.includes(":: " + lesson.gap) && lessons.findIndex((entry) => entry.gap === lesson.gap) === index);
+  state.shown[memory] = shown.map((lesson) => ({
+    ...lesson,
+    evidence: pairs.filter((pair) => lessons.some((entry) => entry.gap === lesson.gap && entry.quote === pair.text)),
+  }));
   const budgetCount = prompt.includes("The count is this file PLUS every skill's \\\`description:\\\` line;\\nskill bodies are free until triggered.")
     ? "surface"
     : prompt.includes("The count is this file alone") ? "file" : null;
@@ -194,7 +199,7 @@ function makeCorpus(dir) {
   return home;
 }
 
-function run(dir, home, args) {
+function run(dir, home, args, extraEnv = {}) {
   const statePath = path.join(home, "fake-state.json");
   const result = spawnSync(
     process.execPath,
@@ -227,6 +232,7 @@ function run(dir, home, args) {
         FAKE_STATE: statePath,
         NO_COLOR: "1",
         CI: "1",
+        ...extraEnv,
       },
     },
   );
@@ -321,6 +327,27 @@ test("a named nested file learns only from its subtree, and each lesson lands in
   assert.equal(fs.readFileSync(path.join(dir, "AGENTS.md"), "utf8"), `${ROOT_MEMORY}- ${WEB_GAP}\n`);
   assert.equal(fs.readFileSync(path.join(dir, "apps/api/AGENTS.md"), "utf8"), `${API_MEMORY}- ${API_GAP}\n`);
   assert.match(applied.output, /wrote apps\/api\/AGENTS\.md \(e2\)/);
+});
+
+test("a gap spanning API and web is proposed only in root, not again from its API subset", () => {
+  const dir = makeMonorepo({ config: { nestedMemoryFiles: ["apps/api/AGENTS.md"] } });
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-nested-shared-home-"));
+  writeSession(home, "api-one", dir, { quote: API_QUOTE, file: "apps/api/src/routes/orders.ts" });
+  writeSession(home, "api-two", dir, { quote: API_QUOTE, file: "apps/api/src/routes/orders.ts" });
+  writeSession(home, "web-one", dir, { quote: WEB_QUOTE, file: "apps/web/src/checkout.tsx" });
+
+  const result = run(dir, home, [], { FAKE_SHARED_GAP: "1" });
+  assert.equal(result.status, 0, result.output);
+  const proposal = readJson(path.join(dir, ".backpass", "proposal.json"));
+  assert.deepEqual(
+    proposal.edits.map((edit) => edit.file),
+    ["AGENTS.md"],
+  );
+  assert.deepEqual(proposal.nested[0].edits, []);
+  assert.deepEqual(
+    result.log.filter((entry) => entry.turn === "edit").map((entry) => entry.lessons),
+    [[API_GAP], []],
+  );
 });
 
 test("with no nested file named, a run trains the root file from every session, as it always did", () => {

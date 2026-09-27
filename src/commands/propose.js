@@ -160,7 +160,11 @@ async function runProposalCore(ctx, precomputed) {
 
   accountForConsolidationUsage(rootProposal, summary);
   const passes = [];
-  for (const corpus of corpora) passes.push(await proposeNested(ctx, { skills: skills ?? [], corpus, routing }));
+  for (const corpus of corpora) {
+    passes.push(
+      await proposeNested(ctx, { skills: skills ?? [], corpus, routing, rootOwnedGaps: summary.rootOwnedGaps }),
+    );
+  }
   const proposal = passes.length ? mergeNestedProposals(rootProposal, passes) : rootProposal;
   config.state.writeProposal(proposal);
   return { proposal, summary, memoryFile: file };
@@ -170,7 +174,7 @@ async function runProposalCore(ctx, precomputed) {
  * One nested memory file's step, in its own state: fold its corpus, then synthesize
  * against it under its own budget. A failed synthesis fails the run, named by file.
  */
-async function proposeNested(ctx, { skills, corpus, routing }) {
+async function proposeNested(ctx, { skills, corpus, routing, rootOwnedGaps }) {
   const { weight, transcripts } = corpus;
   const nested = nestedContext(ctx, weight);
   const pass = { weight, transcripts, cap: nested.config.budgetTokens, summary: null, proposal: null, skipped: null };
@@ -179,7 +183,7 @@ async function proposeNested(ctx, { skills, corpus, routing }) {
     return pass;
   }
   nested.config.state.clearProposal();
-  const route = routing(weight.path);
+  const route = { ...routing(weight.path), rootOwnedGaps };
   pass.summary = await foldForRun(nested, weight.file, weight.hash, skills, transcripts, { route });
   nested.config.state.writeSummary(pass.summary);
   if (!pass.summary.analyzedSessions) {

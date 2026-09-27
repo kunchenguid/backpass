@@ -330,6 +330,17 @@ export function workedUnder(paths, dir) {
   return Array.isArray(paths) && paths.length > 0 && paths.every((relative) => isWithin(relative, dir));
 }
 
+export function rootOwnsGap(items, rootOwnedGaps = []) {
+  return (
+    items.length > 0 &&
+    rootOwnedGaps.some((sightings) =>
+      items.every((item) =>
+        sightings.some((sighting) => sighting.sessionId === item.sessionId && sighting.quote === item.quote),
+      ),
+    )
+  );
+}
+
 /**
  * The nested file that owns evidence from these sessions, or null for the root file.
  *
