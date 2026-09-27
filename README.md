@@ -181,9 +181,11 @@ and `StrictHostKeyChecking=no` is never suggested. Windows remotes are out of sc
 
 ### One file instead of the whole surface
 
-`--target` narrows a run to one configured memory file or one skill, named exactly: a
-`memoryFiles` entry, or a skill's `name:`. Nothing else resolves - not a basename, a
-directory, a path to a SKILL.md, or an existing file the config does not name - and an
+`--target` narrows a run to one root memory file or one skill, named exactly: a
+`memoryFiles` entry, or a skill's `name:`. Nested memory files are trained only by a
+whole-surface run (see [Nested memory files](#10-nested-memory-files-in-a-monorepo)).
+Nothing else resolves - not a basename, a directory, a path to a SKILL.md, or an
+existing file the config does not name - and an
 unknown name fails, listing the valid ones, instead of falling back to the whole surface. A
 configured file that contains only an `@` import is rejected rather than rewritten or silently
 mapped to its import; the error names the imported memory file, which must itself be configured
@@ -631,8 +633,9 @@ run over the whole surface trains every named file as a weight of its own:
   when unset), at propose and again at apply. Skills belong to the root surface, so a
   nested run neither edits a skill nor extracts into one.
 - **One review.** The proposal and `backpass apply` cover every file, each edit labeled
-  with its file and each nested file with its own budget. The two-session evidence floor,
-  remembered rejections, and `apply` as the only writer are unchanged.
+  with its file and each nested file with its own budget. Apply refuses a saved nested
+  edit if that file is no longer named in the current config. The two-session evidence
+  floor, remembered rejections, and `apply` as the only writer are unchanged.
 
 Each nested directory keeps the pointer model above: name its canonical file, and a
 sibling `CLAUDE.md` that only imports it needs nothing, while a sibling with content of its
