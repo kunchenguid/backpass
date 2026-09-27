@@ -83,11 +83,12 @@ export function renderEdit(edit, index, total) {
     for (const quote of edit.evidence.slice(0, 4)) {
       const mark = quote.polarity === "positive" ? color.green("+") : color.red("-");
       const quoted = `"${String(quote.text).replace(/\s+/g, " ").slice(0, 200)}"`;
-      out.push(`    ${mark} ${quoted}`);
       if (typeof quote.before === "string" && typeof quote.after === "string") {
-        out.push(`      ${color.dim(String(quote.before).replace(/\s+/g, " "))}`);
+        out.push(`    ${mark} ${color.dim(String(quote.before).replace(/\s+/g, " "))}`);
         out.push(`      ${quoted}`);
         out.push(`      ${color.dim(String(quote.after).replace(/\s+/g, " "))}`);
+      } else {
+        out.push(`    ${mark} ${quoted}`);
       }
       out.push(`      ${color.dim(quote.source)}`);
     }

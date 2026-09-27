@@ -686,8 +686,95 @@ test("a unique catalog substring inherits polarity, class, and locator", () => {
   assert.equal(inherited.class, "harm");
   assert.equal(inherited.text, "posted the full URL");
   assert.deepEqual(inherited.locator, locator);
-  assert.equal(inherited.before, "### turn 3 · assistant\n");
-  assert.equal(inherited.after, " and then continued");
+  assert.equal(inherited.before, "### turn 3 · assistant\nthe agent ");
+  assert.equal(inherited.after, " in the comment and then continued");
+});
+
+test("a catalog quote copied with its display ellipsis still binds", () => {
+  const long = `the agent posted the full URL ${"and kept explaining the change ".repeat(10)}until the end`;
+  const foldRecord = (id, day, quote) => ({
+    status: "ok",
+    transcript: { id, harness: "claude", startedAt: Date.parse(`2026-08-${day}T00:00:00Z`) },
+    positive: [],
+    negative: [{ instruction: "AG-001", quote, effect: "the rule was skipped", class: "harm" }],
+    gaps: [],
+  });
+  const summary = foldEvidence(
+    [
+      foldRecord("b859b8f3deadbeef", "18", long),
+      foldRecord("c0ffee00deadbeef", "19", "the PR was named without a link"),
+    ],
+    { memoryFile: { units: parseMemoryUnits(MEMORY_TEXT) }, minGapEvidence: 2 },
+  );
+  const [first, second] = summary.sources;
+  const rendered = renderEvidenceForPrompt(summary);
+  const shown = `${long.slice(0, 240)}...`;
+  assert.ok(rendered.includes(shown), rendered);
+  const { proposal, violations } = gate({
+    edit: memoryEdit(REWRITE_SHAPES["append a sentence"]),
+    annotation: {
+      edits: [
+        claim(["H1"], {
+          kind: "rewrite",
+          title: "copy the displayed quote",
+          evidence: [
+            { polarity: "negative", text: shown, source: first },
+            { polarity: "negative", text: "the PR was named without a link", source: second },
+          ],
+        }),
+      ],
+    },
+    context: { summary },
+  });
+  assert.deepEqual(violations, [], violations.join("\n"));
+  assert.equal(proposal.edits[0].transcripts, 2);
+  assert.equal(proposal.edits[0].evidence.find((item) => item.source === first).text, long.slice(0, 240).trimEnd());
+});
+
+test("an instruction quote and a gap quote with the same text bind as one match", () => {
+  const edit = memoryEdit((text) => `${text}- Include the full pull request URL.\n`);
+  const shared = "it used a bare #2731 reference in the pull request body";
+  const summary = {
+    analyzedSessions: 3,
+    sources: [QUOTE[0].source, QUOTE[1].source],
+    totals: { positive: 0, negative: 1, gapClusters: 1 },
+    instructions: [
+      {
+        instruction: "AG-001",
+        quotes: [
+          { polarity: "negative", text: shared, source: QUOTE[0].source, class: "harm" },
+          { polarity: "negative", text: QUOTE[1].text, source: QUOTE[1].source },
+        ],
+      },
+    ],
+    gaps: [
+      {
+        proposedInstruction: "Include the full pull request URL.",
+        sessions: 3,
+        projects: 2,
+        quotes: [{ text: shared, source: QUOTE[0].source }],
+      },
+    ],
+  };
+  const { proposal, violations } = gate({
+    edit,
+    annotation: {
+      edits: [
+        claim(["H1"], {
+          kind: "add",
+          evidence: [
+            { polarity: "negative", text: shared, source: QUOTE[0].source },
+            { polarity: "negative", text: QUOTE[1].text, source: QUOTE[1].source },
+          ],
+        }),
+      ],
+    },
+    config: config({ minGapProjects: 2 }),
+    context: { summary, scope: { kind: "user" } },
+  });
+  assert.deepEqual(violations, [], violations.join("\n"));
+  assert.equal(proposal.edits[0].evidence.find((item) => item.source === QUOTE[0].source).class, "harm");
+  assert.equal(proposal.edits[0].projects, 2);
 });
 
 test("a substring that matches two catalog quotes from the same source is a violation", () => {
@@ -2905,6 +2992,7 @@ test("terminal review prints a distilled quote window only when one is present",
   assert.match(withWindow, /### turn 3 · assistant/);
   assert.match(withWindow, /in the follow-up/);
   assert.match(withWindow, /claude · abc · 2026-08-18/);
+  assert.equal((withWindow.match(/it used a bare #2731 reference/g) || []).length, 1);
 
   const withoutWindow = renderEdit(
     {

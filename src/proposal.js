@@ -173,11 +173,24 @@ function foldCatalog(summary) {
 }
 
 function catalogQuoteKey(quote) {
-  return `${normalizeSourceLabel(quote?.source)}\n${foldSpace(quote?.text)}\n${quote?.polarity || ""}`;
+  return `${normalizeSourceLabel(quote?.source)}\n${foldSpace(quote?.text)}`;
+}
+
+function explicitPolarity(quote) {
+  return quote?.polarity === "positive" || quote?.polarity === "negative" || quote?.polarity === "neutral"
+    ? quote.polarity
+    : "";
+}
+
+/** The cited text without a trailing "..." or ellipsis copied from a truncated catalog render. */
+function citedText(text) {
+  return foldSpace(text)
+    .replace(/(?:\.{3}|\u2026)$/, "")
+    .trimEnd();
 }
 
 function isCatalogSubstring(itemText, catalogText) {
-  const item = foldSpace(itemText);
+  const item = citedText(itemText);
   const catalog = foldSpace(catalogText);
   if (!item || !catalog.includes(item)) return false;
   if (item === catalog) return true;
@@ -186,41 +199,48 @@ function isCatalogSubstring(itemText, catalogText) {
 
 /**
  * Catalog quotes from one source that contain the annotate text. Duplicates of the same
- * folded text and polarity count once; a positive and a negative that share a span stay two.
+ * folded text count once per explicit polarity, and a polarity-less gap quote folds into
+ * any polarized twin; a positive and a negative that share a span stay two.
  */
 function matchingCatalogQuotes(item, catalog, knownSources) {
   const source = normalizeSourceLabel(item?.source);
   if (!source) return [];
   if (knownSources && !knownSources.has(source)) return [];
-  const seen = new Set();
-  const matches = [];
+  /** @type {Map<string, Map<string, object>>} */
+  const byText = new Map();
   for (const candidate of catalog) {
     if (normalizeSourceLabel(candidate?.source) !== source) continue;
     if (!isCatalogSubstring(item?.text, candidate?.text)) continue;
     const key = catalogQuoteKey(candidate);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    matches.push(candidate);
+    if (!byText.has(key)) byText.set(key, new Map());
+    const byPolarity = byText.get(key);
+    const polarity = explicitPolarity(candidate);
+    if (!byPolarity.has(polarity)) byPolarity.set(polarity, candidate);
+  }
+  const matches = [];
+  for (const byPolarity of byText.values()) {
+    const polarized = [...byPolarity.entries()].filter(([polarity]) => polarity).map(([, quote]) => quote);
+    matches.push(...(polarized.length ? polarized : [...byPolarity.values()]));
   }
   return matches;
 }
 
 function bindCatalogQuote(item, match) {
-  const polarity =
-    match.polarity === "positive" || match.polarity === "negative" || match.polarity === "neutral"
-      ? match.polarity
-      : item.polarity === "neutral"
-        ? "negative"
-        : item.polarity;
+  const polarity = explicitPolarity(match) || (item.polarity === "neutral" ? "negative" : item.polarity);
+  const text = citedText(item.text);
   const bound = {
     polarity,
-    text: item.text,
+    text,
     source: item.source,
   };
   if (match.class) bound.class = match.class;
   if (match.locator) bound.locator = match.locator;
-  if (typeof match.before === "string") bound.before = match.before;
-  if (typeof match.after === "string") bound.after = match.after;
+  if (typeof match.before === "string" && typeof match.after === "string") {
+    const catalog = foldSpace(match.text);
+    const offset = catalog.indexOf(text);
+    bound.before = match.before + catalog.slice(0, offset);
+    bound.after = catalog.slice(offset + text.length) + match.after;
+  }
   return bound;
 }
 
@@ -231,14 +251,14 @@ function bindCatalogEvidence(items, catalog, knownSources, editId, violations) {
     if (matches.length === 0) {
       violations.push(
         `edit ${editId} evidence quote is not a unique fold-issued quote from that source ` +
-          `("${foldSpace(item.text).slice(0, 80)}"); cite a verbatim quote from the evidence catalog`,
+          `("${citedText(item.text).slice(0, 80)}"); cite a verbatim quote from the evidence catalog`,
       );
       continue;
     }
     if (matches.length > 1) {
       violations.push(
         `edit ${editId} evidence quote matches ${matches.length} fold-issued quotes from that source ` +
-          `("${foldSpace(item.text).slice(0, 80)}"); cite a longer unique span`,
+          `("${citedText(item.text).slice(0, 80)}"); cite a longer unique span`,
       );
       continue;
     }
