@@ -1657,6 +1657,127 @@ test("rejection suppression distinguishes multi-file extraction destinations", (
   assert.equal(otherDestination.proposal.edits.length, 1, "a different destination is a materially different edit");
 });
 
+const GAP_ID = "cafef00ddeadbeef";
+const THIRD_QUOTE = { polarity: "negative", text: "a third session hit the same pin", source: "pi · ghi · turn 2" };
+
+function summaryWithGap(quotes = QUOTE) {
+  return {
+    analyzedSessions: 4,
+    totals: { positive: 3, negative: 2, gapClusters: 1 },
+    sources: quotes.map((q) => q.source),
+    instructions: Array.from({ length: 20 }, (_, i) => ({
+      instruction: `AG-${String(i + 1).padStart(3, "0")}`,
+      positive: 0,
+      negative: 4,
+      harmSessions: 4,
+      sessions: 4,
+      relevance: 1,
+      quotes: [],
+    })),
+    gaps: [
+      {
+        id: GAP_ID,
+        proposedInstruction: "Always include the full PR URL.",
+        sessions: quotes.length,
+        quotes: quotes.map((q) => ({ text: q.text, source: q.source })),
+      },
+    ],
+  };
+}
+
+test("a reworded add of the same gap stays suppressed until more sessions arrive", () => {
+  const summary = summaryWithGap();
+  const first = gate({
+    edit: memoryEdit((t) => t.replace("## Rules\n\n", "## Rules\n\n- Always include the full PR URL.\n")),
+    annotation: { edits: [claim(["H1"], { kind: "add", title: "add url rule" })] },
+    context: { summary },
+  });
+  assert.deepEqual(first.violations, []);
+  assert.deepEqual(first.proposal.edits[0].gapIds, [GAP_ID]);
+  const rejections = recordRejection(first.proposal.edits[0], { version: 1, entries: {} }, undefined, "too-narrow");
+  assert.equal(Object.values(rejections.entries)[0].reason, "too-narrow");
+
+  const reworded = gate({
+    edit: memoryEdit((t) =>
+      t.replace("## Rules\n\n", "## Rules\n\n- Put the complete pull request URL in every mention.\n"),
+    ),
+    annotation: { edits: [claim(["H1"], { kind: "add", title: "different wording" })] },
+    context: { summary, rejections, isSuppressed: isSuppressedByRejection },
+  });
+  assert.equal(reworded.proposal.edits.length, 0, "same gap, same or fewer sessions, different bytes");
+  assert.deepEqual(reworded.violations, [], "a reason is not a violation");
+
+  const revived = gate({
+    edit: memoryEdit((t) =>
+      t.replace("## Rules\n\n", "## Rules\n\n- Put the complete pull request URL in every mention.\n"),
+    ),
+    annotation: {
+      edits: [claim(["H1"], { kind: "add", title: "different wording", evidence: [...QUOTE, THIRD_QUOTE] })],
+    },
+    context: { summary: summaryWithGap([...QUOTE, THIRD_QUOTE]), rejections, isSuppressed: isSuppressedByRejection },
+  });
+  assert.equal(revived.proposal.edits.length, 1, "strictly more sessions revive the identity");
+});
+
+test("extract is not suppressed by a rejected add that shares a gap id", () => {
+  const summary = summaryWithGap();
+  const added = gate({
+    edit: memoryEdit((t) => t.replace("## Rules\n\n", "## Rules\n\n- Always include the full PR URL.\n")),
+    annotation: { edits: [claim(["H1"], { kind: "add", title: "add url rule" })] },
+    context: { summary },
+  });
+  const rejections = recordRejection(added.proposal.edits[0], { version: 1, entries: {} });
+
+  const extracted = "- Use Node 18 via nvm before running any script.";
+  const extract = gate({
+    files: { ".agents/skills/setup-a/SKILL.md": skillFile("setup", "- Keep the existing setup step.\n") },
+    edit: (root) => {
+      writeIn(root, "AGENTS.md", (text) => text.replace(extracted, "- See the setup skill."));
+      writeIn(root, ".agents/skills/setup-a/SKILL.md", (text) => `${text}${extracted}\n`);
+    },
+    annotation: { edits: [claim(["H1", "H2"], { kind: "extract", title: "extract setup" })] },
+    context: { summary, rejections, isSuppressed: isSuppressedByRejection },
+  });
+  assert.deepEqual(extract.violations, [], extract.violations.join("\n"));
+  assert.equal(extract.proposal.edits.length, 1, "extract stays hunk-key only");
+  assert.deepEqual(extract.proposal.edits[0].gapIds, [GAP_ID]);
+});
+
+test("a rewrite of overlapping instruction units stays suppressed at equal session count", () => {
+  const first = gate({
+    edit: memoryEdit((t) => t.replace("include its URL.", "include its full URL.")),
+    annotation: { edits: [claim(["H1"], { kind: "rewrite", title: "expand url" })] },
+  });
+  assert.ok(first.proposal.edits[0].instructionIds.includes("AG-001"));
+  const rejections = recordRejection(first.proposal.edits[0], { version: 1, entries: {} });
+
+  const reworded = gate({
+    edit: memoryEdit((t) => t.replace("include its URL.", "include the complete pull request URL.")),
+    annotation: { edits: [claim(["H1"], { kind: "rewrite", title: "expand url again" })] },
+    context: { rejections, isSuppressed: isSuppressedByRejection },
+  });
+  assert.equal(reworded.proposal.edits.length, 0);
+});
+
+test("annotate instruction names the hunks do not touch are not stored and do not suppress", () => {
+  const first = gate({
+    edit: memoryEdit((t) => t.replace("Prefer small commits.", "Prefer tiny commits.")),
+    annotation: {
+      edits: [claim(["H1"], { kind: "rewrite", title: "tighten commits", instructions: ["AG-001", "AG-002"] })],
+    },
+  });
+  assert.deepEqual(first.proposal.edits[0].instructionIds, ["AG-002"]);
+  const rejections = recordRejection(first.proposal.edits[0], { version: 1, entries: {} });
+  assert.deepEqual(Object.values(rejections.entries)[0].instructionIds, ["AG-002"]);
+
+  const other = gate({
+    edit: memoryEdit((t) => t.replace("include its URL.", "include its full URL.")),
+    annotation: { edits: [claim(["H1"], { kind: "rewrite", title: "expand url", instructions: ["AG-001"] })] },
+    context: { rejections, isSuppressed: isSuppressedByRejection },
+  });
+  assert.equal(other.proposal.edits.length, 1, "padded annotate names must not widen suppression");
+});
+
 test("projectWithDecisions tracks the budget for the subset the human accepted", () => {
   const { proposal } = gate({
     edit: memoryEdit((t) =>
@@ -1717,6 +1838,32 @@ test("applying decisions writes accepted edits, skips rejected ones, and remembe
 
   const remembered = state.readRejections();
   assert.equal(Object.keys(remembered.entries).length, 1);
+});
+
+test("a successful reject-only apply stores measured gap and instruction identities", () => {
+  const summary = summaryWithGap();
+  const { proposal, repo, state } = gate({
+    edit: memoryEdit((t) => t.replace("## Rules\n\n", "## Rules\n\n- Always include the full PR URL.\n")),
+    annotation: { edits: [claim(["H1"], { kind: "add", title: "add url rule" })] },
+    context: { summary },
+  });
+  assert.deepEqual(proposal.edits[0].gapIds, [GAP_ID]);
+
+  const results = applyDecisions({
+    proposal,
+    decisions: { e1: "rejected" },
+    repo,
+    state,
+    config: { budgetTokens: 5000 },
+    rejectReasons: { e1: "already-covered" },
+  });
+
+  assert.equal(results.rejectionsRecorded, true);
+  assert.equal(results.written.length, 0);
+  const entry = Object.values(state.readRejections().entries)[0];
+  assert.deepEqual(entry.gapIds, [GAP_ID]);
+  assert.equal(entry.reason, "already-covered");
+  assert.equal(fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8"), MEMORY_TEXT);
 });
 
 test("apply refuses an accepted subset that exceeds the memory cap before writing any file", () => {

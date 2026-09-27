@@ -246,7 +246,7 @@ function removeEmptyDirectories(directories) {
  * A file is therefore applied all at once or not at all. Skills are written only after
  * every accepted edit has composed, and before the files that reference them.
  */
-export function applyDecisions({ proposal, decisions, repo, state, config, dryRun = false }) {
+export function applyDecisions({ proposal, decisions, repo, state, config, dryRun = false, rejectReasons = {} }) {
   const accepted = proposal.edits.filter((e) => decisions[e.id] === "accepted");
   const rejected = proposal.edits.filter((e) => decisions[e.id] === "rejected");
 
@@ -660,7 +660,7 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
   // Rejections are remembered so the same edit is not re-proposed without new evidence.
   if (!dryRun && rejected.length) {
     const rejections = state.readRejections();
-    for (const edit of rejected) recordRejection(edit, rejections);
+    for (const edit of rejected) recordRejection(edit, rejections, new Date().toISOString(), rejectReasons[edit.id]);
     state.writeRejections(rejections);
     results.rejectionsRecorded = true;
   }

@@ -215,6 +215,21 @@ test("a later uncited observation preserves the session's failed-trigger citatio
   assert.equal(summary.gaps[0].failedTriggerSessions, 2);
 });
 
+test("ledger observations carry the entry id onto the folded cluster", () => {
+  const phrasing = "Always pin the Node version with nvm.";
+  const ledger = { version: 1, entries: {} };
+  recordGapObservations(ledger, [
+    record("s1", [{ proposedInstruction: phrasing }]),
+    record("s2", [{ proposedInstruction: phrasing }]),
+  ]);
+  const observations = ledgerGapObservations(ledger, MEMORY_PATH);
+  assert.ok(observations.every((observation) => observation.gapId));
+  const summary = foldEvidence([], { gapObservations: observations, minGapEvidence: 2 });
+  const entryId = Object.keys(ledger.entries)[0];
+  assert.equal(summary.gaps[0].id, entryId);
+  assert.deepEqual(summary.gaps[0].ids, [entryId]);
+});
+
 test("a sighting older than gapLedgerMaxAge expires instead of resurfacing indefinitely", async () => {
   const h = harness({ gapLedgerMaxAge: "90d" });
   await run(h, [record("claude-s1", [GAP])]);

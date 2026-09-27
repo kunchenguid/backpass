@@ -79,6 +79,9 @@ Each owning file's comments and tests hold the detail; read them before touching
   function replacer, never a string one (untrusted text can contain `$&`).
 - **The live TUI is an enhancement layer** (`src/tui/`): output must be identical with it inactive (non-TTY, CI,
   `NO_COLOR`, `--quiet`, `--json`), with clean stdout.
+- **Rejection identity** (`src/state.js`): a refused add/rewrite/remove stays suppressed on the same kind and file
+  when measured `gapIds` or `instructionIds` overlap, until a strictly higher session count; extract/move stay
+  hunk-key only. Optional reject reasons never revive an edit and are not evidence floors.
 - Cursor IDE support is deferred; see the header of `src/discovery/adapters/cursor-ide.js`.
 
 ## Maintaining this file

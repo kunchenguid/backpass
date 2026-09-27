@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { UserError, color, info, warn } from "../logger.js";
+import { normalizeRejectReason } from "../state.js";
 import { windowsShimLaunch } from "../subprocess.js";
 
 /**
@@ -75,20 +76,37 @@ function runLavish(args, { inherit = false } = {}) {
 /**
  * Parse the decision vector the surface queues back:
  *   `BACKPASS_DECISIONS e1=accepted e2=rejected e3=accepted`
+ *   `BACKPASS_DECISIONS e1=accepted e2=rejected:already-covered`
  * Parsing is tolerant because the text travels through a human-facing comment box.
+ * An optional reason token after `rejected:` is kept only when it is a known chip;
+ * an unknown token is dropped and the reject verdict still stands.
  */
-export function parseDecisions(text, editIds) {
+function parseDecisionVector(text, editIds) {
   const decisions = {};
-  const pattern = /\b(e\d+)\s*=\s*(accepted|rejected|accept|reject)\b/gi;
+  const reasons = {};
+  const pattern = /\b(e\d+)\s*=\s*(accepted|rejected|accept|reject)(?::([A-Za-z0-9_-]+))?\b/gi;
   let match = pattern.exec(text || "");
   while (match) {
     const id = match[1].toLowerCase();
     if (editIds.includes(id)) {
-      decisions[id] = match[2].toLowerCase().startsWith("accept") ? "accepted" : "rejected";
+      const verdict = match[2].toLowerCase().startsWith("accept") ? "accepted" : "rejected";
+      decisions[id] = verdict;
+      if (verdict === "rejected") {
+        const reason = normalizeRejectReason(match[3]);
+        if (reason) reasons[id] = reason;
+      }
     }
     match = pattern.exec(text || "");
   }
-  return Object.keys(decisions).length ? decisions : null;
+  return Object.keys(decisions).length ? { decisions, reasons } : null;
+}
+
+export function parseDecisions(text, editIds) {
+  return parseDecisionVector(text, editIds)?.decisions ?? null;
+}
+
+export function parseRejectReasons(text, editIds) {
+  return parseDecisionVector(text, editIds)?.reasons ?? {};
 }
 
 export async function openApplySurface(file) {
@@ -152,8 +170,8 @@ export async function pollDecisions(file, editIds, { delayMs = POLL_RETRY_DELAY_
       throw new UserError("lavish-axi poll exited unexpectedly", text.trim().slice(0, 400));
     }
 
-    const decisions = parseDecisions(text, editIds);
-    if (decisions) return decisions;
+    const parsed = parseDecisionVector(text, editIds);
+    if (parsed) return parsed;
 
     // lavish-axi reports an end through the session fields, never in prose: `status: ended`
     // when nothing was queued, `session_ended: true` alongside the final `status: feedback`.

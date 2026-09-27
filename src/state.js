@@ -21,6 +21,8 @@ export const STATE_EXCLUDE_LINE = `${STATE_DIRNAME}/`;
  *   evidence-summary.json  folded evidence (stage 2)
  *   proposal.json          latest parseable tier-2 synthesis; absent if none was produced (stage 3)
  *   rejections.json        edits the human rejected, and the evidence weight behind them
+ *                          (hunk key always; add/rewrite/remove also remember gap and
+ *                          instruction identities so a reworded proposal stays suppressed)
  *   gap-ledger.json        gap observations by gap and session, accumulated across runs (src/gap-ledger.js)
  *   agent-probe-cache.json TTL'd availability/auth verdicts per agent|model (src/agents.js)
  *   prompts/               the exact prompts of the last run, one file per model turn
@@ -246,10 +248,32 @@ export function isEvidenceFresh(evidence, transcript, memoryHash) {
   return evidence.key === evidenceKey(transcript, memoryHash);
 }
 
+/** Optional reject-reason tokens the apply surface may attach. Unknown tokens are dropped. */
+export const REJECT_REASONS = ["wrong-evidence", "already-covered", "too-narrow", "too-broad", "disagree"];
+
+const IDENTITY_KINDS = new Set(["add", "rewrite", "remove"]);
+
+export function normalizeRejectReason(reason) {
+  const token = String(reason || "")
+    .trim()
+    .toLowerCase();
+  return REJECT_REASONS.includes(token) ? token : undefined;
+}
+
+function intersects(left, right) {
+  if (!Array.isArray(left) || !Array.isArray(right) || !left.length || !right.length) return false;
+  const other = new Set(right);
+  return left.some((id) => other.has(id));
+}
+
 /**
  * A rejected edit stays rejected until materially new evidence arrives - the design's
  * replacement for a DEFER button (captain tweak 3). "Materially new" means the edit is
- * backed by strictly more transcripts than when it was turned down.
+ * backed by strictly more transcripts than when it was turned down. Add, rewrite, and
+ * remove also match on measured gap and instruction identities, so a later proposal of
+ * the same decision in different bytes stays suppressed. Extract and move stay hunk-key
+ * only: repositioning or paying for a skill is not the same decision as changing instruction
+ * text. A reason code never revives an edit, and neither does a model-reported count.
  */
 export function rejectionKey(edit) {
   let body;
@@ -269,18 +293,33 @@ export function rejectionKey(edit) {
 }
 
 export function isSuppressedByRejection(edit, rejections) {
-  const prior = rejections.entries[rejectionKey(edit)];
-  if (!prior) return false;
-  return (edit.transcripts || 0) <= (prior.transcripts || 0);
+  const entries = rejections?.entries || {};
+  const transcripts = edit.transcripts || 0;
+  const prior = entries[rejectionKey(edit)];
+  if (prior && transcripts <= (prior.transcripts || 0)) return true;
+  if (!IDENTITY_KINDS.has(edit.kind)) return false;
+  for (const remembered of Object.values(entries)) {
+    if (remembered.kind !== edit.kind || remembered.file !== edit.file) continue;
+    if (transcripts > (remembered.transcripts || 0)) continue;
+    if (intersects(edit.gapIds, remembered.gapIds) || intersects(edit.instructionIds, remembered.instructionIds)) {
+      return true;
+    }
+  }
+  return false;
 }
 
-export function recordRejection(edit, rejections, at = new Date().toISOString()) {
-  rejections.entries[rejectionKey(edit)] = {
+export function recordRejection(edit, rejections, at = new Date().toISOString(), reason) {
+  const entry = {
     kind: edit.kind,
     file: edit.file,
     title: edit.title,
     transcripts: edit.transcripts || 0,
     rejectedAt: at,
   };
+  if (Array.isArray(edit.gapIds) && edit.gapIds.length) entry.gapIds = [...edit.gapIds];
+  if (Array.isArray(edit.instructionIds) && edit.instructionIds.length) entry.instructionIds = [...edit.instructionIds];
+  const normalized = normalizeRejectReason(reason);
+  if (normalized) entry.reason = normalized;
+  rejections.entries[rejectionKey(edit)] = entry;
   return rejections;
 }

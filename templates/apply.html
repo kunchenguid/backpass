@@ -646,6 +646,34 @@
         color: var(--reject);
         background: var(--reject-dim);
       }
+      .reject-reasons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 8px;
+      }
+      .reject-reasons[hidden] {
+        display: none !important;
+      }
+      .reason-chip {
+        font-family: var(--mono);
+        font-size: 10.5px;
+        letter-spacing: 0.06em;
+        padding: 4px 9px;
+        background: transparent;
+        border: 1px solid var(--line);
+        color: var(--faint);
+        cursor: pointer;
+      }
+      .reason-chip:hover {
+        border-color: var(--dim);
+        color: var(--text);
+      }
+      .reason-chip.on {
+        border-color: var(--reject);
+        color: var(--reject);
+        background: var(--reject-dim);
+      }
 
       .skillprev {
         border: 1px solid var(--line-soft);
@@ -862,6 +890,8 @@
         var edits = P.edits || [];
         var budget = P.budget || { current: 0, capTokens: 0 };
         var decisions = {};
+        var rejectReasons = {};
+        var REJECT_REASONS = ["wrong-evidence", "already-covered", "too-narrow", "too-broad", "disagree"];
         edits.forEach(function (e) {
           decisions[e.id] = "accepted";
         });
@@ -1278,6 +1308,8 @@
           }
 
           var decide = el("div", "decide");
+          var reasons = el("div", "reject-reasons");
+          reasons.hidden = true;
           ["accept", "reject"].forEach(function (choice) {
             var btn = el("button", choice === "accept" ? "on-accept" : "", choice.toUpperCase());
             btn.type = "button";
@@ -1288,11 +1320,41 @@
                 b.className = "";
               });
               btn.className = "on-" + choice;
+              if (choice === "accept") {
+                delete rejectReasons[edit.id];
+                reasons.hidden = true;
+                Array.prototype.forEach.call(reasons.children, function (chip) {
+                  chip.className = "reason-chip";
+                });
+              } else {
+                reasons.hidden = false;
+              }
               recompute();
             });
             decide.appendChild(btn);
           });
+          REJECT_REASONS.forEach(function (token) {
+            var chip = el("button", "reason-chip", token);
+            chip.type = "button";
+            chip.setAttribute("data-reason", token);
+            chip.addEventListener("click", function () {
+              if (decisions[edit.id] !== "rejected") return;
+              if (rejectReasons[edit.id] === token) {
+                delete rejectReasons[edit.id];
+                chip.className = "reason-chip";
+              } else {
+                rejectReasons[edit.id] = token;
+                Array.prototype.forEach.call(reasons.children, function (other) {
+                  other.className = "reason-chip";
+                });
+                chip.className = "reason-chip on";
+              }
+              recompute();
+            });
+            reasons.appendChild(chip);
+          });
           body.appendChild(decide);
+          body.appendChild(reasons);
           card.appendChild(body);
           host.appendChild(card);
         });
@@ -1445,7 +1507,9 @@
         document.getElementById("btn-apply").addEventListener("click", function () {
           var vector = edits
             .map(function (e) {
-              return e.id + "=" + decisions[e.id];
+              var value = decisions[e.id];
+              if (value === "rejected" && rejectReasons[e.id]) value += ":" + rejectReasons[e.id];
+              return e.id + "=" + value;
             })
             .join(" ");
           var message = "BACKPASS_DECISIONS " + vector;
@@ -1453,7 +1517,7 @@
             window.lavish.queuePrompt(message, {
               tag: "choice",
               text: vector,
-              data: { question: "backpass-apply-decisions", decisions: decisions },
+              data: { question: "backpass-apply-decisions", decisions: decisions, rejectReasons: rejectReasons },
               queueKey: "backpass-apply-decisions",
             });
             this.textContent = "QUEUED - SEND FROM THE PANEL";

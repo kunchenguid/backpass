@@ -186,6 +186,31 @@ test("near-duplicate gaps from different sessions cluster into one item", () => 
   assert.equal(summary.gaps[0].quotes.length, 2);
 });
 
+test("a cluster of ledger observations surfaces the union of entry ids", () => {
+  const summary = foldEvidence([], {
+    minGapEvidence: 2,
+    gapObservations: [
+      {
+        proposedInstruction: "Read docs/db.md before writing queries.",
+        sessionId: "a",
+        quote: "walked migrations",
+        gapId: "id-one",
+        domain: "project",
+      },
+      {
+        proposedInstruction: "Read docs/db.md before writing database queries.",
+        sessionId: "b",
+        quote: "rebuilt the schema",
+        gapId: "id-two",
+        domain: "project",
+      },
+    ],
+  });
+  assert.equal(summary.gaps.length, 1);
+  assert.equal(summary.gaps[0].id, undefined);
+  assert.deepEqual(summary.gaps[0].ids, ["id-one", "id-two"]);
+});
+
 test("a gap seen in only one session is dropped - batch size greater than one", () => {
   const summary = foldEvidence(
     [

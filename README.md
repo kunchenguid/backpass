@@ -547,7 +547,12 @@ It opens in your default browser when one is available; the URL is always printe
 a headless box or `--no-open` just hands you the link.
 
 There is no DEFER button, and it isn't missing: **rejections are remembered.** A rejected
-edit is not proposed again unless materially new evidence arrives.
+add, rewrite, or remove stays rejected while a later proposal of the same kind against the
+same file cites the same gap or touches the same instruction, even if the wording changed,
+until a later run has strictly more sessions behind it. Extract and move still match on the
+hunk bytes. The browser surface can attach an optional reason (`wrong-evidence`,
+`already-covered`, `too-narrow`, `too-broad`, `disagree`); `--no-ui` records the rejection
+without asking for one.
 
 The live budget gauge is not just a readout. Apply rechecks the accepted subset against
 the same budget gate as synthesis: stay under the cap, or shrink if the file is already

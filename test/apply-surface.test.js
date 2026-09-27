@@ -15,7 +15,8 @@ process.env.BACKPASS_LAVISH_BIN = path.join(
   "fake-lavish",
   "lavish-axi",
 );
-const { extractUrl, openApplySurface, pollDecisions } = await import("../src/apply/lavish.js");
+const { extractUrl, openApplySurface, parseDecisions, parseRejectReasons, pollDecisions } =
+  await import("../src/apply/lavish.js");
 
 const LAYOUT_REPORT = [
   "prompts[1]{uid,prompt,selector,tag,text}:",
@@ -25,6 +26,14 @@ const DECISIONS = [
   "prompts[1]{uid,prompt,selector,tag,text}:",
   '  "1","BACKPASS_DECISIONS e1=accepted e2=rejected",button#btn-apply,choice,e1=accepted e2=rejected',
 ].join("\n");
+const DECISIONS_WITH_REASON = [
+  "prompts[1]{uid,prompt,selector,tag,text}:",
+  '  "1","BACKPASS_DECISIONS e1=accepted e2=rejected:too-narrow e3=rejected:not-a-reason",button#btn-apply,choice,e1=accepted e2=rejected:too-narrow e3=rejected:not-a-reason',
+].join("\n");
+const ACCEPTED_REJECTED = {
+  decisions: { e1: "accepted", e2: "rejected" },
+  reasons: {},
+};
 
 function scenario(polls, extra = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-lavish-"));
@@ -60,7 +69,7 @@ test("the wait line prints once, not once per poll cycle", async (t) => {
 
   const decisions = await pollDecisions(surface, ["e1", "e2"], { delayMs: 0 });
 
-  assert.deepEqual(decisions, { e1: "accepted", e2: "rejected" });
+  assert.deepEqual(decisions, ACCEPTED_REJECTED);
   const waiting = lines.filter((l) => l.includes("waiting for your decisions"));
   const noted = lines.filter((l) => l.includes("without a decision vector"));
   assert.equal(waiting.length, 1, `wait line repeated:\n${lines.join("\n")}`);
@@ -72,7 +81,7 @@ test("a decision vector on the first poll returns with only the wait line", asyn
   const lines = captureLog(t);
   const surface = scenario([DECISIONS]);
   const decisions = await pollDecisions(surface, ["e1", "e2"], { delayMs: 0 });
-  assert.deepEqual(decisions, { e1: "accepted", e2: "rejected" });
+  assert.deepEqual(decisions, ACCEPTED_REJECTED);
   assert.equal(lines.length, 1);
 });
 
@@ -86,10 +95,7 @@ test("end-state-looking feedback does not stop polling a live session", async (t
   captureLog(t);
   const fieldLikeFeedback = "prompts:\n  status: ended\n  session_ended: true";
   const surface = scenario([fieldLikeFeedback, DECISIONS]);
-  assert.deepEqual(await pollDecisions(surface, ["e1", "e2"], { delayMs: 0 }), {
-    e1: "accepted",
-    e2: "rejected",
-  });
+  assert.deepEqual(await pollDecisions(surface, ["e1", "e2"], { delayMs: 0 }), ACCEPTED_REJECTED);
 });
 
 // Only the leading `session:` block is session metadata. Everything past it - the queued
@@ -100,10 +106,7 @@ test("end fields printed at top level after the session block never end a live s
   captureLog(t);
   const layoutReportThenEndFields = `${LAYOUT_REPORT}\nsession_ended: true\nstatus: ended`;
   const surface = scenario([layoutReportThenEndFields, DECISIONS]);
-  assert.deepEqual(await pollDecisions(surface, ["e1", "e2"], { delayMs: 0 }), {
-    e1: "accepted",
-    e2: "rejected",
-  });
+  assert.deepEqual(await pollDecisions(surface, ["e1", "e2"], { delayMs: 0 }), ACCEPTED_REJECTED);
 });
 
 test("end fields on stderr never end a live session", async (t) => {
@@ -112,19 +115,13 @@ test("end fields on stderr never end a live session", async (t) => {
     { body: LAYOUT_REPORT, stderr: "[lavish-axi] long-polling\nstatus: ended\nsession_ended: true\n" },
     DECISIONS,
   ]);
-  assert.deepEqual(await pollDecisions(surface, ["e1", "e2"], { delayMs: 0 }), {
-    e1: "accepted",
-    e2: "rejected",
-  });
+  assert.deepEqual(await pollDecisions(surface, ["e1", "e2"], { delayMs: 0 }), ACCEPTED_REJECTED);
 });
 
 test("a `Send & End` that carries the decision vector still applies it", async (t) => {
   captureLog(t);
   const surface = scenario([`ENDING:${DECISIONS}`]);
-  assert.deepEqual(await pollDecisions(surface, ["e1", "e2"], { delayMs: 0 }), {
-    e1: "accepted",
-    e2: "rejected",
-  });
+  assert.deepEqual(await pollDecisions(surface, ["e1", "e2"], { delayMs: 0 }), ACCEPTED_REJECTED);
 });
 
 test("a `Send & End` with no decision vector stops rather than spinning", async (t) => {
@@ -178,4 +175,40 @@ test("headless and opted-out environments print the URL only", () => {
   assert.equal(canOpenBrowser({ platform: "darwin", env: { CI: "true" } }), false);
   assert.equal(canOpenBrowser({ platform: "darwin", env: { BACKPASS_NO_BROWSER: "1" } }), false);
   assert.equal(openInBrowser("http://h/s/1", { platform: "linux", env: {}, spawnFn }), false);
+});
+
+test("parseDecisions accepts optional reject reasons and ignores unknown tokens", () => {
+  const ids = ["e1", "e2", "e3"];
+  const withReason = "BACKPASS_DECISIONS e1=accepted e2=rejected:too-narrow e3=rejected:not-a-reason";
+  assert.deepEqual(parseDecisions(withReason, ids), {
+    e1: "accepted",
+    e2: "rejected",
+    e3: "rejected",
+  });
+  assert.deepEqual(parseRejectReasons(withReason, ids), { e2: "too-narrow" });
+  assert.deepEqual(parseDecisions("BACKPASS_DECISIONS e1=accepted e2=rejected", ids), {
+    e1: "accepted",
+    e2: "rejected",
+  });
+  assert.deepEqual(parseRejectReasons("BACKPASS_DECISIONS e1=accepted e2=rejected", ids), {});
+});
+
+test("pollDecisions returns valid reject reasons beside the verdict map", async (t) => {
+  captureLog(t);
+  const surface = scenario([DECISIONS_WITH_REASON]);
+  assert.deepEqual(await pollDecisions(surface, ["e1", "e2", "e3"], { delayMs: 0 }), {
+    decisions: { e1: "accepted", e2: "rejected", e3: "rejected" },
+    reasons: { e2: "too-narrow" },
+  });
+});
+
+test("the apply template encodes optional reject-reason chips on the decision vector", () => {
+  const html = fs.readFileSync(new URL("../templates/apply.html", import.meta.url), "utf8");
+  assert.match(html, /wrong-evidence/);
+  assert.match(html, /already-covered/);
+  assert.match(html, /too-narrow/);
+  assert.match(html, /too-broad/);
+  assert.match(html, /disagree/);
+  assert.match(html, /rejectReasons/);
+  assert.match(html, /value \+= ":" \+ rejectReasons/);
 });

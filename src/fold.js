@@ -242,6 +242,7 @@ export function foldEvidence(
   const allDecided = gapClusters.map((cluster) => {
     const eligibleItems = cluster.items.filter((item) => !item.projectCovered);
     const vote = clusterDomainVote(eligibleItems);
+    const gapIds = ledgerIdsOfCluster(cluster);
     return {
       proposedInstruction: cluster.proposedInstruction,
       sessions: cluster.sessions.size,
@@ -258,6 +259,8 @@ export function foldEvidence(
       majorityOrchestration: vote.majorityOrchestration,
       ...failedTriggerOf(eligibleItems, minGapEvidence),
       ...projectSpecificNote(cluster, minGapProjects),
+      ...(gapIds.length === 1 ? { id: gapIds[0] } : {}),
+      ...(gapIds.length ? { ids: gapIds } : {}),
     };
   });
 
@@ -425,6 +428,7 @@ export function clusterGapObservations(observations, { checkProjectCoverage = fa
       project: obs.project || null,
       projectCovered,
       coveredBySkills: new Set(obs.coveredBySkill ? [obs.coveredBySkill] : []),
+      gapIds: new Set(obs.gapId ? [obs.gapId] : []),
     };
     if (cluster) {
       const sessionItem = cluster.items.find((candidate) => candidate.sessionId === obs.sessionId);
@@ -432,6 +436,7 @@ export function clusterGapObservations(observations, { checkProjectCoverage = fa
         if (obs.coveredBySkill) sessionItem.coveredBySkills.add(obs.coveredBySkill);
         if (observationDomain(obs) !== "orchestration") sessionItem.domain = "project";
         if (projectCovered) sessionItem.projectCovered = true;
+        if (obs.gapId) sessionItem.gapIds.add(obs.gapId);
       } else {
         cluster.items.push(item);
       }
@@ -458,6 +463,15 @@ export function clusterGapObservations(observations, { checkProjectCoverage = fa
     );
   }
   return clusters;
+}
+
+/** Stable ledger entry ids on a cluster: the union of item ids, never a hash of current phrasing. */
+function ledgerIdsOfCluster(cluster) {
+  const ids = new Set();
+  for (const item of cluster.items || []) {
+    for (const id of item.gapIds || []) ids.add(id);
+  }
+  return [...ids].sort();
 }
 
 function isProjectCoveredSighting(obs) {

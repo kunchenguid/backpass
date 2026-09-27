@@ -320,6 +320,7 @@ export function ledgerGapObservations(ledger, memoryPath, skills = null) {
         proposedInstruction: entry.proposedInstruction,
         phrasings: obs.phrasings?.length ? obs.phrasings : [entry.proposedInstruction],
         sessionId,
+        gapId: entry.id,
         source: obs.source,
         mistake: obs.mistake,
         quote: obs.quote,

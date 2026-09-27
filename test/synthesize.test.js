@@ -72,7 +72,7 @@ fs.writeFileSync(statePath, JSON.stringify(state));
 fs.chmodSync(fakeAcpx, 0o755);
 process.env.BACKPASS_ACPX_BIN = fakeAcpx;
 
-const { synthesizeProposal, ANNOTATE_TURNS } = await import("../src/synthesize.js");
+const { synthesizeProposal, ANNOTATE_TURNS, renderRejections } = await import("../src/synthesize.js");
 const { applyDecisions } = await import("../src/apply/writer.js");
 const { loadConfig } = await import("../src/config.js");
 const { parseMemoryUnits, readMemoryFile } = await import("../src/memory.js");
@@ -866,4 +866,25 @@ test("a skill backpass withheld from staging is not fingerprinted, so a third pa
 
   const { violations } = await withheld.run();
   assert.deepEqual(violations, []);
+});
+
+test("the synthesis prompt lists stored rejection identities and reasons", () => {
+  const text = renderRejections({
+    version: 1,
+    entries: {
+      abc: {
+        kind: "add",
+        file: "AGENTS.md",
+        title: "pin node",
+        transcripts: 2,
+        rejectedAt: "2026-09-27T00:00:00.000Z",
+        gapIds: ["cafef00ddeadbeef"],
+        reason: "already-covered",
+      },
+    },
+  });
+  assert.match(text, /\[add\] pin node/);
+  assert.match(text, /cafef00ddeadbeef/);
+  assert.match(text, /already-covered/);
+  assert.doesNotMatch(text, /\(none\)/);
 });

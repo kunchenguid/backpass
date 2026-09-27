@@ -62,6 +62,7 @@ export async function cmdApply(ctx) {
 
   const editIds = proposal.edits.map((e) => e.id);
   let decisions;
+  let rejectReasons = {};
   let surfaceFile = null;
 
   if (ctx.flags["no-ui"]) {
@@ -72,7 +73,9 @@ export async function cmdApply(ctx) {
     info(`${color.cyan("·")} review surface: ${url || surfaceFile}`);
     // Best effort: the printed URL above is the fallback when nothing opens.
     if (!ctx.flags["no-open"]) openInBrowser(url);
-    decisions = await pollDecisions(surfaceFile, editIds);
+    const parsed = await pollDecisions(surfaceFile, editIds);
+    decisions = parsed?.decisions ?? null;
+    rejectReasons = parsed?.reasons || {};
   }
 
   if (!decisions) {
@@ -90,12 +93,13 @@ export async function cmdApply(ctx) {
     state: config.state,
     config,
     dryRun: Boolean(ctx.flags["dry-run"]),
+    rejectReasons,
   });
 
   if (surfaceFile) await closeApplySurface(surfaceFile);
 
   if (ctx.flags.json) {
-    json({ decisions, results, mix: proposal.stats.corpusMix || null });
+    json({ decisions, rejectReasons, results, mix: proposal.stats.corpusMix || null });
     return results.failed.length ? 1 : 0;
   }
 

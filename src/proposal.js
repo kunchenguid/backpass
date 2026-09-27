@@ -298,18 +298,51 @@ export function renderChangesForPrompt(measured, memoryFile) {
     .join("\n\n");
 }
 
+function evidenceQuoteKey(item) {
+  return `${item.source || ""}\n${item.text || ""}`;
+}
+
+function ledgerIdsOfGap(gap) {
+  if (Array.isArray(gap?.ids) && gap.ids.length) return gap.ids.map(String).filter(Boolean);
+  return gap?.id ? [String(gap.id)] : [];
+}
+
 /**
- * Validate the annotated, measured changes against the mechanical gates. Returns
- * `{ proposal, violations }`; the caller decides whether to re-prompt or fail loudly.
- *
- * `context.measured` is the workspace measurement (`measureWorkspace`); `rawResult` is
- * the model's annotation. Nothing textual is taken from the model: the hunks, their
- * deltas, the projected budget, and even whether an edit is an addition are measured.
+ * Ledger ids for gap clusters whose catalog quotes uniquely match this edit's evidence.
+ * Exact `source + text` against `summary.gaps` quotes - the same join
+ * `countedEvidenceProjects` uses. A quote that hits two clusters is not unique and is
+ * skipped, so a shared sentence cannot weld two gaps into one suppression identity.
  */
+function uniqueMatchingGapIds(edit, summary) {
+  const ids = new Set();
+  for (const item of edit.evidence || []) {
+    const key = evidenceQuoteKey(item);
+    const matching = (summary?.gaps || []).filter((gap) =>
+      (gap.quotes || []).some((quote) => evidenceQuoteKey(quote) === key),
+    );
+    if (matching.length !== 1) continue;
+    for (const id of ledgerIdsOfGap(matching[0])) ids.add(id);
+  }
+  return [...ids];
+}
+
+/**
+ * Instruction units the memory-file hunks actually touch, using the same range
+ * intersection as removal evidence. Annotate `instructions` never widen this set.
+ */
+function measuredInstructionIds(memoryHunks, memoryFile) {
+  const measured = new Set();
+  if (!memoryFile?.units) return [];
+  for (const hunk of memoryHunks) {
+    for (const unit of unitsRemovedBy(hunk, memoryFile)) measured.add(unit.id);
+  }
+  return [...measured];
+}
+
 function countedEvidenceProjects(edit, summary) {
-  const quoted = new Set(edit.evidence.map((item) => `${item.source || ""}\n${item.text || ""}`));
+  const quoted = new Set(edit.evidence.map((item) => evidenceQuoteKey(item)));
   const byGap = (summary?.gaps || [])
-    .filter((gap) => gap.quotes?.some((quote) => quoted.has(`${quote.source || ""}\n${quote.text || ""}`)))
+    .filter((gap) => gap.quotes?.some((quote) => quoted.has(evidenceQuoteKey(quote))))
     .map((gap) => gap.projects || 0);
   // Gap clusters carry their own project count, but an edit that rewrites or reinforces
   // an existing instruction quotes instruction-row evidence, which carries none. The fold
@@ -323,6 +356,14 @@ function countedEvidenceProjects(edit, summary) {
   return Math.max(0, byQuoteSource.size, ...byGap);
 }
 
+/**
+ * Validate the annotated, measured changes against the mechanical gates. Returns
+ * `{ proposal, violations }`; the caller decides whether to re-prompt or fail loudly.
+ *
+ * `context.measured` is the workspace measurement (`measureWorkspace`); `rawResult` is
+ * the model's annotation. Nothing textual is taken from the model: the hunks, their
+ * deltas, the projected budget, and even whether an edit is an addition are measured.
+ */
 export function buildProposal(rawResult, context) {
   const {
     memoryFile,
@@ -671,6 +712,8 @@ export function buildProposal(rawResult, context) {
       title: edit.title,
       rationale: edit.rationale,
       instructions: edit.instructions,
+      gapIds: uniqueMatchingGapIds(edit, summary),
+      instructionIds: measuredInstructionIds(memoryHunks, memoryFile),
       evidence: edit.evidence,
       transcripts: edit.transcripts,
       ...(evidenceProjects != null ? { projects: evidenceProjects } : {}),

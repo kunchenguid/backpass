@@ -135,14 +135,17 @@ function budgetState(memoryFile, config, descriptionTokens = 0) {
   return "within budget";
 }
 
-function renderRejections(rejections) {
+export function renderRejections(rejections) {
   const entries = Object.values(rejections.entries || {});
   if (!entries.length) return "(none)";
   return entries
-    .map(
-      (e) =>
-        `- [${e.kind}] ${e.title} (rejected ${e.rejectedAt.slice(0, 10)} with ${e.transcripts} session(s) of evidence)`,
-    )
+    .map((e) => {
+      const bits = [`rejected ${e.rejectedAt.slice(0, 10)} with ${e.transcripts} session(s) of evidence`];
+      const ids = [...(e.gapIds || []), ...(e.instructionIds || [])];
+      if (ids.length) bits.push(`ids ${ids.join(", ")}`);
+      if (e.reason) bits.push(`reason ${e.reason}`);
+      return `- [${e.kind}] ${e.title} (${bits.join("; ")})`;
+    })
     .join("\n");
 }
 
