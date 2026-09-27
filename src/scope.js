@@ -193,6 +193,7 @@ function resolveProjectScope(repo, config) {
     stateDir: path.join(repo.root, ".backpass"),
     modelCwd: repo.root,
     memoryFiles: config.memoryFiles,
+    nestedMemoryFiles: config.nestedMemoryFiles || [],
     skillDirs: config.skillsDirs || [],
     skillSearchPaths: (config.skillSearchPaths || []).map((p) => expandUserPath(p)),
     overflowDir: config.skillsDir,

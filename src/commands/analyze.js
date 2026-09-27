@@ -1,9 +1,17 @@
-import path from "node:path";
-
 import { analyzeTranscripts } from "../analyze.js";
 import { userClaudeSkillsDir } from "../config.js";
 import { UserError, color, info, json, out, warn } from "../logger.js";
-import { memorySurfaceHash, resolveMemoryFiles } from "../memory.js";
+import { memorySurfaceHash, resolveMemoryFiles, separateFileWarning } from "../memory.js";
+import {
+  attributeTranscripts,
+  nestedContext,
+  renderAlsoLoaded,
+  reportNestedMemoryFiles,
+  resolveNestedMemoryFiles,
+  nestedSurfaceHash,
+  workedUnder,
+} from "../nested.js";
+import { transcriptIdentity } from "../transcript.js";
 import { loadProjectSkills, resolveOverflowTarget, skillDescriptionTokens } from "../skills.js";
 import { emitProgress } from "../progress.js";
 import { closeRemoteDiscovery, discoverForRun } from "./scan.js";
@@ -42,18 +50,7 @@ export function primaryMemoryFile(repo, config, scope = null) {
       "run `backpass` to bootstrap an AGENTS.md, or set memoryFiles in .backpassrc.json",
     );
   }
-  for (const other of resolved.separate) {
-    const relativeImport = path
-      .relative(path.dirname(other.absolute), resolved.primary.absolute)
-      .split(path.sep)
-      .join("/");
-    const pointerImport = relativeImport;
-    warn(
-      `${other.path} is a separate memory file and will NOT be updated - only ${resolved.primary.path} is optimized. ` +
-        `To cover both, consolidate: move its content into ${resolved.primary.path} and make ${other.path} a pointer ` +
-        `(a single line: @${pointerImport}).`,
-    );
-  }
+  for (const other of resolved.separate) warn(separateFileWarning(other, resolved.primary));
   // Overflow-layout warnings are the synthesis stage's to print; this resolution is read-only.
   const userScope = scope?.kind === "user";
   const overflow = resolveOverflowTarget(repo.root, config.skillsDir, {
@@ -61,12 +58,19 @@ export function primaryMemoryFile(repo, config, scope = null) {
     allowExternal: userScope,
   });
   const skills = loadProjectSkills(repo.root, overflow.dir, config.skillsDirs || [], { exact: userScope });
+  // Nested memory files are weights of their own, named in `nestedMemoryFiles` - never a
+  // separate root file to consolidate (`src/nested.js`).
+  const nested = reportNestedMemoryFiles(resolveNestedMemoryFiles(repo.root, config)).map((weight) => ({
+    ...weight,
+    hash: nestedSurfaceHash(resolved.primary, weight.file, skills),
+  }));
   return {
     file: resolved.primary,
     all: resolved.all,
     hash: memorySurfaceHash(resolved.hash, skills),
     resolved,
     skills,
+    nested,
   };
 }
 
@@ -81,7 +85,7 @@ export async function runAnalysis(ctx) {
 
 async function runAnalysisCore(ctx) {
   const { repo, scope, config } = ctx;
-  const { file, hash, skills } = primaryMemoryFile(repo, config, scope);
+  const { file, hash, skills, nested: weights } = primaryMemoryFile(repo, config, scope);
   // Deterministic by design: tokens and units come from parsing the file, no model.
   const descriptionTokens = skillDescriptionTokens(skills);
   emitProgress("memory", {
@@ -96,7 +100,7 @@ async function runAnalysisCore(ctx) {
 
   if (!transcripts.length) {
     info(`${color.yellow("·")} no transcripts associated with this ${scope?.kind === "user" ? "user" : "repo"}`);
-    return { file, hash, skills, transcripts, perHarness, summary: null };
+    return { file, hash, skills, transcripts, perHarness, summary: null, nested: [], attribution: null };
   }
 
   const summary = await analyzeTranscripts({
@@ -111,14 +115,74 @@ async function runAnalysisCore(ctx) {
     prefetch: (pending) => prefetchRemoteTranscripts(pending, { config }),
   });
 
-  return { file, hash, skills, transcripts, perHarness, summary };
+  const { nested, attribution } = await analyzeNested(ctx, { file, skills, weights, transcripts });
+  return { file, hash, skills, transcripts, perHarness, summary, nested, attribution };
+}
+
+/**
+ * The sessions each nested memory file learns from: those that worked under its
+ * directory (`src/nested.js`). Attribution is computed only when a nested file is named.
+ */
+export async function nestedCorpora(ctx, weights, transcripts, attribution = null) {
+  if (!weights.length) return { corpora: [], attribution: null };
+  const placed = attribution || (await attributeTranscripts(transcripts, ctx.repo, ctx.config.state));
+  const corpora = weights.map((weight) => ({
+    weight,
+    transcripts: transcripts.filter((transcript) =>
+      workedUnder(placed.get(transcriptIdentity(transcript)), weight.dir),
+    ),
+  }));
+  return { corpora, attribution: placed };
+}
+
+/**
+ * Analyze every nested memory file against its own corpus, in its own state, with the
+ * root file shown as already loaded. Nothing runs when no nested file is named.
+ */
+async function analyzeNested(ctx, { file, skills, weights, transcripts }) {
+  const { corpora, attribution } = await nestedCorpora(ctx, weights, transcripts);
+  const nested = [];
+  for (const { weight, transcripts: corpus } of corpora) {
+    info(
+      `${color.cyan("·")} ${weight.path} is a nested memory file: ${corpus.length} of ${transcripts.length} ` +
+        `session(s) worked under ${weight.dir}/`,
+    );
+    const summary = corpus.length
+      ? await analyzeTranscripts({
+          transcripts: corpus,
+          memoryFile: weight.file,
+          skills,
+          alsoLoaded: renderAlsoLoaded(file, weight),
+          config: nestedContext(ctx, weight).config,
+          repo: ctx.repo,
+          modelCwd: ctx.scope?.modelCwd || ctx.repo.root,
+          memoryHash: weight.hash,
+          force: Boolean(ctx.flags.force),
+        })
+      : null;
+    nested.push({ weight, transcripts: corpus, summary });
+  }
+  return { nested, attribution };
 }
 
 export async function cmdAnalyze(ctx) {
-  const { file, transcripts, summary } = await runAnalysis(ctx);
+  const { file, transcripts, summary, nested = [] } = await runAnalysis(ctx);
 
   if (ctx.flags.json) {
-    json({ memoryFile: file.path, transcripts: transcripts.length, summary });
+    json({
+      memoryFile: file.path,
+      transcripts: transcripts.length,
+      summary,
+      ...(nested.length
+        ? {
+            nested: nested.map((entry) => ({
+              memoryFile: entry.weight.path,
+              transcripts: entry.transcripts.length,
+              summary: entry.summary,
+            })),
+          }
+        : {}),
+    });
     return 0;
   }
 
@@ -133,6 +197,18 @@ export async function cmdAnalyze(ctx) {
   if (summary.failed) {
     out(color.dim("  failed transcripts are listed by `backpass status` and retried next run"));
   }
-  printUsage({ tier1: summary.usage });
+  for (const { weight, transcripts: corpus, summary: nestedSummary } of nested) {
+    out(
+      `analyzed against ${weight.path} (nested, ${weight.file.units.length} instructions, ${weight.file.tokens} tok) ` +
+        `from ${corpus.length} session(s) under ${weight.dir}/`,
+    );
+    if (nestedSummary) {
+      out(
+        `  ${nestedSummary.analyzed} newly analyzed · ${nestedSummary.cached} cached · ` +
+          `${nestedSummary.skipped} skipped (too short) · ${nestedSummary.failed} failed`,
+      );
+    }
+  }
+  printUsage({ tier1: [...summary.usage, ...nested.flatMap((entry) => entry.summary?.usage || [])] });
   return 0;
 }

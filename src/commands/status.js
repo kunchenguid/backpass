@@ -4,6 +4,7 @@ import path from "node:path";
 import { userClaudeSkillsDir } from "../config.js";
 import { color, json, out } from "../logger.js";
 import { resolveMemoryFiles } from "../memory.js";
+import { nestedBudget, resolveNestedMemoryFiles } from "../nested.js";
 import {
   loadProjectSkills,
   resolveOverflowTarget,
@@ -58,6 +59,19 @@ export async function cmdStatus(ctx) {
       separate: resolved.separate.includes(file),
     };
   });
+  // Nested memory files are weights of their own, each under its own budget.
+  for (const weight of resolveNestedMemoryFiles(repo.root, config)) {
+    budgets.push({
+      path: weight.path,
+      label: weight.path,
+      ...(weight.file ? budgetStatus(weight.file.text, null, nestedBudget(config)) : {}),
+      instructions: weight.file?.units.length ?? 0,
+      pointerTo: weight.pointerTo,
+      separate: false,
+      nested: weight.dir,
+      missing: !weight.file,
+    });
+  }
 
   if (ctx.flags.json) {
     json({
@@ -80,16 +94,22 @@ export async function cmdStatus(ctx) {
 
   out(color.dim("BUDGET (always-loaded)"));
   if (!budgets.length) out("  no memory file found");
+  const width = budgets.some((b) => b.nested) ? Math.max(14, ...budgets.map((b) => b.label.length)) : 14;
   for (const b of budgets) {
+    if (b.missing) {
+      out(`  ${b.path.padEnd(width)} ${color.yellow("nested - does not exist, not trained")}`);
+      continue;
+    }
     if (b.pointerTo) {
-      out(`  ${b.path.padEnd(14)} ${color.dim(`pointer to ${b.pointerTo}`)}`);
+      out(`  ${b.path.padEnd(width)} ${color.dim(`pointer to ${b.pointerTo}`)}`);
       continue;
     }
     const state_ =
       (b.withinBudget ? "" : color.red(` ${b.over} OVER`)) +
-      (b.separate ? color.yellow(" separate - not optimized") : "");
+      (b.separate ? color.yellow(" separate - not optimized") : "") +
+      (b.nested ? color.dim(` · nested, loads under ${b.nested}/`) : "");
     out(
-      `  ${b.label.padEnd(14)} ${budgetBar(b)} ${formatTokens(b.current)} / ${formatTokens(b.capTokens)} tok` +
+      `  ${b.label.padEnd(width)} ${budgetBar(b)} ${formatTokens(b.current)} / ${formatTokens(b.capTokens)} tok` +
         ` · ${b.instructions} instructions${state_}`,
     );
   }

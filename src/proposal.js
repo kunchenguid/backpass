@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import { renderHunkLines } from "./diff.js";
 import { normalizeSourceLabel } from "./gap-ledger.js";
 import { mixFromCounts } from "./interaction.js";
@@ -333,6 +335,7 @@ export function buildProposal(rawResult, context) {
     skillFiles = [],
     scope = null,
     target = { kind: "surface" },
+    routing = null,
   } = context;
 
   const violations = [];
@@ -578,6 +581,30 @@ export function buildProposal(rawResult, context) {
           `${config.minGapProjects} are required`,
       );
       continue;
+    }
+
+    // With nested memory files named, a new instruction lands in the most specific file
+    // whose directory every session behind it worked in (`src/nested.js`). Measured from
+    // the edit's own quote sources, like the floor above; a rewrite or removal stays with
+    // the file whose text it changes.
+    if (routing && !preservesAlwaysLoaded(edit.kind) && onlyAdds) {
+      const sessions = [
+        ...new Set(
+          edit.evidence.map((item) => summary?.sourceSessions?.[normalizeSourceLabel(item.source)]).filter(Boolean),
+        ),
+      ];
+      const owner = routing.ownerOf(sessions) ?? routing.rootPath;
+      const here = routing.weight ?? routing.rootPath;
+      if (owner !== here) {
+        violations.push(
+          owner === routing.rootPath
+            ? `edit ${edit.id} ("${edit.title}") adds an instruction backed by sessions that did not all work ` +
+                `under ${path.posix.dirname(here)}/; cross-cutting evidence belongs in ${owner}, not ${here} - revert it`
+            : `edit ${edit.id} ("${edit.title}") adds an instruction backed only by sessions that worked under ` +
+                `${path.posix.dirname(owner)}/; it belongs in ${owner}, which its own pass trains - revert it`,
+        );
+        continue;
+      }
     }
 
     // A removal is measured the same way: a hunk that only deletes text, outside an

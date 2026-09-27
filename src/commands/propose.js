@@ -7,7 +7,8 @@ import { formatCorpusMix, INTERACTIVE, NON_INTERACTIVE } from "../interaction.js
 import { UserError, color, info, json, out, terminalSafe } from "../logger.js";
 import { budgetBar, formatTokens } from "../tokens.js";
 import { emitProgress } from "../progress.js";
-import { primaryMemoryFile } from "./analyze.js";
+import { nestedCorpora, primaryMemoryFile } from "./analyze.js";
+import { mergeNestedProposals, nestedContext, routingFor } from "../nested.js";
 import { printUsage } from "./usage.js";
 import { closeRemoteDiscovery, discoverForRun } from "./scan.js";
 import { capTranscripts } from "../sample.js";
@@ -29,7 +30,7 @@ import { pruneHostCache } from "../discovery/cache.js";
  * sampled corpus or score positional instruction aliases against an index they never saw.
  * Legacy records stay excluded until ordinary discovery and analysis backfill them.
  */
-export async function foldForRun(ctx, memoryFile, memoryHash, skills = [], transcripts = []) {
+export async function foldForRun(ctx, memoryFile, memoryHash, skills = [], transcripts = [], { route = null } = {}) {
   const { state, minGapEvidence, gapLedgerMaxAge } = ctx.config;
   const selectedByIdentity = new Map(transcripts.map((transcript) => [transcriptIdentity(transcript), transcript]));
   const selected = new Set(selectedByIdentity.keys());
@@ -87,6 +88,7 @@ export async function foldForRun(ctx, memoryFile, memoryHash, skills = [], trans
     memoryFile,
     gapObservations,
     skills,
+    route,
   });
   summary.consolidation = consolidation;
   return summary;
@@ -113,11 +115,15 @@ async function runProposalCore(ctx, precomputed) {
   // folding, and agent resolution can all fail before synthesis starts; none of those
   // failures may leave an older proposal available to apply as if it came from this run.
   config.state.clearProposal();
-  const { file, hash, skills } = precomputed || primaryMemoryFile(repo, config, ctx.scope);
+  const memory = precomputed || primaryMemoryFile(repo, config, ctx.scope);
+  const { file, hash, skills } = memory;
   const transcripts = precomputed?.transcripts || capTranscripts(await discoverForRun(ctx), config).transcripts;
+  const weights = precomputed ? (precomputed.nested || []).map((entry) => entry.weight) : memory.nested || [];
+  const { corpora, attribution } = await nestedCorpora(ctx, weights, transcripts, precomputed?.attribution);
+  const routing = (weight) => (corpora.length ? routingFor(weights, attribution, file.path, weight) : null);
 
   const foldStarted = Date.now();
-  const summary = await foldForRun(ctx, file, hash, skills ?? [], transcripts);
+  const summary = await foldForRun(ctx, file, hash, skills ?? [], transcripts, { route: routing(null) });
   config.state.writeSummary(summary);
   emitProgress("fold:done", {
     instructions: summary.instructions.length,
@@ -135,18 +141,65 @@ async function runProposalCore(ctx, precomputed) {
     );
   }
 
-  const { proposal } = await synthesizeProposal({
+  const { proposal: rootProposal } = await synthesizeProposal({
     memoryFile: file,
     summary,
     config,
     repo,
     transcripts,
     scope: ctx.scope,
+    routing: routing(null),
   });
 
-  accountForConsolidationUsage(proposal, summary);
+  accountForConsolidationUsage(rootProposal, summary);
+  const passes = [];
+  for (const corpus of corpora) passes.push(await proposeNested(ctx, { skills: skills ?? [], corpus, routing }));
+  const proposal = passes.length ? mergeNestedProposals(rootProposal, passes) : rootProposal;
   config.state.writeProposal(proposal);
   return { proposal, summary, memoryFile: file };
+}
+
+/**
+ * One nested memory file's step, in its own state: fold its corpus, then synthesize
+ * against it under its own budget. A file whose evidence leaves nothing to act on skips
+ * the synthesis call and says why; a failed synthesis fails the run, named by file.
+ */
+async function proposeNested(ctx, { skills, corpus, routing }) {
+  const { weight, transcripts } = corpus;
+  const nested = nestedContext(ctx, weight);
+  const pass = { weight, transcripts, cap: nested.config.budgetTokens, summary: null, proposal: null, skipped: null };
+  if (!transcripts.length) {
+    pass.skipped = "nothing to learn from this run";
+    return pass;
+  }
+  nested.config.state.clearProposal();
+  const route = routing(weight.path);
+  pass.summary = await foldForRun(nested, weight.file, weight.hash, skills, transcripts, { route });
+  nested.config.state.writeSummary(pass.summary);
+  if (!pass.summary.analyzedSessions) {
+    pass.skipped = "its sessions are not analyzed yet; run `backpass analyze`";
+    return pass;
+  }
+  if (!pass.summary.gaps.length && !pass.summary.instructions.some((row) => row.negative > 0)) {
+    pass.skipped = "no gap cluster or negative evidence cleared the thresholds";
+    return pass;
+  }
+  try {
+    const { proposal } = await synthesizeProposal({
+      memoryFile: weight.file,
+      summary: pass.summary,
+      config: nested.config,
+      repo: ctx.repo,
+      transcripts,
+      scope: ctx.scope,
+      routing: route,
+    });
+    pass.proposal = proposal;
+  } catch (err) {
+    if (err instanceof ProposalViolation) err.message = `${weight.path}: ${err.message}`;
+    throw err;
+  }
+  return pass;
 }
 
 /**
@@ -172,6 +225,15 @@ export function printProposal(proposal, { applied = false, analysisUsage = [] } 
     `  evidence: ${proposal.stats.positive} positive · ${proposal.stats.negative} negative · ` +
       `${proposal.stats.gapClusters} gap clusters`,
   );
+  for (const nested of proposal.nested || []) {
+    const head = `  nested ${nested.memoryFile.path} · ${nested.sessions} session(s) under ${nested.dir}/`;
+    out(
+      nested.skipped
+        ? `${head} · ${color.dim(nested.skipped)}`
+        : `${head} · budget ${budgetBar(nested.budget)} ${formatTokens(nested.budget.current)} -> ` +
+            `${formatTokens(nested.budget.projected)} / ${formatTokens(nested.budget.capTokens)} tok`,
+    );
+  }
   out("");
 
   if (!proposal.edits.length) {
@@ -182,7 +244,7 @@ export function printProposal(proposal, { applied = false, analysisUsage = [] } 
     const kind = edit.kind === "extract" ? "EXTRACT" : edit.kind.toUpperCase();
     const delta = edit.deltaTokens || 0;
     out(
-      `  ${color.cyan(edit.id)} ${kind.padEnd(8)} ${edit.title} ` +
+      `  ${color.cyan(edit.id)} ${kind.padEnd(8)} ${edit.nestedMemoryFile ? `${edit.nestedMemoryFile}: ` : ""}${edit.title} ` +
         color.dim(
           `(${delta > 0 ? "+" : ""}${delta} tok, ${edit.transcripts} transcript(s)` +
             (edit.projects != null ? `, projects=${edit.projects}` : "") +
@@ -249,7 +311,7 @@ export function printSynthesisFailure(err, state) {
     info(color.dim("  no proposal was saved: no annotation turn produced one"));
     return;
   }
-  info(color.dim(`  the rejected proposal was saved to ${state.proposalPath}`));
+  info(color.dim(`  the rejected proposal was saved to ${err.proposalPath || state.proposalPath}`));
   if (err.reason !== "gates") {
     info(color.dim(`  it is from annotation attempt ${err.saved.attempt}, not the turn above, and it lists:`));
     for (const violation of err.saved.violations) info(color.dim(`    - ${violation}`));

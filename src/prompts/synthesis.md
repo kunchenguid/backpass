@@ -22,8 +22,7 @@ paste the edited text into your reply; backpass measures what you changed in the
 ## Current memory file: {{MEMORY_PATH}}
 
 Budget: {{CURRENT_TOKENS}} / {{BUDGET_TOKENS}} estimated always-loaded tokens
-({{BUDGET_STATE}}). The count is this file PLUS every skill's `description:` line;
-skill bodies are free until triggered.
+({{BUDGET_STATE}}). {{BUDGET_COUNT}}
 
 Every always-loaded token is paid on every future session, forever, and instruction
 following dilutes as the file grows. The budget is the constraint you optimize under.

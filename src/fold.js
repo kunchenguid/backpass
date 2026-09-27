@@ -41,11 +41,15 @@ import { crossSurfaceDuplicates } from "./overlap.js";
  *     flagged (`crossSurfaceDuplicates` in `src/overlap.js`). Description overlap exposes
  *     duplicated always-loaded tokens; body overlap is placement evidence because skill
  *     bodies load only on trigger. Both are report-only: nothing is deleted here.
+ *  5. With nested memory files named (`src/nested.js`), `route` keeps only the gap clusters
+ *     this file owns: the others are counted in `routedGaps` and left to the file whose
+ *     pass owns them. A failed trigger always stays with the root file, which owns the
+ *     skill layer. Without `route` the summary is exactly what it always was.
  */
 
 /**
  * @param {object[]} evidenceRecords
- * @param {{ minGapEvidence?: number, minGapProjects?: number, checkProjectCoverage?: boolean, memoryFile?: object|null, gapObservations?: object[]|null, skills?: object[] }} [options]
+ * @param {{ minGapEvidence?: number, minGapProjects?: number, checkProjectCoverage?: boolean, memoryFile?: object|null, gapObservations?: object[]|null, skills?: object[], route?: { weight: string|null, rootPath: string, ownerOf: (sessionIds: string[]) => string|null }|null }} [options]
  */
 export function foldEvidence(
   evidenceRecords,
@@ -56,6 +60,7 @@ export function foldEvidence(
     memoryFile = null,
     gapObservations = null,
     skills = [],
+    route = null,
   } = {},
 ) {
   const usable = evidenceRecords.filter((e) => e && e.status === "ok");
@@ -233,7 +238,7 @@ export function foldEvidence(
     })
     .sort((a, b) => b.negative - a.negative || b.sessions - a.sessions || a.instruction.localeCompare(b.instruction));
 
-  const decided = gapClusters.map((cluster) => {
+  const allDecided = gapClusters.map((cluster) => {
     const eligibleItems = cluster.items.filter((item) => !item.projectCovered);
     const vote = clusterDomainVote(eligibleItems);
     return {
@@ -250,6 +255,22 @@ export function foldEvidence(
       ...projectSpecificNote(cluster, minGapProjects),
     };
   });
+
+  const routedGaps = [];
+  const decided = route
+    ? allDecided.filter((cluster, index) => {
+        const owner = cluster.failedTriggerSkill ? null : route.ownerOf([...gapClusters[index].sessions]);
+        if (owner === route.weight) return true;
+        if (cluster.sessions >= minGapEvidence && !cluster.majorityOrchestration) {
+          routedGaps.push({
+            proposedInstruction: cluster.proposedInstruction,
+            sessions: cluster.sessions,
+            owner: owner ?? route.rootPath,
+          });
+        }
+        return false;
+      })
+    : allDecided;
 
   const proposalClusters = decided.filter((cluster) => !cluster.majorityOrchestration);
   // Default 1 means the gate exists but does not require a second project.
@@ -278,7 +299,7 @@ export function foldEvidence(
     else reportOnlyByReason.tooFewProjects += 1;
   }
 
-  return {
+  const summary = {
     version: 1,
     generatedAt: new Date().toISOString(),
     analyzedSessions,
@@ -310,6 +331,25 @@ export function foldEvidence(
     reportOnlyGaps,
     oversized: oversizedRestructureTargets(memoryFile, parentNonComplianceSessions, minGapEvidence),
   };
+  if (route) {
+    summary.routedGaps = routedGaps;
+    summary.sourceSessions = sourceSessionsOf(issuedSources, usable, persistedObservations);
+  }
+  return summary;
+}
+
+/** Which session each issued source label names, for the routing gate in `buildProposal`. */
+function sourceSessionsOf(issuedSources, usable, observations) {
+  const identities = [
+    ...usable.map((record) => record.transcript.identity || record.transcript.id),
+    ...observations.map((observation) => observation?.sessionId),
+  ];
+  const out = {};
+  issuedSources.forEach((source, index) => {
+    const label = normalizeSourceLabel(source);
+    if (label && identities[index] && !out[label]) out[label] = identities[index];
+  });
+  return out;
 }
 
 function parentSessionCounts(memoryFile, instructions, field) {
@@ -612,6 +652,13 @@ function renderEvidence(summary, { includeReportOnly }) {
 
   lines.push("");
   lines.push("### Synthesis-eligible gap clusters (mistakes no current instruction covers)");
+  if (summary.routedGaps?.length) {
+    const owners = [...new Set(summary.routedGaps.map((gap) => gap.owner))];
+    lines.push(
+      `- ${summary.routedGaps.length} more gap cluster(s) belong to ${owners.join(", ")}: the sessions behind ` +
+        `them place them there, and that file's own pass trains them, so they are not evidence for this file`,
+    );
+  }
   if (summary.totals.orchestrationGapSightings) {
     lines.push(
       `- ${summary.totals.orchestrationGapSightings} orchestration-domain sighting(s) counted as domain ` +

@@ -7,6 +7,7 @@ import { budgetBar, formatTokens } from "../tokens.js";
 import { skillDescriptionTokens } from "../skills.js";
 import { startTui } from "../tui/index.js";
 import { resolveMemoryFiles } from "../memory.js";
+import { nestedBudget } from "../nested.js";
 
 /**
  * The default command: one full backward pass.
@@ -92,6 +93,20 @@ export async function cmdRun(ctx) {
         `${color.cyan("·")} evidence: ${analysis.summary.analyzed} new · ${analysis.summary.cached} cached · ` +
           `${analysis.summary.skipped} too short · ${analysis.summary.failed} failed`,
       );
+    }
+    for (const { weight, summary } of analysis.nested || []) {
+      const cap = nestedBudget(config);
+      const bar = budgetBar({ utilization: weight.file.tokens / cap, withinBudget: weight.file.tokens <= cap });
+      info(
+        `${color.cyan("·")} ${weight.path} (nested): ${bar} ${formatTokens(weight.file.tokens)} / ` +
+          `${formatTokens(cap)} tok · ${weight.file.units.length} instructions`,
+      );
+      if (summary) {
+        info(
+          `  evidence: ${summary.analyzed} new · ${summary.cached} cached · ${summary.skipped} too short · ` +
+            `${summary.failed} failed`,
+        );
+      }
     }
 
     const { proposal } = await runProposal(ctx, analysis);

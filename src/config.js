@@ -46,6 +46,15 @@ export const LEGACY_DEFAULT_AGENTS = { analysis: "codex", synthesis: "claude" };
 export const DEFAULT_CONFIG = {
   memoryFiles: ["AGENTS.md", "CLAUDE.md"],
   budgetTokens: 5000,
+  /**
+   * Nested memory files a surface run also trains, each as its own weight: a
+   * repo-relative path like `apps/api/AGENTS.md`, fed only by the sessions that worked
+   * under its directory (`src/nested.js`). Only files named here are ever trained;
+   * nothing is discovered. Project scope only.
+   */
+  nestedMemoryFiles: [],
+  /** Always-loaded budget per nested memory file; `null` means `budgetTokens`. */
+  nestedBudgetTokens: null,
   skillsDir: ".agents/skills",
   /**
    * Extra directories to consult for *existing* skills, alongside `skillsDir`, when
@@ -318,6 +327,24 @@ function validate(config, { kind = "project", repoRoot = null } = {}) {
   }
   if (!Number.isFinite(config.budgetTokens) || config.budgetTokens <= 0) {
     throw new UserError("config.budgetTokens must be a positive number");
+  }
+  if (
+    !Array.isArray(config.nestedMemoryFiles) ||
+    config.nestedMemoryFiles.some((entry) => typeof entry !== "string" || !entry.trim())
+  ) {
+    throw new UserError("config.nestedMemoryFiles must be an array of repo-relative paths");
+  }
+  if (kind === "user" && config.nestedMemoryFiles.length) {
+    throw new UserError(
+      "config.nestedMemoryFiles is project-scope only",
+      "list nested memory files in the repository's .backpassrc.json",
+    );
+  }
+  if (
+    config.nestedBudgetTokens !== null &&
+    (!Number.isFinite(config.nestedBudgetTokens) || config.nestedBudgetTokens <= 0)
+  ) {
+    throw new UserError("config.nestedBudgetTokens must be a positive number, or null to use budgetTokens");
   }
   if (config.maxEditsPerRun !== null && (!Number.isInteger(config.maxEditsPerRun) || config.maxEditsPerRun <= 0)) {
     throw new UserError("config.maxEditsPerRun must be a positive integer, or null for the adaptive cap");

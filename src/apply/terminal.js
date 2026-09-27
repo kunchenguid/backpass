@@ -51,11 +51,13 @@ export function renderEdit(edit, index, total) {
   // A skill-file edit is on-trigger text except for its description line, which is
   // always loaded and billed; say which part of the delta is which.
   const signed = (n) => `${n > 0 ? "+" : ""}${formatTokens(n)}`;
-  const deltaText = edit.targetsMemoryFile
-    ? `${signed(delta)} tok${descriptionDelta ? ` (+${formatTokens(descriptionDelta)} tok skill description)` : ""}`
-    : descriptionDelta
-      ? `${signed(descriptionDelta)} tok always-loaded (description), ${signed(delta - descriptionDelta)} tok on trigger`
-      : `${signed(delta)} tok (not always-loaded)`;
+  const deltaText = edit.nestedMemoryFile
+    ? `${signed(delta)} tok in ${edit.nestedMemoryFile}`
+    : edit.targetsMemoryFile
+      ? `${signed(delta)} tok${descriptionDelta ? ` (+${formatTokens(descriptionDelta)} tok skill description)` : ""}`
+      : descriptionDelta
+        ? `${signed(descriptionDelta)} tok always-loaded (description), ${signed(delta - descriptionDelta)} tok on trigger`
+        : `${signed(delta)} tok (not always-loaded)`;
 
   out.push("");
   out.push(`${color.bold(`[${index + 1}/${total}] ${kind}`)}  ${color.dim(deltaText)}`);
@@ -117,6 +119,15 @@ export async function reviewInTerminal(proposal) {
         )} tok if all accepted`,
       ),
     );
+    for (const nested of proposal.nested || []) {
+      if (!nested.edits.length) continue;
+      console.error(
+        color.dim(
+          `nested ${nested.memoryFile.path}: ${formatTokens(nested.budget.current)} -> ` +
+            `${formatTokens(nested.budget.projected)} / ${formatTokens(nested.budget.capTokens)} tok if all accepted`,
+        ),
+      );
+    }
 
     for (const [index, edit] of proposal.edits.entries()) {
       console.error(renderEdit(edit, index, proposal.edits.length));

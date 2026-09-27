@@ -513,6 +513,19 @@ export function isPointerTo(text, target, options = {}) {
 }
 
 /**
+ * What a run says about a separate file next to its primary: it is not updated, and the
+ * fix is to consolidate it into the primary and leave a pointer behind.
+ */
+export function separateFileWarning(other, primary) {
+  const pointerImport = path.relative(path.dirname(other.absolute), primary.absolute).split(path.sep).join("/");
+  return (
+    `${other.path} is a separate memory file and will NOT be updated - only ${primary.path} is optimized. ` +
+    `To cover both, consolidate: move its content into ${primary.path} and make ${other.path} a pointer ` +
+    `(a single line: @${pointerImport}).`
+  );
+}
+
+/**
  * Resolve the memory file a run optimizes from the configured order.
  *
  *   primary   the first configured file that exists (null when none does)

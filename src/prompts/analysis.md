@@ -8,7 +8,7 @@ have prevented. This is the loss signal for a backward pass over the memory file
 
 Each instruction has a stable id in [brackets]. Refer to instructions ONLY by these ids.
 
-{{INSTRUCTION_INDEX}}
+{{INSTRUCTION_INDEX}}{{ALSO_LOADED}}
 
 ## Project skills (load-on-trigger)
 

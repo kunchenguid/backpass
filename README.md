@@ -595,6 +595,49 @@ pointer-aware:
   transcripts it is seeded from defaults alone and says so. Bootstrap only ever creates
   files; review it with `git diff`.
 
+### 10. Nested memory files in a monorepo
+
+A monorepo layers its memory: the root file loads in every session, and a file such as
+`apps/api/AGENTS.md` loads on top of it only when a session works under `apps/api/`. Name
+each nested file you want trained in `nestedMemoryFiles`. backpass never discovers one, so
+it never writes a file you did not name:
+
+```json
+{
+  "nestedMemoryFiles": ["apps/api/AGENTS.md", "apps/web/AGENTS.md"],
+  "nestedBudgetTokens": 2000
+}
+```
+
+With the list unset, a run is exactly the single-file run described above. With it set, a
+run over the whole surface trains every named file as a weight of its own:
+
+- **Evidence per subtree.** A session worked where its cwd and the paths its tool calls
+  name point (file paths, working directories, the file headers of an apply_patch),
+  resolved against this repository's known checkouts; nothing is read out of shell command
+  text. A nested file is audited only against the sessions that worked under its directory,
+  with the root file shown as already loaded, and keeps its own evidence, gap ledger, and
+  staging copy under `.backpass/nested/`. A session collected over ssh, or one whose paths
+  resolve to no known checkout, is placed nowhere and feeds only the root file.
+- **Routing.** A new instruction belongs to the most specific named file whose directory
+  every session behind it worked in: a lesson from two `apps/api` sessions goes to
+  `apps/api/AGENTS.md`, and one seen in both `apps/api` and `apps/web` goes to the root.
+  The fold hands each file only the gap clusters it owns, and the proposal gate refuses an
+  addition in the wrong file. A rewrite or removal stays with the file whose text it
+  changes, and a failed skill trigger stays with the root, which owns the skill layer.
+- **A budget per file.** Each nested file is held to `nestedBudgetTokens` (`budgetTokens`
+  when unset), at propose and again at apply. Skills belong to the root surface, so a
+  nested run neither edits a skill nor extracts into one.
+- **One review.** The proposal and `backpass apply` cover every file, each edit labeled
+  with its file and each nested file with its own budget. The two-session evidence floor,
+  remembered rejections, and `apply` as the only writer are unchanged.
+
+Each nested directory keeps the pointer model above: name its canonical file, and a
+sibling `CLAUDE.md` that only imports it needs nothing, while a sibling with content of its
+own is warned about. An entry that is only a pointer is refused. A file listed in both
+`memoryFiles` and `nestedMemoryFiles` is nested. `--target` and `--memory-file` name
+exactly the files a run trains, so neither trains a nested file.
+
 ## CLI Reference
 
 | Command            | What it does                                                                             |
@@ -684,6 +727,8 @@ CLI flags on top:
 {
   "memoryFiles": ["AGENTS.md"],
   "budgetTokens": 5000,
+  "nestedMemoryFiles": [],
+  "nestedBudgetTokens": null,
   "skillsDir": ".agents/skills",
   "skillSearchPaths": [],
   "maxEditsPerRun": null,

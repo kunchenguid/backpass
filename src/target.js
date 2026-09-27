@@ -84,6 +84,12 @@ export function resolveTarget(spec, scope) {
     }
     return { kind: "skill", path: skill.path, name: skill.name };
   }
+  if ((scope.nestedMemoryFiles || []).includes(normalized)) {
+    throw new UserError(
+      `--target ${spec} is a nested memory file, which a run over the whole surface trains`,
+      "run backpass without --target: each nested memory file learns from the sessions that worked under its directory",
+    );
+  }
   const memoryList = scope.memoryFiles.length ? scope.memoryFiles.join(", ") : "(none configured)";
   const skillList = skills.length ? skills.map((skill) => skill.name).join(", ") : "(none)";
   throw new UserError(

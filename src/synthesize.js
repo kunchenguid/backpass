@@ -85,11 +85,20 @@ const EDIT_EMPTY_VIOLATION =
  * (`buildProposal`). Framing one number and gating another would set the model up to
  * fail a gate it was never told about.
  */
-function budgetRule(memoryFile, config, maxEdits, descriptionTokens = 0) {
+function budgetRule(memoryFile, config, maxEdits, descriptionTokens = 0, { extraction = true } = {}) {
   const remaining = config.budgetTokens - memoryFile.tokens - descriptionTokens;
   const counted = descriptionTokens
     ? ` The budget counts this file plus every skill description line (${descriptionTokens} tok of descriptions today); skill bodies stay free until triggered.`
     : "";
+  if (remaining <= 0 && !extraction) {
+    return (
+      `This file is ALREADY ${Math.abs(remaining)} tokens OVER its budget, so this run is a SHRINK PLAN. ` +
+      `You are NOT expected to reach ${config.budgetTokens} tokens in one run - the ${maxEdits}-edit cap ` +
+      `makes that impossible and later runs continue the work. What is required is real progress: the edit ` +
+      `set MUST be net-negative. Remove what has its harm-evidence floor, tighten what the evidence ` +
+      `supports rewriting, and make any addition name the removal that pays for it.`
+    );
+  }
   if (remaining <= 0) {
     return (
       `The always-loaded surface is ALREADY ${Math.abs(remaining)} tokens OVER budget, so this run is a SHRINK ` +
@@ -108,7 +117,7 @@ function budgetRule(memoryFile, config, maxEdits, descriptionTokens = 0) {
   if (remaining < config.budgetTokens * 0.15) {
     return (
       `Only ${remaining} tokens of headroom remain. Treat this as zero-sum: every addition must ` +
-      `name its offsetting removal or skill extraction. The post-edit always-loaded surface must stay at or below ` +
+      `name its offsetting removal${extraction ? " or skill extraction" : ""}. The post-edit always-loaded surface must stay at or below ` +
       `${config.budgetTokens} tokens.` +
       counted
     );
@@ -194,6 +203,16 @@ function assertRepoUntouched(repo, before, workspaceRoot) {
 }
 
 function targetRule(target, memoryPath, skillsDir, stagedTargetPath = null, unstageable = []) {
+  if (target.nested) {
+    const dir = path.posix.dirname(memoryPath);
+    return (
+      `0. **This run trains the nested memory file \`./${memoryPath}\` only.** Harnesses load it on top of ` +
+      `the root memory file, and only when a session works under \`${dir}/\`; every session in the evidence ` +
+      `below worked there. Skills belong to the root surface: do not create, extend, or edit a skill, and do ` +
+      `not extract - the extraction rules and the placement table below do not apply to this run. A lesson ` +
+      `that is not specific to \`${dir}/\` belongs in the root memory file, which its own pass trains.\n`
+    );
+  }
   if (target.kind === "skill") {
     return (
       `0. **This run targets \`./${stagedTargetPath || workspacePathFor(target.path)}\` only.** It is the one staged file. ` +
@@ -221,17 +240,24 @@ function targetRule(target, memoryPath, skillsDir, stagedTargetPath = null, unst
  * Everything the edit and annotation turns need: prompt values, the `buildProposal`
  * context, and the overflow target.
  */
-function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts, scope = null }) {
+function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts, scope = null, routing = null }) {
   const state = config.state;
   const rejections = state.readRejections();
   const userScope = scope?.kind === "user";
+  // A nested memory file is trained on its own: skills belong to the root surface, so
+  // none is staged, billed, or offered as an extraction target (`src/nested.js`).
+  const nested = config.target?.nested === true;
   const overflow = resolveOverflowTarget(repo.root, config.skillsDir, {
     claudeSkillsDir: userScope ? userClaudeSkillsDir() : undefined,
     allowExternal: userScope,
   });
-  for (const w of overflow.warnings) warn(w);
-  const skillDirs = resolveProjectSkillDirs(repo.root, overflow.dir, config.skillsDirs || [], { exact: userScope });
-  const skillFiles = loadProjectSkills(repo.root, overflow.dir, config.skillsDirs || [], { exact: userScope });
+  if (!nested) for (const w of overflow.warnings) warn(w);
+  const skillDirs = nested
+    ? []
+    : resolveProjectSkillDirs(repo.root, overflow.dir, config.skillsDirs || [], { exact: userScope });
+  const skillFiles = nested
+    ? []
+    : loadProjectSkills(repo.root, overflow.dir, config.skillsDirs || [], { exact: userScope });
   // `skillSearchPaths` rides `skillDirs` for awareness (config.js), but staging must
   // refuse it unconditionally - unlike the rest of `skillDirs`, it is never writable, in
   // no scope, so `prepareWorkspace` needs the raw roots to enforce that independently of
@@ -245,7 +271,7 @@ function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts, scop
 
   const common = {
     MEMORY_PATH: workspacePathFor(memoryFile.path),
-    BUDGET_RULE: budgetRule(memoryFile, config, maxEdits, descriptionTokens),
+    BUDGET_RULE: budgetRule(memoryFile, config, maxEdits, descriptionTokens, { extraction: !nested }),
     MAX_EDITS: String(maxEdits),
     MIN_GAP_EVIDENCE: String(config.minGapEvidence),
   };
@@ -261,6 +287,7 @@ function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts, scop
     isSuppressed: isSuppressedByRejection,
     skillFiles,
     target,
+    routing,
   };
 
   const promptDir = path.join(state.root, "prompts");
@@ -274,6 +301,7 @@ function synthesisSetup({ memoryFile, summary, config, repo, harnessCounts, scop
     skillFiles,
     searchPathRoots,
     target,
+    nested,
     descriptionTokens,
     maxEdits,
     common,
@@ -502,6 +530,7 @@ export async function synthesizeProposal({
   transcripts,
   runNote = "",
   scope = null,
+  routing = null,
 }) {
   config.state.clearProposal();
   const harnessCounts = harnessCountsOf(transcripts);
@@ -513,6 +542,7 @@ export async function synthesizeProposal({
     skillFiles,
     searchPathRoots,
     target,
+    nested,
     descriptionTokens,
     maxEdits,
     common,
@@ -525,6 +555,7 @@ export async function synthesizeProposal({
     repo,
     harnessCounts,
     scope,
+    routing,
   });
 
   // Staging holds only the write surface: every skill on a surface run, none of them on
@@ -577,7 +608,12 @@ export async function synthesizeProposal({
     BUDGET_STATE: budgetState(memoryFile, config, descriptionTokens),
     INSTRUCTION_INDEX: renderInstructionIndex(memoryFile),
     SKILLS_DIR: stagedSkillsDir,
-    SKILL_INDEX: renderSkillIndex(stagedSkillFiles),
+    SKILL_INDEX: nested
+      ? "(skills belong to the root surface; a nested memory file run does not edit them)"
+      : renderSkillIndex(stagedSkillFiles),
+    BUDGET_COUNT: nested
+      ? "The count is this file alone: it loads on top of the root memory\nfile, which has a budget of its own."
+      : "The count is this file PLUS every skill's `description:` line;\nskill bodies are free until triggered.",
     EVIDENCE: renderEvidenceForPrompt(summary),
     REJECTIONS: renderRejections(rejections),
   };
@@ -612,7 +648,7 @@ export async function synthesizeProposal({
 
   const pick = await config.agents.resolve("synthesis");
   info(
-    `${color.cyan("·")} synthesizing with ${pick.agent}` +
+    `${color.cyan("·")} synthesizing ${nested ? `${memoryFile.path} (nested) ` : ""}with ${pick.agent}` +
       `${pick.model ? ` (${pick.model})` : ""}` +
       `${pick.effort ? ` effort=${pick.effort}` : ""}`,
   );

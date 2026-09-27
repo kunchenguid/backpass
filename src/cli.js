@@ -7,6 +7,7 @@ import { UserError, fail, setQuiet } from "./logger.js";
 import { applyHostFlag, loadConfig, parseMaxTranscripts, parseScopeKind } from "./config.js";
 import { resolveRepo } from "./repo.js";
 import { printScopeNote, resolveScope } from "./scope.js";
+import { applyNestedMemoryConfig } from "./nested.js";
 import { printTargetNote, resolveTarget, TARGET_COMMANDS } from "./target.js";
 import { State } from "./state.js";
 import { AgentResolver } from "./agents.js";
@@ -185,7 +186,11 @@ function overridesFrom(values) {
     overrides.discovery = overrides.discovery || {};
     overrides.discovery.includeProjects = values.project;
   }
-  if (values["memory-file"]?.length) overrides.memoryFiles = values["memory-file"];
+  // A run that names its memory files trains exactly those, never a nested one too.
+  if (values["memory-file"]?.length) {
+    overrides.memoryFiles = values["memory-file"];
+    overrides.nestedMemoryFiles = [];
+  }
   if (values["skills-dir"]) overrides.skillsDir = values["skills-dir"];
   if (values.theme) overrides.theme = values.theme;
 
@@ -264,7 +269,7 @@ export async function main(argv) {
       config = loadConfig(null, overrides, { kind: "user" });
     } else {
       repo = resolveRepo(process.cwd());
-      config = loadConfig(repo.root, overrides);
+      config = applyNestedMemoryConfig(repo.root, loadConfig(repo.root, overrides));
     }
     config.discovery.hosts = applyHostFlag(config.discovery.hosts, values.host);
     const scope = resolveScope(process.cwd(), { ...values, scope: kind, strict: Boolean(values.strict) }, config, repo);
@@ -281,6 +286,9 @@ export async function main(argv) {
     // Resolved after the scope so user-scope entries and skill dirs are the ones matched.
     config.target = resolveTarget(values.target, scope);
     printTargetNote(config.target);
+    // Nested memory files are trained by a run over the whole surface; a targeted run
+    // trains its one file and never widens to them.
+    if (config.target.kind !== "surface") config.nestedMemoryFiles = [];
     config.memoryFiles = config.target.kind === "memory" ? [config.target.path] : scope.memoryFiles;
     config.skillsDir = scope.overflowDir;
     if (scope.skillDirs.length) config.skillsDirs = scope.skillDirs;

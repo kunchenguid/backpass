@@ -150,6 +150,7 @@ async function analyzeOne({
   slot = 0,
   openGapIndex = "(none yet)",
   skillIndex = "(this repo has no skills)",
+  alsoLoaded = "",
 }) {
   const raw = await readTranscript(transcript);
   const distilled = distill(raw.events, {
@@ -186,6 +187,7 @@ async function analyzeOne({
   const prompt = renderPrompt("analysis", {
     MEMORY_PATH: memoryFile.path,
     INSTRUCTION_INDEX: renderInstructionIndex(memoryFile),
+    ALSO_LOADED: alsoLoaded,
     SKILLS: skillIndex,
     OPEN_GAPS: openGapIndex,
     TRACE: distilled.trace,
@@ -257,6 +259,7 @@ export async function analyzeTranscripts({
   memoryHash,
   force = false,
   prefetch = null,
+  alsoLoaded = "",
 }) {
   const state = config.state;
   const pending = [];
@@ -384,6 +387,7 @@ export async function analyzeTranscripts({
         slot,
         openGapIndex,
         skillIndex,
+        alsoLoaded,
       });
       if (result.status === "skipped") {
         summary.skipped += 1;
