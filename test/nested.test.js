@@ -163,7 +163,8 @@ test("a deeper nested analysis includes every loaded ancestor in its hash and co
   const first = primaryMemoryFile(repo, config);
   const db = first.nested.find((weight) => weight.path === DB.path);
   const api = first.nested.find((weight) => weight.path === API.path);
-  assert.deepEqual(db.ancestors.map((ancestor) => ancestor.path), [API.path]);
+  const ancestorPaths = db.ancestors.map((ancestor) => ancestor.path);
+  assert.deepEqual(ancestorPaths, [API.path]);
   const context = renderAlsoLoaded(first.file, db);
   const rootAt = context.indexOf("### Root memory file: AGENTS.md");
   const apiAt = context.indexOf(`### Ancestor memory file: ${API.path}`);
@@ -180,10 +181,8 @@ test("a deeper nested analysis includes every loaded ancestor in its hash and co
     second.nested.find((weight) => weight.path === WEB.path).hash,
     first.nested.find((weight) => weight.path === WEB.path).hash,
   );
-  assert.match(
-    renderAlsoLoaded(second.file, second.nested.find((weight) => weight.path === DB.path)),
-    /# Changed API rule/,
-  );
+  const updatedDb = second.nested.find((weight) => weight.path === DB.path);
+  assert.match(renderAlsoLoaded(second.file, updatedDb), /# Changed API rule/);
 });
 
 test("nested sibling warnings ignore an unrelated root memory basename", () => {
@@ -197,7 +196,8 @@ test("nested sibling warnings ignore an unrelated root memory basename", () => {
       resolveNestedMemoryFiles(repo.root, { memoryFiles: ["README.md"], nestedMemoryFiles: [API.path] }),
     ),
   );
-  assert.deepEqual(result.map((weight) => weight.path), [API.path]);
+  const paths = result.map((weight) => weight.path);
+  assert.deepEqual(paths, [API.path]);
   assert.deepEqual(result[0].separate, []);
   assert.deepEqual(lines, []);
 });
@@ -252,18 +252,12 @@ test("relative tool paths require an absolute recorded base, not the backpass pr
     { kind: "tool", input: "*** Begin Patch\n*** Update File: apps/api/src/orders.ts\n*** End Patch" },
   ];
   assert.deepEqual(workedPaths({}, relative, roots), []);
-  assert.deepEqual(
-    workedPaths({}, [{ kind: "tool", input: { path: "src/orders.ts", workdir: path.join(repo.root, "apps/api") } }], roots),
-    ["apps/api/src/orders.ts"],
-  );
-  assert.deepEqual(
-    workedPaths(
-      {},
-      [{ kind: "tool", input: { path: path.join(repo.root, "apps/api/src/orders.ts"), workdir: "apps/api" } }],
-      roots,
-    ),
-    ["apps/api/src/orders.ts"],
-  );
+  const absoluteWorkdir = path.join(repo.root, "apps/api");
+  const placedByWorkdir = [{ kind: "tool", input: { path: "src/orders.ts", workdir: absoluteWorkdir } }];
+  assert.deepEqual(workedPaths({}, placedByWorkdir, roots), ["apps/api/src/orders.ts"]);
+  const absolutePath = path.join(repo.root, "apps/api/src/orders.ts");
+  const placedByPath = [{ kind: "tool", input: { path: absolutePath, workdir: "apps/api" } }];
+  assert.deepEqual(workedPaths({}, placedByPath, roots), ["apps/api/src/orders.ts"]);
   assert.deepEqual(workedPaths({ cwd: repo.root }, relative, roots), ["apps/api/src/orders.ts"]);
   assert.deepEqual(workedPaths({ cwd: "apps/api" }, relative, roots), []);
 });

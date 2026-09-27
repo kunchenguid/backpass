@@ -194,9 +194,9 @@ export function nestedContext(ctx, weight) {
 export function renderAlsoLoaded(rootFile, weight) {
   const loaded = [
     `### Root memory file: ${rootFile.path}\n\n${rootFile.text.trim()}`,
-    ...weight.ancestors.map((ancestor) =>
-      `### Ancestor memory file: ${ancestor.path}\n\n${ancestor.file.text.trim()}`,
-    ),
+    ...weight.ancestors.map((ancestor) => {
+      return `### Ancestor memory file: ${ancestor.path}\n\n${ancestor.file.text.trim()}`;
+    }),
   ];
   return (
     `\n\n## Also loaded in this session - not under audit\n\n` +
