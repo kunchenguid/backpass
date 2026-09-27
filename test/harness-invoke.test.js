@@ -456,9 +456,12 @@ test("the process wrapper forwards a signal received while spawning", async () =
       },
     });
     const exited = new Promise((resolve) => wrapper.once("close", (code, signal) => resolve({ code, signal })));
+    // Two node startups and a signal round-trip: well under a second alone, but seconds
+    // when the whole suite runs in parallel. A wrapper that swallows the signal never
+    // exits, so a generous bound still fails it.
     const outcome = await Promise.race([
       exited,
-      new Promise((resolve) => setTimeout(() => resolve("timeout"), 2000).unref()),
+      new Promise((resolve) => setTimeout(() => resolve("timeout"), 10000).unref()),
     ]);
     assert.notEqual(outcome, "timeout");
   } finally {
