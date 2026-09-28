@@ -3,6 +3,16 @@ name: release-please
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: Existing release tag to republish
+        required: true
+        type: string
+      version:
+        description: Existing package version without the tag prefix
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -11,6 +21,7 @@ permissions:
 
 jobs:
   release-please:
+    if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest
     steps:
       - uses: googleapis/release-please-action@v4
@@ -50,3 +61,56 @@ jobs:
 
       - run: npm publish --access public --provenance
         if: ${{ steps.release.outputs.release_created }}
+
+  # One-off republish of an already-tagged release. Does not create a release.
+  npm-republish:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    env:
+      TAG_NAME: ${{ inputs.tag_name }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      - name: Restrict recovery to the sanctioned 0.1.29 republish
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "Manual recovery must be dispatched from main, got $GITHUB_REF." >&2
+            exit 1
+          fi
+          if [ "$TAG_NAME" != "backpass-v0.1.29" ] || [ "$VERSION" != "0.1.29" ]; then
+            echo "Manual recovery is restricted to backpass-v0.1.29 at version 0.1.29." >&2
+            exit 1
+          fi
+
+      - uses: actions/checkout@v6
+        with:
+          ref: refs/tags/${{ inputs.tag_name }}
+
+      - name: Assert package.json version
+        run: |
+          set -euo pipefail
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          if [ "$PACKAGE_VERSION" != "$VERSION" ]; then
+            echo "package.json version is $PACKAGE_VERSION, expected $VERSION." >&2
+            exit 1
+          fi
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: "https://registry.npmjs.org"
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm run lint
+
+      - run: pnpm run format:check
+
+      - run: pnpm run typecheck
+
+      - run: pnpm test
+
+      - run: npm publish --access public --provenance
