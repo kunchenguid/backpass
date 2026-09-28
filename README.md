@@ -26,7 +26,7 @@
 
 [This blog post](https://blog.kunchenguid.com/p/your-agentsmd-is-a-neural-net) explains the why and how.
 
-`backpass` helps you improve your `AGENTS.md`, `CLAUDE.md` and skills with scientific rigor. 
+`backpass` helps you improve your `AGENTS.md`, `CLAUDE.md` and skills with scientific rigor.
 It finds the agent sessions that actually ran in your repo, reads
 what happened in them, and proposes evidence-backed edits to your memory surface - the
 memory file and project skills - under a token budget, gated by you.
