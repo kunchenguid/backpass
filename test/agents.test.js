@@ -1121,6 +1121,13 @@ test("acpx failure classification and the per-adapter tables", () => {
     classifyAcpxFailure({ stderr: 'Cannot apply --model "x": the ACP agent did not advertise that model.' }),
     "model-unavailable",
   );
+  assert.equal(
+    classifyAcpxFailure({
+      stderr:
+        "[acpx] error: RUNTIME QUEUE_RUNTIME_PROMPT_FAILED Internal error: API Error: 400 Claude Code 2.1.215 does not support this model; version 2.1.280 or newer is required.",
+    }),
+    "model-unavailable",
+  );
   assert.equal(classifyAcpxFailure({ spawnError: { code: "ENOENT" } }), "unreachable");
   assert.equal(classifyAcpxFailure({ stderr: "[acpx] error: TIMEOUT prompt exceeded 300s" }), null);
   assert.equal(classifyAcpxFailure({ stderr: "" }), null);

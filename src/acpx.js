@@ -142,7 +142,10 @@ function sessionCreateTimeoutError({ agent, acpxAgentArgs, timeoutMs }) {
  * silently switches models after real work has started.
  *
  * acpx reports these on stderr as `[acpx] error: RUNTIME AUTH_REQUIRED ...` and
- * `Cannot apply --model "x": the ACP agent did not advertise that model`.
+ * `Cannot apply --model "x": the ACP agent did not advertise that model`. An adapter can
+ * advertise a model that its bundled harness is too old to call; the provider then
+ * rejects the first prompt with `... does not support this model; version X or newer is
+ * required`. The probe cannot see that (it sends no prompt), so it is classified here.
  *
  * @param {{ stderr?: string, spawnError?: { code?: string } | null, timedOut?: boolean, emptyOutput?: boolean }} failure
  * @returns {"unauthenticated" | "model-unavailable" | "unreachable" | "empty-output" | null}
@@ -152,7 +155,7 @@ export function classifyAcpxFailure(failure) {
   if (failure.spawnError?.code === "ENOENT") return "unreachable";
   const text = failure.stderr || "";
   if (/AUTH_REQUIRED|authentication required/i.test(text)) return "unauthenticated";
-  if (/did not advertise that model/i.test(text)) return "model-unavailable";
+  if (/did not advertise that model|does not support this model/i.test(text)) return "model-unavailable";
   if (/\b(ENOENT|command not found|not found on PATH|failed to spawn|spawn .* ENOENT)\b/i.test(text)) {
     return "unreachable";
   }
