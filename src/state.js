@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
 
@@ -66,9 +67,18 @@ export class State {
       }
       // Windows has no POSIX mode bits: chmod only toggles the read-only attribute and stat
       // always reports 0o666, so this check cannot pass there. On Windows the directory's
-      // privacy comes from the NTFS ACL it inherits from the user profile instead.
+      // privacy comes from the NTFS ACL it inherits from the user profile instead - but only
+      // when the directory actually resolves under that profile (e.g. XDG_CONFIG_HOME left at
+      // its default). A redirected location (a synced or network folder) inherits no such ACL,
+      // so that case proceeds with a warning instead of an unverifiable pass or a hard failure.
       const actualMode = fs.statSync(this.root).mode & 0o777;
-      if (process.platform !== "win32" && actualMode !== this.dirMode) {
+      if (process.platform === "win32") {
+        if (!isInsideUserProfile(this.root)) {
+          warn(
+            `state directory ${this.root} is outside your Windows user profile; its privacy can't be verified there (it won't inherit the profile's ACL) - restrict access to it yourself`,
+          );
+        }
+      } else if (actualMode !== this.dirMode) {
         throw new UserError(
           `could not secure state directory ${this.root} as mode ${this.dirMode.toString(8)} (got ${actualMode.toString(8)})`,
         );
@@ -211,6 +221,13 @@ export class State {
   writeProbeCache(cache) {
     this.writeJsonFile(this.probeCachePath, cache);
   }
+}
+
+/** Windows paths are case-insensitive, so compare resolved paths lowercased. */
+function isInsideUserProfile(dir) {
+  const resolvedDir = path.resolve(dir).toLowerCase();
+  const home = path.resolve(os.homedir()).toLowerCase();
+  return resolvedDir === home || resolvedDir.startsWith(`${home}${path.sep}`);
 }
 
 export function safeFileName(id) {
