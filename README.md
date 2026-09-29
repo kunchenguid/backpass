@@ -96,7 +96,10 @@ rows. `extract` and `move` edits remain exempt.
 State lives in `$XDG_CONFIG_HOME/backpass/user/` (default
 `~/.config/backpass/user/`) with mode 0700, isolated from every project's
 `.backpass/`. User-scope evidence, ledgers, proposals, and apply surfaces stay in
-that one directory.
+that one directory. Windows has no POSIX mode bits, so there the directory's
+privacy comes from the NTFS ACL it inherits from the user profile instead; if
+`XDG_CONFIG_HOME` redirects it outside the profile (a synced or network
+folder), backpass proceeds but warns that its privacy can't be verified.
 
 Harness load paths, verified for v1:
 
@@ -894,7 +897,8 @@ For the user-scope state location and isolation contract, see
   different design - the vision's answer there is sharing derived evidence, not transcripts.
 - A project-scoped run never writes a user-level file. User-level edits are
   `--scope user` only (see [User-level memory](#user-level-memory)).
-- Paths are verified on macOS and Linux.
+- Paths are verified on macOS and Linux, plus Windows for `--scope user`'s
+  state directory (see above).
 
 ## Development
 
