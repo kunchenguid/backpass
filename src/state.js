@@ -64,8 +64,11 @@ export class State {
           `could not secure state directory ${this.root} as mode ${this.dirMode.toString(8)}: ${err.message}`,
         );
       }
+      // Windows has no POSIX mode bits: chmod only toggles the read-only attribute and stat
+      // always reports 0o666, so this check cannot pass there. On Windows the directory's
+      // privacy comes from the NTFS ACL it inherits from the user profile instead.
       const actualMode = fs.statSync(this.root).mode & 0o777;
-      if (actualMode !== this.dirMode) {
+      if (process.platform !== "win32" && actualMode !== this.dirMode) {
         throw new UserError(
           `could not secure state directory ${this.root} as mode ${this.dirMode.toString(8)} (got ${actualMode.toString(8)})`,
         );
