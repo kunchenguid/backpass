@@ -144,8 +144,8 @@ function sessionCreateTimeoutError({ agent, acpxAgentArgs, timeoutMs }) {
  * acpx reports these on stderr as `[acpx] error: RUNTIME AUTH_REQUIRED ...` and
  * `Cannot apply --model "x": the ACP agent did not advertise that model`. An adapter can
  * advertise a model that its bundled harness is too old to call; the provider then
- * rejects the first prompt with `... does not support this model; version X or newer is
- * required`. The probe cannot see that (it sends no prompt), so it is classified here.
+ * rejects the first prompt with `... does not support this model`. The probe cannot see
+ * that (it sends no prompt), so it is classified here.
  *
  * @param {{ stderr?: string, spawnError?: { code?: string } | null, timedOut?: boolean, emptyOutput?: boolean }} failure
  * @returns {"unauthenticated" | "model-unavailable" | "unreachable" | "empty-output" | null}

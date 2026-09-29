@@ -18,7 +18,7 @@ import { runCapture } from "./subprocess.js";
  * `provider/id` wins; a collision is ranked by auth class (subscription over API key)
  * from `src/provider-auth.js`. An unrankable collision is a loud non-match that names
  * the ids - never an arbitrary pick, and never silent fallthrough disguised as
- * "model not advertised".
+ * "model not available".
  *
  * All model invocation still goes through `src/acpx.js`. The one documented exception
  * is `NATIVE_PROBES` below: the claude adapter creates sessions happily while logged
@@ -50,7 +50,7 @@ const PROVIDER_AUTH_SENSITIVE_AGENTS = new Set(["pi", "opencode"]);
 export const VERDICT_LABELS = {
   ok: "ok",
   unauthenticated: "not logged in",
-  "model-unavailable": "model not advertised",
+  "model-unavailable": "model not available",
   unreachable: "not installed / not spawnable",
   timeout: "probe timed out",
   "empty-output": "returned no output",
