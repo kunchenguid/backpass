@@ -33,6 +33,18 @@ function tools(events) {
   return events.filter((e) => e.kind === "tool");
 }
 
+test("JSONL adapters distinguish a failed read from a successfully read empty trace", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-read-failure-"));
+  const file = path.join(dir, "session.jsonl");
+  for (const adapter of [claude, codex, pi, grok]) {
+    const ref = { path: file, extra: { chatPath: file } };
+    assert.throws(() => adapter.read(ref), /ENOENT/);
+    fs.writeFileSync(file, "");
+    assert.deepEqual(adapter.read(ref).events, []);
+    fs.unlinkSync(file);
+  }
+});
+
 test("claude adapter classifies a session by its per-line cwd", () => {
   const file = path.join(FIXTURES, "claude-session.jsonl");
   const descriptor = claude.classify(candidateFor(file));
@@ -438,8 +450,7 @@ test("hermes adapter recovers cli/acp cwd, skips gateway, converts seconds to ms
   const empty = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-hermes-empty-"));
   await withHermesHome(empty, async () => {
     assert.deepEqual(await hermes.discover(), []);
-    const emptyRead = await hermes.read({ id: "missing", extra: { sessionId: "missing" } });
-    assert.deepEqual(emptyRead.events, []);
+    await assert.rejects(hermes.read({ id: "missing", extra: { sessionId: "missing" } }), /transcript store missing/);
   });
 
   const junk = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-hermes-junk-"));

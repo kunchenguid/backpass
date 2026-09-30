@@ -191,7 +191,7 @@ function emitTools(raw, events, idAlias) {
 
 export async function read(ref) {
   const db = await openReadOnly(dbPath());
-  if (!db) return { events: [], model: ref.model || null };
+  if (!db) throw new Error(`transcript store missing: ${dbPath()}`);
 
   try {
     const sessionId = ref.extra?.sessionId || ref.id;
@@ -226,8 +226,6 @@ export async function read(ref) {
       }
     }
     return { events: attachToolResults(events), model: ref.model || null };
-  } catch {
-    return { events: [], model: ref.model || null };
   } finally {
     db.close();
   }

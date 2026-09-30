@@ -109,7 +109,7 @@ export async function discover({ cutoffMs }) {
 
 export async function read(ref) {
   const db = await openReadOnly(globalDbPath());
-  if (!db) return { events: [], model: null };
+  if (!db) throw new Error(`transcript store missing: ${globalDbPath()}`);
 
   try {
     const composerId = ref.extra?.composerId || ref.id;

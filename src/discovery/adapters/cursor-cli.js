@@ -61,7 +61,7 @@ export function classify(candidate) {
 
 export async function read(ref) {
   const db = await openReadOnly(path.join(ref.path, "store.db"));
-  if (!db) return { events: [], model: null };
+  if (!db) throw new Error(`transcript store missing: ${path.join(ref.path, "store.db")}`);
 
   try {
     const rows = db.prepare("SELECT data FROM blobs ORDER BY rowid").all();

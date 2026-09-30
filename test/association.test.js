@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { associate, globToRegExp, passesStrict } from "../src/discovery/association.js";
+import { isWindowsPath, localPath, parseDriveMounts } from "../src/discovery/paths.js";
 import { normalizeRemote } from "../src/repo.js";
 
 /** A repo identity backed by one real directory, so tier-1/tier-3 liveness is genuine. */
@@ -94,10 +95,188 @@ test("tier 1.5: a live sibling clone is deterministic, not a foreign live path",
   assert.equal(associate({ cwd: other }, repo), null);
 });
 
+/** Run `fn` with the process cwd inside `dir`, the way `backpass` runs from inside a checkout. */
+function fromInside(dir, fn) {
+  const previous = process.cwd();
+  process.chdir(dir);
+  try {
+    return fn();
+  } finally {
+    process.chdir(previous);
+  }
+}
+
+const WINDOWS_CWDS = [
+  "C:\\work\\demo",
+  "C:/work/demo",
+  "D:\\Projects\\foo",
+  "\\\\server\\share\\demo",
+  "//server/share/demo",
+];
+
+test(
+  "a Windows cwd matches no path tier on a POSIX host that is not WSL, even from inside the clone",
+  { skip: process.platform === "win32" && "Windows spells these paths natively" },
+  () => {
+    const { repo, live } = makeRepo();
+    const notWsl = { wsl: null };
+    fromInside(live, () => {
+      for (const cwd of WINDOWS_CWDS) {
+        assert.equal(associate({ cwd }, repo, notWsl), null, `${cwd} is no path on this machine`);
+        assert.equal(
+          associate({ cwd, gitRoot: cwd }, repo, notWsl),
+          null,
+          `${cwd} as a recorded root matches nothing either`,
+        );
+        assert.equal(
+          associate({ cwd, remotes: [] }, repo, { ...notWsl, worktreeGlobs: ["**"] }),
+          null,
+          `${cwd} never reaches the best-effort tier`,
+        );
+      }
+      const remote = associate({ cwd: "C:\\work\\demo", remotes: ["git@github.com:acme/demo.git"] }, repo, notWsl);
+      assert.equal(remote.tier, 2, "a recorded remote still associates the session");
+    });
+  },
+);
+
+test(
+  "under WSL a Windows path to this distro is the same place as its POSIX spelling",
+  { skip: process.platform === "win32" && "Windows spells these paths natively" },
+  () => {
+    const { repo, live } = makeRepo();
+    const wsl = { distro: "Ubuntu", drives: new Map() };
+    const backslashed = live.replaceAll("/", "\\");
+    for (const cwd of [
+      `\\\\wsl.localhost\\Ubuntu${backslashed}`,
+      `//wsl.localhost/Ubuntu${live}`,
+      `\\\\wsl$\\ubuntu${live}`,
+    ]) {
+      assert.equal(associate({ cwd }, repo, { wsl })?.tier, 1, cwd);
+      assert.equal(associate({ cwd: `${cwd}/src` }, repo, { wsl })?.confidence, "nested", cwd);
+    }
+    assert.equal(associate({ cwd: `\\\\wsl.localhost\\Debian${backslashed}` }, repo, { wsl }), null, "another distro");
+    assert.equal(associate({ cwd: `\\\\server\\share${backslashed}` }, repo, { wsl }), null, "a network share");
+  },
+);
+
+test("a Windows cwd from another machine reaches no tier over there either", () => {
+  const { repo } = makeRepo();
+  const facts = { "C:/work/demo": { exists: false, real: "C:/work/demo" } };
+  assert.equal(associate({ cwd: "C:/work/demo" }, repo, { facts, host: "mac-home" }), null);
+  const remote = associate({ cwd: "C:/work/demo", remotes: ["https://github.com/acme/demo"] }, repo, {
+    facts,
+    host: "mac-home",
+  });
+  assert.equal(remote.tier, 2);
+});
+
+test("localPath refuses a Windows path only where it names no place", () => {
+  for (const cwd of WINDOWS_CWDS) {
+    assert.equal(isWindowsPath(cwd), true, cwd);
+    assert.equal(localPath(cwd, { platform: "linux", wsl: null }), null, cwd);
+    assert.equal(localPath(cwd, { platform: "darwin" }), null, cwd);
+    assert.equal(localPath(cwd, { platform: "win32" }), cwd, cwd);
+  }
+  for (const posix of ["/home/me/demo", "relative/demo", "/", "a:b/c"]) {
+    assert.equal(isWindowsPath(posix), false, posix);
+    assert.equal(localPath(posix, { platform: "linux", wsl: null }), posix, posix);
+  }
+  assert.equal(localPath("", { platform: "linux" }), null);
+  assert.equal(localPath(null, { platform: "linux" }), null);
+});
+
+test("under WSL a drive path is read where /proc/mounts mounts that drive", () => {
+  const drives = parseDriveMounts(
+    [
+      "10 1 0:10 / /usr/lib/wsl/drivers ro - 9p drivers ro,aname=drivers;fmask=222;dmask=222",
+      "11 1 0:11 /Users/me /mnt/me rw - 9p C:\\134 rw,aname=drvfs;path=C:\\",
+      "12 1 0:12 / /Docker/host rw - 9p C:\\134Program\\040Files\\134Docker rw,aname=drvfs",
+      "13 1 0:11 / /mnt/c rw shared:1 - 9p C:\\134 rw,aname=drvfs;path=C:\\;uid=1000",
+      "14 1 0:14 / /win/d\\040drive rw - 9p D:\\134 rw,aname=drvfs;path=D:\\;uid=1000",
+      "15 1 0:15 / /mnt/e rw - drvfs E: rw,uid=1000,gid=1000",
+      "16 1 8:32 / / rw - ext4 /dev/sdc rw,relatime",
+    ].join("\n"),
+  );
+  assert.deepEqual(
+    [...drives],
+    [
+      ["c", "/mnt/c"],
+      ["d", "/win/d drive"],
+      ["e", "/mnt/e"],
+    ],
+  );
+  const wsl = { distro: "Ubuntu", drives };
+  const read = (recorded) => localPath(recorded, { platform: "linux", wsl });
+  assert.equal(read("C:\\Users\\me\\repo"), "/mnt/c/Users/me/repo");
+  assert.equal(read("C:/Users/me/repo/"), "/mnt/c/Users/me/repo");
+  assert.equal(read("c:\\"), "/mnt/c");
+  assert.equal(read("D:\\work\\x.ts"), "/win/d drive/work/x.ts");
+  assert.equal(read("E:/a/../b"), "/mnt/e/b");
+  for (const recorded of ["C:\\..", "C:/../..", "C:/a/../../.."]) {
+    assert.equal(read(recorded), "/mnt/c", recorded);
+  }
+  for (const recorded of ["C:\\..\\..\\home\\me\\repo", "C:/../../home/me/repo"]) {
+    assert.equal(read(recorded), "/mnt/c/home/me/repo", recorded);
+  }
+  assert.equal(read("//wsl.localhost/Ubuntu/../../home/me/repo"), "/home/me/repo");
+  assert.equal(read("F:\\unmounted"), null, "a drive WSL has not mounted names nothing here");
+  assert.equal(read("\\\\wsl.localhost\\Ubuntu\\home\\me\\repo"), "/home/me/repo");
+  assert.equal(read("//wsl.localhost/Ubuntu/home/me/repo"), "/home/me/repo");
+  assert.equal(read("\\\\wsl$\\UBUNTU\\home\\me"), "/home/me", "distro names are case-insensitive");
+  assert.equal(read("\\\\wsl.localhost\\Ubuntu"), "/");
+  assert.equal(read("\\\\wsl.localhost\\Debian\\home\\me"), null, "another distro");
+  assert.equal(read("\\\\fileserver\\share\\repo"), null, "a network share");
+  assert.equal(
+    localPath("\\\\wsl.localhost\\Ubuntu\\home\\me", { platform: "linux", wsl: { distro: null, drives } }),
+    null,
+    "without WSL_DISTRO_NAME no distro path can be placed",
+  );
+});
+
+test(
+  "subdirectory mounts alone never associate a Windows drive path",
+  { skip: process.platform === "win32" && "Windows spells these paths natively" },
+  () => {
+    const { repo, live } = makeRepo();
+    const target = live.replaceAll("\\", "\\134").replaceAll(" ", "\\040");
+    for (const mount of [
+      `11 1 0:11 / ${target} rw - 9p C:\\134Users\\134me rw,aname=drvfs`,
+      `11 1 0:11 /Users/me ${target} rw - 9p C:\\134 rw,aname=drvfs`,
+    ]) {
+      const wsl = { distro: "Ubuntu", drives: parseDriveMounts(mount) };
+      assert.equal(localPath("C:\\work\\repo", { platform: "linux", wsl }), null);
+      assert.equal(associate({ cwd: "C:\\work\\repo" }, repo, { wsl }), null);
+      assert.equal(associate({ gitRoot: "C:/work/repo" }, repo, { wsl }), null);
+    }
+  },
+);
+
+test("wslEnvironment requires a WSL kernel, not just an inherited distro name", async (t) => {
+  const release = t.mock.method(os, "release");
+  for (const kernel of ["6.8.0-generic", "4.4.0-Microsoft", "6.6.87.2-microsoft-standard-WSL2"]) {
+    release.mock.mockImplementation(() => kernel);
+    // Each module instance detects its kernel once, just like a fresh process.
+    const { wslEnvironment } = await import(`../src/discovery/paths.js?kernel=${kernel}`);
+    for (const platform of ["linux", "darwin", "win32"]) {
+      for (const distro of ["Ubuntu", undefined]) {
+        const environment = wslEnvironment({ platform, env: { WSL_DISTRO_NAME: distro } });
+        if (platform !== "linux" || kernel === "6.8.0-generic") {
+          assert.equal(environment, null, `${platform} / ${kernel} / ${distro}`);
+        } else {
+          assert.equal(environment.distro, distro || null);
+          assert.ok(environment.drives instanceof Map);
+        }
+      }
+    }
+  }
+});
+
 test("--strict keeps only the deterministic tiers", () => {
   assert.equal(passesStrict({ tier: 1 }, true), true);
   assert.equal(passesStrict({ tier: 1.5 }, true), true);
   assert.equal(passesStrict({ tier: 2 }, true), true);
+  assert.equal(passesStrict({ tier: 2.5 }, true), true);
   assert.equal(passesStrict({ tier: 3 }, true), false);
   assert.equal(passesStrict({ tier: 3 }, false), true);
   assert.equal(passesStrict(null, false), false);

@@ -41,21 +41,20 @@ export function readJsonFile(file) {
 
 export function readJsonl(file, { maxBytes = 64 * 1024 * 1024 } = {}) {
   let text;
-  try {
-    const stat = fs.statSync(file);
-    if (stat.size > maxBytes) {
-      // Very large sessions are read tail-first: recent turns carry the loss signal.
-      const fd = fs.openSync(file, "r");
+  const stat = fs.statSync(file);
+  if (stat.size > maxBytes) {
+    // Very large sessions are read tail-first: recent turns carry the loss signal.
+    const fd = fs.openSync(file, "r");
+    try {
       const buffer = Buffer.alloc(maxBytes);
       fs.readSync(fd, buffer, 0, maxBytes, stat.size - maxBytes);
-      fs.closeSync(fd);
       text = buffer.toString("utf8");
       text = text.slice(text.indexOf("\n") + 1);
-    } else {
-      text = fs.readFileSync(file, "utf8");
+    } finally {
+      fs.closeSync(fd);
     }
-  } catch {
-    return [];
+  } else {
+    text = fs.readFileSync(file, "utf8");
   }
   const out = [];
   for (const line of text.split("\n")) {

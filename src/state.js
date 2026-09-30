@@ -17,7 +17,7 @@ export const STATE_EXCLUDE_LINE = `${STATE_DIRNAME}/`;
  * command, so a plain `backpass` run with no prior `init` is excluded too) rather than
  * the tracked `.gitignore`:
  *
- *   scan-cache.json        path+mtime+size -> association verdict (design section 2.2)
+ *   scan-cache.json        discovery cache (src/discovery/index.js)
  *   evidence/<identity>.json per-transcript tier-1 analysis output (design section 3)
  *   evidence-summary.json  folded evidence (stage 2)
  *   proposal.json          latest parseable tier-2 synthesis; absent if none was produced (stage 3)

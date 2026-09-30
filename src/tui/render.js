@@ -52,6 +52,7 @@ const TIER_LABELS = {
   1: "ran in this repo",
   1.5: "sibling clone",
   2: "git remote match",
+  2.5: "worked in this repo",
   3: "path match (best-effort)",
 };
 
@@ -155,7 +156,7 @@ function stageElapsed(stage, now) {
 
 function tierLabel(tiers = {}) {
   let best = null;
-  for (const tier of [1, 1.5, 2, 3]) {
+  for (const tier of [1, 1.5, 2, 2.5, 3]) {
     if ((tiers[tier] || 0) > (tiers[best] || 0)) best = tier;
   }
   return best ? TIER_LABELS[best] : "";

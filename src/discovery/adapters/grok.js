@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import path from "node:path";
 
 import { emptyInteractionSignals } from "../../interaction.js";
@@ -59,8 +58,6 @@ function decodeDirName(encoded) {
 
 export function read(ref) {
   const chatPath = ref.extra?.chatPath || path.join(ref.path, "chat_history.jsonl");
-  if (!fs.existsSync(chatPath)) return { events: [], model: null };
-
   const entries = readJsonl(chatPath);
   const events = [];
   let model = null;

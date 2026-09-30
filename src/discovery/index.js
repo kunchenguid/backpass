@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 
 import * as claude from "./adapters/claude.js";
@@ -10,6 +11,7 @@ import * as cursorCli from "./adapters/cursor-cli.js";
 import * as cursorIde from "./adapters/cursor-ide.js";
 
 import { associate, passesStrict } from "./association.js";
+import { WORK_PATHS_VERSION, workPaths, workTier } from "./work.js";
 import { collectHosts, resolveHostList } from "./hosts.js";
 import { createControlPath } from "./remote/ssh.js";
 import { isSelfSession } from "./self.js";
@@ -40,11 +42,13 @@ export function getAdapter(harness) {
  *
  * For file-backed stores the expensive step is reading each transcript's header, so
  * results are memoised in `.backpass/scan-cache.json` keyed by path + mtime + size.
- * Re-scans are then O(new files) - which matters: codex alone had 10,317 rollouts on
- * the machine this was designed against.
+ * Only new or changed file headers need re-reading.
  *
- * SQLite-backed stores (opencode, hermes, cursor IDE) answer the same question with one
- * indexed query, so they skip the cache entirely.
+ * Direct SQLite stores (opencode, hermes, cursor IDE) obtain descriptors with one
+ * indexed query, bypassing the header cache; Cursor CLI caches its file headers.
+ * Both discovery paths use the separate work-path cache in `associateByWork`;
+ * SQLite candidates are read once per scan to hash their events for that cache only.
+ * Transcript content signatures stay adapter-owned; checkout ownership is recomputed each scan.
  *
  * Every harness is fail-soft: a store that is missing, unreadable, or has drifted into
  * an unrecognised format produces a named warning and is skipped, never a failed run.
@@ -54,9 +58,10 @@ export function getAdapter(harness) {
  * `perHarness[h].self` - see `./self.js`.
  *
  * Configured ssh hosts (`./hosts.js`) are collected after the local harnesses and join
- * the same corpus: same tiers, same sample, same cap. They have no tier of their own and
- * no budget of their own. A session that exists on two machines - a synced or copied
- * store - is kept once, or one session would satisfy `minGapEvidence` by itself.
+ * the same corpus, sample and cap. Remote association is handled by `associateRemote`
+ * in `./association.js`, not the local work-path pass. Hosts have no budget of their own.
+ * A session that exists on two machines - a synced or copied store - is kept once, or
+ * one session would satisfy `minGapEvidence` by itself.
  */
 export async function discoverTranscripts({
   repo,
@@ -74,6 +79,11 @@ export async function discoverTranscripts({
     ((descriptor) => associate(descriptor, repo, { worktreeGlobs: config.discovery.worktreeGlobs }));
   const stateDir = config.state?.root;
   const userFilter = scope?.kind === "user";
+  // Tier 2.5 (./work.js) places a project-scope session that started in no checkout by
+  // where its tool calls worked. The paths each one names are cached by content.
+  const tier = userFilter ? null : workTier(repo);
+  const priorWork = cache.work && typeof cache.work === "object" ? cache.work : {};
+  const work = { tier, entries: { ...priorWork }, changed: false, scope, repo };
 
   const transcripts = [];
   const identities = new Set();
@@ -95,7 +105,7 @@ export async function discoverTranscripts({
     emitProgress("discover:harness:start", { harness });
 
     try {
-      const found = adapter.discover
+      const { found, pending } = adapter.discover
         ? await discoverDirect(adapter, {
             repo,
             config,
@@ -105,6 +115,7 @@ export async function discoverTranscripts({
             associateFn,
             stateDir,
             userFilter,
+            tier,
           })
         : discoverFiles(adapter, {
             repo,
@@ -116,11 +127,13 @@ export async function discoverTranscripts({
             associateFn,
             stateDir,
             userFilter,
+            tier,
             markDirty: () => {
               cacheDirty = true;
             },
           });
-      const unique = found.filter((transcript) => {
+      const worked = await associateByWork(adapter, pending, { work, stats, stateDir });
+      const unique = [...found, ...worked].filter((transcript) => {
         if (identities.has(transcript.identity)) return false;
         identities.add(transcript.identity);
         return true;
@@ -142,6 +155,10 @@ export async function discoverTranscripts({
     }
   }
 
+  if (work.changed) {
+    cache.work = work.entries;
+    cacheDirty = true;
+  }
   if (cacheDirty) config.state.writeScanCache(cache);
 
   const perHost = [];
@@ -280,12 +297,20 @@ function tierCounts(found) {
   return tiers;
 }
 
-async function discoverDirect(adapter, { repo, config, cutoffMs, strict, stats, associateFn, stateDir, userFilter }) {
+async function discoverDirect(
+  adapter,
+  { repo, config, cutoffMs, strict, stats, associateFn, stateDir, userFilter, tier },
+) {
   const rows = await adapter.discover({ cutoffMs, repo, config });
   const out = [];
+  const pending = [];
   for (const row of rows) {
     stats.scanned += 1;
     const association = associateFn({ cwd: row.cwd, remotes: row.remotes || [], gitRoot: row.gitRoot });
+    if (!association && tier?.isCandidate(row)) {
+      pending.push({ row, id: row.id });
+      continue;
+    }
     if (!passesStrict(association, strict)) {
       stats.skipped += 1;
       continue;
@@ -301,15 +326,16 @@ async function discoverDirect(adapter, { repo, config, cutoffMs, strict, stats, 
     }
     out.push(transcript);
   }
-  return out;
+  return { found: out, pending };
 }
 
 function discoverFiles(
   adapter,
-  { repo, config, cutoffMs, strict, stats, cache, markDirty, associateFn, stateDir, userFilter },
+  { repo, config, cutoffMs, strict, stats, cache, markDirty, associateFn, stateDir, userFilter, tier },
 ) {
   const candidates = adapter.enumerate({ cutoffMs, repo, config });
   const out = [];
+  const pending = [];
 
   for (const candidate of candidates) {
     if (cutoffMs && candidate.mtimeMs < cutoffMs) continue;
@@ -353,6 +379,10 @@ function discoverFiles(
       remotes: descriptor.remotes || [],
       gitRoot: descriptor.gitRoot,
     });
+    if (!association && tier?.isCandidate(descriptor)) {
+      pending.push({ row: { ...candidate, ...descriptor }, id: descriptor.id });
+      continue;
+    }
     if (!passesStrict(association, strict)) {
       stats.skipped += 1;
       continue;
@@ -372,6 +402,61 @@ function discoverFiles(
     out.push(transcript);
   }
 
+  return { found: out, pending };
+}
+
+/**
+ * Tier 2.5 for the sessions a scan handed back as candidates: read each one's work paths
+ * (cached by content signature) and keep the ones whose work was in this repository.
+ * SQLite timestamps need not advance when tool inputs change, so those candidates are
+ * read once per scan and hashed from their events before consulting the path cache.
+ * Always deterministic, so `--strict` keeps
+ * them; backpass's own sessions are dropped as on every other tier.
+ */
+async function associateByWork(adapter, pending, { work, stats, stateDir }) {
+  const out = [];
+  for (const { row, id } of pending) {
+    const draft = toTranscript(adapter, row, null, id);
+    let paths;
+    try {
+      const result = adapter.sqliteBacked ? await readTranscript(draft) : null;
+      const content = result
+        ? crypto
+            .createHash("sha256")
+            .update(JSON.stringify([draft.cwd, result.events]))
+            .digest("hex")
+        : draft.contentSignature || `${draft.mtimeMs}:${draft.bytes}`;
+      const prior = work.entries[draft.identity];
+      paths =
+        prior?.version === WORK_PATHS_VERSION && prior.content === content && Array.isArray(prior.paths)
+          ? prior.paths
+          : null;
+      if (!paths) {
+        paths = workPaths(draft, (result || (await readTranscript(draft))).events);
+        work.entries[draft.identity] = { version: WORK_PATHS_VERSION, content, paths };
+        work.changed = true;
+      }
+    } catch (err) {
+      warn(`${adapter.name}: work paths unreadable for ${draft.nativeId} (${err.message}) - session skipped`);
+      stats.skipped += 1;
+      continue;
+    }
+    const association = work.tier.associate(paths);
+    if (!association) {
+      stats.skipped += 1;
+      continue;
+    }
+    if (work.scope && work.scope.kind !== "user") {
+      association.project = work.repo.root;
+      association.projectRoot = work.repo.root;
+    }
+    const transcript = toTranscript(adapter, row, association, id);
+    if (isSelfSession(transcript, { stateDir })) {
+      stats.self += 1;
+      continue;
+    }
+    out.push(transcript);
+  }
   return out;
 }
 

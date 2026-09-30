@@ -95,7 +95,7 @@ async function cmdScanCore(ctx) {
   if (selfTotal) out(color.dim(`  SELF = backpass's own loss / gradient-descent sessions, excluded from the corpus`));
   out("");
 
-  const byTier = { 1: 0, 1.5: 0, 2: 0, 3: 0 };
+  const byTier = { 1: 0, 1.5: 0, 2: 0, 2.5: 0, 3: 0 };
   for (const t of transcripts) byTier[t.association.tier] += 1;
   if (ctx.scope?.kind === "user") {
     const byProject = new Map();
@@ -112,7 +112,7 @@ async function cmdScanCore(ctx) {
     out(
       `${transcripts.length} transcript(s) associated with this repo · ` +
         `tier1 ${byTier[1]} (exact) · tier1.5 ${byTier[1.5]} (sibling clone) · ` +
-        `tier2 ${byTier[2]} (remote) · tier3 ${byTier[3]} (best-effort) · ` +
+        `tier2 ${byTier[2]} (remote) · tier2.5 ${byTier[2.5]} (worked here) · tier3 ${byTier[3]} (best-effort) · ` +
         formatCorpusMix(mix),
     );
   }

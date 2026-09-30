@@ -188,6 +188,17 @@ function remotesOverlap(ours, theirs) {
 }
 
 /**
+ * True when the checkout at `dir` shares a git remote with `cloneRemotes` (a repo's
+ * `cloneRemotes`): another clone of the same repository. Read-only and fail-soft.
+ *
+ * @param {string} dir
+ * @param {string[]} cloneRemotes
+ */
+export function isCloneOf(dir, cloneRemotes) {
+  return remotesOverlap(cloneRemotes || [], listCloneRemotes(dir));
+}
+
+/**
  * Local checkouts that share a remote with this repo, plus their worktrees.
  *
  * Claude (and other harnesses that record cwd but no remote) only reach tier 1 when

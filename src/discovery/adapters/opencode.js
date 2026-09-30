@@ -79,8 +79,9 @@ export async function discover({ cutoffMs }) {
 }
 
 export async function read(ref) {
+  if (ref.extra?.legacy) return legacyRead();
   const db = await openReadOnly(dbPath());
-  if (!db) return legacyRead();
+  if (!db) throw new Error(`transcript store missing: ${dbPath()}`);
 
   try {
     const sessionId = ref.extra?.sessionId || ref.id;

@@ -9,8 +9,8 @@ import { execFileSync } from "node:child_process";
  * inputs are facts about paths, and on a remote host those paths are only real over
  * there: `fs.existsSync` on a remote cwd is always false here, so a naive mirror would
  * file every live remote session as a dead path. This module computes the facts where
- * the paths are real; `src/discovery/association.js` then applies exactly the same tier
- * rules to them.
+ * the paths are real; `associateRemote` in `src/discovery/association.js` then applies
+ * the remote association rules to them.
  *
  * It is deliberately dependency-free (no logger, no config): it ships to the remote
  * inside the probe bundle, where nothing but `node:` builtins exists. Every call is

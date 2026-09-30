@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { normalizeRemote } from "../repo.js";
+import { isWindowsPath, localPath } from "./paths.js";
 
 /**
  * Association tiers (design section 2.1, plus sibling clones).
@@ -13,8 +14,15 @@ import { normalizeRemote } from "../repo.js";
  *                              is how a second clone's interactive history attaches.
  *   tier 2    deterministic  - a recorded git remote matches one of the repo's remotes;
  *                              survives worktree deletion (codex, grok)
+ *   tier 2.5  deterministic  - the session started in no checkout, and its tool calls
+ *                              worked mostly in this repo's checkouts (`./work.js`);
+ *                              survives `--strict`. Judged in discovery, which reads the
+ *                              session, so it is not applied here.
  *   tier 3    best-effort    - dead cwd whose last segment is the repo dir name, or that
  *                              matches a user-supplied worktree glob; excluded by --strict
+ *
+ * The path tiers (1, 1.5, 3) require a local mapping from `localPath` in `./paths.js`;
+ * an unmappable cwd must not resolve under the process cwd. Tier 2 needs no local path.
  *
  * Returns null when the transcript belongs to some other repo.
  */
@@ -63,7 +71,7 @@ export function associate(descriptor, repo, options = {}) {
   if (options.facts) return associateRemote(descriptor, repo, options);
   const { cwd, remotes = [], gitRoot = null } = descriptor;
   const globs = options.worktreeGlobs || [];
-  const candidates = [cwd, gitRoot].filter(Boolean);
+  const candidates = [cwd, gitRoot].map((recorded) => localPath(recorded, { wsl: options.wsl })).filter(Boolean);
 
   // Tier 1 - live path under a known worktree of this clone.
   for (const candidate of candidates) {
@@ -121,9 +129,10 @@ export function associate(descriptor, repo, options = {}) {
 /**
  * Association for a session that ran on another machine (design section 6.5).
  *
- * The tier rules are the local ones, applied to facts computed where the paths are real
+ * Descriptor-based tiers use facts computed where the paths are real
  * (`src/discovery/remote/git-facts.js`): whether the cwd still exists over there, which
- * checkout it sits in, and that checkout's git remotes. What changes is the ceiling.
+ * checkout it sits in, and that checkout's git remotes. For the user-facing rules and
+ * local-only tiers, see README.md's Collect samples section.
  * Tier 1 means "this clone", and nothing on another host is this clone, so a remote
  * session is never tier 1 - it reaches tier 1.5 by sharing a remote with this repo,
  * which is the same bar a sibling clone clears here. That also means a second checkout
@@ -135,7 +144,8 @@ export function associate(descriptor, repo, options = {}) {
  */
 export function associateRemote({ cwd, remotes = [], gitRoot = null }, repo, options = {}) {
   const { facts = {}, host = "", home = "", worktreeGlobs: globs = [] } = options;
-  const candidates = [cwd, gitRoot].filter(Boolean);
+  // Remote Windows paths are unsupported; this machine's WSL mappings do not describe the host.
+  const candidates = [cwd, gitRoot].filter((recorded) => recorded && !isWindowsPath(recorded));
   const repoRemotes = new Set(repo.remotes);
 
   // Tier 1.5 - a live checkout over there that shares a remote with this repo.
@@ -174,7 +184,8 @@ export function associateRemote({ cwd, remotes = [], gitRoot = null }, repo, opt
   return null;
 }
 
+/** `--strict` keeps every deterministic tier; tier 3 is the only best-effort one. */
 export function passesStrict(association, strict) {
   if (!association) return false;
-  return strict ? association.tier <= 2 : true;
+  return strict ? association.tier < 3 : true;
 }

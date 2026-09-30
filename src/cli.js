@@ -94,7 +94,7 @@ COLLECT SAMPLES
   --since <dur>            only sessions newer than this (30d, 12h, 2w, all)  [30d]
   --harness <a,b>          limit to these harnesses
                            (claude, codex, pi, opencode, grok, cursor, hermes)
-  --strict                 deterministic associations only (tiers 1, 1.5, and 2)
+  --strict                 deterministic associations only (tiers 1, 1.5, 2, and 2.5)
   --host <dest>            also collect from this SSH host this run (repeatable;
                            "none" collects locally only). Configure hosts once in
                            ~/.config/backpass/config.json; a repo file may not set them

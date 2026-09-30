@@ -861,7 +861,12 @@ function recoverPiUsage({ promptFile, cwd, startedAt }) {
   for (const candidate of candidates) {
     const descriptor = piStore.classify(candidate);
     if (!descriptor || !wanted.has(descriptor.cwd)) continue;
-    const entries = readJsonl(candidate.path);
+    let entries;
+    try {
+      entries = readJsonl(candidate.path);
+    } catch {
+      continue;
+    }
     const firstUser = entries.find((e) => e.type === "message" && e.message?.role === "user");
     if (!firstUser || piMessageText(firstUser.message.content).trim() !== prompt) continue;
 
