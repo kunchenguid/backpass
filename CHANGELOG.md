@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.32](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.31...backpass-v0.1.32) (2026-09-30)
+
+
+### Bug Fixes
+
+* prevent false session matches from Windows paths on POSIX ([#173](https://github.com/kunchenguid/backpass/issues/173)) ([a1bd0af](https://github.com/kunchenguid/backpass/commit/a1bd0af00ced5af1ed995b71f7ef650156fbfb69))
+* recognize acpx exit code 3 as a timeout ([#177](https://github.com/kunchenguid/backpass/issues/177)) ([4c1a8a8](https://github.com/kunchenguid/backpass/commit/4c1a8a82ae03d2ac9759acead7b856c491c03818))
+
 ## [0.1.31](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.30...backpass-v0.1.31) (2026-09-30)
 
 
