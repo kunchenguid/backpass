@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.1.31](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.30...backpass-v0.1.31) (2026-09-30)
+
+
+### Features
+
+* **discovery:** support additional OpenCode stores and 2.x transcripts ([#181](https://github.com/kunchenguid/backpass/issues/181)) ([04ac5ef](https://github.com/kunchenguid/backpass/commit/04ac5efa89ef466debad07612428ba4c5f61e65c))
+* support explicit per-edit decisions in backpass apply ([#182](https://github.com/kunchenguid/backpass/issues/182)) ([d1e7550](https://github.com/kunchenguid/backpass/commit/d1e755072013801fed95ed1f1be799e328a46eb3))
+
+
+### Bug Fixes
+
+* **agents:** treat "does not support this model" as model-unavailable ([#185](https://github.com/kunchenguid/backpass/issues/185)) ([e6c2ffd](https://github.com/kunchenguid/backpass/commit/e6c2ffdacbb4c291f8b4322d7bcad2398fc1324f))
+* isolate SQLite session raw transcripts and reclaim expired files ([#178](https://github.com/kunchenguid/backpass/issues/178)) ([19bd9f3](https://github.com/kunchenguid/backpass/commit/19bd9f33c3682b325de8c93bc54c19e9c6945418))
+* **state:** skip unverifiable POSIX mode check for Windows user-profile state dirs ([#195](https://github.com/kunchenguid/backpass/issues/195)) ([b0e6706](https://github.com/kunchenguid/backpass/commit/b0e6706e72e7fcc45866508a4b3bef6860a01f06))
+* stop scheduling analysis after a fatal worker error ([#180](https://github.com/kunchenguid/backpass/issues/180)) ([1418cbd](https://github.com/kunchenguid/backpass/commit/1418cbdb4d83d21b3dfdff42f018a4bc207db3fc))
+
 ## [0.1.30](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.29...backpass-v0.1.30) (2026-09-28)
 
 
