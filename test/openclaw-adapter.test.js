@@ -1,0 +1,516 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import * as zlib from "node:zlib";
+import zlibRuntime from "node:zlib";
+import { syncBuiltinESMExports } from "node:module";
+import { SELF_SESSION_SENTINEL } from "../src/sentinel.js";
+import { DatabaseSync } from "node:sqlite";
+import * as openclaw from "../src/discovery/adapters/openclaw.js";
+import { classifyInteraction } from "../src/interaction.js";
+import { transcriptIdentity } from "../src/transcript.js";
+import { emptyGapLedger, recordGapObservations } from "../src/gap-ledger.js";
+import { ADAPTERS, discoverTranscripts, readTranscript } from "../src/discovery/index.js";
+import { main } from "../src/cli.js";
+import { distill } from "../src/distill.js";
+import { buildFixture, timestamp } from "./fixtures/openclaw/build.js";
+
+function setEnv(t, key, value) {
+  const previous = process.env[key];
+  if (value == null) delete process.env[key];
+  else process.env[key] = value;
+  t.after(() => {
+    if (previous === undefined) delete process.env[key];
+    else process.env[key] = previous;
+  });
+}
+
+function setup(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-openclaw-test-"));
+  setEnv(t, "HOME", dir);
+  setEnv(t, "OPENCLAW_AGENT", "main");
+  setEnv(t, "OPENCLAW_STATE_DIR", null);
+  const file = path.join(dir, "database.sqlite");
+  setEnv(t, "BACKPASS_OPENCLAW_DB", file);
+  buildFixture(file);
+  t.after(() => {
+    openclaw.cleanup();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  return { dir, file };
+}
+
+test("PRA-442 discovers live and archive generations, excludes probes and overlap, and resolves cwd", async (t) => {
+  const { dir } = setup(t);
+  fs.mkdirSync(path.join(dir, ".openclaw"));
+  fs.writeFileSync(
+    path.join(dir, ".openclaw/openclaw.json"),
+    JSON.stringify({
+      agents: { defaults: { workspace: "/synthetic/default" }, list: [{ id: "main", workspace: "/synthetic/agent" }] },
+    }),
+  );
+  const rows = await openclaw.discover();
+  const dashboard = rows.find((r) => r.extra.sessionId === "dashboard");
+  assert.equal(dashboard.cwd, "/synthetic/metadata");
+  assert.equal(dashboard.startedAt, timestamp);
+  const fallback = rows.find((r) => r.extra.sessionId === "fallback");
+  assert.equal(fallback.cwd, "/synthetic/agent");
+  assert.equal(fallback.extra.cwdSource, "configured-workspace");
+  assert.equal(rows.find((r) => r.extra.sessionId === "slack").cwd, "/synthetic/header");
+  assert.equal(rows.filter((r) => r.extra.sessionId === "archive").length, 1);
+  assert.equal(rows.filter((r) => r.extra.sessionId === "dashboard").length, 1);
+  assert.ok(
+    !rows.some((r) =>
+      /^(test|bakeoff|content-lane-eval|explicit|pra\d+-|internal-session-effects|memory-health-probe|routing-smoke|r3-routing)/.test(
+        r.extra.sessionKey.split(":")[2],
+      ),
+    ),
+  );
+  assert.deepEqual(await openclaw.discover({ cutoffMs: timestamp + 10000 }), []);
+});
+
+test("PRA-442 classifies human channels and automated keys through shared interaction signals", async (t) => {
+  setup(t);
+  const rows = await openclaw.discover();
+  for (const row of rows) {
+    const expected = /^(cron|subagent|heartbeat|acp|hook)/.test(row.extra.sessionKey.split(":")[2])
+      ? "non-interactive"
+      : "interactive";
+    assert.equal(classifyInteraction({ ...row, harness: "openclaw" }), expected, row.extra.sessionKey);
+  }
+});
+
+test("PRA-442 strips injected context, drops system turns and stale branches, and folds tools", async (t) => {
+  setup(t);
+  const row = (await openclaw.discover()).find((r) => r.extra.sessionId === "dashboard");
+  const { events } = await openclaw.read(row);
+  assert.deepEqual(
+    events.filter((e) => e.kind === "message").map((e) => e.text),
+    ["Keep my actual words.", "Verbatim answer."],
+  );
+  assert.deepEqual(
+    events.find((e) => e.kind === "tool"),
+    { kind: "tool", name: "read", input: { path: "demo.txt" }, result: "synthetic result", status: "error" },
+  );
+  assert.doesNotMatch(
+    distill(events, { ...row, harness: "openclaw" }).trace,
+    /OPENCLAW_INTERNAL_CONTEXT|bootstrap|Stale branch/,
+  );
+});
+
+test("PRA-442 decodes identity and zstd archives and compressed live events", async (t) => {
+  setup(t);
+  const rows = await openclaw.discover();
+  const row = rows.find((r) => r.extra.sessionId === "archive");
+  assert.equal((await openclaw.read(row)).events[0].text, "Archived human request.");
+  if (typeof zlib.zstdDecompressSync === "function") {
+    for (const [id, text] of [
+      ["compressed", "Compressed human request."],
+      ["compressed-live", "Compressed live request."],
+    ]) {
+      const found = rows.find((r) => r.extra.sessionId === id);
+      assert.ok(found, id);
+      assert.equal((await openclaw.read(found)).events[0].text, text);
+    }
+  } else assert.ok(!rows.some((r) => r.extra.sessionId === "compressed"));
+});
+
+test("PRA-442 missing and drifted stores fail soft with named warnings", async (t) => {
+  const { file } = setup(t);
+  const warnings = [];
+  t.mock.method(console, "error", (...args) => warnings.push(args.join(" ")));
+  fs.rmSync(file);
+  assert.deepEqual(await openclaw.discover(), []);
+  assert.match(warnings.join("\n"), /openclaw.*snapshot/i);
+  const db = new DatabaseSync(file);
+  db.exec("CREATE TABLE wrong (id TEXT)");
+  db.close();
+  assert.deepEqual(await openclaw.discover(), []);
+  assert.match(warnings.join("\n"), /openclaw.*unreadable/i);
+  assert.deepEqual((await openclaw.read({ path: file, extra: { sessionId: "absent" } })).events, []);
+});
+
+test("PRA-442 P1-4 live-to-archive identity and duplicate generations preserve one gap sighting", async (t) => {
+  const { file } = setup(t);
+  const before = (await openclaw.discover()).find((r) => r.extra.sessionId === "slack");
+  const db = new DatabaseSync(file);
+  const entries = db.prepare("SELECT event_json FROM transcript_events WHERE session_id='slack' ORDER BY seq").all();
+  const bytes = Buffer.from(entries.map((r) => r.event_json).join("\n"));
+  const insert = db.prepare(
+    "INSERT INTO session_transcript_archives VALUES ('slack', ?, 'agent:main:slack', 'deleted', 'identity', ?, ?)",
+  );
+  insert.run("generation-1", bytes, timestamp + 2000);
+  insert.run("generation-2", bytes, timestamp + 3000);
+  db.exec("DELETE FROM session_windows WHERE session_id='slack'");
+  const after = (await openclaw.discover()).filter((r) => r.extra.sessionId === "slack");
+  assert.equal(after.length, 1);
+  assert.equal(before.id, "slack");
+  const identity = (row) => transcriptIdentity({ ...row, harness: "openclaw", nativeId: row.id });
+  assert.equal(identity(before), identity(after[0]));
+  assert.equal(identity(before), identity({ ...after[0], path: "/relocated/database.sqlite" }));
+  const ledger = emptyGapLedger();
+  for (const row of [before, after[0]])
+    recordGapObservations(ledger, [
+      {
+        status: "ok",
+        memoryPath: "AGENTS.md",
+        transcript: { ...row, identity: identity(row), harness: "openclaw" },
+        gaps: [{ proposedInstruction: "Read the setup guide.", quote: "Human request." }],
+      },
+    ]);
+  assert.equal(Object.keys(Object.values(ledger.entries)[0].sessions).length, 1);
+  insert.run(
+    "generation-3",
+    Buffer.from(bytes.toString().replace("Human request.", "A genuinely different request.")),
+    timestamp + 4000,
+  );
+  db.close();
+  const distinct = (await openclaw.discover()).filter((r) => r.extra.sessionId === "slack");
+  assert.equal(distinct.length, 2);
+  assert.equal(identity(distinct[0]), identity(before));
+  assert.notEqual(identity(distinct[0]), identity(distinct[1]));
+});
+
+test("PRA-442 creates one private snapshot per run and cleans only owned snapshots", async (t) => {
+  const { file } = setup(t);
+  setEnv(t, "BACKPASS_OPENCLAW_DB", null);
+  setEnv(t, "OPENCLAW_AGENT", "other");
+  let calls = 0;
+  let directory;
+  const run = async (bin, args) => {
+    calls++;
+    assert.equal(bin, "openclaw");
+    assert.deepEqual(args.slice(0, 5), ["backup", "sqlite", "create", "--agent", "other"]);
+    directory = args[6];
+    assert.equal(fs.statSync(directory).mode & 0o777, 0o700);
+    const snapshotPath = path.join(directory, "snapshot");
+    fs.mkdirSync(snapshotPath);
+    fs.copyFileSync(file, path.join(snapshotPath, "database.sqlite"));
+    return {
+      code: 0,
+      stdout: JSON.stringify({ snapshotPath, manifest: { artifact: { path: "database.sqlite" } } }),
+      stderr: "",
+    };
+  };
+  const [one, two] = await Promise.all([openclaw.resolveSnapshot({ run }), openclaw.resolveSnapshot({ run })]);
+  assert.equal(one, two);
+  assert.equal(calls, 1);
+  assert.ok(fs.existsSync(one));
+  openclaw.cleanup();
+  assert.ok(!fs.existsSync(directory));
+  assert.ok(fs.existsSync(file));
+  await openclaw.resolveSnapshot({ run });
+  assert.equal(calls, 2);
+});
+
+test("PRA-442 backup errors, timeout and shim refusal warn once and never open a store", async (t) => {
+  setup(t);
+  setEnv(t, "BACKPASS_OPENCLAW_DB", null);
+  const warnings = [];
+  t.mock.method(console, "error", (...args) => warnings.push(args.join(" ")));
+  for (const result of [
+    { code: null, spawnError: Object.assign(new Error("not found"), { code: "ENOENT" }) },
+    { code: 0, timedOut: true },
+    { code: null, spawnError: Object.assign(new Error("unsafe argument"), { code: "ERR_WINDOWS_SHIM_UNSAFE_ARG" }) },
+    { code: 0, stdout: "not json" },
+    { code: 0, stdout: JSON.stringify({ snapshotPath: "/outside", manifest: { artifact: { path: "missing" } } }) },
+  ]) {
+    openclaw.cleanup();
+    let calls = 0;
+    const run = async () => {
+      calls++;
+      return { stdout: "", stderr: "", ...result };
+    };
+    assert.equal(await openclaw.resolveSnapshot({ run }), null);
+    assert.equal(await openclaw.resolveSnapshot({ run }), null);
+    assert.equal(calls, 1);
+  }
+  assert.match(warnings.join("\n"), /ENOENT/);
+  assert.match(warnings.join("\n"), /timed out/);
+  assert.match(warnings.join("\n"), /ERR_WINDOWS_SHIM_UNSAFE_ARG/);
+});
+
+test("PRA-442 corrupt archives skip independently and other agents are not collected", async (t) => {
+  const { file } = setup(t);
+  const warnings = [];
+  t.mock.method(console, "error", (...args) => warnings.push(args.join(" ")));
+  const db = new DatabaseSync(file);
+  db.prepare("UPDATE session_transcript_archives SET archive_blob = ? WHERE session_id = 'archive'").run(
+    Buffer.from("broken json"),
+  );
+  db.close();
+  const rows = await openclaw.discover();
+  assert.ok(rows.some((r) => r.extra.sessionId === "dashboard"));
+  assert.ok(!rows.some((r) => r.extra.sessionId === "archive"));
+  assert.match(warnings.join("\n"), /2 session\(s\) skipped/);
+  setEnv(t, "OPENCLAW_AGENT", "other");
+  assert.deepEqual(await openclaw.discover(), []);
+});
+
+test("PRA-442 wrapper stripping preserves ordinary text, repeated blocks and timestamp-like prose", () => {
+  const human = "  Keep whitespace and `code`.\nNext line.  ";
+  assert.equal(openclaw.stripScaffolding(human), human);
+  assert.equal(
+    openclaw.stripScaffolding("Discuss [Sun 2026-09-27 21:24 EDT] tomorrow."),
+    "Discuss [Sun 2026-09-27 21:24 EDT] tomorrow.",
+  );
+  assert.equal(
+    openclaw.stripScaffolding(
+      "<active_memory_plugin>one</active_memory_plugin><active_memory_plugin>two</active_memory_plugin>Human",
+    ),
+    "Human",
+  );
+});
+
+test("PRA-442 missing zstd support skips compressed sessions without breaking identity archives", async (t) => {
+  setup(t);
+  const warnings = [];
+  t.mock.method(console, "error", (...args) => warnings.push(args.join(" ")));
+  const saved = zlibRuntime.zstdDecompressSync;
+  try {
+    zlibRuntime.zstdDecompressSync = undefined;
+    syncBuiltinESMExports();
+    const rows = await openclaw.discover();
+    assert.ok(rows.some((r) => r.extra.sessionId === "archive"));
+    assert.ok(!rows.some((r) => r.extra.sessionId.startsWith("compressed")));
+    assert.match(warnings.join("\n"), /zstd decompression unavailable/);
+  } finally {
+    zlibRuntime.zstdDecompressSync = saved;
+    syncBuiltinESMExports();
+  }
+});
+
+test("PRA-442 defaults cwd, preserves text spacing and excludes its own prompts after stripping", async (t) => {
+  const { file, dir } = setup(t);
+  const rows = await openclaw.discover();
+  assert.equal(rows.find((r) => r.extra.sessionId === "fallback").cwd, path.join(dir, ".openclaw/workspace"));
+  const db = new DatabaseSync(file);
+  const event = { type: "message", message: { role: "user", content: [{ type: "text", text: "  Human words.\n  " }] } };
+  db.prepare("UPDATE transcript_events SET event_json=? WHERE session_id='fallback'").run(JSON.stringify(event));
+  assert.equal(
+    (await openclaw.read(rows.find((r) => r.extra.sessionId === "fallback"))).events[0].text,
+    "  Human words.\n  ",
+  );
+  event.message.content[0].text = `<active_memory_plugin>injected</active_memory_plugin>${SELF_SESSION_SENTINEL}\nself analysis`;
+  db.prepare("UPDATE transcript_events SET event_json=? WHERE session_id='fallback'").run(JSON.stringify(event));
+  db.close();
+  assert.ok(!(await openclaw.discover()).some((r) => r.extra.sessionId === "fallback"));
+});
+
+test("PRA-442 P1-1 excludes tokenized eval namespaces and prefers typed routing over key fallback", async (t) => {
+  const { file } = setup(t);
+  const db = new DatabaseSync(file);
+  db.exec(`UPDATE session_nodes SET created_via='spawn' WHERE current_session_id='dashboard';
+    UPDATE session_nodes SET created_via='run' WHERE current_session_id='fallback';
+    UPDATE session_nodes SET spawned_by='parent' WHERE current_session_id='discord';
+    UPDATE session_nodes SET parent_session_key='parent' WHERE current_session_id='telegram';
+    UPDATE session_nodes SET created_via='cron' WHERE current_session_id='webchat';
+    UPDATE session_nodes SET created_via='operator' WHERE current_session_id='acp:child';
+    UPDATE session_windows SET channel='slack', chat_type='channel' WHERE session_id='subagent:child';
+    UPDATE session_windows SET chat_type='direct' WHERE session_id IN ('hook:gmail', 'dashboard');
+    UPDATE session_windows SET spawned_by='parent' WHERE session_id='signal:direct:person';
+    UPDATE session_windows SET parent_session_key='parent' WHERE session_id='slack';`);
+  db.close();
+  const rows = await openclaw.discover();
+  const byId = new Map(rows.map((r) => [r.extra.sessionId, r]));
+  for (const id of [
+    "routing-smoke-fable-20260715",
+    "r3-routing-muse-smoke-20260910",
+    "r3-routing-fable-review-20260910",
+    "pra290-router-main-interactive",
+    "pra373-review-case",
+  ])
+    assert.ok(!byId.has(id), id);
+  for (const id of ["fallback", "dashboard", "discord", "telegram", "webchat", "signal:direct:person", "slack"])
+    assert.equal(classifyInteraction({ ...byId.get(id), harness: "openclaw" }), "non-interactive", id);
+  for (const id of ["retrieval", "evaluation", "slack:channel:eval", "acp:child", "subagent:child", "hook:gmail"]) {
+    assert.ok(byId.has(id), id);
+    assert.equal(classifyInteraction({ ...byId.get(id), harness: "openclaw" }), "interactive", id);
+  }
+});
+
+test("PRA-442 P1-2 gateway state-root headers fall through to labelled configured workspace", async (t) => {
+  const { file, dir } = setup(t);
+  const db = new DatabaseSync(file);
+  const update = db.prepare("UPDATE transcript_events SET event_json=? WHERE session_id='slack' AND seq=0");
+  for (const stateRoot of [path.join(dir, ".openclaw"), path.join(dir, "custom-state")]) {
+    setEnv(t, "OPENCLAW_STATE_DIR", stateRoot);
+    fs.mkdirSync(stateRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(stateRoot, "openclaw.json"),
+      JSON.stringify({ agents: { defaults: { workspace: "/synthetic/configured" } } }),
+    );
+    update.run(JSON.stringify({ type: "session", cwd: stateRoot + "/", timestamp }));
+    const rows = await openclaw.discover();
+    const row = rows.find((r) => r.extra.sessionId === "slack");
+    assert.equal(row.cwd, "/synthetic/configured");
+    assert.equal(row.extra.cwdSource, "configured-workspace");
+    assert.equal(rows.find((r) => r.extra.sessionId === "dashboard").extra.cwdSource, "session-metadata");
+  }
+  update.run(JSON.stringify({ type: "session", cwd: "/other/project/worktree", timestamp }));
+  db.close();
+  assert.equal((await openclaw.discover()).find((r) => r.extra.sessionId === "slack").cwd, "/other/project/worktree");
+});
+
+test("PRA-442 P1-3 archived since uses newest event activity, with archive time only when undated", async (t) => {
+  const { file } = setup(t);
+  const db = new DatabaseSync(file);
+  db.exec(`UPDATE session_transcript_archives SET created_at=${timestamp + 100000} WHERE session_id='archive'`);
+  assert.ok(!(await openclaw.discover({ cutoffMs: timestamp + 5000 })).some((r) => r.extra.sessionId === "archive"));
+  const entries = [
+    { type: "session", timestamp },
+    {
+      type: "message",
+      timestamp: new Date(timestamp + 6000).toISOString(),
+      message: { role: "user", content: "Later activity." },
+    },
+  ];
+  db.prepare("UPDATE session_transcript_archives SET archive_blob=? WHERE session_id='archive'").run(
+    Buffer.from(entries.map((e) => JSON.stringify(e)).join("\n")),
+  );
+  assert.equal(
+    (await openclaw.discover({ cutoffMs: timestamp + 5000 })).find((r) => r.extra.sessionId === "archive").mtimeMs,
+    timestamp + 6000,
+  );
+  delete entries[0].timestamp;
+  delete entries[1].timestamp;
+  db.prepare("UPDATE session_transcript_archives SET archive_blob=? WHERE session_id='archive'").run(
+    Buffer.from(entries.map((e) => JSON.stringify(e)).join("\n")),
+  );
+  db.close();
+  assert.equal(
+    (await openclaw.discover({ cutoffMs: timestamp + 5000 })).find((r) => r.extra.sessionId === "archive").mtimeMs,
+    timestamp + 100000,
+  );
+});
+
+test("PRA-442 P2-6 unterminated internal context preserves the remaining human turn verbatim", () => {
+  const human = "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>truncated context\n\nPlease keep these human words.";
+  assert.equal(openclaw.stripScaffolding(human), human);
+  assert.equal(
+    openclaw.stripScaffolding(
+      "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>complete<<<END_OPENCLAW_INTERNAL_CONTEXT>>>\n" + human,
+    ),
+    human,
+  );
+});
+
+test("PRA-442 P2-2 absent optional routing columns degrade and schema drift warns once", async (t) => {
+  const { file } = setup(t);
+  const warnings = [];
+  t.mock.method(console, "error", (...args) => warnings.push(args.join(" ")));
+  const db = new DatabaseSync(file);
+  db.exec(`ALTER TABLE session_windows DROP COLUMN acp_owned;
+    ALTER TABLE session_windows DROP COLUMN hook_external_content_source;
+    ALTER TABLE session_windows DROP COLUMN channel;
+    ALTER TABLE session_windows DROP COLUMN chat_type;
+    ALTER TABLE session_nodes DROP COLUMN created_via;
+    ALTER TABLE session_nodes DROP COLUMN spawned_by;
+    ALTER TABLE session_nodes DROP COLUMN parent_session_key;
+    PRAGMA user_version=24;`);
+  db.close();
+  assert.ok((await openclaw.discover()).some((r) => r.extra.sessionId === "dashboard"));
+  assert.equal(warnings.filter((w) => /schema version 24/.test(w)).length, 1);
+  assert.ok(!warnings.some((w) => /snapshot unreadable/.test(w)));
+});
+
+test("PRA-442 P2-5 bad workspace config warns by name and keeps sessions with a fallback", async (t) => {
+  const { dir } = setup(t);
+  const warnings = [];
+  t.mock.method(console, "error", (...args) => warnings.push(args.join(" ")));
+  fs.mkdirSync(path.join(dir, ".openclaw"));
+  for (const config of ["{broken", JSON.stringify({ agents: { defaults: { workspace: "relative/path" } } })]) {
+    fs.writeFileSync(path.join(dir, ".openclaw/openclaw.json"), config);
+    const rows = await openclaw.discover();
+    const row = rows.find((r) => r.extra.sessionId === "fallback");
+    assert.ok(row);
+    assert.equal(row.cwd, path.join(dir, ".openclaw/workspace"));
+    assert.equal(row.extra.cwdSource, "configured-workspace");
+  }
+  assert.equal(warnings.filter((w) => /workspace config/.test(w)).length, 2);
+  assert.ok(!warnings.some((w) => /snapshot unreadable/.test(w)));
+});
+
+test("PRA-442 P2-4 direct adapters declare self checking and cleanup without name checks", async (t) => {
+  const { dir } = setup(t);
+  assert.equal(ADAPTERS.openclaw, openclaw);
+  const shared = path.join(dir, "shared-store");
+  fs.writeFileSync(shared, JSON.stringify({ text: SELF_SESSION_SENTINEL }));
+  const stateDir = path.join(dir, "state");
+  let cleanups = 0;
+  const adapter = {
+    name: "fixture",
+    selfChecked: true,
+    cleanup: () => cleanups++,
+    discover: async () => [
+      { id: "human", path: shared, cwd: dir },
+      { id: "self", path: shared, cwd: stateDir },
+    ],
+  };
+  ADAPTERS.fixture = adapter;
+  t.after(() => delete ADAPTERS.fixture);
+  const config = {
+    discovery: { harnesses: ["fixture"], since: "all" },
+    state: { root: stateDir, readScanCache: () => ({}) },
+  };
+  const result = await discoverTranscripts({
+    repo: {},
+    scope: { associate: () => ({ tier: 1, confidence: "high" }) },
+    config,
+  });
+  assert.deepEqual(
+    result.transcripts.map((r) => r.nativeId),
+    ["human"],
+  );
+  assert.equal(result.perHarness.fixture.self, 1);
+  adapter.selfChecked = false;
+  assert.equal(
+    (await discoverTranscripts({ repo: {}, scope: { associate: () => ({ tier: 1, confidence: "high" }) }, config }))
+      .transcripts.length,
+    0,
+  );
+  t.mock.method(console, "error", () => {});
+  assert.equal(await main(["status", "--scope", "invalid"]), 1);
+  assert.equal(cleanups, 1);
+});
+
+test("PRA-442 P1-4 distinct archive content and a live copy retain their identities on archival", async (t) => {
+  const { file } = setup(t);
+  const db = new DatabaseSync(file);
+  const live = db.prepare("SELECT event_json FROM transcript_events WHERE session_id='slack' ORDER BY seq").all();
+  const bytes = Buffer.from(live.map((r) => r.event_json).join("\n"));
+  const insert = db.prepare(
+    "INSERT INTO session_transcript_archives VALUES ('slack', ?, 'agent:main:slack', 'reset', 'identity', ?, ?)",
+  );
+  insert.run("first", Buffer.from(bytes.toString().replace("Human request.", "Earlier distinct request.")), timestamp);
+  const before = (await openclaw.discover()).filter((r) => r.extra.sessionId === "slack");
+  assert.equal(before.length, 2);
+  assert.equal(before[0].id, "slack");
+  insert.run("second", bytes, timestamp + 2000);
+  const overlap = (await openclaw.discover()).filter((r) => r.extra.sessionId === "slack");
+  assert.deepEqual(
+    overlap.map((r) => r.id),
+    before.map((r) => r.id),
+  );
+  assert.equal(overlap.find((r) => r.id === before[1].id).extra.generation, null);
+  db.exec("DELETE FROM session_windows WHERE session_id='slack'");
+  db.close();
+  const after = (await openclaw.discover()).filter((r) => r.extra.sessionId === "slack");
+  assert.deepEqual(
+    after.map((r) => r.id),
+    before.map((r) => r.id),
+  );
+});
+
+test("PRA-442 P2-7 distillation never invites opening a shared SQLite snapshot as a raw transcript", async (t) => {
+  setup(t);
+  const row = (await openclaw.discover()).find((r) => r.extra.sessionId === "dashboard");
+  const raw = await readTranscript({ ...row, harness: "openclaw" });
+  assert.equal(raw.rawPath, null);
+  const trace = distill(raw.events, { ...row, harness: "openclaw", rawPath: raw.rawPath }).trace;
+  assert.ok(!trace.includes(row.path));
+  assert.doesNotMatch(trace, /Open the raw|raw transcript: null/);
+  assert.match(trace, /No per-session raw transcript file/);
+});

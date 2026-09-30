@@ -215,7 +215,7 @@ It cannot be combined with
 
 ### 1. Collect samples - which sessions belong to this repo
 
-backpass reads the local transcript stores of seven harnesses directly. No API, no upload.
+backpass reads the transcript stores of eight harnesses locally. No API, no upload.
 
 | Harness        | Store                                          | Repo tie                                            |
 | -------------- | ---------------------------------------------- | --------------------------------------------------- |
@@ -226,6 +226,7 @@ backpass reads the local transcript stores of seven harnesses directly. No API, 
 | **grok**       | `~/.grok/sessions/<encoded-cwd>/<uuid>/`       | `summary.json` `cwd` + `git_remotes`                |
 | **cursor CLI** | `~/.cursor/chats/<md5(cwd)>/<uuid>/`           | `meta.json` `cwd`                                   |
 | **hermes**     | `~/.hermes/state.db` (sqlite)                  | session cwd, with CLI prompt / ACP config fallbacks |
+| **openclaw**   | online SQLite backup snapshot                  | session workspace/cwd, then configured workspace    |
 
 Claude collection covers `$CLAUDE_CONFIG_DIR/projects` alongside the default store, so a
 relocated config dir does not hide its sessions. The variable is read from backpass's own
@@ -253,6 +254,24 @@ A configured store that is missing or unreadable is named in a warning and skipp
 Hermes collection includes CLI and ACP sessions, plus TUI sessions with an absolute
 `sessions.cwd`. Gateway, cron, and WhatsApp sessions are excluded because their recorded
 cwd belongs to a shared process, not a project.
+
+OpenClaw collection reads an online snapshot created by `openclaw backup sqlite create`,
+never the live database. Set `BACKPASS_OPENCLAW_DB` to an existing snapshot `database.sqlite`
+to skip backup creation; `OPENCLAW_AGENT` selects the agent (default `main`). One private
+temporary snapshot is reused for the run and removed afterward; supplied snapshots are
+left untouched. Live active branches and deleted/reset archives are included. Identity survives
+archival; only distinct session content separates archive generations, and `--since` uses
+archive activity rather than deletion time. Compressed
+records need Node with `zstdDecompressSync` (Node 26 recommended); missing codecs or
+drifted records warn and skip. Session metadata and headers provide cwd, with a labelled
+`configured-workspace` fallback to the agent workspace in `~/.openclaw/openclaw.json`
+(or `~/.openclaw/workspace`); `OPENCLAW_STATE_DIR` overrides that state root. Gateway
+state-root headers also use this fallback. Typed routing takes precedence over key patterns:
+human channels are interactive; programmatic runs, cron, subagent, heartbeat, ACP and hook
+sessions are non-interactive. Probe/eval/test/smoke and ticket-run namespaces are excluded, and
+injected context and system messages are removed before distillation. Collection is local;
+OpenClaw is not yet included in the SSH probe. If an existing config pins the harness list,
+add `openclaw` or select it with `--harness openclaw`.
 
 Association runs in four tiers:
 
@@ -808,7 +827,7 @@ CLI flags on top:
     ]
   },
   "discovery": {
-    "harnesses": ["claude", "codex", "pi", "opencode", "grok", "cursor", "hermes"],
+    "harnesses": ["claude", "codex", "pi", "opencode", "grok", "cursor", "hermes", "openclaw"],
     "since": "30d",
     "worktreeGlobs": [],
     "cloneRoots": [],

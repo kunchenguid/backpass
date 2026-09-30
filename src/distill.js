@@ -8,8 +8,8 @@ import { estimateTokens } from "./tokens.js";
  * The point is cheap-first analysis. Raw transcripts on this machine run to megabytes,
  * almost all of it tool-call noise. Distillation keeps what carries the loss signal -
  * what the human asked, what the agent said, and a one-line shape of each tool call -
- * and drops the rest. The trace ends with the raw transcript path so the analysis agent
- * can open the original when (and only when) a claim needs it.
+ * and drops the rest. When a per-session raw file exists, the trace ends with its path
+ * so the analysis agent can open the original when (and only when) a claim needs it.
  *
  * Adapters produce a normalized event stream; everything below is shared.
  */
@@ -142,9 +142,13 @@ export function distill(events, meta, options = {}) {
   const footer = [
     "",
     "---",
-    `raw transcript: ${meta.rawPath}`,
-    "Tool calls above are one-line summaries and tool output is truncated. Open the raw",
-    "transcript only if a specific claim needs the full text.",
+    ...(meta.rawPath === null
+      ? ["No per-session raw transcript file is available. Tool calls are summaries and tool output is truncated."]
+      : [
+          `raw transcript: ${meta.rawPath}`,
+          "Tool calls above are one-line summaries and tool output is truncated. Open the raw",
+          "transcript only if a specific claim needs the full text.",
+        ]),
   ].join("\n");
 
   const { body, elided } = capTrace(lines.join("\n").trim(), maxTraceTokens);

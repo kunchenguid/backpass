@@ -7,7 +7,7 @@ import { applyHostFlag, loadConfig } from "../src/config.js";
 import { discoverProject, initRepo, sshCalls, tmpdir, withRemoteEnv, writeClaudeSession } from "./helpers/remote.js";
 import { disambiguateSourceLabels, gapSource } from "../src/gap-ledger.js";
 import { classifySshFailure, closeSshMasters } from "../src/discovery/remote/ssh.js";
-import { discoverTranscripts } from "../src/discovery/index.js";
+import { ADAPTERS, discoverTranscripts } from "../src/discovery/index.js";
 import { resolveHostList } from "../src/discovery/hosts.js";
 import { resolveScope } from "../src/scope.js";
 import { State } from "../src/state.js";
@@ -532,4 +532,19 @@ test("every named ssh failure is classified into the message that says what to d
     assert.equal(failure.reason, reason);
     assert.match(failure.message, message);
   }
+});
+
+test("PRA-442 P2-3 local-only adapters never enter SSH harness requests", async (t) => {
+  const s = scenario();
+  const original = ADAPTERS.openclaw;
+  ADAPTERS.openclaw = { ...original, discover: async () => [] };
+  t.after(() => {
+    ADAPTERS.openclaw = original;
+  });
+  const result = await withRemoteEnv({ localHome: s.localHome, hosts: s.hosts }, () =>
+    discoverProject(s.repoRoot, { discovery: { hosts: ["mac-home"], harnesses: ["claude", "openclaw"] } }),
+  );
+  assert.ok(result.perHarness.openclaw);
+  assert.ok(result.perHost[0].harnesses.claude);
+  assert.equal(result.perHost[0].harnesses.openclaw, undefined);
 });

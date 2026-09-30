@@ -6,6 +6,7 @@ import * as pi from "./adapters/pi.js";
 import * as grok from "./adapters/grok.js";
 import * as opencode from "./adapters/opencode.js";
 import * as hermes from "./adapters/hermes.js";
+import * as openclaw from "./adapters/openclaw.js";
 import * as cursorCli from "./adapters/cursor-cli.js";
 import * as cursorIde from "./adapters/cursor-ide.js";
 
@@ -27,6 +28,7 @@ export const ADAPTERS = Object.assign(Object.create(null), {
   grok,
   opencode,
   hermes,
+  openclaw,
   cursor: cursorCli,
   "cursor-ide": cursorIde,
 });
@@ -149,7 +151,7 @@ export async function discoverTranscripts({
   if (hosts.length) {
     const collected = await collectHosts({
       hosts,
-      harnesses: selected.filter((h) => getAdapter(h)),
+      harnesses: selected.filter((h) => getAdapter(h) && !getAdapter(h).localOnly),
       cutoffMs,
       controlPath: createControlPath(),
     });
@@ -300,9 +302,15 @@ async function discoverDirect(adapter, { repo, config, cutoffMs, strict, stats, 
       stats.skipped += 1;
       continue;
     }
-    // A SQLite store has no per-session file to inspect; its adapter marks backpass's own
-    // sessions from the store itself (see ./self.js).
-    if (row.self || isSelfSession(transcript, { stateDir, readHead: !adapter.sqliteBacked })) {
+    // SQLite stores have no per-session file head. Adapters that check individual turns
+    // mark their own sessions (selfChecked); others are marked from the store (see ./self.js).
+    if (
+      row.self ||
+      isSelfSession(adapter.selfChecked ? { cwd: transcript.cwd } : transcript, {
+        stateDir,
+        readHead: !adapter.sqliteBacked,
+      })
+    ) {
       stats.self += 1;
       continue;
     }
