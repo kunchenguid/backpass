@@ -512,8 +512,15 @@ export class AgentResolver {
    * Unclassifiable errors (garbage output) propagate unchanged. A timeout on real work propagates
    * unchanged for pinned and auto-picked agents alike: it is never classified (whatever its stderr
    * says), demoted, or retried.
+   *
+   * A blank turn gets one retry per candidate per invocation before normal failure handling.
+   * Not every blank turn is exhausted credits: a turn can also spend its whole output budget on
+   * reasoning (finish "length"), how far it reasons varies from attempt to attempt, and a provider
+   * can fail once. The retry absorbs those without caching a negative verdict or stopping a pinned
+   * run, while repeated blanks still fail quickly when credits are exhausted.
    */
   async withFallthrough(role, fn) {
+    const retriedBlank = new Set();
     for (;;) {
       const pick = await this.resolve(role);
       try {
@@ -521,6 +528,12 @@ export class AgentResolver {
       } catch (err) {
         const isAcpxError = err instanceof AcpxError;
         if (isAcpxError && err.timedOut) throw err;
+        const candidate = `${pick.agent}|${pick.model}`;
+        if (isAcpxError && err.emptyOutput && !retriedBlank.has(candidate)) {
+          retriedBlank.add(candidate);
+          warn(`${role}: ${pick.agent} (${pick.model}) returned no output; retrying it once`);
+          continue;
+        }
         const verdict = isAcpxError ? classifyAcpxFailure(err) : null;
         if (isAcpxError && pick.pinned) throw pinnedFailureError(role, pick, verdict, err);
         if (!verdict) throw err;
@@ -579,7 +592,7 @@ function exhaustedError(role, trail) {
     return `  ${t.model.padEnd(width)}  ${t.agent.padEnd(9)} ${label}${t.detail ? ` (${t.detail})` : ""}${hint ? `  ${hint}` : ""}`;
   });
   // "log in" is only true advice when something in the trail is actually an auth
-  // failure - an all-"empty-output" trail (exhausted credits) needs its own line, not
+  // failure - an all-"empty-output" trail needs its own line, not
   // login instructions that don't apply to any candidate shown above.
   const pinHint = `pin one explicitly: backpass --${role}-agent <agent> --${role}-model <id>`;
   const closing = trail.some((t) => t.verdict === "unauthenticated")

@@ -721,13 +721,12 @@ minutes for a cold-starting adapter; the remaining probe operations retain their
 durable verdicts are cached in
 `.backpass/agent-probe-cache.json` for 12h (30min for negatives). Pi and OpenCode entries
 are re-probed when their credential or auth-file state changes; `--force` re-probes every
-entry. The probe is a filter, not a promise: if the chosen harness answers `AUTH_REQUIRED`,
-rejects the model, or returns a clean exit with no output at all (a provider account out
-of quota or credits, often swallowed before it reaches stderr) mid-run, backpass falls
-through to the next candidate and says so. The one blank exit that never falls through is
-one that consumed the call's whole `--timeout` budget - that is acpx enforcing the timeout
-itself, and backpass reports it as a timeout, not a provider failure. When a whole ladder
-is exhausted the error lists every candidate with what to run to fix it.
+entry.
+The probe is a filter, not a promise: if the chosen harness answers `AUTH_REQUIRED` or rejects the model mid-run, backpass falls through to the next candidate and says so.
+A clean exit with no output at all can mean exhausted provider quota or credits, but also a turn that spent its whole output budget on reasoning, which varies from attempt to attempt, or a transient provider error, so backpass retries it once on the same candidate for that call.
+A second blank demotes the candidate and falls through to the next one in the ladder, or stops the run if the agent is pinned.
+A blank exit that consumed the call's `--timeout` budget is instead reported as a timeout, never retried or treated as a provider failure.
+When a whole ladder is exhausted the error lists every candidate with what to run to fix it.
 
 Bare model ids are resolved against what each adapter advertises (`openai-codex/gpt-5.6-luna`
 on pi, `openai/gpt-5.6-luna` on opencode, `gpt-5.6-luna` on codex), so nothing is hardcoded

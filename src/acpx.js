@@ -228,14 +228,14 @@ export function isBlankOutput(text) {
 
 /**
  * A call that exits clean but returns no text at all is a silent failure, not a
- * quality problem: the prompt contract always requires at least an empty JSON object
+ * quality problem: the prompt contract always requires a JSON answer
  * (`"An empty array is a valid and useful answer"`), so blank output means the turn
- * never really ran - most often an upstream provider error (exhausted credits, a
- * suspended key) that an ACP bridge swallows without ever writing to stderr. Unlike
- * garbled prose, no real work was done, so it is safe to demote the candidate and
- * retry with the next one in the ladder rather than burning the whole run on it.
- * Call this from inside a `withFallthrough` callback, before the caller's own
- * `extractJson` check, so the throw is still in scope to trigger a fallthrough.
+ * produced no usable answer. Possible causes include a turn that spent its whole
+ * output budget on reasoning or an upstream provider error (exhausted credits, a
+ * suspended key, or a transient failure) swallowed by an ACP bridge without stderr.
+ * Call this from inside a `withFallthrough` callback, before
+ * the caller's own `extractJson` check, so `src/agents.js` owns retry and fallthrough
+ * handling rather than treating the blank turn as malformed JSON.
  *
  * Not for every model call: synthesis's edit turn never reads its own `text` (the edit
  * happens through tool calls, so blank is normal there) and its annotate turn
@@ -259,7 +259,7 @@ export function assertNonEmptyOutput(result, { agent, model }) {
 
 /**
  * Fraction of the configured `--timeout` budget a textless quiet exit must have
- * consumed before it is read as acpx's own timeout kill rather than a silent provider
+ * consumed before it is read as acpx's own timeout kill rather than an empty-output
  * failure. acpx starts its budget when the turn spawns, so the kill lands at or just
  * past the full budget; the floor only absorbs start-up skew, never most of it.
  */
@@ -273,13 +273,13 @@ const BLANK_AT_BUDGET_FLOOR = 0.9;
  * (`result.timedOut`), but acpx enforces `--timeout` first: when the harness dies at
  * the budget, `--format quiet` has the process exit clean with blank output, and the
  * outer kill never fires. Read generically that blank result reaches
- * `assertNonEmptyOutput` as a silent provider failure - an `empty-output` verdict
+ * `assertNonEmptyOutput` as an `empty-output` verdict
  * whose hints point at exhausted credits - misreporting a timeout as a provider
  * problem. Wall clock is the only remaining signal: a blank result that spent (almost)
  * the whole budget is that kill; one clearly short of it keeps the empty-output
  * diagnosis. Same contract as the session-create timeout: raised by name, before any
- * generic handling, and deliberately not classifiable - a run never silently switches
- * models after real work has started.
+ * generic handling, and deliberately not classifiable - a timeout must not trigger
+ * the retry or model fallthrough policy in `src/agents.js`.
  *
  * Only for one-shot analysis calls (`execOneShot`, `sessionPrompt`). Synthesis's edit
  * turn never reads its own text - edits land through tool calls, so blank there is
@@ -318,7 +318,7 @@ function assertNotAcpxBudgetKill({
  * (almost) the whole `--timeout` budget is named a timeout first
  * (`assertNotAcpxBudgetKill`), so acpx's own kill never reads as a provider failure.
  * Shared by `analyze.js` and `consolidate.js`; call from inside a `withFallthrough`
- * callback so a blank result still falls through to the next candidate.
+ * callback for the blank-turn recovery policy in `src/agents.js`.
  *
  * @param {Parameters<typeof execOneShot>[0]} call
  * @param {{ agent: string, model?: string | null, effort?: string | null }} pick

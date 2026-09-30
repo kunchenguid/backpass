@@ -390,10 +390,54 @@ test("a clean exit with no output (e.g. exhausted provider credits) falls throug
   });
 
   assert.equal(result, "evidence");
-  assert.deepEqual(attempts, ["pi/openai/gpt-5.6-luna", "codex/gpt-5.6-luna"]);
+  assert.deepEqual(
+    attempts,
+    ["pi/openai/gpt-5.6-luna", "pi/openai/gpt-5.6-luna", "codex/gpt-5.6-luna"],
+    "a blank candidate gets one retry before it is demoted",
+  );
   assert.deepEqual(calls, ["pi|gpt-5.6-luna", "opencode|gpt-5.6-luna", "codex|gpt-5.6-luna"]);
   assert.equal(state.cache.entries["pi|gpt-5.6-luna"].verdict, "empty-output", "the failure is remembered");
   assert.equal((await resolver.resolve("analysis")).agent, "codex", "later calls in the run stay on the fallback");
+});
+
+test("one blank turn is retried on the same candidate, which keeps its place", async () => {
+  const { resolver, state } = resolverWith({
+    "pi|gpt-5.6-luna": { resolvedModel: "openai/gpt-5.6-luna" },
+    "codex|gpt-5.6-luna": { resolvedModel: "gpt-5.6-luna" },
+  });
+  let turns = 0;
+  const result = await resolver.withFallthrough("analysis", async (pick) => {
+    turns += 1;
+    if (turns === 1) throw emptyOutput(pick.agent, pick.model);
+    return pick.agent;
+  });
+  assert.equal(result, "pi");
+  assert.equal(turns, 2);
+  assert.equal(state.cache.entries["pi|gpt-5.6-luna"]?.verdict, "ok", "a single blank turn is not remembered");
+  assert.equal((await resolver.resolve("analysis")).agent, "pi");
+});
+
+test("a pinned agent's single blank turn is retried instead of stopping the run", async () => {
+  const config = loadConfig(tmpRepo(), { analysis: { agent: "opencode", model: "github-copilot/claude-opus-5.5" } });
+  const { resolver } = resolverWith({}, { config });
+  let turns = 0;
+  const result = await resolver.withFallthrough("analysis", async (pick) => {
+    turns += 1;
+    if (turns === 1) throw emptyOutput(pick.agent, pick.model);
+    return "evidence";
+  });
+  assert.equal(result, "evidence");
+  assert.equal(turns, 2);
+
+  turns = 0;
+  await assert.rejects(
+    resolver.withFallthrough("analysis", async (pick) => {
+      turns += 1;
+      throw emptyOutput(pick.agent, pick.model);
+    }),
+    (err) => err instanceof UserError && /pinned analysis agent opencode/.test(err.message),
+  );
+  assert.equal(turns, 2, "a second blank turn stops the run");
 });
 
 test("parallel workers failing on the same candidate fall through once, together", async () => {
