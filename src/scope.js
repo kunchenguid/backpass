@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { expandHomePath, parseScopeKind, userStateDir } from "./config.js";
 import { associate as associateProject, associateRemote, globToRegExp } from "./discovery/association.js";
+import { localPath } from "./discovery/paths.js";
 import { UserError, info } from "./logger.js";
 import { gitProjectIdentity, gitToplevel, listWorktrees, normalizeRemote } from "./repo.js";
 
@@ -61,12 +62,19 @@ function realpathOrResolve(p) {
  *   tier 1  live git toplevel (passes --strict)
  *   tier 2  recorded remote, for deleted worktrees (codex, grok)
  *   tier 3  cwd string; excluded by --strict
+ *
+ * A cwd this machine cannot spell (`localPath`) is keyed by its recorded string, never
+ * resolved against the process cwd.
+ *
+ * @param {{ cwd?: string | null, remotes?: string[] } | null} descriptor
+ * @param {{ strict?: boolean, wsl?: import("./discovery/paths.js").WslEnvironment | null }} [options]
  */
-export function associateUser(descriptor, { strict = false } = {}) {
+export function associateUser(descriptor, { strict = false, wsl } = {}) {
   const cwd = descriptor?.cwd;
   if (!cwd) return null;
+  const local = localPath(cwd, { wsl });
 
-  const liveRoot = gitToplevel(cwd);
+  const liveRoot = local ? gitToplevel(local) : null;
   if (liveRoot) {
     return {
       tier: 1,
@@ -90,7 +98,7 @@ export function associateUser(descriptor, { strict = false } = {}) {
 
   if (strict) return null;
 
-  const key = realpathOrResolve(cwd);
+  const key = local ? realpathOrResolve(local) : cwd;
   return {
     tier: 3,
     confidence: "cwd",
@@ -250,8 +258,8 @@ function resolveUserScope(cwd, config, { strict = false, home = os.homedir(), as
   };
   const normalizeProjects = (transcripts) => {
     for (const transcript of transcripts) {
-      if (transcript.host || transcript.association?.tier !== 3 || !transcript.cwd) continue;
-      const cwdPath = realpathOrResolve(transcript.cwd);
+      if (transcript.host || transcript.association?.tier !== 3 || !localPath(transcript.cwd)) continue;
+      const cwdPath = realpathOrResolve(localPath(transcript.cwd));
       const match = [...knownWorktrees.entries()]
         .filter(([worktree]) => cwdPath === worktree || cwdPath.startsWith(`${worktree}${path.sep}`))
         .sort(([a], [b]) => b.length - a.length)[0];

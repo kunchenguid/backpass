@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { normalizeRemote } from "../repo.js";
+import { isWindowsPath, localPath } from "./paths.js";
 
 /**
  * Association tiers (design section 2.1, plus sibling clones).
@@ -15,6 +16,9 @@ import { normalizeRemote } from "../repo.js";
  *                              survives worktree deletion (codex, grok)
  *   tier 3    best-effort    - dead cwd whose last segment is the repo dir name, or that
  *                              matches a user-supplied worktree glob; excluded by --strict
+ *
+ * The path tiers (1, 1.5, 3) require a local mapping from `localPath` in `./paths.js`;
+ * an unmappable cwd must not resolve under the process cwd. Tier 2 needs no local path.
  *
  * Returns null when the transcript belongs to some other repo.
  */
@@ -63,7 +67,7 @@ export function associate(descriptor, repo, options = {}) {
   if (options.facts) return associateRemote(descriptor, repo, options);
   const { cwd, remotes = [], gitRoot = null } = descriptor;
   const globs = options.worktreeGlobs || [];
-  const candidates = [cwd, gitRoot].filter(Boolean);
+  const candidates = [cwd, gitRoot].map((recorded) => localPath(recorded, { wsl: options.wsl })).filter(Boolean);
 
   // Tier 1 - live path under a known worktree of this clone.
   for (const candidate of candidates) {
@@ -135,7 +139,8 @@ export function associate(descriptor, repo, options = {}) {
  */
 export function associateRemote({ cwd, remotes = [], gitRoot = null }, repo, options = {}) {
   const { facts = {}, host = "", home = "", worktreeGlobs: globs = [] } = options;
-  const candidates = [cwd, gitRoot].filter(Boolean);
+  // Remote Windows paths are unsupported; this machine's WSL mappings do not describe the host.
+  const candidates = [cwd, gitRoot].filter((recorded) => recorded && !isWindowsPath(recorded));
   const repoRemotes = new Set(repo.remotes);
 
   // Tier 1.5 - a live checkout over there that shares a remote with this repo.

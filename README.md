@@ -260,6 +260,14 @@ Association runs in four tiers:
 4. **Tier 3 - best-effort.** A dead path whose last segment is the repo's directory name,
    or one matching a glob you configured. Labelled as such, and excluded by `--strict`.
 
+On macOS and Linux outside WSL, recorded Windows drive paths (`C:\work\repo`, `C:/work/repo`) and UNC paths (`\\server\share\repo`, `//server/share/repo`) are excluded from the path tiers and nested-file attribution; a matching recorded git remote still associates the session at tier 2.
+Backpass recognizes WSL by a kernel release that names Microsoft or WSL, or by WSL's drive-root mounts of Windows drives, which custom WSL 2 kernels keep; `WSL_DISTRO_NAME` alone does not count, because any child process can inherit it.
+Under WSL, recorded session cwds and tool-call paths use the local filesystem mapping: a drive path such as `C:\work\repo` maps through the drive-root mount reported in `/proc/self/mountinfo` (normally `/mnt/c/work/repo`), and `\\wsl.localhost\<distro>\home\me\repo` or `\\wsl$\<distro>\home\me\repo` maps to `/home/me/repo` when `<distro>` matches `WSL_DISTRO_NAME`, case-insensitively.
+Forward-slash spellings work too, including `C:/work/repo` and `//wsl.localhost/<distro>/home/me/repo`.
+A drive without a drive-root mount, another distro, or a network share remains excluded from path-based association and nested-file attribution; a matching recorded remote can still associate the session.
+In user scope, when a cwd has no local mapping and no recorded remote supplies a project key, it remains a tier-3 key in its original spelling, never resolved against the process cwd, and `--strict` excludes it.
+Windows hosts retain native path handling.
+
 Configured SSH hosts are collected after the local stores and join the same corpus, with
 the same tiers, sample and cap - see [Your other machines](#your-other-machines).
 

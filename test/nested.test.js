@@ -262,6 +262,198 @@ test("relative tool paths require an absolute recorded base, not the backpass pr
   assert.deepEqual(workedPaths({ cwd: "apps/api" }, relative, roots), []);
 });
 
+test(
+  "a Windows tool path or workdir is never resolved against a POSIX cwd",
+  { skip: process.platform === "win32" && "Windows spells these paths natively" },
+  () => {
+    const repo = makeRepo({ "apps/api/AGENTS.md": "# API\n" });
+    const roots = checkoutRoots(repo);
+    const events = [
+      { kind: "tool", input: { filePath: "C:\\Users\\me\\notes.md" } },
+      { kind: "tool", input: { path: "\\\\server\\share\\apps\\api\\x.ts" } },
+      { kind: "tool", input: { path: "src/orders.ts", workdir: "C:\\work\\apps\\api" } },
+      { kind: "tool", input: "*** Begin Patch\n*** Update File: D:/work/apps/api/y.ts\n*** End Patch" },
+      { kind: "tool", input: { path: "apps/api/handler.ts" } },
+    ];
+    const notWsl = { wsl: null };
+    assert.deepEqual(workedPaths({ cwd: repo.root }, events, roots, notWsl), ["apps/api/handler.ts"]);
+    assert.deepEqual(workedPaths({ cwd: "C:\\work" }, [], roots, notWsl), [], "a Windows cwd places nothing either");
+  },
+);
+
+test(
+  "under WSL a Windows session's tool paths into this distro place its work",
+  { skip: process.platform === "win32" && "Windows spells these paths natively" },
+  () => {
+    const repo = makeRepo({ "apps/api/AGENTS.md": "# API\n" });
+    const roots = checkoutRoots(repo);
+    const wsl = { distro: "Ubuntu", drives: new Map([["c", "/mnt/c"]]) };
+    const unc = `\\\\wsl.localhost\\Ubuntu${repo.root.replaceAll("/", "\\")}`;
+    const events = [
+      { kind: "tool", input: { path: `${unc}\\apps\\api\\handler.ts` } },
+      { kind: "tool", input: { path: "routes/index.ts", workdir: `${unc}\\apps\\api` } },
+      { kind: "tool", input: { filePath: "C:\\Users\\me\\notes.md" } },
+    ];
+    assert.deepEqual(workedPaths({ cwd: "C:\\Users\\me\\setup" }, events, roots, { wsl }), [
+      "apps/api/handler.ts",
+      "apps/api/routes/index.ts",
+    ]);
+  },
+);
+
+test(
+  "absolute tool paths survive unusable workdirs without admitting dependent paths",
+  { skip: process.platform === "win32" && "Windows spells these paths natively" },
+  () => {
+    const repo = makeRepo({ "apps/api/x.ts": "" });
+    const roots = checkoutRoots(repo);
+    const wsl = { distro: "Ubuntu", drives: new Map([["c", repo.root]]) };
+    const unc = `//wsl.localhost/Ubuntu${repo.root}`;
+    const inputs = (raw) => [
+      ...["file_path", "filePath", "notebook_path", "path"].map((field) => ({ [field]: raw })),
+      ...["Add File", "Update File", "Delete File", "Move to"].map((action) => ({
+        patch: `*** Begin Patch\n*** ${action}: ${raw}\n*** End Patch`,
+      })),
+    ];
+    const absolutePaths = [
+      path.join(repo.root, "apps/api/x.ts"),
+      "C:\\apps\\api\\x.ts",
+      "C:/apps/api/x.ts",
+      `${unc}/apps/api/x.ts`,
+      `//wsl$/Ubuntu${repo.root}/apps/api/x.ts`,
+    ].flatMap((raw) => (raw.startsWith("//") ? [raw, raw.replaceAll("/", "\\")] : [raw]));
+    for (const cwd of [repo.root, "C:\\", unc]) {
+      for (const workdir of ["Y:\\work", "//wsl$/Debian/work", "//server/share/work", "~/work"]) {
+        for (const field of ["workdir", "cwd"]) {
+          for (const raw of [...absolutePaths, "apps/api/x.ts", "apps\\api\\x.ts", "\\apps\\api\\x.ts"]) {
+            for (const input of inputs(raw)) {
+              const paths = workedPaths({ cwd }, [{ kind: "tool", input: { ...input, [field]: workdir } }], roots, {
+                wsl,
+              });
+              const independent = absolutePaths.includes(raw);
+              assert.deepEqual(paths, independent ? ["apps/api/x.ts"] : [], `${cwd} / ${workdir} / ${raw}`);
+              assert.equal(
+                owningFile(["session"], [API], new Map([["session", paths]])),
+                independent ? API.path : null,
+              );
+            }
+          }
+        }
+      }
+    }
+  },
+);
+
+test(
+  "under WSL relative tool paths and workdirs inherit the recorded base's separators",
+  { skip: process.platform === "win32" && "Windows spells these paths natively" },
+  () => {
+    const repo = makeRepo({ "apps/api/AGENTS.md": "# API\n" });
+    const roots = checkoutRoots(repo);
+    const wsl = { distro: "Ubuntu", drives: new Map([["c", repo.root]]) };
+    const bases = [
+      "C:\\",
+      "C:/",
+      `\\\\wsl.localhost\\Ubuntu${repo.root.replaceAll("/", "\\")}`,
+      `//wsl$/Ubuntu${repo.root}`,
+    ];
+    const inputs = (raw) => [
+      ...["file_path", "filePath", "notebook_path", "path"].map((field) => ({ [field]: raw })),
+      ...["Add File", "Update File", "Delete File", "Move to"].map((action) => ({
+        patch: `*** Begin Patch\n*** ${action}: ${raw}\n*** End Patch`,
+      })),
+    ];
+    for (const cwd of bases) {
+      for (const input of inputs("apps\\api\\x.ts")) {
+        const paths = workedPaths({ cwd }, [{ kind: "tool", input }], roots, { wsl });
+        assert.deepEqual(paths, ["apps/api/x.ts"]);
+        assert.equal(owningFile(["session"], [API], new Map([["session", paths]])), API.path);
+      }
+      const patch = "*** Begin Patch\n*** Update File: apps\\api\\x.ts\n*** End Patch";
+      assert.deepEqual(workedPaths({ cwd }, [{ kind: "tool", input: patch }], roots, { wsl }), ["apps/api/x.ts"]);
+      for (const field of ["workdir", "cwd"]) {
+        for (const input of inputs("x.ts")) {
+          for (const workdir of ["apps\\api", "apps/api", `${cwd}/apps/api`]) {
+            assert.deepEqual(
+              workedPaths({ cwd }, [{ kind: "tool", input: { ...input, [field]: workdir } }], roots, { wsl }),
+              ["apps/api/x.ts"],
+            );
+          }
+        }
+        const input = { path: "apps\\api\\x.ts", [field]: cwd };
+        assert.deepEqual(workedPaths({ cwd: repo.root }, [{ kind: "tool", input }], roots, { wsl }), ["apps/api/x.ts"]);
+        const posixInput = { path: "apps\\api\\x.ts", [field]: repo.root };
+        assert.deepEqual(workedPaths({ cwd }, [{ kind: "tool", input: posixInput }], roots, { wsl }), [
+          "apps\\api\\x.ts",
+        ]);
+      }
+    }
+    assert.deepEqual(
+      workedPaths({ cwd: repo.root }, [{ kind: "tool", input: { path: "apps\\api\\x.ts" } }], roots, { wsl }),
+      ["apps\\api\\x.ts"],
+    );
+  },
+);
+
+test(
+  "under WSL rooted tool paths and workdirs resolve inside their recorded drive or share",
+  { skip: process.platform === "win32" && "Windows spells these paths natively" },
+  () => {
+    const repo = makeRepo({ "windows drive/work/repo/apps/api/x.ts": "" });
+    const mount = path.join(repo.root, "windows drive");
+    const root = path.join(mount, "work/repo");
+    const wsl = { distro: "Ubuntu", drives: new Map([["c", mount]]) };
+    const cases = [
+      { base: "C:\\work\\repo", rooted: "\\work\\repo\\apps\\api" },
+      { base: "C:/work/repo", rooted: "\\work/repo/apps/api" },
+      {
+        base: `\\\\wsl.localhost\\Ubuntu${root.replaceAll("/", "\\")}`,
+        rooted: `${root}/apps/api`.replaceAll("/", "\\"),
+      },
+      { base: `//wsl$/Ubuntu${root}`, rooted: `${root}/apps/api`.replaceAll("/", "\\") },
+    ];
+    const inputs = (raw) => [
+      ...["file_path", "filePath", "notebook_path", "path"].map((field) => ({ [field]: raw })),
+      ...["Add File", "Update File", "Delete File", "Move to"].flatMap((action) => {
+        const patch = `*** Begin Patch\n*** ${action}: ${raw}\n*** End Patch`;
+        return [patch, { patch }];
+      }),
+    ];
+    for (const { base, rooted } of cases) {
+      const cwd = `${base}\\sub`;
+      for (const input of inputs(`${rooted}\\x.ts`)) {
+        const paths = workedPaths({ cwd }, [{ kind: "tool", input }], [root], { wsl });
+        assert.deepEqual(paths, ["apps/api/x.ts"]);
+        assert.equal(owningFile(["session"], [API], new Map([["session", paths]])), API.path);
+      }
+      for (const field of ["workdir", "cwd"]) {
+        for (const workdir of [rooted, "..\\apps\\api", `${base}\\apps\\api`]) {
+          for (const input of inputs("x.ts").filter((input) => typeof input === "object")) {
+            assert.deepEqual(
+              workedPaths({ cwd }, [{ kind: "tool", input: { ...input, [field]: workdir } }], [root], { wsl }),
+              ["apps/api/x.ts"],
+            );
+          }
+          const input = { path: `${rooted}\\x.ts`, [field]: workdir };
+          assert.deepEqual(workedPaths({ cwd }, [{ kind: "tool", input }], [root], { wsl }), ["apps/api/x.ts"]);
+        }
+        const input = { path: `${rooted}\\x.ts`, [field]: base };
+        assert.deepEqual(workedPaths({ cwd: repo.root }, [{ kind: "tool", input }], [root], { wsl }), [
+          "apps/api/x.ts",
+        ]);
+      }
+    }
+    for (const raw of ["..\\..\\..\\work\\repo\\apps\\api\\x.ts", "~/apps/api/x.ts"]) {
+      const paths = workedPaths({ cwd: "C:\\work\\repo" }, [{ kind: "tool", input: { path: raw } }], [root], { wsl });
+      assert.deepEqual(paths, raw.startsWith("~") ? [] : ["apps/api/x.ts"]);
+    }
+    for (const cwd of ["F:\\work\\repo", "\\\\wsl.localhost\\Debian\\work\\repo", "\\\\server\\share\\work\\repo"]) {
+      const input = { path: "\\work\\repo\\apps\\api\\x.ts" };
+      assert.deepEqual(workedPaths({ cwd }, [{ kind: "tool", input }], [root], { wsl }), []);
+    }
+  },
+);
+
 test("out-of-repo paths do not make in-repo API work cross-cutting", async () => {
   const repo = makeRepo({ "apps/api/AGENTS.md": "# API\n" });
   const paths = workedPaths(
@@ -311,6 +503,44 @@ test("attribution reads a local session once, and never places a session that ra
   const second = await attributeTranscripts([local], repo, state);
   assert.deepEqual(second.get(transcriptIdentity(local)), ["apps/api/src/orders.ts"]);
 });
+
+test(
+  "attribution refreshes version 7 paths that discarded an absolute path with an unmappable workdir",
+  { skip: process.platform === "win32" && "Windows spells these paths natively" },
+  async () => {
+    const repo = makeRepo({ "apps/api/x.ts": "" });
+    const state = new State(repo.root).ensure();
+    const sessionPath = path.join(repo.root, "session.jsonl");
+    const entries = [
+      { type: "session", version: 3, id: "absolute", cwd: repo.root },
+      {
+        type: "message",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id: "t1",
+              name: "edit",
+              arguments: { path: path.join(repo.root, "apps/api/x.ts"), workdir: "//server/share/work" },
+            },
+          ],
+        },
+      },
+    ];
+    fs.writeFileSync(sessionPath, entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+    const transcript = { harness: "pi", id: "absolute", path: sessionPath, cwd: repo.root, contentSignature: "same" };
+    const identity = transcriptIdentity(transcript);
+    state.writeJsonFile(path.join(state.root, "nested", "attribution.json"), {
+      version: 7,
+      roots: checkoutRoots(repo),
+      entries: { [identity]: { content: "same", paths: [] } },
+    });
+    const attribution = await attributeTranscripts([transcript], repo, state);
+    assert.deepEqual(attribution.get(identity), ["apps/api/x.ts"]);
+    assert.equal(owningFile([identity], [API], attribution), API.path);
+  },
+);
 
 test("attribution cache changes when a sibling checkout becomes known", async () => {
   const repo = makeRepo({ "AGENTS.md": "# root\n" });
