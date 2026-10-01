@@ -45,7 +45,7 @@ export function getAdapter(harness) {
  * Re-scans are then O(new files) - which matters: codex alone had 10,317 rollouts on
  * the machine this was designed against.
  *
- * SQLite-backed stores (opencode, hermes, cursor IDE) query session metadata directly,
+ * SQLite-backed stores (opencode, hermes, openclaw, cursor IDE) query session metadata directly,
  * so they skip the file-header cache entirely.
  *
  * Every harness is fail-soft: a store that is missing, unreadable, or has drifted into
