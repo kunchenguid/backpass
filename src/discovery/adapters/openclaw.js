@@ -16,10 +16,11 @@ import { openReadOnly } from "./sqlite.js";
  * One private snapshot is shared until CLI completion (exit is a cleanup backstop).
  * Windows use the active branch index; deleted/reset archives contain JSONL, optionally
  * zstd. Times are milliseconds. Live copies win over content-equal archives and the
- * first-seen generation keeps the bare session_id across archival. A later generation with
- * distinct content is suffixed by a digest of a stable anchor (the archive generation key,
- * or start time plus first event for a live window), so identity never moves as a live
- * session grows; duplicate generations cannot corroborate themselves.
+ * first-seen generation keeps the bare session_id. A later generation is suffixed by a
+ * digest of its start time plus first event, which a live window shares with its own
+ * archive, so identity survives archival and never moves as a live session grows; two
+ * generations sharing that anchor fall back to the generation key. Duplicate generations
+ * cannot corroborate themselves.
  * Schema/codec drift warns and skips; a damaged session cannot hide healthy sessions.
  * Metadata cwd wins, then session headers, then a labelled configured-workspace fallback.
  */
@@ -259,6 +260,14 @@ function normalized(entries) {
   return { events: attachToolResults(events.filter((event) => event.kind !== "message" || event.text.trim())), model };
 }
 
+function generationId(row, startedAt, events, seen) {
+  const anchor = `${String(startedAt)}\n${String(JSON.stringify(events[0]))}`;
+  const suffix = (text) => createHash("sha256").update(text).digest("hex");
+  const candidate = `${row.session_id}:${suffix(anchor)}`;
+  if (![...seen.values()].includes(candidate)) return candidate;
+  return `${row.session_id}:${suffix(String(row.generation ?? "live") + anchor)}`;
+}
+
 /** @param {{ cutoffMs?: number }} [options] */
 export async function discover({ cutoffMs } = {}) {
   let db;
@@ -345,9 +354,7 @@ export async function discover({ cutoffMs } = {}) {
         if (!contentIds.has(row.session_id)) contentIds.set(row.session_id, new Map());
         const seen = contentIds.get(row.session_id);
         if (seen.has(digest) && row.generation != null) continue;
-        const anchor = row.generation ?? `${startedAt}\n${JSON.stringify(events[0])}`;
-        const suffix = createHash("sha256").update(anchor).digest("hex");
-        const id = seen.get(digest) ?? (seen.size ? `${row.session_id}:${suffix}` : row.session_id);
+        const id = seen.get(digest) ?? (seen.size ? generationId(row, startedAt, events, seen) : row.session_id);
         seen.set(digest, id);
         if (cutoffMs != null && mtimeMs < cutoffMs) continue;
         out.set(id, {

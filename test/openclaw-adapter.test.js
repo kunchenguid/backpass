@@ -488,6 +488,7 @@ test("PRA-442 P1-4 distinct archive content and a live copy each keep a stable i
   const overlap = (await openclaw.discover()).filter((r) => r.extra.sessionId === "slack");
   assert.equal(overlap.length, 2);
   assert.equal(overlap[0].id, "slack");
+  assert.equal(overlap[1].id, before[1].id);
   assert.equal(overlap[1].extra.generation, null);
   db.exec("DELETE FROM session_windows WHERE session_id='slack'");
   db.close();
@@ -523,4 +524,57 @@ test("PRA-442 P1-4 a live window keeps its identity as turns append beside an ol
   assert.equal((await openclaw.read(after)).events.at(-1).text, "A later answer.");
   assert.equal(after.id, before.id);
   assert.equal(identity(after), identity(before));
+});
+
+function twinArchives(db, sessionId, answers) {
+  const header = { type: "session", cwd: "/synthetic/header", timestamp };
+  const message = (role, content) => ({ type: "message", message: { role, content } });
+  answers.forEach((answer, index) => {
+    const blob = Buffer.from(
+      [header, message("user", "Same opener."), message("assistant", answer)].map((e) => JSON.stringify(e)).join("\n"),
+    );
+    db.prepare("INSERT INTO session_transcript_archives VALUES (?, ?, ?, 'reset', 'identity', ?, ?)").run(
+      sessionId,
+      index + 1,
+      `agent:main:${sessionId}`,
+      blob,
+      timestamp + 1000 * (index + 1),
+    );
+  });
+}
+
+test("PRA-442 P1-4 generations sharing a start and first event keep distinct stable identities", async (t) => {
+  const { file } = setup(t);
+  const db = new DatabaseSync(file);
+  twinArchives(db, "twin", ["One.", "Two.", "Three."]);
+  db.close();
+  const rows = (await openclaw.discover()).filter((r) => r.extra.sessionId === "twin");
+  assert.equal(rows.length, 3);
+  assert.equal(rows[0].id, "twin");
+  assert.equal(new Set(rows.map((r) => r.id)).size, 3);
+  assert.deepEqual(
+    (await openclaw.discover()).filter((r) => r.extra.sessionId === "twin").map((r) => r.id),
+    rows.map((r) => r.id),
+  );
+  assert.equal((await openclaw.read(rows[2])).events.at(-1).text, "Three.");
+});
+
+test("PRA-442 P1-4 an INTEGER generation column is read and keyed without throwing", async (t) => {
+  const { file } = setup(t);
+  const warnings = [];
+  t.mock.method(console, "error", (...args) => warnings.push(args.join(" ")));
+  const db = new DatabaseSync(file);
+  db.exec(`DROP TABLE session_transcript_archives;
+    CREATE TABLE session_transcript_archives (session_id TEXT, generation INTEGER, session_key TEXT,
+      reason TEXT, encoding TEXT, archive_blob BLOB, created_at INTEGER, PRIMARY KEY(session_id, generation));`);
+  twinArchives(db, "numbered", ["One.", "Two.", "Three."]);
+  db.close();
+  const rows = (await openclaw.discover()).filter((r) => r.extra.sessionId === "numbered");
+  assert.deepEqual(
+    rows.map((r) => r.extra.generation),
+    [1, 2, 3],
+  );
+  assert.equal(new Set(rows.map((r) => r.id)).size, 3);
+  assert.equal((await openclaw.read(rows[2])).events.at(-1).text, "Three.");
+  assert.ok(!warnings.some((w) => /skipped/.test(w)), warnings.join("\n"));
 });
