@@ -16,11 +16,14 @@ import { openReadOnly } from "./sqlite.js";
  * One private snapshot is shared until CLI completion (exit is a cleanup backstop).
  * Windows use the active branch index; deleted/reset archives contain JSONL, optionally
  * zstd. Times are milliseconds. Every generation, live or archived, is identified by
- * session_id plus a digest of its start time and first event: a live window shares that
- * anchor with its own archive, so identity survives archival, never moves as a live session
- * grows, and never depends on which sibling generations exist or their processing order.
- * Live copies win over content-equal archives; two generations sharing an anchor fall back
- * to the generation key. Duplicate generations cannot corroborate themselves.
+ * session_id plus a digest of its anchor (start time and first event): a live window shares
+ * that anchor with its own archive, so identity survives archival and never moves as a live
+ * session grows. Identity is assigned after every generation is read (`identify`), so it never
+ * depends on processing order: when distinct-content generations share an anchor, the live one
+ * keeps the anchor id and each archive is keyed by its generation. The only identity moves
+ * left are a live member of such a collision group being archived, and a lone archive gaining
+ * its first colliding sibling. Live copies win over content-equal archives, and duplicate
+ * generations cannot corroborate themselves.
  * Schema/codec drift warns and skips; a damaged session cannot hide healthy sessions.
  * Metadata cwd wins, then session headers, then a labelled configured-workspace fallback.
  */
@@ -211,13 +214,26 @@ function entriesFor(db, ref) {
   return active;
 }
 
-/** Remove complete harness wrappers only; a missing terminator must not eat human words. */
+// A wrapper opener that survives complete-wrapper removal has no terminator.
+const UNTERMINATED_WRAPPER =
+  /^\s*(?:<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>|Conversation info: ⟦openclaw:ctx⟧|<active_memory_plugin>)/;
+
+/**
+ * Remove complete harness wrappers; a missing terminator must not eat human words. Backpass's own
+ * prompts start with the self sentinel, so anything before it under an unterminated wrapper is
+ * injected and is dropped so the self check still sees the sentinel first; otherwise only the
+ * opening memory tag goes.
+ */
 export function stripScaffolding(text) {
-  return text
+  const stripped = text
     .replace(/<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>[\s\S]*?<<<END_OPENCLAW_INTERNAL_CONTEXT>>>\s*/g, "")
     .replace(/Conversation info: ⟦openclaw:ctx⟧[^\r\n]*\r?\n\s*```(?:json)?[^\r\n]*\r?\n[\s\S]*?```\s*/g, "")
     .replace(/<active_memory_plugin>[\s\S]*?<\/active_memory_plugin>\s*/g, "")
     .replace(/^\s*\[(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat) \d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2})? [^\]\r\n]+\]\s*/, "");
+  if (!UNTERMINATED_WRAPPER.test(stripped)) return stripped;
+  const sentinel = stripped.indexOf(SELF_SESSION_SENTINEL);
+  if (sentinel >= 0) return stripped.slice(sentinel);
+  return stripped.replace(/^\s*<active_memory_plugin>\s*/, "");
 }
 
 function normalized(entries) {
@@ -260,12 +276,25 @@ function normalized(entries) {
   return { events: attachToolResults(events.filter((event) => event.kind !== "message" || event.text.trim())), model };
 }
 
-function generationId(row, startedAt, events, seen) {
-  const anchor = `${String(startedAt)}\n${String(JSON.stringify(events[0]))}`;
-  const suffix = (text) => createHash("sha256").update(text).digest("hex");
-  const candidate = `${row.session_id}:${suffix(anchor)}`;
-  if (![...seen.values()].includes(candidate)) return candidate;
-  return `${row.session_id}:${suffix(String(row.generation ?? "live") + anchor)}`;
+/**
+ * Assign ids to one session_id's distinct-content generations from the whole set, never from
+ * processing order: `${session_id}:${sha256(anchor)}`, except that archives sharing an anchor with
+ * another generation are keyed by `${anchor}\n${generation}` while the live window keeps the anchor id.
+ */
+function identify(sessionId, generations) {
+  const digest = (text) => createHash("sha256").update(text).digest("hex");
+  const byAnchor = new Map();
+  for (const generation of generations) {
+    if (!byAnchor.has(generation.anchor)) byAnchor.set(generation.anchor, []);
+    byAnchor.get(generation.anchor).push(generation);
+  }
+  for (const [anchor, group] of byAnchor) {
+    for (const { record } of group) {
+      const keyed = group.length > 1 && record.extra.generation != null;
+      record.id = `${sessionId}:${digest(keyed ? `${anchor}\n${String(record.extra.generation)}` : anchor)}`;
+      record.key = `openclaw:${record.id}`;
+    }
+  }
 }
 
 /** @param {{ cutoffMs?: number }} [options] */
@@ -316,8 +345,7 @@ export async function discover({ cutoffMs } = {}) {
         "SELECT session_id, generation, session_key, created_at FROM session_transcript_archives ORDER BY created_at, generation",
       )
       .all();
-    const out = new Map();
-    const contentIds = new Map();
+    const sessions = new Map();
     const errors = new Map();
     for (const row of [...archives, ...live]) {
       const source = sessionSource(row.session_key, agent, row);
@@ -349,36 +377,43 @@ export async function discover({ cutoffMs } = {}) {
         const { events, model } = normalized(entries);
         const firstUser = events.find((event) => event.kind === "message" && event.role === "user");
         if (firstUser?.text.startsWith(SELF_SESSION_SENTINEL)) continue;
-        // Resolve identity before --since so changing the window cannot rename a generation.
         const digest = createHash("sha256").update(JSON.stringify(events)).digest("hex");
-        if (!contentIds.has(row.session_id)) contentIds.set(row.session_id, new Map());
-        const seen = contentIds.get(row.session_id);
-        if (seen.has(digest) && row.generation != null) continue;
-        const id = seen.get(digest) ?? generationId(row, startedAt, events, seen);
-        seen.set(digest, id);
-        if (cutoffMs != null && mtimeMs < cutoffMs) continue;
-        out.set(id, {
-          key: `openclaw:${id}`,
-          id,
-          path: file,
-          cwd: metadataCwd || headerCwd || fallback,
-          gitRoot: null,
-          gitBranch: null,
-          remotes: [],
-          title: null,
-          startedAt,
-          mtimeMs,
-          bytes: 0,
-          model,
-          extra,
-          interactionSignals: interactionSignals({ source }),
+        if (!sessions.has(row.session_id)) sessions.set(row.session_id, new Map());
+        const generations = sessions.get(row.session_id);
+        // The live copy wins over content-equal archives; duplicate archives keep the first read.
+        if (generations.has(digest) && row.generation != null) continue;
+        generations.set(digest, {
+          anchor: `${String(startedAt)}\n${String(JSON.stringify(events[0]))}`,
+          record: {
+            key: null,
+            id: null,
+            path: file,
+            cwd: metadataCwd || headerCwd || fallback,
+            gitRoot: null,
+            gitBranch: null,
+            remotes: [],
+            title: null,
+            startedAt,
+            mtimeMs,
+            bytes: 0,
+            model,
+            extra,
+            interactionSignals: interactionSignals({ source }),
+          },
         });
       } catch (err) {
         errors.set(err.message, (errors.get(err.message) || 0) + 1);
       }
     }
     for (const [message, count] of errors) diagnostic(`${count} session(s) skipped (${message})`);
-    return [...out.values()];
+    const out = [];
+    for (const [sessionId, generations] of sessions) {
+      // Identity is resolved over every generation before --since so the window cannot rename one.
+      identify(sessionId, [...generations.values()]);
+      for (const { record } of generations.values())
+        if (cutoffMs == null || record.mtimeMs >= cutoffMs) out.push(record);
+    }
+    return out;
   } catch (err) {
     diagnostic(`snapshot unreadable (${err.message}) - harness skipped`);
     return [];

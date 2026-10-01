@@ -261,8 +261,9 @@ to skip backup creation; `OPENCLAW_AGENT` selects the agent (default `main`). On
 temporary snapshot is reused for the run and removed afterward; supplied snapshots are
 left untouched; when the `openclaw` binary is absent the harness is silently empty. Live active
 branches and deleted/reset archives are included. Each generation is identified by its own start
-time and first event, so identity survives archival and never changes when another generation of
-the same session appears, and `--since` uses archive activity rather than deletion time. Compressed
+time and first event, so identity survives archival and never depends on the order generations are
+read; when distinct generations share that start and first event, the live one keeps the id and each
+archive is keyed by its generation. `--since` uses archive activity rather than deletion time. Compressed
 records need Node with `zstdDecompressSync` (Node 26 recommended); missing codecs or
 drifted records warn and skip. Session metadata and headers provide cwd, with a labelled
 `configured-workspace` fallback to the agent workspace in `~/.openclaw/openclaw.json`

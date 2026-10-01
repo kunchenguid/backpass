@@ -319,10 +319,16 @@ test("PRA-442 defaults cwd, preserves text spacing and excludes its own prompts 
     (await openclaw.read(rows.find((r) => r.extra.sessionId === "fallback"))).events[0].text,
     "  Human words.\n  ",
   );
-  event.message.content[0].text = `<active_memory_plugin>injected</active_memory_plugin>${SELF_SESSION_SENTINEL}\nself analysis`;
-  db.prepare("UPDATE transcript_events SET event_json=? WHERE session_id='fallback'").run(JSON.stringify(event));
+  for (const wrapper of [
+    "<active_memory_plugin>injected</active_memory_plugin>",
+    "<active_memory_plugin>unclosed injected memory\n",
+    "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>unclosed context\n",
+  ]) {
+    event.message.content[0].text = `${wrapper}${SELF_SESSION_SENTINEL}\nself analysis`;
+    db.prepare("UPDATE transcript_events SET event_json=? WHERE session_id='fallback'").run(JSON.stringify(event));
+    assert.ok(!(await openclaw.discover()).some((r) => r.extra.sessionId === "fallback"), wrapper);
+  }
   db.close();
-  assert.ok(!(await openclaw.discover()).some((r) => r.extra.sessionId === "fallback"));
 });
 
 test("PRA-442 P1-1 excludes tokenized eval namespaces and prefers typed routing over key fallback", async (t) => {
@@ -423,10 +429,28 @@ test("PRA-442 P2-6 unterminated internal context preserves the remaining human t
   );
 });
 
-test("PRA-442 an unclosed active memory block preserves the human words that follow it", () => {
+test("PRA-442 an unclosed active memory block drops only its opening tag and keeps the words that follow", () => {
   const human = "<active_memory_plugin>truncated memory\n\nPlease keep these human words.";
-  assert.equal(openclaw.stripScaffolding(human), human);
-  assert.equal(openclaw.stripScaffolding("<active_memory_plugin>complete</active_memory_plugin>\n" + human), human);
+  const kept = "truncated memory\n\nPlease keep these human words.";
+  assert.equal(openclaw.stripScaffolding(human), kept);
+  assert.equal(openclaw.stripScaffolding("<active_memory_plugin>complete</active_memory_plugin>\n" + human), kept);
+});
+
+test("PRA-442 an unclosed wrapper before the self sentinel is dropped so the sentinel leads", () => {
+  const prompt = `${SELF_SESSION_SENTINEL}\nself analysis`;
+  for (const opener of [
+    "<active_memory_plugin>truncated memory\n",
+    "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>truncated context\n",
+    'Conversation info: ⟦openclaw:ctx⟧\n```json\n{"id":"synthetic"}\n',
+  ]) {
+    assert.equal(openclaw.stripScaffolding(opener + prompt), prompt);
+    assert.equal(
+      openclaw.stripScaffolding("<active_memory_plugin>complete</active_memory_plugin>\n" + opener + prompt),
+      prompt,
+    );
+  }
+  // Without an unterminated wrapper, text before the sentinel is kept.
+  assert.equal(openclaw.stripScaffolding("Human quotes " + prompt), "Human quotes " + prompt);
 });
 
 test("PRA-442 P2-2 absent optional routing columns degrade and schema drift warns once", async (t) => {
@@ -583,16 +607,68 @@ test("PRA-442 P1-4 generations sharing a start and first event keep distinct sta
   const { file } = setup(t);
   const db = new DatabaseSync(file);
   twinArchives(db, "twin", ["One.", "Two.", "Three."]);
-  db.close();
   const rows = (await openclaw.discover()).filter((r) => r.extra.sessionId === "twin");
   assert.equal(rows.length, 3);
   for (const row of rows) assert.match(row.id, /^twin:[0-9a-f]{64}$/);
   assert.equal(new Set(rows.map((r) => r.id)).size, 3);
-  assert.deepEqual(
-    (await openclaw.discover()).filter((r) => r.extra.sessionId === "twin").map((r) => r.id),
-    rows.map((r) => r.id),
+  const idsByGeneration = async () =>
+    Object.fromEntries(
+      (await openclaw.discover())
+        .filter((r) => r.extra.sessionId === "twin")
+        .map((r) => [String(r.extra.generation), r.id]),
+    );
+  const forward = await idsByGeneration();
+  // Reversing archive processing order must not move any twin's identity.
+  db.prepare("UPDATE session_transcript_archives SET created_at = ? WHERE session_id = 'twin' AND created_at = ?").run(
+    timestamp + 9000,
+    timestamp + 1000,
   );
+  assert.deepEqual(await idsByGeneration(), forward);
+  db.close();
   assert.equal((await openclaw.read(rows[2])).events.at(-1).text, "Three.");
+});
+
+test("PRA-442 P1-4 a live member keeps the anchor id and earlier colliding archives never move existing ids", async (t) => {
+  const { file } = setup(t);
+  const db = new DatabaseSync(file);
+  const header = { type: "session", cwd: "/synthetic/header", timestamp };
+  const message = (role, content) => ({ type: "message", message: { role, content } });
+  db.prepare(
+    "INSERT INTO session_windows (session_id, session_key, created_at, updated_at, acp_owned) VALUES (?, ?, ?, ?, 0)",
+  ).run("twin", "agent:main:twin", timestamp, timestamp + 1000);
+  [header, message("user", "Same opener."), message("assistant", "Live.")].forEach((entry, seq) => {
+    db.prepare("INSERT INTO transcript_events VALUES ('twin', ?, ?, NULL, ?)").run(
+      seq,
+      JSON.stringify(entry),
+      timestamp + seq,
+    );
+    if (seq) db.prepare("INSERT INTO session_transcript_active_events VALUES ('twin', ?, ?)").run(seq, seq);
+  });
+  const idsByGeneration = async () =>
+    Object.fromEntries(
+      (await openclaw.discover())
+        .filter((r) => r.extra.sessionId === "twin")
+        .map((r) => [String(r.extra.generation), r.id]),
+    );
+  const alone = await idsByGeneration();
+  assert.deepEqual(Object.keys(alone), ["null"]);
+  twinArchives(db, "twin", ["One.", "Two."]);
+  const colliding = await idsByGeneration();
+  assert.equal(colliding.null, alone.null);
+  assert.equal(new Set(Object.values(colliding)).size, 3);
+  // An archive created before every existing generation changes nothing already identified.
+  db.prepare(
+    "INSERT INTO session_transcript_archives VALUES ('twin', '0', 'agent:main:twin', 'reset', 'identity', ?, ?)",
+  ).run(
+    Buffer.from(
+      [header, message("user", "Same opener."), message("assistant", "Zero.")].map((e) => JSON.stringify(e)).join("\n"),
+    ),
+    timestamp - 1000,
+  );
+  db.close();
+  const earlier = await idsByGeneration();
+  assert.equal(new Set(Object.values(earlier)).size, 4);
+  for (const [generation, id] of Object.entries(colliding)) assert.equal(earlier[generation], id);
 });
 
 test("PRA-442 P1-4 an INTEGER generation column is read and keyed without throwing", async (t) => {
