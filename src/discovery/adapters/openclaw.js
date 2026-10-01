@@ -15,12 +15,12 @@ import { openReadOnly } from "./sqlite.js";
  * OpenClaw schema 23: ONLY online backup snapshots, never the live agent DB.
  * One private snapshot is shared until CLI completion (exit is a cleanup backstop).
  * Windows use the active branch index; deleted/reset archives contain JSONL, optionally
- * zstd. Times are milliseconds. Live copies win over content-equal archives and the
- * first-seen generation keeps the bare session_id. A later generation is suffixed by a
- * digest of its start time plus first event, which a live window shares with its own
- * archive, so identity survives archival and never moves as a live session grows; two
- * generations sharing that anchor fall back to the generation key. Duplicate generations
- * cannot corroborate themselves.
+ * zstd. Times are milliseconds. Every generation, live or archived, is identified by
+ * session_id plus a digest of its start time and first event: a live window shares that
+ * anchor with its own archive, so identity survives archival, never moves as a live session
+ * grows, and never depends on which sibling generations exist or their processing order.
+ * Live copies win over content-equal archives; two generations sharing an anchor fall back
+ * to the generation key. Duplicate generations cannot corroborate themselves.
  * Schema/codec drift warns and skips; a damaged session cannot hide healthy sessions.
  * Metadata cwd wins, then session headers, then a labelled configured-workspace fallback.
  */
@@ -216,7 +216,7 @@ export function stripScaffolding(text) {
   return text
     .replace(/<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>[\s\S]*?<<<END_OPENCLAW_INTERNAL_CONTEXT>>>\s*/g, "")
     .replace(/Conversation info: ⟦openclaw:ctx⟧[^\r\n]*\r?\n\s*```(?:json)?[^\r\n]*\r?\n[\s\S]*?```\s*/g, "")
-    .replace(/<active_memory_plugin>[\s\S]*?(?:<\/active_memory_plugin>|$)\s*/g, "")
+    .replace(/<active_memory_plugin>[\s\S]*?<\/active_memory_plugin>\s*/g, "")
     .replace(/^\s*\[(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat) \d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2})? [^\]\r\n]+\]\s*/, "");
 }
 
@@ -354,7 +354,7 @@ export async function discover({ cutoffMs } = {}) {
         if (!contentIds.has(row.session_id)) contentIds.set(row.session_id, new Map());
         const seen = contentIds.get(row.session_id);
         if (seen.has(digest) && row.generation != null) continue;
-        const id = seen.get(digest) ?? (seen.size ? generationId(row, startedAt, events, seen) : row.session_id);
+        const id = seen.get(digest) ?? generationId(row, startedAt, events, seen);
         seen.set(digest, id);
         if (cutoffMs != null && mtimeMs < cutoffMs) continue;
         out.set(id, {

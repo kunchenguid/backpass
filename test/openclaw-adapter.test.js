@@ -146,7 +146,7 @@ test("PRA-442 P1-4 live-to-archive identity and duplicate generations preserve o
   db.exec("DELETE FROM session_windows WHERE session_id='slack'");
   const after = (await openclaw.discover()).filter((r) => r.extra.sessionId === "slack");
   assert.equal(after.length, 1);
-  assert.equal(before.id, "slack");
+  assert.match(before.id, /^slack:[0-9a-f]{64}$/);
   const identity = (row) => transcriptIdentity({ ...row, harness: "openclaw", nativeId: row.id });
   assert.equal(identity(before), identity(after[0]));
   assert.equal(identity(before), identity({ ...after[0], path: "/relocated/database.sqlite" }));
@@ -423,6 +423,12 @@ test("PRA-442 P2-6 unterminated internal context preserves the remaining human t
   );
 });
 
+test("PRA-442 an unclosed active memory block preserves the human words that follow it", () => {
+  const human = "<active_memory_plugin>truncated memory\n\nPlease keep these human words.";
+  assert.equal(openclaw.stripScaffolding(human), human);
+  assert.equal(openclaw.stripScaffolding("<active_memory_plugin>complete</active_memory_plugin>\n" + human), human);
+});
+
 test("PRA-442 P2-2 absent optional routing columns degrade and schema drift warns once", async (t) => {
   const { file } = setup(t);
   const warnings = [];
@@ -469,7 +475,7 @@ test("PRA-442 P2-4 CLI completion runs every adapter cleanup without name checks
   assert.equal(cleanups, 1);
 });
 
-test("PRA-442 P1-4 distinct archive content and a live copy each keep a stable identity", async (t) => {
+test("PRA-442 P1-4 a live window keeps its identity beside a later distinct archive and across its own archival", async (t) => {
   const { file } = setup(t);
   const db = new DatabaseSync(file);
   const live = db.prepare("SELECT event_json FROM transcript_events WHERE session_id='slack' ORDER BY seq").all();
@@ -477,27 +483,57 @@ test("PRA-442 P1-4 distinct archive content and a live copy each keep a stable i
   const insert = db.prepare(
     "INSERT INTO session_transcript_archives VALUES ('slack', ?, 'agent:main:slack', 'reset', 'identity', ?, ?)",
   );
+  const slack = () => openclaw.discover().then((rows) => rows.filter((r) => r.extra.sessionId === "slack"));
+  const alone = await slack();
+  assert.equal(alone.length, 1);
+  assert.match(alone[0].id, /^slack:[0-9a-f]{64}$/);
   insert.run("first", Buffer.from(bytes.toString().replace("Human request.", "Earlier distinct request.")), timestamp);
-  const before = (await openclaw.discover()).filter((r) => r.extra.sessionId === "slack");
+  const before = await slack();
   assert.equal(before.length, 2);
-  assert.equal(before[0].id, "slack");
   assert.equal(before[0].extra.generation, "first");
-  assert.notEqual(before[1].id, "slack");
+  assert.notEqual(before[0].id, alone[0].id);
+  assert.equal(before[1].id, alone[0].id);
   assert.equal(before[1].extra.generation, null);
   insert.run("second", bytes, timestamp + 2000);
-  const overlap = (await openclaw.discover()).filter((r) => r.extra.sessionId === "slack");
+  const overlap = await slack();
   assert.equal(overlap.length, 2);
-  assert.equal(overlap[0].id, "slack");
-  assert.equal(overlap[1].id, before[1].id);
+  assert.deepEqual(
+    overlap.map((r) => r.id),
+    before.map((r) => r.id),
+  );
   assert.equal(overlap[1].extra.generation, null);
   db.exec("DELETE FROM session_windows WHERE session_id='slack'");
   db.close();
-  const after = (await openclaw.discover()).filter((r) => r.extra.sessionId === "slack");
+  const after = await slack();
   assert.deepEqual(
     after.map((r) => r.id),
-    overlap.map((r) => r.id),
+    before.map((r) => r.id),
   );
   assert.equal(after[1].extra.generation, "second");
+});
+
+test("PRA-442 P1-4 generation identity does not depend on processing order", async (t) => {
+  const { file } = setup(t);
+  const db = new DatabaseSync(file);
+  const live = db.prepare("SELECT event_json FROM transcript_events WHERE session_id='slack' ORDER BY seq").all();
+  const bytes = Buffer.from(live.map((r) => r.event_json).join("\n"));
+  const insert = db.prepare(
+    "INSERT INTO session_transcript_archives VALUES ('slack', ?, 'agent:main:slack', 'reset', 'identity', ?, ?)",
+  );
+  insert.run("alpha", Buffer.from(bytes.toString().replace("Human request.", "Alpha request.")), timestamp + 1000);
+  insert.run("beta", Buffer.from(bytes.toString().replace("Human request.", "Beta request.")), timestamp + 2000);
+  const idsByGeneration = async () =>
+    Object.fromEntries(
+      (await openclaw.discover())
+        .filter((r) => r.extra.sessionId === "slack")
+        .map((r) => [String(r.extra.generation), r.id]),
+    );
+  const forward = await idsByGeneration();
+  assert.deepEqual(Object.keys(forward).sort(), ["alpha", "beta", "null"]);
+  assert.equal(new Set(Object.values(forward)).size, 3);
+  db.prepare("UPDATE session_transcript_archives SET created_at = ? WHERE generation = 'alpha'").run(timestamp + 3000);
+  db.close();
+  assert.deepEqual(await idsByGeneration(), forward);
 });
 
 test("PRA-442 P1-4 a live window keeps its identity as turns append beside an older generation", async (t) => {
@@ -550,7 +586,7 @@ test("PRA-442 P1-4 generations sharing a start and first event keep distinct sta
   db.close();
   const rows = (await openclaw.discover()).filter((r) => r.extra.sessionId === "twin");
   assert.equal(rows.length, 3);
-  assert.equal(rows[0].id, "twin");
+  for (const row of rows) assert.match(row.id, /^twin:[0-9a-f]{64}$/);
   assert.equal(new Set(rows.map((r) => r.id)).size, 3);
   assert.deepEqual(
     (await openclaw.discover()).filter((r) => r.extra.sessionId === "twin").map((r) => r.id),

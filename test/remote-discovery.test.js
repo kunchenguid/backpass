@@ -548,3 +548,19 @@ test("PRA-442 P2-3 local-only adapters never enter SSH harness requests", async 
   assert.ok(result.perHost[0].harnesses.claude);
   assert.equal(result.perHost[0].harnesses.openclaw, undefined);
 });
+
+test("PRA-442 an openclaw-only run with configured hosts never connects to or probes a host", async (t) => {
+  const s = scenario();
+  const original = ADAPTERS.openclaw;
+  ADAPTERS.openclaw = { ...original, discover: async () => [] };
+  t.after(() => {
+    ADAPTERS.openclaw = original;
+  });
+  const result = await withRemoteEnv({ localHome: s.localHome, hosts: s.hosts, log: s.log }, () =>
+    discoverProject(s.repoRoot, { discovery: { hosts: ["mac-home"], harnesses: ["openclaw"] } }),
+  );
+  assert.ok(result.perHarness.openclaw);
+  assert.deepEqual(result.perHost, []);
+  assert.deepEqual(result.remoteMasters, []);
+  assert.deepEqual(sshCalls(s.log), [], "no ssh may run when no selected harness can be collected remotely");
+});

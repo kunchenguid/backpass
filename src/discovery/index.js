@@ -148,10 +148,12 @@ export async function discoverTranscripts({
 
   const perHost = [];
   const remoteMasters = [];
-  if (hosts.length) {
+  // A run selecting only local-only harnesses has nothing to collect remotely, so no host is contacted.
+  const remoteHarnesses = selected.filter((h) => getAdapter(h) && !getAdapter(h).localOnly);
+  if (hosts.length && remoteHarnesses.length) {
     const collected = await collectHosts({
       hosts,
-      harnesses: selected.filter((h) => getAdapter(h) && !getAdapter(h).localOnly),
+      harnesses: remoteHarnesses,
       cutoffMs,
       controlPath: createControlPath(),
     });
