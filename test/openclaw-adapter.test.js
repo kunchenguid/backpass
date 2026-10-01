@@ -12,7 +12,8 @@ import * as openclaw from "../src/discovery/adapters/openclaw.js";
 import { classifyInteraction } from "../src/interaction.js";
 import { transcriptIdentity } from "../src/transcript.js";
 import { emptyGapLedger, recordGapObservations } from "../src/gap-ledger.js";
-import { ADAPTERS } from "../src/discovery/index.js";
+import { ADAPTERS, discoverTranscripts } from "../src/discovery/index.js";
+import { loadConfig } from "../src/config.js";
 import { main } from "../src/cli.js";
 import { distill } from "../src/distill.js";
 import { buildFixture, timestamp } from "./fixtures/openclaw/build.js";
@@ -319,14 +320,24 @@ test("PRA-442 defaults cwd, preserves text spacing and excludes its own prompts 
     (await openclaw.read(rows.find((r) => r.extra.sessionId === "fallback"))).events[0].text,
     "  Human words.\n  ",
   );
+  const prompt = `${SELF_SESSION_SENTINEL}\nself analysis`;
+  const update = (text) => {
+    event.message.content[0].text = text;
+    db.prepare("UPDATE transcript_events SET event_json=? WHERE session_id='fallback'").run(JSON.stringify(event));
+  };
+  const kept = async () => (await openclaw.discover()).some((r) => r.extra.sessionId === "fallback");
+  update(prompt);
+  assert.equal(await kept(), false);
+  update("<active_memory_plugin>injected</active_memory_plugin>\n" + prompt);
+  assert.equal(await kept(), false, "the sentinel right after a closed wrapper is Backpass's own prompt");
+  // A quoted sentinel is human text: nothing before it is cut, so these sessions stay in the corpus.
   for (const wrapper of [
-    "<active_memory_plugin>injected</active_memory_plugin>",
+    "Why does backpass prepend ",
     "<active_memory_plugin>unclosed injected memory\n",
     "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>unclosed context\n",
   ]) {
-    event.message.content[0].text = `${wrapper}${SELF_SESSION_SENTINEL}\nself analysis`;
-    db.prepare("UPDATE transcript_events SET event_json=? WHERE session_id='fallback'").run(JSON.stringify(event));
-    assert.ok(!(await openclaw.discover()).some((r) => r.extra.sessionId === "fallback"), wrapper);
+    update(wrapper + prompt);
+    assert.equal(await kept(), true, wrapper);
   }
   db.close();
 });
@@ -436,21 +447,53 @@ test("PRA-442 an unclosed active memory block drops only its opening tag and kee
   assert.equal(openclaw.stripScaffolding("<active_memory_plugin>complete</active_memory_plugin>\n" + human), kept);
 });
 
-test("PRA-442 an unclosed wrapper before the self sentinel is dropped so the sentinel leads", () => {
+test("PRA-442 a quoted self sentinel after an unclosed wrapper keeps every preceding character", () => {
   const prompt = `${SELF_SESSION_SENTINEL}\nself analysis`;
+  const closed = "<active_memory_plugin>complete</active_memory_plugin>\n";
   for (const opener of [
-    "<active_memory_plugin>truncated memory\n",
-    "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>truncated context\n",
-    'Conversation info: ⟦openclaw:ctx⟧\n```json\n{"id":"synthetic"}\n',
+    "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>truncated context\n  I asked about ",
+    'Conversation info: ⟦openclaw:ctx⟧\n```json\n{"id":"synthetic"}\n  I asked about ',
   ]) {
-    assert.equal(openclaw.stripScaffolding(opener + prompt), prompt);
-    assert.equal(
-      openclaw.stripScaffolding("<active_memory_plugin>complete</active_memory_plugin>\n" + opener + prompt),
-      prompt,
-    );
+    assert.equal(openclaw.stripScaffolding(opener + prompt), opener + prompt);
+    assert.equal(openclaw.stripScaffolding(closed + opener + prompt), opener + prompt);
   }
-  // Without an unterminated wrapper, text before the sentinel is kept.
+  const memory = "<active_memory_plugin>truncated memory\n  I asked about ";
+  const remainder = memory.slice("<active_memory_plugin>".length) + prompt;
+  assert.equal(openclaw.stripScaffolding(memory + prompt), remainder);
+  assert.equal(openclaw.stripScaffolding(closed + memory + prompt), remainder);
+  // Only a closed leading wrapper leaves the sentinel first.
+  assert.equal(openclaw.stripScaffolding(closed + prompt), prompt);
   assert.equal(openclaw.stripScaffolding("Human quotes " + prompt), "Human quotes " + prompt);
+});
+
+test("PRA-442 a Backpass session behind an unclosed wrapper is still excluded by the state-dir cwd check", async (t) => {
+  const { file, dir } = setup(t);
+  const repoRoot = fs.realpathSync(fs.mkdtempSync(path.join(dir, "repo-")));
+  const config = loadConfig(repoRoot, { discovery: { harnesses: ["openclaw"], since: "all" } });
+  const cache = { version: 1, entries: {} };
+  config.state = { root: path.join(repoRoot, ".backpass"), readScanCache: () => cache, writeScanCache: () => {} };
+  const repo = { name: "demo", root: repoRoot, worktrees: [repoRoot], remotes: [] };
+  const db = new DatabaseSync(file);
+  const text = `<active_memory_plugin>unclosed injected memory\n${SELF_SESSION_SENTINEL}\nself analysis`;
+  const event = { type: "message", message: { role: "user", content: [{ type: "text", text }] } };
+  for (const id of ["fallback", "slack"])
+    db.prepare(
+      "UPDATE transcript_events SET event_json=? WHERE session_id=? AND seq=(SELECT MAX(seq) FROM transcript_events WHERE session_id=?)",
+    ).run(JSON.stringify(event), id, id);
+  // Both sessions belong to the repo; Backpass runs its own harness sessions with cwd inside its
+  // state dir (the synthesis staging copy), which is what distinguishes them.
+  const workspace = (id, cwd) =>
+    db
+      .prepare("UPDATE session_nodes SET entry_json=? WHERE current_session_id=?")
+      .run(JSON.stringify({ systemPromptReport: { workspaceDir: cwd } }), id);
+  workspace("slack", repoRoot);
+  workspace("fallback", path.join(config.state.root, "synthesis"));
+  db.close();
+  const { transcripts, perHarness } = await discoverTranscripts({ repo, config });
+  const ids = transcripts.map((transcript) => transcript.extra.sessionId);
+  assert.ok(!ids.includes("fallback"), "Backpass's own session is excluded by cwd");
+  assert.ok(ids.includes("slack"), "a human session quoting the sentinel after an unclosed wrapper is kept");
+  assert.equal(perHarness.openclaw.self, 1);
 });
 
 test("PRA-442 P2-2 absent optional routing columns degrade and schema drift warns once", async (t) => {

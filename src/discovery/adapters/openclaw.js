@@ -26,6 +26,10 @@ import { openReadOnly } from "./sqlite.js";
  * generations cannot corroborate themselves.
  * Schema/codec drift warns and skips; a damaged session cannot hide healthy sessions.
  * Metadata cwd wins, then session headers, then a labelled configured-workspace fallback.
+ * Self exclusion here counts the sentinel only as the first non-wrapper content of the first user
+ * message (at the very start, or right after closed leading wrappers), so a human who quotes it is
+ * kept. The tradeoff: a Backpass prompt behind an unterminated wrapper is not recognised here and
+ * relies on the cwd/state-dir check in `../self.js`, which Backpass-spawned sessions always hit.
  */
 export const name = "openclaw";
 export const sqliteBacked = true;
@@ -214,26 +218,18 @@ function entriesFor(db, ref) {
   return active;
 }
 
-// A wrapper opener that survives complete-wrapper removal has no terminator.
-const UNTERMINATED_WRAPPER =
-  /^\s*(?:<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>|Conversation info: ⟦openclaw:ctx⟧|<active_memory_plugin>)/;
-
 /**
- * Remove complete harness wrappers; a missing terminator must not eat human words. Backpass's own
- * prompts start with the self sentinel, so anything before it under an unterminated wrapper is
- * injected and is dropped so the self check still sees the sentinel first; otherwise only the
- * opening memory tag goes.
+ * Remove complete harness wrappers; a missing terminator must not eat human words, so an
+ * unterminated memory block loses only its opening tag and every character after it is kept.
+ * Nothing here searches for the self sentinel: a human may quote it.
  */
 export function stripScaffolding(text) {
-  const stripped = text
+  return text
     .replace(/<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>[\s\S]*?<<<END_OPENCLAW_INTERNAL_CONTEXT>>>\s*/g, "")
     .replace(/Conversation info: ⟦openclaw:ctx⟧[^\r\n]*\r?\n\s*```(?:json)?[^\r\n]*\r?\n[\s\S]*?```\s*/g, "")
     .replace(/<active_memory_plugin>[\s\S]*?<\/active_memory_plugin>\s*/g, "")
-    .replace(/^\s*\[(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat) \d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2})? [^\]\r\n]+\]\s*/, "");
-  if (!UNTERMINATED_WRAPPER.test(stripped)) return stripped;
-  const sentinel = stripped.indexOf(SELF_SESSION_SENTINEL);
-  if (sentinel >= 0) return stripped.slice(sentinel);
-  return stripped.replace(/^\s*<active_memory_plugin>\s*/, "");
+    .replace(/^\s*\[(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat) \d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2})? [^\]\r\n]+\]\s*/, "")
+    .replace(/^\s*<active_memory_plugin>/, "");
 }
 
 function normalized(entries) {
