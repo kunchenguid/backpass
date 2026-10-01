@@ -302,15 +302,9 @@ async function discoverDirect(adapter, { repo, config, cutoffMs, strict, stats, 
       stats.skipped += 1;
       continue;
     }
-    // SQLite stores have no per-session file head. Adapters that check individual turns
-    // mark their own sessions (selfChecked); others are marked from the store (see ./self.js).
-    if (
-      row.self ||
-      isSelfSession(adapter.selfChecked ? { cwd: transcript.cwd } : transcript, {
-        stateDir,
-        readHead: !adapter.sqliteBacked,
-      })
-    ) {
+    // A SQLite store has no per-session file to inspect; its adapter marks backpass's own
+    // sessions from the store itself (see ./self.js).
+    if (row.self || isSelfSession(transcript, { stateDir, readHead: !adapter.sqliteBacked })) {
       stats.self += 1;
       continue;
     }

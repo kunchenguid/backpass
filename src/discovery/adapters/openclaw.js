@@ -15,16 +15,17 @@ import { openReadOnly } from "./sqlite.js";
  * OpenClaw schema 23: ONLY online backup snapshots, never the live agent DB.
  * One private snapshot is shared until CLI completion (exit is a cleanup backstop).
  * Windows use the active branch index; deleted/reset archives contain JSONL, optionally
- * zstd. Times are milliseconds. Live copies win over content-equal archives;
- * identity is session_id across archival. Only distinct normalized archive content
- * receives an additional identity; duplicate generations cannot corroborate themselves.
+ * zstd. Times are milliseconds. Live copies win over content-equal archives and the
+ * first-seen generation keeps the bare session_id across archival. A later generation with
+ * distinct content is suffixed by a digest of a stable anchor (the archive generation key,
+ * or start time plus first event for a live window), so identity never moves as a live
+ * session grows; duplicate generations cannot corroborate themselves.
  * Schema/codec drift warns and skips; a damaged session cannot hide healthy sessions.
  * Metadata cwd wins, then session headers, then a labelled configured-workspace fallback.
  */
 export const name = "openclaw";
 export const sqliteBacked = true;
 export const localOnly = true;
-export const selfChecked = true;
 let snapshotPromise = null;
 let snapshotDir = null;
 
@@ -78,9 +79,14 @@ async function createSnapshot(run) {
       throw new Error(`ERR_WINDOWS_SHIM_UNSAFE_ARG: ${result.spawnError.message}`);
     }
     if (result.timedOut) throw new Error("online backup timed out");
+    if (result.spawnError?.code === "ENOENT") {
+      fs.rmSync(snapshotDir, { recursive: true, force: true });
+      snapshotDir = null;
+      return null;
+    }
     if (result.spawnError || result.code !== 0)
       throw new Error(
-        `online backup failed (${result.spawnError?.code || result.code}); install OpenClaw or set BACKPASS_OPENCLAW_DB to a snapshot`,
+        `online backup failed (${result.spawnError?.code || result.code}); set BACKPASS_OPENCLAW_DB to a snapshot`,
       );
     const response = JSON.parse(result.stdout);
     const artifact = response.manifest?.artifact?.path;
@@ -339,7 +345,9 @@ export async function discover({ cutoffMs } = {}) {
         if (!contentIds.has(row.session_id)) contentIds.set(row.session_id, new Map());
         const seen = contentIds.get(row.session_id);
         if (seen.has(digest) && row.generation != null) continue;
-        const id = seen.get(digest) ?? (seen.size ? `${row.session_id}:${digest}` : row.session_id);
+        const anchor = row.generation ?? `${startedAt}\n${JSON.stringify(events[0])}`;
+        const suffix = createHash("sha256").update(anchor).digest("hex");
+        const id = seen.get(digest) ?? (seen.size ? `${row.session_id}:${suffix}` : row.session_id);
         seen.set(digest, id);
         if (cutoffMs != null && mtimeMs < cutoffMs) continue;
         out.set(id, {
@@ -370,11 +378,6 @@ export async function discover({ cutoffMs } = {}) {
   } finally {
     db?.close();
   }
-}
-
-// A shared SQLite snapshot is not a per-session raw transcript the model can open.
-export function rawPath() {
-  return null;
 }
 
 export async function read(ref) {

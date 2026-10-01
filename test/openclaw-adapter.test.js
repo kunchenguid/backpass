@@ -12,7 +12,7 @@ import * as openclaw from "../src/discovery/adapters/openclaw.js";
 import { classifyInteraction } from "../src/interaction.js";
 import { transcriptIdentity } from "../src/transcript.js";
 import { emptyGapLedger, recordGapObservations } from "../src/gap-ledger.js";
-import { ADAPTERS, discoverTranscripts, readTranscript } from "../src/discovery/index.js";
+import { ADAPTERS } from "../src/discovery/index.js";
 import { main } from "../src/cli.js";
 import { distill } from "../src/distill.js";
 import { buildFixture, timestamp } from "./fixtures/openclaw/build.js";
@@ -211,7 +211,8 @@ test("PRA-442 backup errors, timeout and shim refusal warn once and never open a
   const warnings = [];
   t.mock.method(console, "error", (...args) => warnings.push(args.join(" ")));
   for (const result of [
-    { code: null, spawnError: Object.assign(new Error("not found"), { code: "ENOENT" }) },
+    { code: 1 },
+    { code: null, spawnError: Object.assign(new Error("denied"), { code: "EACCES" }) },
     { code: 0, timedOut: true },
     { code: null, spawnError: Object.assign(new Error("unsafe argument"), { code: "ERR_WINDOWS_SHIM_UNSAFE_ARG" }) },
     { code: 0, stdout: "not json" },
@@ -227,9 +228,34 @@ test("PRA-442 backup errors, timeout and shim refusal warn once and never open a
     assert.equal(await openclaw.resolveSnapshot({ run }), null);
     assert.equal(calls, 1);
   }
-  assert.match(warnings.join("\n"), /ENOENT/);
+  assert.match(warnings.join("\n"), /failed \(1\)/);
+  assert.match(warnings.join("\n"), /EACCES/);
   assert.match(warnings.join("\n"), /timed out/);
   assert.match(warnings.join("\n"), /ERR_WINDOWS_SHIM_UNSAFE_ARG/);
+});
+
+test("PRA-442 an absent openclaw binary is an empty harness with no warning", async (t) => {
+  setup(t);
+  setEnv(t, "BACKPASS_OPENCLAW_DB", null);
+  const warnings = [];
+  t.mock.method(console, "error", (...args) => warnings.push(args.join(" ")));
+  let calls = 0;
+  let directory;
+  const run = async (bin, args) => {
+    calls++;
+    directory = args[6];
+    return {
+      code: null,
+      stdout: "",
+      stderr: "",
+      spawnError: Object.assign(new Error("not found"), { code: "ENOENT" }),
+    };
+  };
+  assert.equal(await openclaw.resolveSnapshot({ run }), null);
+  assert.deepEqual(await openclaw.discover(), []);
+  assert.equal(calls, 1);
+  assert.deepEqual(warnings, []);
+  assert.ok(!fs.existsSync(directory));
 });
 
 test("PRA-442 corrupt archives skip independently and other agents are not collected", async (t) => {
@@ -433,50 +459,17 @@ test("PRA-442 P2-5 bad workspace config warns by name and keeps sessions with a 
   assert.ok(!warnings.some((w) => /snapshot unreadable/.test(w)));
 });
 
-test("PRA-442 P2-4 direct adapters declare self checking and cleanup without name checks", async (t) => {
-  const { dir } = setup(t);
+test("PRA-442 P2-4 CLI completion runs every adapter cleanup without name checks", async (t) => {
   assert.equal(ADAPTERS.openclaw, openclaw);
-  const shared = path.join(dir, "shared-store");
-  fs.writeFileSync(shared, JSON.stringify({ text: SELF_SESSION_SENTINEL }));
-  const stateDir = path.join(dir, "state");
   let cleanups = 0;
-  const adapter = {
-    name: "fixture",
-    selfChecked: true,
-    cleanup: () => cleanups++,
-    discover: async () => [
-      { id: "human", path: shared, cwd: dir },
-      { id: "self", path: shared, cwd: stateDir },
-    ],
-  };
-  ADAPTERS.fixture = adapter;
+  ADAPTERS.fixture = { name: "fixture", cleanup: () => cleanups++, discover: async () => [] };
   t.after(() => delete ADAPTERS.fixture);
-  const config = {
-    discovery: { harnesses: ["fixture"], since: "all" },
-    state: { root: stateDir, readScanCache: () => ({}) },
-  };
-  const result = await discoverTranscripts({
-    repo: {},
-    scope: { associate: () => ({ tier: 1, confidence: "high" }) },
-    config,
-  });
-  assert.deepEqual(
-    result.transcripts.map((r) => r.nativeId),
-    ["human"],
-  );
-  assert.equal(result.perHarness.fixture.self, 1);
-  adapter.selfChecked = false;
-  assert.equal(
-    (await discoverTranscripts({ repo: {}, scope: { associate: () => ({ tier: 1, confidence: "high" }) }, config }))
-      .transcripts.length,
-    0,
-  );
   t.mock.method(console, "error", () => {});
   assert.equal(await main(["status", "--scope", "invalid"]), 1);
   assert.equal(cleanups, 1);
 });
 
-test("PRA-442 P1-4 distinct archive content and a live copy retain their identities on archival", async (t) => {
+test("PRA-442 P1-4 distinct archive content and a live copy each keep a stable identity", async (t) => {
   const { file } = setup(t);
   const db = new DatabaseSync(file);
   const live = db.prepare("SELECT event_json FROM transcript_events WHERE session_id='slack' ORDER BY seq").all();
@@ -488,29 +481,46 @@ test("PRA-442 P1-4 distinct archive content and a live copy retain their identit
   const before = (await openclaw.discover()).filter((r) => r.extra.sessionId === "slack");
   assert.equal(before.length, 2);
   assert.equal(before[0].id, "slack");
+  assert.equal(before[0].extra.generation, "first");
+  assert.notEqual(before[1].id, "slack");
+  assert.equal(before[1].extra.generation, null);
   insert.run("second", bytes, timestamp + 2000);
   const overlap = (await openclaw.discover()).filter((r) => r.extra.sessionId === "slack");
-  assert.deepEqual(
-    overlap.map((r) => r.id),
-    before.map((r) => r.id),
-  );
-  assert.equal(overlap.find((r) => r.id === before[1].id).extra.generation, null);
+  assert.equal(overlap.length, 2);
+  assert.equal(overlap[0].id, "slack");
+  assert.equal(overlap[1].extra.generation, null);
   db.exec("DELETE FROM session_windows WHERE session_id='slack'");
   db.close();
   const after = (await openclaw.discover()).filter((r) => r.extra.sessionId === "slack");
   assert.deepEqual(
     after.map((r) => r.id),
-    before.map((r) => r.id),
+    overlap.map((r) => r.id),
   );
+  assert.equal(after[1].extra.generation, "second");
 });
 
-test("PRA-442 P2-7 distillation never invites opening a shared SQLite snapshot as a raw transcript", async (t) => {
-  setup(t);
-  const row = (await openclaw.discover()).find((r) => r.extra.sessionId === "dashboard");
-  const raw = await readTranscript({ ...row, harness: "openclaw" });
-  assert.equal(raw.rawPath, null);
-  const trace = distill(raw.events, { ...row, harness: "openclaw", rawPath: raw.rawPath }).trace;
-  assert.ok(!trace.includes(row.path));
-  assert.doesNotMatch(trace, /Open the raw|raw transcript: null/);
-  assert.match(trace, /No per-session raw transcript file/);
+test("PRA-442 P1-4 a live window keeps its identity as turns append beside an older generation", async (t) => {
+  const { file } = setup(t);
+  const db = new DatabaseSync(file);
+  const live = db.prepare("SELECT event_json FROM transcript_events WHERE session_id='slack' ORDER BY seq").all();
+  const bytes = Buffer.from(live.map((r) => r.event_json).join("\n"));
+  db.prepare(
+    "INSERT INTO session_transcript_archives VALUES ('slack', 'first', 'agent:main:slack', 'reset', 'identity', ?, ?)",
+  ).run(Buffer.from(bytes.toString().replace("Human request.", "Earlier distinct request.")), timestamp);
+  const identity = (row) => transcriptIdentity({ ...row, harness: "openclaw", nativeId: row.id });
+  const liveRow = () =>
+    openclaw.discover().then((rows) => rows.find((r) => r.extra.sessionId === "slack" && r.extra.generation == null));
+  const before = await liveRow();
+  const seq = live.length;
+  db.prepare("INSERT INTO transcript_events VALUES ('slack', ?, ?, NULL, ?)").run(
+    seq,
+    JSON.stringify({ type: "message", message: { role: "assistant", content: "A later answer." } }),
+    timestamp + seq,
+  );
+  db.prepare("INSERT INTO session_transcript_active_events VALUES ('slack', ?, ?)").run(seq, seq);
+  db.close();
+  const after = await liveRow();
+  assert.equal((await openclaw.read(after)).events.at(-1).text, "A later answer.");
+  assert.equal(after.id, before.id);
+  assert.equal(identity(after), identity(before));
 });

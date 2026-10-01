@@ -259,9 +259,10 @@ OpenClaw collection reads an online snapshot created by `openclaw backup sqlite 
 never the live database. Set `BACKPASS_OPENCLAW_DB` to an existing snapshot `database.sqlite`
 to skip backup creation; `OPENCLAW_AGENT` selects the agent (default `main`). One private
 temporary snapshot is reused for the run and removed afterward; supplied snapshots are
-left untouched. Live active branches and deleted/reset archives are included. Identity survives
-archival; only distinct session content separates archive generations, and `--since` uses
-archive activity rather than deletion time. Compressed
+left untouched; when the `openclaw` binary is absent the harness is silently empty. Live active
+branches and deleted/reset archives are included. Identity survives archival; a later generation
+with distinct content gets its own stable identity, and `--since` uses archive activity rather
+than deletion time. Compressed
 records need Node with `zstdDecompressSync` (Node 26 recommended); missing codecs or
 drifted records warn and skip. Session metadata and headers provide cwd, with a labelled
 `configured-workspace` fallback to the agent workspace in `~/.openclaw/openclaw.json`
