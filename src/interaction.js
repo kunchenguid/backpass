@@ -88,6 +88,10 @@ export function classifyInteraction(transcript) {
     if (HERMES_NONINTERACTIVE_SOURCES.has(source)) return NON_INTERACTIVE;
   }
 
+  if (harness === "openclaw" && ["run", "cron", "subagent", "heartbeat", "acp", "hook"].includes(signals.source)) {
+    return NON_INTERACTIVE;
+  }
+
   if (pathLooksNonInteractive(cwd)) return NON_INTERACTIVE;
 
   return INTERACTIVE;

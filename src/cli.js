@@ -3,6 +3,7 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 
+import { ADAPTERS } from "./discovery/index.js";
 import { UserError, fail, setQuiet } from "./logger.js";
 import { applyHostFlag, loadConfig, parseMaxTranscripts, parseScopeKind } from "./config.js";
 import { resolveRepo } from "./repo.js";
@@ -93,7 +94,7 @@ COMMANDS
 COLLECT SAMPLES
   --since <dur>            only sessions newer than this (30d, 12h, 2w, all)  [30d]
   --harness <a,b>          limit to these harnesses
-                           (claude, codex, pi, opencode, grok, cursor, hermes)
+                           (claude, codex, pi, opencode, grok, cursor, hermes, openclaw)
   --strict                 deterministic associations only (tiers 1, 1.5, and 2)
   --host <dest>            also collect from this SSH host this run (repeatable;
                            "none" collects locally only). Configure hosts once in
@@ -326,6 +327,8 @@ export async function main(argv) {
     return (await command(ctx)) ?? 0;
   } catch (err) {
     return reportError(err);
+  } finally {
+    for (const adapter of Object.values(ADAPTERS)) adapter.cleanup?.();
   }
 }
 

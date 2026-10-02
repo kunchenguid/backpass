@@ -31,7 +31,7 @@ It finds the agent sessions that actually ran in your repo, reads
 what happened in them, and proposes evidence-backed edits to your memory surface - the
 memory file and project skills - under a token budget, gated by you.
 
-- **Local-first** - Reads the transcript stores of seven agent harnesses directly from disk,
+- **Local-first** - Reads the transcript stores of eight agent harnesses directly from disk,
   locally or over SSH to your own machines. No API, no upload; transcripts never leave your
   machines except into an agent you already authenticated, and obvious secrets are redacted
   before they do.
@@ -215,7 +215,7 @@ It cannot be combined with
 
 ### 1. Collect samples - which sessions belong to this repo
 
-backpass reads the local transcript stores of seven harnesses directly. No API, no upload.
+backpass reads the transcript stores of eight harnesses locally. No API, no upload.
 
 | Harness        | Store                                          | Repo tie                                            |
 | -------------- | ---------------------------------------------- | --------------------------------------------------- |
@@ -226,6 +226,7 @@ backpass reads the local transcript stores of seven harnesses directly. No API, 
 | **grok**       | `~/.grok/sessions/<encoded-cwd>/<uuid>/`       | `summary.json` `cwd` + `git_remotes`                |
 | **cursor CLI** | `~/.cursor/chats/<md5(cwd)>/<uuid>/`           | `meta.json` `cwd`                                   |
 | **hermes**     | `~/.hermes/state.db` (sqlite)                  | session cwd, with CLI prompt / ACP config fallbacks |
+| **openclaw**   | online SQLite backup snapshot                  | session workspace/cwd, then configured workspace    |
 
 Claude collection covers `$CLAUDE_CONFIG_DIR/projects` alongside the default store, so a
 relocated config dir does not hide its sessions. The variable is read from backpass's own
@@ -254,6 +255,28 @@ Hermes collection includes CLI and ACP sessions, plus TUI sessions with an absol
 `sessions.cwd`. Gateway, cron, and WhatsApp sessions are excluded because their recorded
 cwd belongs to a shared process, not a project.
 
+OpenClaw collection reads an online snapshot created by `openclaw backup sqlite create`,
+never the live database. Set `BACKPASS_OPENCLAW_DB` to an existing snapshot `database.sqlite`
+to skip backup creation; `OPENCLAW_AGENT` selects the agent (default `main`). One private
+temporary snapshot is reused for the run and removed afterward; supplied snapshots are
+left untouched; when the `openclaw` binary is absent the harness is silently empty. Live active
+branches and deleted/reset archives are included. Each generation is identified by its own first
+event and, when its entries are dated, their first timestamp, so identity survives archival and never
+depends on the order generations are read; when distinct generations share that anchor, the live one
+keeps the id and each archive is keyed by its generation. `--since` uses archive activity rather than deletion time. Compressed
+records need Node with `zstdDecompressSync` (Node 26 recommended); missing codecs or
+drifted records warn and skip. Session metadata and headers provide cwd, with a labelled
+`configured-workspace` fallback to the agent workspace in `~/.openclaw/openclaw.json`
+(or `~/.openclaw/workspace`); `OPENCLAW_STATE_DIR` overrides that state root. A fallback cwd is a guess, not a
+recording, so its association is capped at tier 3 (best-effort) and `--strict` excludes it. Gateway
+state-root headers also use this fallback. Typed routing takes precedence over key patterns:
+human channels are interactive; programmatic runs, cron, subagent, heartbeat, ACP and hook
+sessions are non-interactive. Probe/eval/test/smoke and ticket-run namespaces are excluded, and
+injected context and system messages are removed before distillation. Collection is local;
+OpenClaw is not yet included in the SSH probe, and a run that selects only `openclaw` contacts
+no configured host. If an existing config pins the harness list, add `openclaw` or select it
+with `--harness openclaw`.
+
 Association runs in four tiers:
 
 1. **Tier 1 - deterministic.** The session's cwd is (or sits inside) one of this repo's
@@ -270,7 +293,9 @@ Association runs in four tiers:
    matches one of the repo's remotes. This is how codex and grok stay attributable long
    after the worktree is gone.
 4. **Tier 3 - best-effort.** A dead path whose last segment is the repo's directory name,
-   or one matching a glob you configured. Labelled as such, and excluded by `--strict`.
+   one matching a glob you configured, or a cwd the harness could only infer rather than
+   record (capped here whatever tier the guess would reach). Labelled as such, and excluded
+   by `--strict`.
 
 On macOS and Linux, recorded Windows drive paths (`C:\work\repo`, `C:/work/repo`) and UNC paths (`\\server\share\repo`, `//server/share/repo`) are excluded from the path tiers and nested-file attribution; a matching recorded git remote still associates the session at tier 2.
 In user scope, when no recorded remote supplies a project key, such a cwd remains a tier-3 key in its original spelling, never resolved against the process cwd, and `--strict` excludes it.
@@ -309,7 +334,7 @@ deterministically: user and assistant turns verbatim, each tool call collapsed t
 dropped, secrets redacted. Typical reduction is **96-99%**.
 
 The distilled trace ends with the path to the raw transcript, so the analysis agent can open the original when - and only when - a specific claim needs it.
-For a session in a local SQLite store (opencode, hermes, Cursor CLI, Cursor IDE), the analysis call names a file of that session's normalized events instead of the store, which may contain other sessions or require queries against an undocumented schema.
+For a session in a local SQLite store (opencode, hermes, openclaw, Cursor CLI, Cursor IDE), the analysis call names a file of that session's normalized events instead of the store, which may contain other sessions or require queries against an undocumented schema.
 The file is written with mode `0600` under `raw/` in the active [state directory](#state), only for non-trivial sessions, and removed when the call finishes or during catchable process exits, including SIGINT or SIGTERM.
 While the call runs, backpass renews the file's modification time every minute; reclamation waits for 24 hours without renewal to tolerate hours of clock skew between hosts sharing a state directory.
 Files left by an uncatchable exit such as SIGKILL become eligible for cleanup after a day, and the next analysis run removes them from the root and nested state directories; PIDs play no part, since they cannot establish ownership or liveness across hosts or PID namespaces.
@@ -808,7 +833,7 @@ CLI flags on top:
     ]
   },
   "discovery": {
-    "harnesses": ["claude", "codex", "pi", "opencode", "grok", "cursor", "hermes"],
+    "harnesses": ["claude", "codex", "pi", "opencode", "grok", "cursor", "hermes", "openclaw"],
     "since": "30d",
     "worktreeGlobs": [],
     "cloneRoots": [],

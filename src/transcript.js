@@ -12,7 +12,11 @@ import crypto from "node:crypto";
  * SQLite stores add the row id, since every session there shares one database path.
  */
 export function transcriptSource(transcript) {
-  const file = String(transcript?.path ?? "");
+  // OpenClaw online backups move every run; provenance is the agent, not the temp directory.
+  const file =
+    transcript?.harness === "openclaw"
+      ? `openclaw:${transcript?.extra?.agent || "main"}`
+      : String(transcript?.path ?? "");
   if (!transcript?.host) return file;
   const base = `ssh://${transcript.host}${file.startsWith("/") ? "" : "/"}${file}`;
   return transcript.remote?.kind === "events" ? `${base}#${nativeIdOf(transcript)}` : base;

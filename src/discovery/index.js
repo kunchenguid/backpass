@@ -6,6 +6,7 @@ import * as pi from "./adapters/pi.js";
 import * as grok from "./adapters/grok.js";
 import * as opencode from "./adapters/opencode.js";
 import * as hermes from "./adapters/hermes.js";
+import * as openclaw from "./adapters/openclaw.js";
 import * as cursorCli from "./adapters/cursor-cli.js";
 import * as cursorIde from "./adapters/cursor-ide.js";
 
@@ -27,6 +28,7 @@ export const ADAPTERS = Object.assign(Object.create(null), {
   grok,
   opencode,
   hermes,
+  openclaw,
   cursor: cursorCli,
   "cursor-ide": cursorIde,
 });
@@ -43,7 +45,7 @@ export function getAdapter(harness) {
  * Re-scans are then O(new files) - which matters: codex alone had 10,317 rollouts on
  * the machine this was designed against.
  *
- * SQLite-backed stores (opencode, hermes, cursor IDE) query session metadata directly,
+ * SQLite-backed stores (opencode, hermes, openclaw, cursor IDE) query session metadata directly,
  * so they skip the file-header cache entirely.
  *
  * Every harness is fail-soft: a store that is missing, unreadable, or has drifted into
@@ -146,10 +148,12 @@ export async function discoverTranscripts({
 
   const perHost = [];
   const remoteMasters = [];
-  if (hosts.length) {
+  // A run selecting only local-only harnesses has nothing to collect remotely, so no host is contacted.
+  const remoteHarnesses = selected.filter((h) => getAdapter(h) && !getAdapter(h).localOnly);
+  if (hosts.length && remoteHarnesses.length) {
     const collected = await collectHosts({
       hosts,
-      harnesses: selected.filter((h) => getAdapter(h)),
+      harnesses: remoteHarnesses,
       cutoffMs,
       controlPath: createControlPath(),
     });
@@ -280,6 +284,22 @@ function tierCounts(found) {
   return tiers;
 }
 
+/**
+ * An adapter that could not recover a session's cwd and substituted a configured default
+ * marks the row `cwdInferred`. A guessed path is not deterministic evidence, so whatever
+ * tier the guess would reach is capped at tier 3: labelled best-effort, excluded by
+ * `--strict` (VISION: a wrong attribution is worse evidence than none).
+ */
+export function capInferred(association, row) {
+  if (!association || !row?.cwdInferred) return association;
+  return {
+    ...association,
+    tier: 3,
+    confidence: "inferred",
+    reason: `inferred cwd (no recorded cwd): ${association.reason}`,
+  };
+}
+
 async function discoverDirect(adapter, { repo, config, cutoffMs, strict, stats, associateFn, stateDir, userFilter }) {
   const rows = await adapter.discover({
     cutoffMs,
@@ -290,7 +310,10 @@ async function discoverDirect(adapter, { repo, config, cutoffMs, strict, stats, 
   const out = [];
   for (const row of rows) {
     stats.scanned += 1;
-    const association = associateFn({ cwd: row.cwd, remotes: row.remotes || [], gitRoot: row.gitRoot });
+    const association = capInferred(
+      associateFn({ cwd: row.cwd, remotes: row.remotes || [], gitRoot: row.gitRoot }),
+      row,
+    );
     if (!passesStrict(association, strict)) {
       stats.skipped += 1;
       continue;
