@@ -16,13 +16,13 @@ import { openReadOnly } from "./sqlite.js";
  * One private snapshot is shared until CLI completion (exit is a cleanup backstop).
  * Windows use the active branch index; deleted/reset archives contain JSONL, optionally
  * zstd. Times are milliseconds. Every generation, live or archived, is identified by
- * session_id plus a digest of its anchor (start time and first event): a live window shares
- * that anchor with its own archive, so identity survives archival and never moves as a live
- * session grows. Identity is assigned after every generation is read (`identify`), so it never
- * depends on processing order: when distinct-content generations share an anchor, the live one
- * keeps the anchor id and each archive is keyed by its generation. The only identity moves
- * left are a live member of such a collision group being archived, and a lone archive gaining
- * its first colliding sibling. Live copies win over content-equal archives, and duplicate
+ * session_id plus a digest of its anchor (the first event timestamp, when any entry is dated,
+ * and the first event; never a row's created_at): a live window shares that anchor with its own
+ * archive, so identity survives archival and never moves as a live session grows. Identity is
+ * assigned after every generation is read (`identify`), so it never depends on processing order:
+ * when distinct-content generations share an anchor, the live one keeps the anchor id and each
+ * archive is keyed by its generation. The only identity moves left are a live member of such a
+ * collision group being archived, and a lone archive gaining its first colliding sibling. Live copies win over content-equal archives, and duplicate
  * generations cannot corroborate themselves.
  * Schema/codec drift warns and skips; a damaged session cannot hide healthy sessions.
  * Metadata cwd wins, then session headers, then a labelled configured-workspace fallback.
@@ -373,6 +373,7 @@ export async function discover({ cutoffMs } = {}) {
             ? Math.max(...times)
             : Math.max(row.updated_at || row.created_at, ...times);
         const { events, model } = normalized(entries);
+        const anchor = [...(times.length ? [String(times[0])] : []), String(JSON.stringify(events[0]))].join("\n");
         const firstUser = events.find((event) => event.kind === "message" && event.role === "user");
         if (firstUser?.text.startsWith(SELF_SESSION_SENTINEL)) continue;
         const digest = createHash("sha256").update(JSON.stringify(events)).digest("hex");
@@ -381,7 +382,7 @@ export async function discover({ cutoffMs } = {}) {
         // The live copy wins over content-equal archives; duplicate archives keep the first read.
         if (generations.has(digest) && row.generation != null) continue;
         generations.set(digest, {
-          anchor: `${String(startedAt)}\n${String(JSON.stringify(events[0]))}`,
+          anchor,
           record: {
             key: null,
             id: null,

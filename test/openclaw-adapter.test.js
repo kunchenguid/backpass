@@ -627,6 +627,27 @@ test("openclaw P1-4 a live window keeps its identity beside a later distinct arc
   assert.equal(after[1].extra.generation, "second");
 });
 
+test("openclaw P1-4 an undated live window keeps its identity when archived", async (t) => {
+  const { file } = setup(t);
+  const db = new DatabaseSync(file);
+  const live = db.prepare("SELECT event_json FROM transcript_events WHERE session_id='fallback' ORDER BY seq").all();
+  assert.ok(live.every((r) => JSON.parse(r.event_json).timestamp === undefined));
+  const fallback = () => openclaw.discover().then((rows) => rows.filter((r) => r.extra.sessionId === "fallback"));
+  const [before] = await fallback();
+  assert.equal(before.extra.generation, null);
+  assert.equal(before.startedAt, timestamp);
+  db.prepare(
+    "INSERT INTO session_transcript_archives VALUES ('fallback', 'reset', 'agent:main:main', 'reset', 'identity', ?, ?)",
+  ).run(Buffer.from(live.map((r) => r.event_json).join("\n")), timestamp + 5000);
+  db.exec("DELETE FROM session_windows WHERE session_id='fallback'");
+  db.close();
+  const after = await fallback();
+  assert.equal(after.length, 1);
+  assert.equal(after[0].extra.generation, "reset");
+  assert.equal(after[0].startedAt, timestamp + 5000);
+  assert.equal(after[0].id, before.id);
+});
+
 test("openclaw P1-4 generation identity does not depend on processing order", async (t) => {
   const { file } = setup(t);
   const db = new DatabaseSync(file);
