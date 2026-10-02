@@ -26,6 +26,8 @@ import { openReadOnly } from "./sqlite.js";
  * generations cannot corroborate themselves.
  * Schema/codec drift warns and skips; a damaged session cannot hide healthy sessions.
  * Metadata cwd wins, then session headers, then a labelled configured-workspace fallback.
+ * A fallback cwd is inferred, not recorded: discovery caps its association at tier 3
+ * (best-effort), so it is labelled as such and `--strict` drops it.
  * Self exclusion here counts the sentinel only as the first non-wrapper content of the first user
  * message (at the very start, or right after closed leading wrappers), so a human who quotes it is
  * kept. The tradeoff: a Backpass prompt behind an unterminated wrapper is not recognised here and
@@ -135,7 +137,7 @@ function workspace(agent) {
 const EXCLUDED_NAMESPACES = [
   /(?:^|[-_])(eval|test|probe|bakeoff|smoke)(?:$|[-_])/, // Evaluation and smoke families.
   /^r\d+-routing-.*(?:^|[-_])review(?:$|[-_])/, // Routing model-review runs.
-  /^pra\d+(?:$|[-_])/, // Ticket-scoped scripted runs (not just PRA-245).
+  /^pra\d+(?:$|[-_])/, // Ticket-scoped scripted runs.
   /^(explicit|internal-session-effects|child-steer-launcher)$/, // Internal test launchers.
   /^grok\d+eval(?:$|[-_])/, // Legacy eval namespace without a separator.
 ];
@@ -385,6 +387,9 @@ export async function discover({ cutoffMs } = {}) {
             id: null,
             path: file,
             cwd: metadataCwd || headerCwd || fallback,
+            // No recorded cwd: the configured workspace is a guess, so association is capped at
+            // best-effort (tier 3) and `--strict` excludes it (VISION: wrong attribution < none).
+            cwdInferred: !metadataCwd && !headerCwd,
             gitRoot: null,
             gitBranch: null,
             remotes: [],

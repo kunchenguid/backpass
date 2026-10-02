@@ -534,7 +534,7 @@ test("every named ssh failure is classified into the message that says what to d
   }
 });
 
-test("PRA-442 P2-3 local-only adapters never enter SSH harness requests", async (t) => {
+test("openclaw P2-3 local-only adapters never enter SSH harness requests", async (t) => {
   const s = scenario();
   const original = ADAPTERS.openclaw;
   ADAPTERS.openclaw = { ...original, discover: async () => [] };
@@ -549,7 +549,7 @@ test("PRA-442 P2-3 local-only adapters never enter SSH harness requests", async 
   assert.equal(result.perHost[0].harnesses.openclaw, undefined);
 });
 
-test("PRA-442 an openclaw-only run with configured hosts never connects to or probes a host", async (t) => {
+test("openclaw an openclaw-only run with configured hosts never connects to or probes a host", async (t) => {
   const s = scenario();
   const original = ADAPTERS.openclaw;
   ADAPTERS.openclaw = { ...original, discover: async () => [] };

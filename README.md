@@ -267,7 +267,8 @@ archive is keyed by its generation. `--since` uses archive activity rather than 
 records need Node with `zstdDecompressSync` (Node 26 recommended); missing codecs or
 drifted records warn and skip. Session metadata and headers provide cwd, with a labelled
 `configured-workspace` fallback to the agent workspace in `~/.openclaw/openclaw.json`
-(or `~/.openclaw/workspace`); `OPENCLAW_STATE_DIR` overrides that state root. Gateway
+(or `~/.openclaw/workspace`); `OPENCLAW_STATE_DIR` overrides that state root. A fallback cwd is a guess, not a
+recording, so its association is capped at tier 3 (best-effort) and `--strict` excludes it. Gateway
 state-root headers also use this fallback. Typed routing takes precedence over key patterns:
 human channels are interactive; programmatic runs, cron, subagent, heartbeat, ACP and hook
 sessions are non-interactive. Probe/eval/test/smoke and ticket-run namespaces are excluded, and

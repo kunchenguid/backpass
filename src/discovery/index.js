@@ -284,6 +284,17 @@ function tierCounts(found) {
   return tiers;
 }
 
+/**
+ * An adapter that could not recover a session's cwd and substituted a configured default
+ * marks the row `cwdInferred`. A guessed path is not deterministic evidence, so whatever
+ * tier the guess would reach is capped at tier 3: labelled best-effort, excluded by
+ * `--strict` (VISION: a wrong attribution is worse evidence than none).
+ */
+export function capInferred(association, row) {
+  if (!association || !row?.cwdInferred || association.tier >= 3) return association;
+  return { tier: 3, confidence: "inferred", reason: `inferred cwd (no recorded cwd): ${association.reason}` };
+}
+
 async function discoverDirect(adapter, { repo, config, cutoffMs, strict, stats, associateFn, stateDir, userFilter }) {
   const rows = await adapter.discover({
     cutoffMs,
@@ -294,7 +305,10 @@ async function discoverDirect(adapter, { repo, config, cutoffMs, strict, stats, 
   const out = [];
   for (const row of rows) {
     stats.scanned += 1;
-    const association = associateFn({ cwd: row.cwd, remotes: row.remotes || [], gitRoot: row.gitRoot });
+    const association = capInferred(
+      associateFn({ cwd: row.cwd, remotes: row.remotes || [], gitRoot: row.gitRoot }),
+      row,
+    );
     if (!passesStrict(association, strict)) {
       stats.skipped += 1;
       continue;

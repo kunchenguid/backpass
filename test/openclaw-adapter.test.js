@@ -12,7 +12,7 @@ import * as openclaw from "../src/discovery/adapters/openclaw.js";
 import { classifyInteraction } from "../src/interaction.js";
 import { transcriptIdentity } from "../src/transcript.js";
 import { emptyGapLedger, recordGapObservations } from "../src/gap-ledger.js";
-import { ADAPTERS, discoverTranscripts } from "../src/discovery/index.js";
+import { ADAPTERS, capInferred, discoverTranscripts } from "../src/discovery/index.js";
 import { loadConfig } from "../src/config.js";
 import { main } from "../src/cli.js";
 import { distill } from "../src/distill.js";
@@ -43,7 +43,7 @@ function setup(t) {
   return { dir, file };
 }
 
-test("PRA-442 discovers live and archive generations, excludes probes and overlap, and resolves cwd", async (t) => {
+test("openclaw discovers live and archive generations, excludes probes and overlap, and resolves cwd", async (t) => {
   const { dir } = setup(t);
   fs.mkdirSync(path.join(dir, ".openclaw"));
   fs.writeFileSync(
@@ -72,7 +72,7 @@ test("PRA-442 discovers live and archive generations, excludes probes and overla
   assert.deepEqual(await openclaw.discover({ cutoffMs: timestamp + 10000 }), []);
 });
 
-test("PRA-442 classifies human channels and automated keys through shared interaction signals", async (t) => {
+test("openclaw classifies human channels and automated keys through shared interaction signals", async (t) => {
   setup(t);
   const rows = await openclaw.discover();
   for (const row of rows) {
@@ -83,7 +83,7 @@ test("PRA-442 classifies human channels and automated keys through shared intera
   }
 });
 
-test("PRA-442 strips injected context, drops system turns and stale branches, and folds tools", async (t) => {
+test("openclaw strips injected context, drops system turns and stale branches, and folds tools", async (t) => {
   setup(t);
   const row = (await openclaw.discover()).find((r) => r.extra.sessionId === "dashboard");
   const { events } = await openclaw.read(row);
@@ -101,7 +101,7 @@ test("PRA-442 strips injected context, drops system turns and stale branches, an
   );
 });
 
-test("PRA-442 decodes identity and zstd archives and compressed live events", async (t) => {
+test("openclaw decodes identity and zstd archives and compressed live events", async (t) => {
   setup(t);
   const rows = await openclaw.discover();
   const row = rows.find((r) => r.extra.sessionId === "archive");
@@ -118,7 +118,7 @@ test("PRA-442 decodes identity and zstd archives and compressed live events", as
   } else assert.ok(!rows.some((r) => r.extra.sessionId === "compressed"));
 });
 
-test("PRA-442 missing and drifted stores fail soft with named warnings", async (t) => {
+test("openclaw missing and drifted stores fail soft with named warnings", async (t) => {
   const { file } = setup(t);
   const warnings = [];
   t.mock.method(console, "error", (...args) => warnings.push(args.join(" ")));
@@ -133,7 +133,7 @@ test("PRA-442 missing and drifted stores fail soft with named warnings", async (
   assert.deepEqual((await openclaw.read({ path: file, extra: { sessionId: "absent" } })).events, []);
 });
 
-test("PRA-442 P1-4 live-to-archive identity and duplicate generations preserve one gap sighting", async (t) => {
+test("openclaw P1-4 live-to-archive identity and duplicate generations preserve one gap sighting", async (t) => {
   const { file } = setup(t);
   const before = (await openclaw.discover()).find((r) => r.extra.sessionId === "slack");
   const db = new DatabaseSync(file);
@@ -174,7 +174,7 @@ test("PRA-442 P1-4 live-to-archive identity and duplicate generations preserve o
   assert.notEqual(identity(distinct[0]), identity(distinct[1]));
 });
 
-test("PRA-442 creates one private snapshot per run and cleans only owned snapshots", async (t) => {
+test("openclaw creates one private snapshot per run and cleans only owned snapshots", async (t) => {
   const { file } = setup(t);
   setEnv(t, "BACKPASS_OPENCLAW_DB", null);
   setEnv(t, "OPENCLAW_AGENT", "other");
@@ -206,7 +206,7 @@ test("PRA-442 creates one private snapshot per run and cleans only owned snapsho
   assert.equal(calls, 2);
 });
 
-test("PRA-442 backup errors, timeout and shim refusal warn once and never open a store", async (t) => {
+test("openclaw backup errors, timeout and shim refusal warn once and never open a store", async (t) => {
   setup(t);
   setEnv(t, "BACKPASS_OPENCLAW_DB", null);
   const warnings = [];
@@ -235,7 +235,7 @@ test("PRA-442 backup errors, timeout and shim refusal warn once and never open a
   assert.match(warnings.join("\n"), /ERR_WINDOWS_SHIM_UNSAFE_ARG/);
 });
 
-test("PRA-442 an absent openclaw binary is an empty harness with no warning", async (t) => {
+test("openclaw an absent openclaw binary is an empty harness with no warning", async (t) => {
   setup(t);
   setEnv(t, "BACKPASS_OPENCLAW_DB", null);
   const warnings = [];
@@ -259,7 +259,7 @@ test("PRA-442 an absent openclaw binary is an empty harness with no warning", as
   assert.ok(!fs.existsSync(directory));
 });
 
-test("PRA-442 corrupt archives skip independently and other agents are not collected", async (t) => {
+test("openclaw corrupt archives skip independently and other agents are not collected", async (t) => {
   const { file } = setup(t);
   const warnings = [];
   t.mock.method(console, "error", (...args) => warnings.push(args.join(" ")));
@@ -276,7 +276,7 @@ test("PRA-442 corrupt archives skip independently and other agents are not colle
   assert.deepEqual(await openclaw.discover(), []);
 });
 
-test("PRA-442 wrapper stripping preserves ordinary text, repeated blocks and timestamp-like prose", () => {
+test("openclaw wrapper stripping preserves ordinary text, repeated blocks and timestamp-like prose", () => {
   const human = "  Keep whitespace and `code`.\nNext line.  ";
   assert.equal(openclaw.stripScaffolding(human), human);
   assert.equal(
@@ -291,7 +291,7 @@ test("PRA-442 wrapper stripping preserves ordinary text, repeated blocks and tim
   );
 });
 
-test("PRA-442 missing zstd support skips compressed sessions without breaking identity archives", async (t) => {
+test("openclaw missing zstd support skips compressed sessions without breaking identity archives", async (t) => {
   setup(t);
   const warnings = [];
   t.mock.method(console, "error", (...args) => warnings.push(args.join(" ")));
@@ -309,7 +309,7 @@ test("PRA-442 missing zstd support skips compressed sessions without breaking id
   }
 });
 
-test("PRA-442 defaults cwd, preserves text spacing and excludes its own prompts after stripping", async (t) => {
+test("openclaw defaults cwd, preserves text spacing and excludes its own prompts after stripping", async (t) => {
   const { file, dir } = setup(t);
   const rows = await openclaw.discover();
   assert.equal(rows.find((r) => r.extra.sessionId === "fallback").cwd, path.join(dir, ".openclaw/workspace"));
@@ -342,7 +342,7 @@ test("PRA-442 defaults cwd, preserves text spacing and excludes its own prompts 
   db.close();
 });
 
-test("PRA-442 P1-1 excludes tokenized eval namespaces and prefers typed routing over key fallback", async (t) => {
+test("openclaw P1-1 excludes tokenized eval namespaces and prefers typed routing over key fallback", async (t) => {
   const { file } = setup(t);
   const db = new DatabaseSync(file);
   db.exec(`UPDATE session_nodes SET created_via='spawn' WHERE current_session_id='dashboard';
@@ -374,7 +374,7 @@ test("PRA-442 P1-1 excludes tokenized eval namespaces and prefers typed routing 
   }
 });
 
-test("PRA-442 P1-2 gateway state-root headers fall through to labelled configured workspace", async (t) => {
+test("openclaw P1-2 gateway state-root headers fall through to labelled configured workspace", async (t) => {
   const { file, dir } = setup(t);
   const db = new DatabaseSync(file);
   const update = db.prepare("UPDATE transcript_events SET event_json=? WHERE session_id='slack' AND seq=0");
@@ -397,7 +397,7 @@ test("PRA-442 P1-2 gateway state-root headers fall through to labelled configure
   assert.equal((await openclaw.discover()).find((r) => r.extra.sessionId === "slack").cwd, "/other/project/worktree");
 });
 
-test("PRA-442 P1-3 archived since uses newest event activity, with archive time only when undated", async (t) => {
+test("openclaw P1-3 archived since uses newest event activity, with archive time only when undated", async (t) => {
   const { file } = setup(t);
   const db = new DatabaseSync(file);
   db.exec(`UPDATE session_transcript_archives SET created_at=${timestamp + 100000} WHERE session_id='archive'`);
@@ -429,7 +429,7 @@ test("PRA-442 P1-3 archived since uses newest event activity, with archive time 
   );
 });
 
-test("PRA-442 P2-6 unterminated internal context preserves the remaining human turn verbatim", () => {
+test("openclaw P2-6 unterminated internal context preserves the remaining human turn verbatim", () => {
   const human = "<<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>truncated context\n\nPlease keep these human words.";
   assert.equal(openclaw.stripScaffolding(human), human);
   assert.equal(
@@ -440,14 +440,14 @@ test("PRA-442 P2-6 unterminated internal context preserves the remaining human t
   );
 });
 
-test("PRA-442 an unclosed active memory block drops only its opening tag and keeps the words that follow", () => {
+test("openclaw an unclosed active memory block drops only its opening tag and keeps the words that follow", () => {
   const human = "<active_memory_plugin>truncated memory\n\nPlease keep these human words.";
   const kept = "truncated memory\n\nPlease keep these human words.";
   assert.equal(openclaw.stripScaffolding(human), kept);
   assert.equal(openclaw.stripScaffolding("<active_memory_plugin>complete</active_memory_plugin>\n" + human), kept);
 });
 
-test("PRA-442 a quoted self sentinel after an unclosed wrapper keeps every preceding character", () => {
+test("openclaw a quoted self sentinel after an unclosed wrapper keeps every preceding character", () => {
   const prompt = `${SELF_SESSION_SENTINEL}\nself analysis`;
   const closed = "<active_memory_plugin>complete</active_memory_plugin>\n";
   for (const opener of [
@@ -466,7 +466,7 @@ test("PRA-442 a quoted self sentinel after an unclosed wrapper keeps every prece
   assert.equal(openclaw.stripScaffolding("Human quotes " + prompt), "Human quotes " + prompt);
 });
 
-test("PRA-442 a Backpass session behind an unclosed wrapper is still excluded by the state-dir cwd check", async (t) => {
+test("openclaw a Backpass session behind an unclosed wrapper is still excluded by the state-dir cwd check", async (t) => {
   const { file, dir } = setup(t);
   const repoRoot = fs.realpathSync(fs.mkdtempSync(path.join(dir, "repo-")));
   const config = loadConfig(repoRoot, { discovery: { harnesses: ["openclaw"], since: "all" } });
@@ -496,7 +496,55 @@ test("PRA-442 a Backpass session behind an unclosed wrapper is still excluded by
   assert.equal(perHarness.openclaw.self, 1);
 });
 
-test("PRA-442 P2-2 absent optional routing columns degrade and schema drift warns once", async (t) => {
+test("openclaw a session with no recorded cwd is capped at best-effort tier 3 and dropped by --strict", async (t) => {
+  const { file, dir } = setup(t);
+  const repoRoot = fs.realpathSync(fs.mkdtempSync(path.join(dir, "repo-")));
+  // The configured workspace IS the repo, so the guessed cwd would otherwise reach tier 1.
+  fs.mkdirSync(path.join(dir, ".openclaw"), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, ".openclaw/openclaw.json"),
+    JSON.stringify({ agents: { defaults: { workspace: repoRoot } } }),
+  );
+  const config = loadConfig(repoRoot, { discovery: { harnesses: ["openclaw"], since: "all" } });
+  const cache = { version: 1, entries: {} };
+  config.state = { root: path.join(repoRoot, ".backpass"), readScanCache: () => cache, writeScanCache: () => {} };
+  const repo = { name: "demo", root: repoRoot, worktrees: [repoRoot], remotes: [] };
+  const db = new DatabaseSync(file);
+  db.prepare("UPDATE session_nodes SET entry_json=? WHERE current_session_id='dashboard'").run(
+    JSON.stringify({ systemPromptReport: { workspaceDir: repoRoot } }),
+  );
+  db.close();
+  const rows = await openclaw.discover();
+  assert.equal(rows.find((r) => r.extra.sessionId === "fallback").cwdInferred, true);
+  assert.equal(rows.find((r) => r.extra.sessionId === "dashboard").cwdInferred, false);
+
+  const loose = await discoverTranscripts({ repo, config });
+  const byId = (list, id) => list.transcripts.find((transcript) => transcript.extra.sessionId === id);
+  assert.equal(byId(loose, "dashboard").association.tier, 1, "a recorded cwd keeps its deterministic tier");
+  const guessed = byId(loose, "fallback").association;
+  assert.equal(guessed.tier, 3);
+  assert.equal(guessed.confidence, "inferred");
+  assert.match(guessed.reason, /^inferred cwd/);
+
+  const strict = await discoverTranscripts({ repo, config, strict: true });
+  assert.ok(byId(strict, "dashboard"), "--strict keeps the recorded-cwd session");
+  assert.equal(byId(strict, "fallback"), undefined, "--strict drops the inferred-cwd session");
+});
+
+test("openclaw capInferred leaves recorded-cwd and already best-effort associations alone", () => {
+  const tier1 = { tier: 1, confidence: "exact", reason: "cwd is worktree /r" };
+  assert.equal(capInferred(tier1, { cwdInferred: false }), tier1);
+  assert.equal(capInferred(null, { cwdInferred: true }), null);
+  const tier3 = { tier: 3, confidence: "path", reason: "dead path" };
+  assert.equal(capInferred(tier3, { cwdInferred: true }), tier3);
+  assert.deepEqual(capInferred(tier1, { cwdInferred: true }), {
+    tier: 3,
+    confidence: "inferred",
+    reason: "inferred cwd (no recorded cwd): cwd is worktree /r",
+  });
+});
+
+test("openclaw P2-2 absent optional routing columns degrade and schema drift warns once", async (t) => {
   const { file } = setup(t);
   const warnings = [];
   t.mock.method(console, "error", (...args) => warnings.push(args.join(" ")));
@@ -515,7 +563,7 @@ test("PRA-442 P2-2 absent optional routing columns degrade and schema drift warn
   assert.ok(!warnings.some((w) => /snapshot unreadable/.test(w)));
 });
 
-test("PRA-442 P2-5 bad workspace config warns by name and keeps sessions with a fallback", async (t) => {
+test("openclaw P2-5 bad workspace config warns by name and keeps sessions with a fallback", async (t) => {
   const { dir } = setup(t);
   const warnings = [];
   t.mock.method(console, "error", (...args) => warnings.push(args.join(" ")));
@@ -532,7 +580,7 @@ test("PRA-442 P2-5 bad workspace config warns by name and keeps sessions with a 
   assert.ok(!warnings.some((w) => /snapshot unreadable/.test(w)));
 });
 
-test("PRA-442 P2-4 CLI completion runs every adapter cleanup without name checks", async (t) => {
+test("openclaw P2-4 CLI completion runs every adapter cleanup without name checks", async (t) => {
   assert.equal(ADAPTERS.openclaw, openclaw);
   let cleanups = 0;
   ADAPTERS.fixture = { name: "fixture", cleanup: () => cleanups++, discover: async () => [] };
@@ -542,7 +590,7 @@ test("PRA-442 P2-4 CLI completion runs every adapter cleanup without name checks
   assert.equal(cleanups, 1);
 });
 
-test("PRA-442 P1-4 a live window keeps its identity beside a later distinct archive and across its own archival", async (t) => {
+test("openclaw P1-4 a live window keeps its identity beside a later distinct archive and across its own archival", async (t) => {
   const { file } = setup(t);
   const db = new DatabaseSync(file);
   const live = db.prepare("SELECT event_json FROM transcript_events WHERE session_id='slack' ORDER BY seq").all();
@@ -579,7 +627,7 @@ test("PRA-442 P1-4 a live window keeps its identity beside a later distinct arch
   assert.equal(after[1].extra.generation, "second");
 });
 
-test("PRA-442 P1-4 generation identity does not depend on processing order", async (t) => {
+test("openclaw P1-4 generation identity does not depend on processing order", async (t) => {
   const { file } = setup(t);
   const db = new DatabaseSync(file);
   const live = db.prepare("SELECT event_json FROM transcript_events WHERE session_id='slack' ORDER BY seq").all();
@@ -603,7 +651,7 @@ test("PRA-442 P1-4 generation identity does not depend on processing order", asy
   assert.deepEqual(await idsByGeneration(), forward);
 });
 
-test("PRA-442 P1-4 a live window keeps its identity as turns append beside an older generation", async (t) => {
+test("openclaw P1-4 a live window keeps its identity as turns append beside an older generation", async (t) => {
   const { file } = setup(t);
   const db = new DatabaseSync(file);
   const live = db.prepare("SELECT event_json FROM transcript_events WHERE session_id='slack' ORDER BY seq").all();
@@ -646,7 +694,7 @@ function twinArchives(db, sessionId, answers) {
   });
 }
 
-test("PRA-442 P1-4 generations sharing a start and first event keep distinct stable identities", async (t) => {
+test("openclaw P1-4 generations sharing a start and first event keep distinct stable identities", async (t) => {
   const { file } = setup(t);
   const db = new DatabaseSync(file);
   twinArchives(db, "twin", ["One.", "Two.", "Three."]);
@@ -671,7 +719,7 @@ test("PRA-442 P1-4 generations sharing a start and first event keep distinct sta
   assert.equal((await openclaw.read(rows[2])).events.at(-1).text, "Three.");
 });
 
-test("PRA-442 P1-4 a live member keeps the anchor id and earlier colliding archives never move existing ids", async (t) => {
+test("openclaw P1-4 a live member keeps the anchor id and earlier colliding archives never move existing ids", async (t) => {
   const { file } = setup(t);
   const db = new DatabaseSync(file);
   const header = { type: "session", cwd: "/synthetic/header", timestamp };
@@ -714,7 +762,7 @@ test("PRA-442 P1-4 a live member keeps the anchor id and earlier colliding archi
   for (const [generation, id] of Object.entries(colliding)) assert.equal(earlier[generation], id);
 });
 
-test("PRA-442 P1-4 an INTEGER generation column is read and keyed without throwing", async (t) => {
+test("openclaw P1-4 an INTEGER generation column is read and keyed without throwing", async (t) => {
   const { file } = setup(t);
   const warnings = [];
   t.mock.method(console, "error", (...args) => warnings.push(args.join(" ")));
