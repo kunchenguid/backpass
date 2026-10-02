@@ -178,6 +178,15 @@ test("--include-cursor-ide is the only way the deferred store is scanned", () =>
   assert.ok(config.discovery.harnesses.includes("cursor-ide"));
 });
 
+test("OMP discovery rejects non-boolean opt-ins rather than treating them as enabled", () => {
+  for (const includeOmp of ["true", 1, null, []]) {
+    assert.throws(
+      () => loadConfig(tempRepo({ discovery: { includeOmp } })),
+      /config\.discovery\.includeOmp must be a boolean/,
+    );
+  }
+});
+
 test("unknown harness names are dropped rather than failing the run", () => {
   const config = loadConfig(tempRepo({ discovery: { harnesses: ["claude", "not-a-harness"] } }));
   assert.deepEqual(config.discovery.harnesses, ["claude"]);

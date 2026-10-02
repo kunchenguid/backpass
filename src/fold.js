@@ -12,6 +12,7 @@ import {
   normalizeSourceLabel,
 } from "./gap-ledger.js";
 import { crossSurfaceDuplicates } from "./overlap.js";
+import { corroborationIdentityOf } from "./transcript.js";
 
 /**
  * Stage 2 of the pipeline (design section 3): fold per-transcript evidence into one
@@ -107,7 +108,7 @@ export function foldEvidence(
   const issuedSources = disambiguateSourceLabels([
     ...usable.map((record) => ({
       source: gapSource(record.transcript),
-      identity: record.transcript.identity || record.transcript.id,
+      identity: corroborationIdentityOf(record.transcript),
     })),
     ...persistedObservations.map((observation) => ({
       source: observation?.source,
@@ -117,6 +118,8 @@ export function foldEvidence(
   const recordSources = issuedSources.slice(0, usable.length);
   const observationSources = issuedSources.slice(usable.length);
   for (const [index, record] of usable.entries()) {
+    const sessionIdentity = record.transcript.identity || record.transcript.id;
+    const corroborationIdentity = corroborationIdentityOf(record.transcript);
     if (record.usedRawTranscript) usedRawCount += 1;
     const source = recordSources[index];
     sources.add(source);
@@ -126,7 +129,6 @@ export function foldEvidence(
       for (const item of record[polarity] || []) {
         const entry = touch(item.instruction);
         entry[polarity] += 1;
-        const sessionIdentity = record.transcript.identity || record.transcript.id;
         const category = classifyInteraction(record.transcript);
         entry.sessions.add(sessionIdentity);
         entry.sessionsByInteraction[category].add(sessionIdentity);
@@ -138,9 +140,9 @@ export function foldEvidence(
         // `class` is what a negative means (harm vs non-compliance vs irrelevant);
         // `harmSessions` is what the removal-evidence floor counts. A record from
         // before the class existed carries none and never counts as harm.
-        if (polarity === "negative" && item.class === "harm") entry.harmSessions.add(sessionIdentity);
+        if (polarity === "negative" && item.class === "harm") entry.harmSessions.add(corroborationIdentity);
         if (polarity === "negative" && item.class === "non-compliance") {
-          entry.nonComplianceSessions.add(sessionIdentity);
+          entry.nonComplianceSessions.add(corroborationIdentity);
         }
         entry.quotes.push({
           polarity,
@@ -162,7 +164,7 @@ export function foldEvidence(
         quote: gap.quote,
         recurrenceRisk: gap.recurrenceRisk,
         source,
-        sessionId: record.transcript.identity || record.transcript.id,
+        sessionId: corroborationIdentity,
         domain: gap.domain === "orchestration" ? "orchestration" : "project",
         project: record.transcript.project || null,
         projectRoot: record.transcript.projectRoot || null,

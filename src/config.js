@@ -119,6 +119,8 @@ export const DEFAULT_CONFIG = {
      * is refused by name. Absolute paths; `~` is expanded.
      */
     opencodeStores: [],
+    /** Include Oh My Pi's default session store in Pi discovery; opt-in only. */
+    includeOmp: false,
     minUserTurns: 2,
     includeCursorIde: false,
   },
@@ -467,6 +469,9 @@ function validate(config, { kind = "project", repoRoot = null } = {}) {
   }
   config.discovery.harnesses = config.discovery.harnesses.filter((h) => known.has(h));
   parseSince(config.discovery.since);
+  if (typeof config.discovery.includeOmp !== "boolean") {
+    throw new UserError("config.discovery.includeOmp must be a boolean");
+  }
   if (!Array.isArray(config.discovery.cloneRoots) || config.discovery.cloneRoots.some((p) => typeof p !== "string")) {
     throw new UserError("config.discovery.cloneRoots must be an array of paths");
   }

@@ -217,15 +217,15 @@ It cannot be combined with
 
 backpass reads the local transcript stores of seven harnesses directly. No API, no upload.
 
-| Harness        | Store                                          | Repo tie                                            |
-| -------------- | ---------------------------------------------- | --------------------------------------------------- |
-| **claude**     | `~/.claude/projects/<munged-cwd>/<uuid>.jsonl` | per-line `cwd`                                      |
-| **codex**      | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | `cwd` + recorded `git.repository_url`               |
-| **pi**         | standalone and BB-managed Pi JSONL stores      | session-header `cwd`                                |
-| **opencode**   | `~/.local/share/opencode/opencode.db` (sqlite) | `session.directory` / `session_v2.directory`        |
-| **grok**       | `~/.grok/sessions/<encoded-cwd>/<uuid>/`       | `summary.json` `cwd` + `git_remotes`                |
-| **cursor CLI** | `~/.cursor/chats/<md5(cwd)>/<uuid>/`           | `meta.json` `cwd`                                   |
-| **hermes**     | `~/.hermes/state.db` (sqlite)                  | session cwd, with CLI prompt / ACP config fallbacks |
+| Harness        | Store                                           | Repo tie                                            |
+| -------------- | ----------------------------------------------- | --------------------------------------------------- |
+| **claude**     | `~/.claude/projects/<munged-cwd>/<uuid>.jsonl`  | per-line `cwd`                                      |
+| **codex**      | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`  | `cwd` + recorded `git.repository_url`               |
+| **pi**         | standalone, OMP, and BB-managed Pi JSONL stores | session-header `cwd`                                |
+| **opencode**   | `~/.local/share/opencode/opencode.db` (sqlite)  | `session.directory` / `session_v2.directory`        |
+| **grok**       | `~/.grok/sessions/<encoded-cwd>/<uuid>/`        | `summary.json` `cwd` + `git_remotes`                |
+| **cursor CLI** | `~/.cursor/chats/<md5(cwd)>/<uuid>/`            | `meta.json` `cwd`                                   |
+| **hermes**     | `~/.hermes/state.db` (sqlite)                   | session cwd, with CLI prompt / ACP config fallbacks |
 
 Claude collection covers `$CLAUDE_CONFIG_DIR/projects` alongside the default store, so a
 relocated config dir does not hide its sessions. The variable is read from backpass's own
@@ -237,6 +237,25 @@ sessions under `~/.bb/pi-bridge-sessions/`. It also honors `PI_CODING_AGENT_DIR`
 `PI_CODING_AGENT_SESSION_DIR`, `BB_DATA_DIR`, and `BB_PI_BRIDGE_SESSION_DIR` when they are
 set in backpass's environment. When roots overlap, backpass scans every applicable layout
 and reads each JSONL file once.
+
+OMP (Oh My Pi) collection is **off by default**. Set `discovery.includeOmp` to `true` in
+`.backpassrc.json` or your [personal config](#configuration) to also read
+`~/.omp/agent/sessions/` through the Pi adapter:
+
+```json
+{ "discovery": { "includeOmp": true } }
+```
+
+Then run `backpass scan --harness pi` (or a normal `backpass` run). The setting also
+applies to configured SSH hosts. For `--scope user`, set it in `user.discovery` and
+include `"pi"` in `user.discovery.harnesses`; user scope otherwise collects only Claude
+and Codex. Explicit Pi store environment overrides still work without this setting;
+it controls only the additional default OMP store, not the harness backpass invokes.
+
+OMP nests subagent JSONL files below each parent session, and a subagent's own subagents
+one level further down. Backpass analyzes each file separately, but uses the root session as
+their shared corroboration source; a session and its subagents cannot count as independent
+sessions.
 
 OpenCode collection reads both store layouts: OpenCode 1.x (`session`, `message`, `part`) and OpenCode 2.x (`session_v2`, `session_message`).
 For 2.x, session activity uses the later of the session's update time and its newest message's update time.
@@ -289,12 +308,12 @@ OpenCode sessions with no recorded messages, such as unused agent probes, are no
 
 Every remaining session is labelled **interactive** or **non-interactive** (`src/interaction.js`).
 Codex `codex exec` / `originator: codex_exec`, Claude SDK, GitHub, action, and CI
-entrypoints, OpenCode child sessions (`parent_id`), and a cwd with a `.no-mistakes` path
-segment are non-interactive. Hermes gateway, cron, and WhatsApp sessions are classified the
-same way if they leak past collection's source filter. A no-mistakes pipeline run is just one
-kind of non-interactive session, not its own category. Missing harness metadata defaults to
-interactive. `backpass scan`, the proposal, and apply all print the mix so relevance is never
-silently computed against a robot-skewed pool.
+entrypoints, OpenCode child sessions (`parent_id`), OMP subagent transcripts, and a cwd
+with a `.no-mistakes` path segment are non-interactive. Hermes gateway, cron, and WhatsApp
+sessions are classified the same way if they leak past collection's source filter. A
+no-mistakes pipeline run is just one kind of non-interactive session, not its own category.
+Missing harness metadata defaults to interactive. `backpass scan`, the proposal, and apply
+all print the mix so relevance is never silently computed against a robot-skewed pool.
 
 ```sh
 backpass scan --since 7d --strict
@@ -812,6 +831,7 @@ CLI flags on top:
     "since": "30d",
     "worktreeGlobs": [],
     "cloneRoots": [],
+    "includeOmp": false,
     "minUserTurns": 2
   },
   "jobs": 4

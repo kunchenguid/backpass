@@ -126,6 +126,163 @@ test("the same session is never double-counted across runs", async () => {
   assert.equal(entries.length, 1, "rephrasings of one gap share one ledger entry");
   assert.deepEqual(Object.keys(entries[0].sessions), ["claude-s1"]);
 });
+test("OMP parent and subagent persist one ledger sighting and keep it in the child sample", async () => {
+  const h = harness();
+  const startedAt = Date.parse("2026-08-01T00:00:00Z");
+  const parentPath = "/omp/sessions/-repo-demo/parent-session.jsonl";
+  const parentIdentity = "pi-parent-session";
+  const parent = {
+    id: "pi-parent",
+    nativeId: "parent-native",
+    identity: "pi-file-parent",
+    corroborationIdentity: parentIdentity,
+    corroborationNativeId: "parent-native",
+    corroborationStartedAt: startedAt,
+    harness: "pi",
+    path: parentPath,
+    startedAt,
+    interaction: "interactive",
+  };
+  const child = {
+    id: "pi-child",
+    nativeId: "child-native",
+    identity: "pi-file-child",
+    parentSessionId: "parent-native",
+    corroborationIdentity: parentIdentity,
+    corroborationNativeId: "parent-native",
+    corroborationStartedAt: startedAt,
+    harness: "pi",
+    path: "/omp/sessions/-repo-demo/parent-session/Subagent.jsonl",
+    startedAt: startedAt + 1_000,
+    interaction: "non-interactive",
+  };
+  const independent = {
+    id: "claude-independent",
+    nativeId: "independent",
+    identity: "independent-session",
+    corroborationIdentity: "independent-session",
+    corroborationNativeId: "independent",
+    corroborationStartedAt: startedAt + 2_000,
+    harness: "claude",
+    path: "/claude/independent.jsonl",
+    startedAt: startedAt + 2_000,
+    interaction: "interactive",
+  };
+  const evidence = (transcript) => {
+    const result = record(transcript.id, [GAP]);
+    result.transcript = transcript;
+    result.key = evidenceKey(transcript, result.memoryHash);
+    return result;
+  };
+  const parentEvidence = evidence(parent);
+  const childEvidence = evidence(child);
+
+  const first = await run(h, [parentEvidence, childEvidence]);
+  assert.equal(first.gaps.length, 0, "a parent plus its subagent remains one observer");
+  assert.deepEqual(Object.keys(Object.values(h.state.readGapLedger().entries)[0].sessions), [parentIdentity]);
+
+  const childOnly = await foldForRun(h.ctx, memoryFile(), "h1", [], [child]);
+  assert.equal(childOnly.totals.gapSightings, 1, "the sampled child keeps its parent's ledger sighting");
+  assert.equal(childOnly.gaps.length, 0);
+
+  const independentEvidence = evidence(independent);
+  h.state.writeEvidence(independent.id, independentEvidence);
+  const withIndependent = await foldForRun(h.ctx, memoryFile(), "h1", [], [child, independent]);
+  assert.equal(withIndependent.gaps.length, 1);
+  assert.equal(withIndependent.gaps[0].sessions, 2);
+});
+test("a selected OMP child collapses legacy parent and child ledger sightings", async () => {
+  const h = harness({ gapLedgerMaxAge: "all" });
+  const startedAt = Date.parse("2026-08-01T00:00:00Z");
+  const parentIdentity = "pi-parent-session";
+  const parent = {
+    id: "pi-parent",
+    nativeId: "parent-native",
+    identity: parentIdentity,
+    harness: "pi",
+    path: "/omp/sessions/-repo-demo/parent-session.jsonl",
+    startedAt,
+    interaction: "interactive",
+  };
+  const child = {
+    id: "pi-child",
+    nativeId: "child-native",
+    identity: "pi-file-child",
+    parentSessionId: "parent-native",
+    corroborationIdentity: parentIdentity,
+    corroborationNativeId: "parent-native",
+    corroborationStartedAt: startedAt,
+    harness: "pi",
+    path: "/omp/sessions/-repo-demo/parent-session/Subagent.jsonl",
+    startedAt: startedAt + 1_000,
+    interaction: "non-interactive",
+  };
+  const asEvidence = (transcript) => {
+    const result = record(transcript.id, [GAP]);
+    result.transcript = transcript;
+    result.key = evidenceKey(transcript, result.memoryHash);
+    return result;
+  };
+  const legacyChild = { ...child };
+  delete legacyChild.parentSessionId;
+  delete legacyChild.corroborationIdentity;
+  delete legacyChild.corroborationNativeId;
+  delete legacyChild.corroborationStartedAt;
+  const ledger = { version: 1, entries: {} };
+  recordGapObservations(ledger, [asEvidence(parent), asEvidence(legacyChild)], {
+    now: new Date(startedAt + 2_000),
+  });
+  h.state.writeGapLedger(ledger);
+
+  const currentChildEvidence = asEvidence(child);
+  currentChildEvidence.gaps = [];
+  h.state.writeEvidence(child.id, currentChildEvidence);
+  const summary = await foldForRun(h.ctx, memoryFile(), "h1", [], [child]);
+
+  assert.equal(summary.gaps.length, 0, "old parent and child keys still represent one observer");
+  assert.equal(summary.totals.droppedGapSingletons, 1);
+  assert.deepEqual(Object.keys(Object.values(h.state.readGapLedger().entries)[0].sessions), [parentIdentity]);
+});
+
+test("an OMP parent and subagent sharing a root vote project in one run whatever the order", () => {
+  const startedAt = Date.parse("2026-08-01T00:00:00Z");
+  const rootIdentity = "pi-parent-session";
+  const observe = (id, domain) => {
+    const transcript = {
+      id,
+      nativeId: `${id}-native`,
+      identity: `pi-file-${id}`,
+      corroborationIdentity: rootIdentity,
+      corroborationNativeId: "parent-native",
+      corroborationStartedAt: startedAt,
+      harness: "pi",
+      startedAt,
+      interaction: "interactive",
+    };
+    const result = record(id, [{ proposedInstruction: GAP, domain }]);
+    result.transcript = transcript;
+    result.key = evidenceKey(transcript, result.memoryHash);
+    return result;
+  };
+  const parent = observe("pi-parent", "project");
+  const child = observe("pi-child", "orchestration");
+  const domainAfter = (records, ledger = { version: 1, entries: {} }, now = new Date(startedAt + DAY)) => {
+    recordGapObservations(ledger, records, { now });
+    const [entry] = Object.values(ledger.entries);
+    assert.deepEqual(Object.keys(entry.sessions), [rootIdentity]);
+    return { ledger, domain: entry.sessions[rootIdentity].domain };
+  };
+
+  assert.equal(domainAfter([parent, child]).domain, "project");
+  assert.equal(domainAfter([child, parent]).domain, "project");
+
+  const { ledger } = domainAfter([parent]);
+  assert.equal(
+    domainAfter([child], ledger, new Date(startedAt + 2 * DAY)).domain,
+    "orchestration",
+    "a later run still replaces the earlier vote",
+  );
+});
 
 test("a legacy session-id observation migrates without counting the identity as a second session", async () => {
   const h = harness();
@@ -143,6 +300,71 @@ test("a legacy session-id observation migrates without counting the identity as 
   const entry = Object.values(h.state.readGapLedger().entries)[0];
   assert.deepEqual(Object.keys(entry.sessions), ["stable-identity-s1"]);
   assert.equal(entry.sessions["stable-identity-s1"].firstObservedAt, firstObservedAt);
+});
+
+test("an ambiguous legacy session id never migrates onto a selected session", async () => {
+  const h = harness({ gapLedgerMaxAge: "all" });
+  const evidenceFor = (transcript, gaps) => {
+    const result = record(transcript.id, gaps);
+    result.transcript = transcript;
+    result.key = evidenceKey(transcript, result.memoryHash);
+    return result;
+  };
+  const shared = (identity) => ({
+    ...record("claude-shared", []).transcript,
+    nativeId: "shared",
+    identity,
+    path: `/claude/${identity}.jsonl`,
+  });
+  const a = shared("session-a");
+  const b = shared("session-b");
+  const c = record("claude-c", []).transcript;
+  const ledger = { version: 1, entries: {} };
+  recordGapObservations(ledger, [record("claude-shared", [GAP]), record("claude-c", [GAP])]);
+  h.state.writeGapLedger(ledger);
+  h.state.writeEvidence(a, evidenceFor(a, []));
+  h.state.writeEvidence(b, evidenceFor(b, [GAP]));
+
+  const summary = await foldForRun(h.ctx, memoryFile(), "h1", [], [a, c]);
+
+  assert.equal(summary.gaps.length, 0, "a sighting that may be B's must not corroborate A");
+  const [entry] = Object.values(h.state.readGapLedger().entries);
+  assert.deepEqual(Object.keys(entry.sessions).sort(), ["claude-c", "claude-shared"]);
+});
+
+test("a selected session recording a gap never inherits an ambiguous legacy id's sighting", async () => {
+  const h = harness();
+  const shared = (identity) => ({
+    ...record("claude-shared", []).transcript,
+    nativeId: "shared",
+    identity,
+    path: `/claude/${identity}.jsonl`,
+  });
+  const a = shared("session-a");
+  const b = shared("session-b");
+  const evidenceFor = (transcript, gaps) => {
+    const result = record(transcript.id, gaps);
+    result.transcript = transcript;
+    result.key = evidenceKey(transcript, result.memoryHash);
+    return result;
+  };
+  const ledger = { version: 1, entries: {} };
+  const bFirstObservedAt = new Date(Date.now() - 80 * DAY);
+  recordGapObservations(ledger, [record("claude-shared", [GAP])], { now: bFirstObservedAt });
+  h.state.writeGapLedger(ledger);
+  h.state.writeEvidence(a, evidenceFor(a, [GAP]));
+  h.state.writeEvidence(b, evidenceFor(b, [GAP]));
+
+  const summary = await foldForRun(h.ctx, memoryFile(), "h1", [], [a]);
+
+  assert.equal(summary.gaps.length, 0, "B's sighting must not corroborate A");
+  const [entry] = Object.values(h.state.readGapLedger().entries);
+  assert.deepEqual(Object.keys(entry.sessions).sort(), ["claude-shared", "session-a"]);
+  assert.equal(entry.sessions["claude-shared"].firstObservedAt, bFirstObservedAt.toISOString());
+  assert.ok(
+    Date.parse(entry.sessions["session-a"].firstObservedAt) > bFirstObservedAt.getTime(),
+    "A's fresh sighting keeps its own first-seen time",
+  );
 });
 
 test("a genuine one-off never graduates, however many runs see it", async () => {

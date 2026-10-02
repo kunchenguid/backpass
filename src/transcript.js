@@ -37,3 +37,8 @@ export function transcriptIdentity(transcript) {
     )
     .digest("hex");
 }
+
+/** Shared observer identity for related transcript files such as OMP subagents. */
+export function corroborationIdentityOf(transcript) {
+  return transcript?.corroborationIdentity || transcriptIdentity(transcript);
+}
