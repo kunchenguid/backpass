@@ -14,6 +14,7 @@ import { transcriptIdentity } from "../src/transcript.js";
 import { emptyGapLedger, recordGapObservations } from "../src/gap-ledger.js";
 import { ADAPTERS, capInferred, discoverTranscripts } from "../src/discovery/index.js";
 import { loadConfig } from "../src/config.js";
+import { resolveScope } from "../src/scope.js";
 import { main } from "../src/cli.js";
 import { distill } from "../src/distill.js";
 import { buildFixture, timestamp } from "./fixtures/openclaw/build.js";
@@ -518,21 +519,25 @@ test("openclaw a session with no recorded cwd is capped at best-effort tier 3 an
   assert.equal(rows.find((r) => r.extra.sessionId === "fallback").cwdInferred, true);
   assert.equal(rows.find((r) => r.extra.sessionId === "dashboard").cwdInferred, false);
 
-  const loose = await discoverTranscripts({ repo, config });
+  const scope = resolveScope(repoRoot, { scope: "project" }, config, repo);
+  const loose = await discoverTranscripts({ repo, config, scope });
   const byId = (list, id) => list.transcripts.find((transcript) => transcript.extra.sessionId === id);
   assert.equal(byId(loose, "dashboard").association.tier, 1, "a recorded cwd keeps its deterministic tier");
   const guessed = byId(loose, "fallback").association;
   assert.equal(guessed.tier, 3);
   assert.equal(guessed.confidence, "inferred");
   assert.match(guessed.reason, /^inferred cwd/);
+  assert.equal(guessed.project, repoRoot, "the cap keeps the scope's project");
+  assert.equal(guessed.projectRoot, repoRoot);
+  assert.equal(byId(loose, "fallback").project, repoRoot);
 
-  const strict = await discoverTranscripts({ repo, config, strict: true });
+  const strict = await discoverTranscripts({ repo, config, scope, strict: true });
   assert.ok(byId(strict, "dashboard"), "--strict keeps the recorded-cwd session");
   assert.equal(byId(strict, "fallback"), undefined, "--strict drops the inferred-cwd session");
 });
 
 test("openclaw capInferred leaves recorded-cwd and already best-effort associations alone", () => {
-  const tier1 = { tier: 1, confidence: "exact", reason: "cwd is worktree /r" };
+  const tier1 = { tier: 1, confidence: "exact", reason: "cwd is worktree /r", project: "/r", projectRoot: "/r" };
   assert.equal(capInferred(tier1, { cwdInferred: false }), tier1);
   assert.equal(capInferred(null, { cwdInferred: true }), null);
   const tier3 = { tier: 3, confidence: "path", reason: "dead path" };
@@ -541,6 +546,8 @@ test("openclaw capInferred leaves recorded-cwd and already best-effort associati
     tier: 3,
     confidence: "inferred",
     reason: "inferred cwd (no recorded cwd): cwd is worktree /r",
+    project: "/r",
+    projectRoot: "/r",
   });
 });
 

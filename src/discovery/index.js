@@ -292,7 +292,12 @@ function tierCounts(found) {
  */
 export function capInferred(association, row) {
   if (!association || !row?.cwdInferred || association.tier >= 3) return association;
-  return { tier: 3, confidence: "inferred", reason: `inferred cwd (no recorded cwd): ${association.reason}` };
+  return {
+    ...association,
+    tier: 3,
+    confidence: "inferred",
+    reason: `inferred cwd (no recorded cwd): ${association.reason}`,
+  };
 }
 
 async function discoverDirect(adapter, { repo, config, cutoffMs, strict, stats, associateFn, stateDir, userFilter }) {
