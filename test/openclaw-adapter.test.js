@@ -580,12 +580,62 @@ test("openclaw an inferred cwd stays tier 3 inferred under user scope even when 
   assert.equal(strict("fallback"), undefined, "--strict drops the inferred-cwd session");
 });
 
-test("openclaw capInferred leaves recorded-cwd and already best-effort associations alone", () => {
+test("openclaw an inferred cwd that only reaches tier 3 on its own stays inferred through normalizeProjects", async (t) => {
+  const { file, dir } = setup(t);
+  setEnv(t, "XDG_CONFIG_HOME", path.join(dir, ".config"));
+  const repoRoot = fs.realpathSync(fs.mkdtempSync(path.join(dir, "repo-")));
+  for (const args of [
+    ["init", "-q", "-b", "main"],
+    ["config", "user.email", "test@example.com"],
+    ["config", "user.name", "test"],
+    ["commit", "--allow-empty", "-q", "-m", "init"],
+  ])
+    execFileSync("git", args, { cwd: repoRoot, stdio: "ignore" });
+  const deletedWorkspace = path.join(repoRoot, "agent-workspace");
+  assert.ok(!fs.existsSync(deletedWorkspace));
+  fs.mkdirSync(path.join(dir, ".openclaw"), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, ".openclaw/openclaw.json"),
+    JSON.stringify({ agents: { defaults: { workspace: deletedWorkspace } } }),
+  );
+  const db = new DatabaseSync(file);
+  db.prepare("UPDATE session_nodes SET entry_json=? WHERE current_session_id='dashboard'").run(
+    JSON.stringify({ systemPromptReport: { workspaceDir: repoRoot } }),
+  );
+  db.close();
+  const config = loadConfig(null, { discovery: { harnesses: ["openclaw"], since: "all" } }, { kind: "user" });
+  const cache = { version: 1, entries: {} };
+  const discover = async (strict) => {
+    const scope = resolveScope(dir, { scope: "user", strict }, config, null, { home: dir });
+    config.state = { root: scope.stateDir, readScanCache: () => cache, writeScanCache: () => {} };
+    const result = await discoverTranscripts({ repo: scope.repo, scope, config, strict });
+    return (id) => result.transcripts.find((transcript) => transcript.extra.sessionId === id);
+  };
+  const loose = await discover(false);
+  assert.equal(loose("dashboard").association.tier, 1, "the recorded cwd registers the repo's worktrees");
+  const guessed = loose("fallback").association;
+  assert.equal(guessed.tier, 3);
+  assert.equal(guessed.confidence, "inferred");
+  assert.match(guessed.reason, /^inferred cwd \(no recorded cwd\): cwd /);
+  assert.equal(loose("fallback").cwd, deletedWorkspace);
+  const strict = await discover(true);
+  assert.ok(strict("dashboard"));
+  assert.equal(strict("fallback"), undefined, "--strict drops the inferred-cwd session");
+});
+
+test("openclaw capInferred leaves recorded-cwd associations alone and relabels every inferred one", () => {
   const tier1 = { tier: 1, confidence: "exact", reason: "cwd is worktree /r", project: "/r", projectRoot: "/r" };
   assert.equal(capInferred(tier1, { cwdInferred: false }), tier1);
   assert.equal(capInferred(null, { cwdInferred: true }), null);
-  const tier3 = { tier: 3, confidence: "path", reason: "dead path" };
-  assert.equal(capInferred(tier3, { cwdInferred: true }), tier3);
+  const tier3 = { tier: 3, confidence: "path", reason: "dead path", project: "/r", projectRoot: null };
+  assert.equal(capInferred(tier3, { cwdInferred: false }), tier3);
+  assert.deepEqual(capInferred(tier3, { cwdInferred: true }), {
+    tier: 3,
+    confidence: "inferred",
+    reason: "inferred cwd (no recorded cwd): dead path",
+    project: "/r",
+    projectRoot: null,
+  });
   assert.deepEqual(capInferred(tier1, { cwdInferred: true }), {
     tier: 3,
     confidence: "inferred",

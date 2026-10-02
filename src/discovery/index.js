@@ -291,7 +291,7 @@ function tierCounts(found) {
  * `--strict` (VISION: a wrong attribution is worse evidence than none).
  */
 export function capInferred(association, row) {
-  if (!association || !row?.cwdInferred || association.tier >= 3) return association;
+  if (!association || !row?.cwdInferred) return association;
   return {
     ...association,
     tier: 3,
