@@ -732,7 +732,7 @@ test("openclaw P1-4 an undated live window keeps its identity when archived", as
   const { file } = setup(t);
   const db = new DatabaseSync(file);
   const live = db.prepare("SELECT event_json FROM transcript_events WHERE session_id='fallback' ORDER BY seq").all();
-  assert.ok(live.every((r) => JSON.parse(r.event_json).timestamp === undefined));
+  assert.ok(live.every((r) => JSON.parse(String(r.event_json)).timestamp === undefined));
   const fallback = () => openclaw.discover().then((rows) => rows.filter((r) => r.extra.sessionId === "fallback"));
   const [before] = await fallback();
   assert.equal(before.extra.generation, null);

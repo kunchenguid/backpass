@@ -273,8 +273,9 @@ state-root headers also use this fallback. Typed routing takes precedence over k
 human channels are interactive; programmatic runs, cron, subagent, heartbeat, ACP and hook
 sessions are non-interactive. Probe/eval/test/smoke and ticket-run namespaces are excluded, and
 injected context and system messages are removed before distillation. Collection is local;
-OpenClaw is not yet included in the SSH probe. If an existing config pins the harness list,
-add `openclaw` or select it with `--harness openclaw`.
+OpenClaw is not yet included in the SSH probe, and a run that selects only `openclaw` contacts
+no configured host. If an existing config pins the harness list, add `openclaw` or select it
+with `--harness openclaw`.
 
 Association runs in four tiers:
 
@@ -292,7 +293,9 @@ Association runs in four tiers:
    matches one of the repo's remotes. This is how codex and grok stay attributable long
    after the worktree is gone.
 4. **Tier 3 - best-effort.** A dead path whose last segment is the repo's directory name,
-   or one matching a glob you configured. Labelled as such, and excluded by `--strict`.
+   one matching a glob you configured, or a cwd the harness could only infer rather than
+   record (capped here whatever tier the guess would reach). Labelled as such, and excluded
+   by `--strict`.
 
 On macOS and Linux, recorded Windows drive paths (`C:\work\repo`, `C:/work/repo`) and UNC paths (`\\server\share\repo`, `//server/share/repo`) are excluded from the path tiers and nested-file attribution; a matching recorded git remote still associates the session at tier 2.
 In user scope, when no recorded remote supplies a project key, such a cwd remains a tier-3 key in its original spelling, never resolved against the process cwd, and `--strict` excludes it.
