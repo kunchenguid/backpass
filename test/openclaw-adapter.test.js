@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import * as zlib from "node:zlib";
 import zlibRuntime from "node:zlib";
+import { execFileSync } from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
 import { SELF_SESSION_SENTINEL } from "../src/sentinel.js";
 import { DatabaseSync } from "node:sqlite";
@@ -534,6 +535,49 @@ test("openclaw a session with no recorded cwd is capped at best-effort tier 3 an
   const strict = await discoverTranscripts({ repo, config, scope, strict: true });
   assert.ok(byId(strict, "dashboard"), "--strict keeps the recorded-cwd session");
   assert.equal(byId(strict, "fallback"), undefined, "--strict drops the inferred-cwd session");
+});
+
+test("openclaw an inferred cwd stays tier 3 inferred under user scope even when the workspace is a git toplevel", async (t) => {
+  const { file, dir } = setup(t);
+  setEnv(t, "XDG_CONFIG_HOME", path.join(dir, ".config"));
+  const repoRoot = fs.realpathSync(fs.mkdtempSync(path.join(dir, "repo-")));
+  for (const args of [
+    ["init", "-q", "-b", "main"],
+    ["config", "user.email", "test@example.com"],
+    ["config", "user.name", "test"],
+    ["commit", "--allow-empty", "-q", "-m", "init"],
+  ])
+    execFileSync("git", args, { cwd: repoRoot, stdio: "ignore" });
+  fs.mkdirSync(path.join(dir, ".openclaw"), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, ".openclaw/openclaw.json"),
+    JSON.stringify({ agents: { defaults: { workspace: repoRoot } } }),
+  );
+  const db = new DatabaseSync(file);
+  db.prepare("UPDATE session_nodes SET entry_json=? WHERE current_session_id='dashboard'").run(
+    JSON.stringify({ systemPromptReport: { workspaceDir: repoRoot } }),
+  );
+  db.close();
+  const config = loadConfig(null, { discovery: { harnesses: ["openclaw"], since: "all" } }, { kind: "user" });
+  const cache = { version: 1, entries: {} };
+  const discover = async (strict) => {
+    const scope = resolveScope(dir, { scope: "user", strict }, config, null, { home: dir });
+    config.state = { root: scope.stateDir, readScanCache: () => cache, writeScanCache: () => {} };
+    const result = await discoverTranscripts({ repo: scope.repo, scope, config, strict });
+    return (id) => result.transcripts.find((transcript) => transcript.extra.sessionId === id);
+  };
+  const loose = await discover(false);
+  const recorded = loose("dashboard").association;
+  assert.equal(recorded.tier, 1);
+  assert.equal(recorded.confidence, "git");
+  const guessed = loose("fallback").association;
+  assert.equal(guessed.tier, 3);
+  assert.equal(guessed.confidence, "inferred");
+  assert.match(guessed.reason, /^inferred cwd/);
+  assert.equal(guessed.projectRoot, repoRoot);
+  const strict = await discover(true);
+  assert.ok(strict("dashboard"), "--strict keeps the recorded-cwd session");
+  assert.equal(strict("fallback"), undefined, "--strict drops the inferred-cwd session");
 });
 
 test("openclaw capInferred leaves recorded-cwd and already best-effort associations alone", () => {
