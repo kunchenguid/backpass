@@ -158,16 +158,18 @@ export function skillDescriptionTokens(skills) {
  * change to its description line costs k times that delta on the always-loaded surface.
  */
 export function loadedCopies(repoRoot, skills, file) {
-  const identity = (p) => {
-    try {
-      return fs.realpathSync(path.isAbsolute(p) ? p : path.join(repoRoot, p));
-    } catch {
-      return null;
-    }
-  };
-  const target = identity(file);
+  const target = skillFileIdentity(repoRoot, file);
   if (!target) return 1;
-  return Math.max(1, (skills || []).filter((skill) => identity(skill.path) === target).length);
+  return Math.max(1, (skills || []).filter((skill) => skillFileIdentity(repoRoot, skill.path) === target).length);
+}
+
+/** The real file behind a skill path (links followed), or null when it cannot be resolved. */
+function skillFileIdentity(repoRoot, p) {
+  try {
+    return fs.realpathSync(path.isAbsolute(p) ? p : path.join(repoRoot, p));
+  } catch {
+    return null;
+  }
 }
 
 /** Minimal YAML frontmatter reader for plain values and `>` / `|` multi-line values. */
@@ -250,11 +252,21 @@ export function renderSkillIndex(skills) {
  * The skill index the analysis prompt sees: name, path, and trigger description only.
  * Bodies are deliberately absent - the analysis turn opens a SKILL.md by path when a
  * description looks relevant to a mistake, instead of paying for every body on every
- * transcript.
+ * transcript. Each skill file is listed once: one library reached through several links
+ * is loaded (and billed) per link, but the model only needs to see it once. Identity is
+ * the file's realpath, so distinct files that share a name and description stay separate.
  */
-export function renderSkillIndexForAnalysis(skills) {
+export function renderSkillIndexForAnalysis(skills, repoRoot = process.cwd()) {
   if (!skills.length) return "(this repo has no skills)";
-  return skills.map((s) => `- ${s.name} (${s.path}) :: ${s.description || "(no description)"}`).join("\n");
+  const seen = new Set();
+  const distinct = skills.filter((s) => {
+    const identity = skillFileIdentity(repoRoot, s.path);
+    if (!identity) return true;
+    if (seen.has(identity)) return false;
+    seen.add(identity);
+    return true;
+  });
+  return distinct.map((s) => `- ${s.name} (${s.path}) :: ${s.description || "(no description)"}`).join("\n");
 }
 
 /** Serialize a skill draft to the common SKILL.md shape. */
