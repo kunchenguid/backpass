@@ -636,13 +636,19 @@ export function buildProposal(rawResult, context) {
           edit.evidence.map((item) => summary?.sourceSessions?.[normalizeSourceLabel(item.source)]).filter(Boolean),
         ),
       ];
+      // A quote whose session cannot be named is left out of `sessions`, which would let the
+      // sessions that can be named claim the edit for a deeper file. Incomplete attribution
+      // is cross-cutting by default: it stays in the root file.
+      const completeAttribution = edit.evidence.every((item) =>
+        Boolean(summary?.sourceSessions?.[normalizeSourceLabel(item.source)]),
+      );
       const sightings = edit.evidence.map((item) => ({
         sessionId: summary?.sourceSessions?.[normalizeSourceLabel(item.source)],
         quote: item.text,
       }));
       const owner = rootOwnsGap(sightings, routing.rootOwnedGaps)
         ? routing.rootPath
-        : (routing.ownerOf(sessions) ?? routing.rootPath);
+        : ((completeAttribution ? routing.ownerOf(sessions) : null) ?? routing.rootPath);
       const here = routing.weight ?? routing.rootPath;
       if (owner !== here) {
         violations.push(

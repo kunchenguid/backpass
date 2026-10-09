@@ -497,6 +497,7 @@ function routedGate({
   routing = true,
   weights = [API, WEB],
   initialText = null,
+  unattributed = [],
 }) {
   const repo = makeRepo({
     "AGENTS.md": "# Root\n\n- Use pnpm for every package script.\n",
@@ -511,7 +512,9 @@ function routedGate({
     totals: { positive: 0, negative: 0, gapClusters: 1 },
     instructions: [],
     sources: labels,
-    sourceSessions: Object.fromEntries([...ATTRIBUTION.keys()].map((id) => [labelOf(id), id])),
+    sourceSessions: Object.fromEntries(
+      [...ATTRIBUTION.keys()].filter((id) => !unattributed.includes(id)).map((id) => [labelOf(id), id]),
+    ),
   };
   return buildProposal(
     {
@@ -563,6 +566,31 @@ test("a new instruction backed by sessions from more than one app is refused in 
 
   const inRoot = routedGate({ memoryPath: "AGENTS.md", weight: null, sessions: ["api-1", "web-1"] });
   assert.deepEqual(inRoot.violations, []);
+});
+
+test("a new instruction with a quote from an unattributable session stays in the root file", () => {
+  // `api-2` is a real API session, but the fold issued its label without naming the session.
+  const inApi = routedGate({
+    memoryPath: API.path,
+    weight: API.path,
+    sessions: ["api-1", "api-2"],
+    unattributed: ["api-2"],
+  });
+  assert.equal(inApi.violations.length, 1);
+  assert.match(inApi.violations[0], /cross-cutting evidence belongs in AGENTS\.md, not apps\/api\/AGENTS\.md/);
+  assert.equal(inApi.proposal.edits.length, 0);
+
+  const inRoot = routedGate({
+    memoryPath: "AGENTS.md",
+    weight: null,
+    sessions: ["api-1", "api-2"],
+    unattributed: ["api-2"],
+  });
+  assert.deepEqual(inRoot.violations, []);
+  assert.equal(inRoot.proposal.edits.length, 1);
+
+  const attributed = routedGate({ memoryPath: API.path, weight: API.path, sessions: ["api-1", "api-2"] });
+  assert.deepEqual(attributed.violations, [], "with every session named the app's file still owns it");
 });
 
 test("a rewrite stays with the file whose text it changes, whoever's sessions back it", () => {

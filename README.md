@@ -673,6 +673,8 @@ weight of its own; a missing file is reported, never created:
 - **Routing.** A new instruction belongs to the most specific named file whose directory
   every session behind it worked in: a lesson from two `apps/api` sessions goes to
   `apps/api/AGENTS.md`, and one seen in both `apps/api` and `apps/web` goes to the root.
+  If any supporting quote cannot be mapped back to its session, the instruction stays in
+  the root even when every identifiable session worked in one subtree.
   The fold hands each file only the gap clusters it owns, and the proposal gate refuses an
   addition in the wrong file. A rewrite or removal stays with the file whose text it
   changes, and a failed skill trigger stays with the root, which owns the skill layer.
