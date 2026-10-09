@@ -488,6 +488,7 @@ export async function analyzeTranscripts({
           path: path.isAbsolute(skill.path) ? skill.path : path.join(repo.root, skill.path),
         }))
       : skills,
+    repo.root,
   );
 
   let done = 0;

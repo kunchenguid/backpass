@@ -13,11 +13,12 @@ import {
   loadSkills,
   parseFrontmatter,
   renderSkillFile,
+  renderSkillIndexForAnalysis,
   resolveOverflowTarget,
   writeSkill,
 } from "../src/skills.js";
 import { applyDecisions } from "../src/apply/writer.js";
-import { DEFAULT_CONFIG } from "../src/config.js";
+import { DEFAULT_CONFIG, USER_SKILLS_DIRS } from "../src/config.js";
 import { UserError } from "../src/logger.js";
 
 function tmpRepo() {
@@ -388,4 +389,38 @@ test("a skill symlinked into the loaded directory is read, because that is what 
   const beads = loadSkills(root, ".claude/skills").find((s) => s.name === "beads");
   assert.match(beads.description, /tracking project work/);
   assert.ok(beads.descriptionTokens > 0, "a symlinked skill's description is billed like any other");
+});
+
+function writeLibrarySkill(file, name, description) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, `---\nname: ${name}\ndescription: ${description}\n---\n\nbody\n`);
+}
+
+test("the analysis skill index lists a library skill reached through several user roots once", () => {
+  const root = tmpRepo();
+  const library = path.join(root, "library");
+  writeLibrarySkill(path.join(library, "db", "SKILL.md"), "db", "Use when touching the database.");
+  const roots = USER_SKILLS_DIRS.map((dir) => path.join(root, dir));
+  for (const dir of roots) {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.symlinkSync(path.join(library, "db"), path.join(dir, "db"), "dir");
+  }
+
+  const skills = loadProjectSkills(root, CANONICAL_SKILLS_DIR, roots, { exact: true });
+  assert.equal(skills.length, 3, "every link is loaded, and billed, as its own copy");
+  const lines = renderSkillIndexForAnalysis(skills, root).split("\n");
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /^- db \(/);
+});
+
+test("the analysis skill index keeps distinct files that share a name and description", () => {
+  const root = tmpRepo();
+  writeLibrarySkill(path.join(root, ".agents", "skills", "db", "SKILL.md"), "db", "Use when touching the database.");
+  writeLibrarySkill(path.join(root, ".claude", "skills", "db", "SKILL.md"), "db", "Use when touching the database.");
+
+  const skills = loadProjectSkills(root, CANONICAL_SKILLS_DIR, [".agents/skills", ".claude/skills"], { exact: true });
+  const lines = renderSkillIndexForAnalysis(skills, root).split("\n");
+  assert.equal(lines.length, 2);
+  assert.ok(lines.some((line) => line.includes(".agents/skills/db/SKILL.md")));
+  assert.ok(lines.some((line) => line.includes(".claude/skills/db/SKILL.md")));
 });
