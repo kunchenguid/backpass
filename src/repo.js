@@ -58,11 +58,10 @@ export function listWorktrees(root) {
   } catch {
     return [realpathOrSelf(root)];
   }
-  const paths = [];
+  const paths = [realpathOrSelf(root)];
   for (const line of raw.split("\n")) {
     if (line.startsWith("worktree ")) paths.push(realpathOrSelf(line.slice("worktree ".length)));
   }
-  if (!paths.length) paths.push(realpathOrSelf(root));
   return [...new Set(paths)];
 }
 

@@ -5,8 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
-import { associate } from "../src/discovery/association.js";
-import { attachSiblingClones, ensureLocalExclude, resolveRepo } from "../src/repo.js";
+import { associate, passesStrict } from "../src/discovery/association.js";
+import { attachSiblingClones, ensureLocalExclude, listWorktrees, resolveRepo } from "../src/repo.js";
 
 function git(args, cwd) {
   execFileSync("git", args, { cwd, stdio: "ignore" });
@@ -25,6 +25,51 @@ function initRepo() {
   git(["commit", "--allow-empty", "-q", "-m", "init"], dir);
   return dir;
 }
+
+test("separate git directories retain tier-1 association with the checkout", (t) => {
+  const parent = tempDir("backpass-separate-git-");
+  t.after(() => fs.rmSync(parent, { recursive: true, force: true }));
+  const root = path.join(parent, "checkout with spaces");
+  const nested = path.join(root, "nested");
+  const unrelated = path.join(parent, "unrelated");
+  fs.mkdirSync(nested, { recursive: true });
+  fs.mkdirSync(unrelated);
+  git(["init", "-q", "--separate-git-dir", path.join(parent, "git metadata")], root);
+
+  assert.ok(fs.statSync(path.join(root, ".git")).isFile());
+  assert.equal(listWorktrees(root).filter((worktree) => worktree === fs.realpathSync(root)).length, 1);
+  const repo = resolveRepo(root);
+  for (const [cwd, confidence] of [
+    [root, "exact"],
+    [nested, "nested"],
+  ]) {
+    const association = associate({ cwd }, repo);
+    assert.equal(association?.tier, 1);
+    assert.equal(association?.confidence, confidence);
+    assert.equal(passesStrict(association, true), true);
+  }
+  assert.equal(associate({ cwd: unrelated }, repo), null);
+});
+
+test("listWorktrees retains ordinary and linked checkout paths without duplicates", (t) => {
+  const root = initRepo();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  assert.deepEqual(listWorktrees(root), [fs.realpathSync(root)]);
+  const parent = tempDir("backpass-linked-");
+  t.after(() => fs.rmSync(parent, { recursive: true, force: true }));
+  const linked = path.join(parent, "linked");
+  git(["worktree", "add", "-q", "-b", "linked", linked], root);
+
+  const worktrees = listWorktrees(root);
+  assert.equal(worktrees.length, 2);
+  assert.deepEqual(new Set(worktrees), new Set([fs.realpathSync(root), fs.realpathSync(linked)]));
+});
+
+test("listWorktrees falls back to the normalized root outside a Git repository", (t) => {
+  const root = tempDir("backpass-no-git-");
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  assert.deepEqual(listWorktrees(root), [fs.realpathSync(root)]);
+});
 
 test("writes the line to .git/info/exclude, not a tracked .gitignore", () => {
   const dir = initRepo();
