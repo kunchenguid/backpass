@@ -58,9 +58,19 @@ export function listWorktrees(root) {
   } catch {
     return [realpathOrSelf(root)];
   }
+  // With `git init --separate-git-dir`, git reports the external git dir as the
+  // main `worktree` entry; it is not a checkout, so it must not be counted as one.
+  let commonDir = null;
+  try {
+    commonDir = realpathOrSelf(path.resolve(root, git(["rev-parse", "--git-common-dir"], root)));
+  } catch {
+    // keep every reported entry
+  }
   const paths = [realpathOrSelf(root)];
   for (const line of raw.split("\n")) {
-    if (line.startsWith("worktree ")) paths.push(realpathOrSelf(line.slice("worktree ".length)));
+    if (!line.startsWith("worktree ")) continue;
+    const worktree = realpathOrSelf(line.slice("worktree ".length));
+    if (worktree !== commonDir) paths.push(worktree);
   }
   return [...new Set(paths)];
 }

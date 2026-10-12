@@ -37,7 +37,7 @@ test("separate git directories retain tier-1 association with the checkout", (t)
   git(["init", "-q", "--separate-git-dir", path.join(parent, "git metadata")], root);
 
   assert.ok(fs.statSync(path.join(root, ".git")).isFile());
-  assert.equal(listWorktrees(root).filter((worktree) => worktree === fs.realpathSync(root)).length, 1);
+  assert.deepEqual(listWorktrees(root), [fs.realpathSync(root)]);
   const repo = resolveRepo(root);
   for (const [cwd, confidence] of [
     [root, "exact"],
