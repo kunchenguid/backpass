@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { cmdStatus } from "../src/commands/status.js";
 import { loadConfig } from "../src/config.js";
+import { nestedReach, writeNestedReach } from "../src/nested.js";
 import { State } from "../src/state.js";
 import { estimateTokens } from "../src/tokens.js";
 import { makeRepo } from "./helpers/staging.js";
@@ -11,11 +12,12 @@ const MEMORY = "# Rules\n\n- Keep changes focused.\n";
 const DESCRIPTION = "Load before changing database queries.";
 const SKILL = `---\nname: database\ndescription: ${DESCRIPTION}\n---\n\n# Database\n\nRead the schema first.\n`;
 
-async function captureStatus(repo, json) {
+async function captureStatus(repo, json, overrides = {}) {
   const config = loadConfig(repo.root, {
     memoryFiles: ["AGENTS.md"],
     skillsDir: ".agents/skills",
     budgetTokens: estimateTokens(MEMORY),
+    ...overrides,
   });
   config.state = new State(repo.root).ensure();
   config.agents = {
@@ -118,4 +120,60 @@ test("status neither counts nor reports thematic breaks as instructions (#192)",
   const text = (await captureStatus(repo, false)).join("\n");
   assert.match(text, /· 3 instructions/);
   assert.doesNotMatch(text, /restates demo/);
+});
+
+test("status shows each nested file's sampled-session reach and warns only below minGapEvidence", async () => {
+  const repo = makeRepo({
+    "AGENTS.md": MEMORY,
+    "apps/api/AGENTS.md": "# API\n\n- Handlers live in src/routes.\n",
+    "apps/web/AGENTS.md": "# Web\n\n- Components live in src/ui.\n",
+    "apps/docs/AGENTS.md": "# Docs\n\n- Pages live in src/pages.\n",
+  });
+  const nested = { nestedMemoryFiles: ["apps/api/AGENTS.md", "apps/web/AGENTS.md", "apps/docs/AGENTS.md"] };
+  const state = new State(repo.root).ensure();
+  const corpus = (n) => Array.from({ length: n }, () => ({}));
+  writeNestedReach(
+    state,
+    nestedReach(
+      [
+        { weight: { path: "apps/api/AGENTS.md", dir: "apps/api" }, transcripts: corpus(1) },
+        { weight: { path: "apps/web/AGENTS.md", dir: "apps/web" }, transcripts: corpus(2) },
+      ],
+      78,
+      2,
+    ),
+  );
+
+  const text = (await captureStatus(repo, false, nested)).join("\n");
+  assert.match(text, /NESTED EVIDENCE REACH \(sampled sessions at the last attribution, [^;]+; report-only\)/);
+  assert.match(
+    text,
+    /apps\/api\/AGENTS\.md: 1 of 78 sampled session\(s\) worked only under apps\/api\/\n {4}below minGapEvidence \(2\); no add, rewrite, or remove edit can reach this file/,
+  );
+  assert.match(
+    text,
+    /apps\/web\/AGENTS\.md: 2 of 78 sampled session\(s\) worked only under apps\/web\/\n(?! {4}below)/,
+  );
+  assert.equal((text.match(/below minGapEvidence/g) || []).length, 1);
+  assert.match(text, /apps\/docs\/AGENTS\.md: not yet measured - run `backpass` or `backpass analyze`/);
+
+  const structured = JSON.parse((await captureStatus(repo, true, nested)).join("\n"));
+  assert.deepEqual(
+    structured.nestedAttribution.files.map((entry) => [
+      entry.path,
+      entry.measured,
+      entry.sessions,
+      entry.sampledSessions,
+      entry.minGapEvidence,
+      entry.belowMinGapEvidence,
+    ]),
+    [
+      ["apps/api/AGENTS.md", true, 1, 78, 2, true],
+      ["apps/web/AGENTS.md", true, 2, 78, 2, false],
+      ["apps/docs/AGENTS.md", false, null, null, null, null],
+    ],
+  );
+
+  const plain = JSON.parse((await captureStatus(repo, true)).join("\n"));
+  assert.equal(plain.nestedAttribution, undefined);
 });

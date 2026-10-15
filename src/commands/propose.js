@@ -14,7 +14,7 @@ import { UserError, color, info, json, out, terminalSafe } from "../logger.js";
 import { budgetBar, formatTokens } from "../tokens.js";
 import { emitProgress } from "../progress.js";
 import { nestedCorpora, primaryMemoryFile } from "./analyze.js";
-import { mergeNestedProposals, nestedContext, routingFor } from "../nested.js";
+import { mergeNestedProposals, nestedContext, nestedReachWarning, routingFor } from "../nested.js";
 import { printUsage } from "./usage.js";
 import { closeRemoteDiscovery, discoverForRun } from "./scan.js";
 import { capTranscripts } from "../sample.js";
@@ -196,7 +196,12 @@ async function runProposalCore(ctx, precomputed) {
   });
 
   accountForConsolidationUsage(rootProposal, summary);
-  const proposal = passes.length ? mergeNestedProposals(rootProposal, passes) : rootProposal;
+  const proposal = passes.length
+    ? mergeNestedProposals(rootProposal, passes, {
+        sampledSessions: transcripts.length,
+        minGapEvidence: config.minGapEvidence,
+      })
+    : rootProposal;
   config.state.writeProposal(proposal);
   return { proposal, summary, memoryFile: file };
 }
@@ -263,13 +268,20 @@ export function printProposal(proposal, { applied = false, analysisUsage = [] } 
       `${proposal.stats.gapClusters} gap clusters`,
   );
   for (const nested of proposal.nested || []) {
-    const head = `  nested ${nested.memoryFile.path} · ${nested.sessions} session(s) under ${nested.dir}/`;
+    const sessions =
+      nested.sampledSessions != null
+        ? `${nested.sessions} of ${nested.sampledSessions} sampled session(s) worked only under ${nested.dir}/`
+        : `${nested.sessions} session(s) under ${nested.dir}/`;
+    const head = `  nested ${nested.memoryFile.path} · ${sessions}`;
     out(
       nested.skipped
         ? `${head} · ${color.dim(nested.skipped)}`
         : `${head} · budget ${budgetBar(nested.budget)} ${formatTokens(nested.budget.current)} -> ` +
             `${formatTokens(nested.budget.projected)} / ${formatTokens(nested.budget.capTokens)} tok`,
     );
+    // Report-only: the count explains an empty result, it never gates one.
+    const warning = nestedReachWarning(nested);
+    if (warning) out(`    ${color.yellow(warning)}`);
   }
   out("");
 

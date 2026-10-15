@@ -8,8 +8,10 @@ import {
   renderAlsoLoaded,
   reportNestedMemoryFiles,
   resolveNestedMemoryFiles,
+  nestedReach,
   nestedSurfaceHash,
   workedUnder,
+  writeNestedReach,
 } from "../nested.js";
 import { transcriptIdentity } from "../transcript.js";
 import { loadProjectSkills, resolveOverflowTarget, skillDescriptionTokens } from "../skills.js";
@@ -127,6 +129,7 @@ async function runAnalysisCore(ctx) {
 /**
  * The sessions each nested memory file learns from: those that worked under its
  * directory (`src/nested.js`). Attribution is computed only when a nested file is named.
+ * Each file's share of the sample is recorded for `status` (`nestedReach`), report-only.
  */
 export async function nestedCorpora(ctx, weights, transcripts, attribution = null) {
   if (!weights.length) return { corpora: [], attribution: null };
@@ -137,6 +140,9 @@ export async function nestedCorpora(ctx, weights, transcripts, attribution = nul
       workedUnder(placed.get(transcriptIdentity(transcript)), weight.dir),
     ),
   }));
+  if (ctx.config?.state) {
+    writeNestedReach(ctx.config.state, nestedReach(corpora, transcripts.length, ctx.config.minGapEvidence));
+  }
   return { corpora, attribution: placed };
 }
 

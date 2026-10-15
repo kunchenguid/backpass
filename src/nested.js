@@ -383,9 +383,10 @@ export function owningFile(sessionIds, weights, attribution) {
  * each nested file's edits renumbered after it and labeled with their file. A nested
  * file's image joins `targetFiles`, so apply refuses it if it changed since, the same
  * freshness contract every non-root target has; `nested` carries each file's own budget,
- * which apply re-checks against the accepted subset.
+ * which apply re-checks against the accepted subset. With `sampledSessions` and
+ * `minGapEvidence`, each entry also carries its report-only reach (`nestedReach`).
  */
-export function mergeNestedProposals(root, passes) {
+export function mergeNestedProposals(root, passes, { sampledSessions = null, minGapEvidence = null } = {}) {
   const edits = [...root.edits];
   const targetFiles = [...(root.targetFiles || [])];
   const usage = [...(root.usage || [])];
@@ -409,6 +410,13 @@ export function mergeNestedProposals(root, passes) {
       memoryFile: { path: weight.path, hash: weight.file.hash, tokens: weight.file.tokens },
       dir: weight.dir,
       sessions: pass.transcripts.length,
+      ...(sampledSessions !== null && minGapEvidence !== null
+        ? {
+            sampledSessions,
+            minGapEvidence,
+            belowMinGapEvidence: pass.transcripts.length < minGapEvidence,
+          }
+        : {}),
       budget: proposal?.budget ?? budgetStatus(weight.file.text, null, pass.cap),
       maxEdits: proposal?.config?.maxEditsPerRun ?? null,
       edits: ids,
@@ -433,4 +441,45 @@ export function routingFor(weights, attribution, rootPath, weight) {
     rootPath,
     ownerOf: (sessionIds) => owningFile(sessionIds, weights, attribution),
   };
+}
+
+/**
+ * How many sampled sessions each nested file can learn from: those whose every in-repo
+ * work path stays under its directory (`workedUnder`). Below `minGapEvidence` no gap can
+ * be corroborated for that file, since corroboration is bounded to the sample, so no add,
+ * rewrite, or remove can reach it - and a run that proposes nothing there cannot be told
+ * apart from a file with no gaps. Measured from deterministic attribution, never from a
+ * model; persisted in `.backpass/nested/reach.json` at each attribution so `status` can
+ * show it without discovering. Report-only: nothing reads it back to gate.
+ */
+export function nestedReach(corpora, sampledSessions, minGapEvidence) {
+  return corpora.map(({ weight, transcripts }) => ({
+    path: weight.path,
+    dir: weight.dir,
+    sessions: transcripts.length,
+    sampledSessions,
+    minGapEvidence,
+    belowMinGapEvidence: transcripts.length < minGapEvidence,
+  }));
+}
+
+function reachPath(state) {
+  return path.join(state.root, "nested", "reach.json");
+}
+
+export function writeNestedReach(state, reach) {
+  state.writeJsonFile(reachPath(state), { measuredAt: new Date().toISOString(), files: reach });
+}
+
+/** The last measured reach, or null when no run has attributed sessions yet. */
+export function readNestedReach(state) {
+  const saved = state.readJsonFile(reachPath(state), null);
+  return saved && Array.isArray(saved.files) ? saved : null;
+}
+
+/** The floor warning for one file's reach, or null at or above `minGapEvidence`. */
+export function nestedReachWarning(entry) {
+  return entry.belowMinGapEvidence
+    ? `below minGapEvidence (${entry.minGapEvidence}); no add, rewrite, or remove edit can reach this file`
+    : null;
 }

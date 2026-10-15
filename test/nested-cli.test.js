@@ -310,7 +310,16 @@ test("a named nested file learns only from its subtree, and each lesson lands in
   assert.deepEqual(proposal.nested[0].edits, ["e2"]);
   assert.ok(proposal.targetFiles.some((target) => target.file === "apps/api/AGENTS.md"));
   assert.match(result.output, /e2 ADD\s+apps\/api\/AGENTS\.md: /);
-  assert.match(result.output, /nested apps\/api\/AGENTS\.md · 2 session\(s\) under apps\/api\/ · budget /);
+  // At the floor: the count is shown, with no warning.
+  assert.match(
+    result.output,
+    /nested apps\/api\/AGENTS\.md · 2 of 4 sampled session\(s\) worked only under apps\/api\/ · budget /,
+  );
+  assert.doesNotMatch(result.output, /below minGapEvidence/);
+  assert.deepEqual(
+    [proposal.nested[0].sampledSessions, proposal.nested[0].minGapEvidence, proposal.nested[0].belowMinGapEvidence],
+    [4, 2, false],
+  );
 
   // The nested file's state is its own; the root's evidence dir holds only root evidence.
   const nestedState = path.join(dir, ".backpass", "nested");
@@ -327,6 +336,68 @@ test("a named nested file learns only from its subtree, and each lesson lands in
   assert.equal(fs.readFileSync(path.join(dir, "AGENTS.md"), "utf8"), `${ROOT_MEMORY}- ${WEB_GAP}\n`);
   assert.equal(fs.readFileSync(path.join(dir, "apps/api/AGENTS.md"), "utf8"), `${API_MEMORY}- ${API_GAP}\n`);
   assert.match(applied.output, /wrote apps\/api\/AGENTS\.md \(e2\)/);
+});
+
+function status(dir, args = []) {
+  const result = spawnSync(process.execPath, [CLI, "status", ...args], {
+    cwd: dir,
+    encoding: "utf8",
+    env: { ...process.env, NO_COLOR: "1", CI: "1" },
+  });
+  return { ...result, output: `${result.stdout}${result.stderr}` };
+}
+
+test("a nested file whose sampled sessions fall below minGapEvidence is named in the run summary and status", () => {
+  const dir = makeMonorepo({ config: { nestedMemoryFiles: ["apps/api/AGENTS.md"] } });
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-nested-sparse-home-"));
+  writeSession(home, "api-one", dir, { quote: API_QUOTE, file: "apps/api/src/routes/orders.ts" });
+  writeSession(home, "web-one", dir, { quote: WEB_QUOTE, file: "apps/web/src/checkout.tsx" });
+  writeSession(home, "web-two", dir, { quote: WEB_QUOTE, file: "apps/web/src/checkout.tsx" });
+
+  const before = status(dir);
+  assert.equal(before.status, 0, before.output);
+  assert.match(before.output, /apps\/api\/AGENTS\.md: not yet measured - run `backpass` or `backpass analyze`/);
+
+  const result = run(dir, home, []);
+  assert.equal(result.status, 0, result.output);
+  const warning = "below minGapEvidence (2); no add, rewrite, or remove edit can reach this file";
+  assert.match(
+    result.stdout,
+    /nested apps\/api\/AGENTS\.md · 1 of 3 sampled session\(s\) worked only under apps\/api\//,
+  );
+  assert.ok(result.stdout.includes(`\n    ${warning}\n`), result.stdout);
+  const proposal = readJson(path.join(dir, ".backpass", "proposal.json"));
+  assert.deepEqual(
+    [proposal.nested[0].sessions, proposal.nested[0].sampledSessions, proposal.nested[0].belowMinGapEvidence],
+    [1, 3, true],
+  );
+  // Report-only: the root edit the web sessions earned is still proposed.
+  assert.deepEqual(
+    proposal.edits.map((edit) => edit.file),
+    ["AGENTS.md"],
+  );
+
+  const text = status(dir);
+  assert.equal(text.status, 0, text.output);
+  assert.match(text.stdout, /NESTED EVIDENCE REACH \(sampled sessions at the last attribution, [^;]+; report-only\)/);
+  assert.match(text.stdout, /apps\/api\/AGENTS\.md: 1 of 3 sampled session\(s\) worked only under apps\/api\//);
+  assert.ok(text.stdout.includes(`\n    ${warning}\n`), text.stdout);
+
+  const structured = status(dir, ["--json"]);
+  assert.equal(structured.status, 0, structured.output);
+  const { nestedAttribution } = JSON.parse(structured.stdout);
+  assert.ok(nestedAttribution.measuredAt);
+  assert.deepEqual(nestedAttribution.files, [
+    {
+      path: "apps/api/AGENTS.md",
+      dir: "apps/api",
+      measured: true,
+      sessions: 1,
+      sampledSessions: 3,
+      minGapEvidence: 2,
+      belowMinGapEvidence: true,
+    },
+  ]);
 });
 
 test("a gap spanning API and web is proposed only in root, not again from its API subset", () => {
