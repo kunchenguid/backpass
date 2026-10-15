@@ -251,6 +251,14 @@ function migrateEvidenceRecord(record, transcript, identity) {
 export const ANALYSIS_INDEX_VERSION = 4;
 
 /**
+ * Consecutive unparseable analysis replies at one evidence key after which the transcript
+ * is skipped rather than retried every run (`hasGivenUp` in `src/analyze.js`). A changed
+ * key - transcript content, memory surface, or `ANALYSIS_INDEX_VERSION` - or `--force`
+ * analyzes it again.
+ */
+export const MAX_UNPARSED_REPLIES = 3;
+
+/**
  * Cache key for a transcript's analysis: its content signature, the memory-surface hash,
  * and the analysis index version. Changing any of them invalidates the evidence.
  */
@@ -263,6 +271,8 @@ export function evidenceKey(transcript, memoryHash) {
  * Only a successful analysis is worth caching. A `failed` entry is retried, and a
  * `skipped` entry is re-derived because the skip decision depends on configuration
  * (`minUserTurns`) rather than on the model - recomputing it costs one local file read.
+ * The one bound on retrying is `MAX_UNPARSED_REPLIES`, and a record given up on that way
+ * is still not fresh: it stays `failed` and never counts as evidence.
  */
 export function isEvidenceFresh(evidence, transcript, memoryHash) {
   if (!evidence || evidence.status !== "ok") return false;
