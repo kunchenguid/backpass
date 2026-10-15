@@ -896,3 +896,56 @@ test("a setext heading stays with the section it introduces when a removal is sp
   const hunk = { oldStart: 5, oldEnd: 9 };
   assert.equal(splitRemovalHunk(hunk, { oldText, oldLines, recovered: recoveredLineCounts([skill]) }), null);
 });
+
+test("a plain thematic break never ties an extraction to the deletion after it", () => {
+  const skill =
+    "---\nname: release\ndescription: Release steps.\n---\n\n## Release\n\nTag the commit before release.\n";
+  const split = (lines, hunk) => {
+    const oldText = lines.join("\n");
+    return splitRemovalHunk(hunk, { oldText, oldLines: oldText.split("\n"), recovered: recoveredLineCounts([skill]) });
+  };
+  const afterParagraph = split(
+    [
+      "# Guide",
+      "",
+      "Keep it small.",
+      "",
+      "Tag the commit before release.",
+      "",
+      "---",
+      "",
+      "Drop this stale note.",
+      "",
+      "## Other",
+      "",
+      "Stay.",
+      "",
+    ],
+    { oldStart: 5, oldEnd: 10 },
+  );
+  assert.deepEqual(
+    afterParagraph?.map((sub) => sub.find),
+    ["Tag the commit before release.\n\n---\n", "\nDrop this stale note.\n\n"],
+  );
+  const afterHeading = split(
+    [
+      "# Guide",
+      "",
+      "Keep it small.",
+      "",
+      "## Release",
+      "---",
+      "",
+      "Tag the commit before release.",
+      "",
+      "Drop this stale note.",
+      "",
+      "## Other",
+      "",
+      "Stay.",
+      "",
+    ],
+    { oldStart: 5, oldEnd: 11 },
+  );
+  assert.equal(afterHeading?.length, 2);
+});

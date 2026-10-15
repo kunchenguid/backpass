@@ -28,7 +28,7 @@ export const ATTRIBUTION_SPLIT_TOKENS = 120;
 
 const FENCE = /^\s*(```|~~~)/;
 /** CommonMark thematic break: 3+ of one of `-*_`, optional spaces between, up to 3 leading spaces. */
-const THEMATIC_BREAK = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+export const THEMATIC_BREAK = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
 const LIST_ITEM = /^\s*([-*+]|\d+[.)])\s+/;
 
 function normalizeForHash(text) {
