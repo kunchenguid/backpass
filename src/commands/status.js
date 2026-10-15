@@ -64,7 +64,7 @@ export async function cmdStatus(ctx) {
     budgets.push({
       path: weight.path,
       label: weight.path,
-      ...(weight.file ? budgetStatus(weight.file.text, null, nestedBudget(config)) : {}),
+      ...(weight.file ? budgetStatus(weight.file.text, null, nestedBudget(config, weight.path)) : {}),
       instructions: weight.file?.units.length ?? 0,
       pointerTo: weight.pointerTo,
       separate: false,

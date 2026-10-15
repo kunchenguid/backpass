@@ -680,7 +680,7 @@ it never writes a file you did not name:
 
 ```json
 {
-  "nestedMemoryFiles": ["apps/api/AGENTS.md", "apps/web/AGENTS.md"],
+  "nestedMemoryFiles": ["apps/web/AGENTS.md", { "path": "apps/api/AGENTS.md", "budgetTokens": 8000 }],
   "nestedBudgetTokens": 2000
 }
 ```
@@ -707,8 +707,11 @@ weight of its own; a missing file is reported, never created:
   The fold hands each file only the gap clusters it owns, and the proposal gate refuses an
   addition in the wrong file. A rewrite or removal stays with the file whose text it
   changes, and a failed skill trigger stays with the root, which owns the skill layer.
-- **A budget per file.** Each nested file is held to `nestedBudgetTokens` (`budgetTokens`
-  when unset), at propose and again at apply. An unchanged root over budget does not block
+- **A budget per file.** An entry written as `{ "path", "budgetTokens" }` holds that file
+  to its own positive-integer cap; a plain path entry is held to `nestedBudgetTokens`
+  (`budgetTokens`, which `--budget` sets, when unset). Propose and apply read the same cap.
+  An entry object without a `path`, with a non-integer or non-positive `budgetTokens`, or
+  with any other key is a config error. An unchanged root over budget does not block
   a combined proposal if at least one nested file actually runs synthesis with analyzed
   evidence; if every nested file is skipped, the normal root shrink gate still applies.
   Root edits must still clear that gate, and a nested edit must clear its own file's gate.

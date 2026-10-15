@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { applyEdit, filesOfEdit, sliceEditForFile } from "../proposal.js";
 import { memoryTextHash, readOnlyResolvedPath, resolveMemoryPath } from "../memory.js";
 import { userClaudeSkillsDir } from "../config.js";
+import { nestedBudget } from "../nested.js";
 import { budgetGateKind, budgetStatus, estimateTokens, formatTokens } from "../tokens.js";
 import { recordRejection } from "../state.js";
 import {
@@ -497,7 +498,7 @@ export function applyDecisions({ proposal, decisions, repo, state, config, dryRu
       });
       continue;
     }
-    const capTokens = config.nestedBudgetTokens ?? config.budgetTokens;
+    const capTokens = nestedBudget(config, plan.relative);
     const budget = budgetStatus(plan.before, plan.text, capTokens);
     const gate = budgetGateKind(budget);
     if (gate === "cap") {
