@@ -103,3 +103,19 @@ test("status identifies body overlap as triggered placement evidence", async () 
   assert.match(text, /AG-001 restates database body.*body loads on trigger; weigh placement/);
   assert.doesNotMatch(text, /duplicated always loaded/);
 });
+
+test("status neither counts nor reports thematic breaks as instructions (#192)", async () => {
+  const repo = makeRepo({
+    "AGENTS.md":
+      "# Guide\n\nRun the linter before you commit.\n\n---\n\n## Tests\n\nRun the unit tests with `make test`.\n\n---\n\nKeep commits small.\n",
+    ".agents/skills/demo/SKILL.md":
+      "---\nname: demo\ndescription: Use when releasing.\n---\n\n# Release\n\nTag the commit, then push the tag.\n\n---\n\nWrite the changelog entry.\n",
+  });
+
+  const structured = JSON.parse((await captureStatus(repo, true)).join("\n"));
+  assert.deepEqual(structured.crossSurfaceDuplicates, []);
+
+  const text = (await captureStatus(repo, false)).join("\n");
+  assert.match(text, /· 3 instructions/);
+  assert.doesNotMatch(text, /restates demo/);
+});

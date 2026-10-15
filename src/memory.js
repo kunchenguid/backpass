@@ -10,8 +10,10 @@ import { UserError } from "./logger.js";
  * Memory files are the weights. To talk about them precisely, backpass parses each
  * file into addressable instruction units (design section 3.1):
  *
- *   - sections come from markdown headings
- *   - units come from list items and paragraphs inside those sections
+ *   - sections come from markdown headings (ATX `#`, and a `---` setext underline)
+ *   - units come from list items and paragraphs inside those sections; a thematic
+ *     break (`---`, `***`, `___`) outside a fence ends the current unit and is never
+ *     a unit itself
  *   - each unit gets a content hash (survives cosmetic edits elsewhere in the file)
  *     and a readable alias AG-001, AG-002, ... used in prompts and evidence
  *   - eligible prose above ATTRIBUTION_SPLIT_TOKENS is conservatively split at
@@ -25,6 +27,9 @@ import { UserError } from "./logger.js";
 export const ATTRIBUTION_SPLIT_TOKENS = 120;
 
 const FENCE = /^\s*(```|~~~)/;
+/** CommonMark thematic break: 3+ of one of `-*_`, optional spaces between, up to 3 leading spaces. */
+const THEMATIC_BREAK = /^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
+const LIST_ITEM = /^\s*([-*+]|\d+[.)])\s+/;
 
 function normalizeForHash(text) {
   return text
@@ -100,7 +105,30 @@ export function parseMemoryUnits(text) {
       continue;
     }
 
-    const isListItem = /^\s*([-*+]|\d+[.)])\s+/.test(line);
+    // A break-only line is never an instruction. Directly under a plain paragraph a
+    // `---` run is a setext H2 underline instead, so that paragraph is a heading, as
+    // in CommonMark; under a list item, quote, or fence it stays a break. Checked
+    // before list items because `* * *` and `- - -` are breaks, not items.
+    if (THEMATIC_BREAK.test(line)) {
+      const setext =
+        /^ {0,3}-+[ \t]*$/.test(line) &&
+        buffer.length &&
+        !LIST_ITEM.test(buffer[0]) &&
+        !/^\s*>/.test(buffer[0]) &&
+        !buffer.some((bufferLine) => FENCE.test(bufferLine));
+      if (setext) {
+        const text = buffer.map((bufferLine) => bufferLine.trim()).join(" ");
+        buffer = [];
+        headings.length = Math.min(headings.length, 1);
+        headings[1] = text;
+        headings[0] = headings[0] ?? "";
+      } else {
+        flush(i);
+      }
+      continue;
+    }
+
+    const isListItem = LIST_ITEM.test(line);
     const isBlank = line.trim() === "";
 
     if (isBlank) {
@@ -108,7 +136,7 @@ export function parseMemoryUnits(text) {
       continue;
     }
     // A new list item starts a new unit; continuation lines stay with it.
-    if (isListItem && buffer.length && /^\s*([-*+]|\d+[.)])\s+/.test(buffer[0])) {
+    if (isListItem && buffer.length && LIST_ITEM.test(buffer[0])) {
       flush(i);
     }
     if (!buffer.length) bufferStart = i;
