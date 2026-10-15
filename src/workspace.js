@@ -401,23 +401,36 @@ export function splitRemovalHunk(hunk, { oldText, oldLines, recovered }) {
     if (remaining > 0) recovered.set(normalized, remaining - 1);
   }
 
+  const unitLines = new Set();
   for (const unit of parseMemoryUnits(oldText)) {
     const start = Math.max(unit.startLine, hunk.oldStart);
     const end = Math.min(unit.endLine, hunk.oldEnd);
     if (start > end) continue;
     const kinds = new Set();
     for (let lineNo = start; lineNo <= end; lineNo += 1) {
+      unitLines.add(lineNo);
       if (lineKinds.has(lineNo)) kinds.add(lineKinds.get(lineNo));
     }
     if (kinds.size > 1) return null;
   }
 
+  // Non-blank lines outside every unit are headings (ATX, or a setext title with its
+  // underline) or breaks; each adjacent block of them stays with the content it introduces.
   for (let lineNo = hunk.oldStart; lineNo <= hunk.oldEnd; lineNo += 1) {
-    if (!/^#{1,6}\s+/.test(oldLines[lineNo - 1] || "")) continue;
-    let contentLine = lineNo + 1;
-    while (contentLine <= hunk.oldEnd && !normalizeRecoveryLine(oldLines[contentLine - 1])) contentLine += 1;
-    if (contentLine > hunk.oldEnd || /^#{1,6}\s+/.test(oldLines[contentLine - 1] || "")) continue;
-    if (lineKinds.get(lineNo) !== lineKinds.get(contentLine)) return null;
+    if (!lineKinds.has(lineNo) || unitLines.has(lineNo)) continue;
+    let blockEnd = lineNo;
+    while (blockEnd < hunk.oldEnd && lineKinds.has(blockEnd + 1) && !unitLines.has(blockEnd + 1)) {
+      blockEnd += 1;
+    }
+    for (let blockLine = lineNo + 1; blockLine <= blockEnd; blockLine += 1) {
+      if (lineKinds.get(blockLine) !== lineKinds.get(lineNo)) return null;
+    }
+    let contentLine = blockEnd + 1;
+    while (contentLine <= hunk.oldEnd && !lineKinds.has(contentLine)) contentLine += 1;
+    if (contentLine <= hunk.oldEnd && unitLines.has(contentLine)) {
+      if (lineKinds.get(blockEnd) !== lineKinds.get(contentLine)) return null;
+    }
+    lineNo = blockEnd;
   }
 
   // Group the removed lines into maximal runs by recovery; blank lines never start a

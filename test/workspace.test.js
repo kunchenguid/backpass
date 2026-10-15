@@ -19,7 +19,9 @@ import {
   parseSkillFile,
   prepareWorkspace,
   repoFingerprint,
+  recoveredLineCounts,
   skillStagingRefusal,
+  splitRemovalHunk,
   workspacePathFor,
 } from "../src/workspace.js";
 import { UserError } from "../src/logger.js";
@@ -871,4 +873,26 @@ test("project scope bills a skill symlinked out of the repo but never stages it"
   const external = prepareWorkspace({ state, repo, memoryFile, skillsDir: ".agents/skills", allowExternal: true });
   assert.equal(external.originals.get(".agents/skills/db/SKILL.md"), SKILL);
   assert.ok(external.originals.has(".agents/skills/solo.md"));
+});
+
+test("a setext heading stays with the section it introduces when a removal is split", () => {
+  const oldText = [
+    "# Guide",
+    "",
+    "Keep it small.",
+    "",
+    "Release steps",
+    "---",
+    "",
+    "Tag the commit.",
+    "",
+    "## Other",
+    "",
+    "Stay.",
+    "",
+  ].join("\n");
+  const oldLines = oldText.split("\n");
+  const skill = "---\nname: release\ndescription: Release steps.\n---\n\n# Release\n\nTag the commit.\n";
+  const hunk = { oldStart: 5, oldEnd: 9 };
+  assert.equal(splitRemovalHunk(hunk, { oldText, oldLines, recovered: recoveredLineCounts([skill]) }), null);
 });
