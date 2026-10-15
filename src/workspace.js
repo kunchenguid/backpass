@@ -433,7 +433,12 @@ export function splitRemovalHunk(hunk, { oldText, oldLines, recovered }) {
       while (isSetextTitle(headingStart - 1)) headingStart -= 1;
     }
     let contentLine = lineNo + 1;
-    while (contentLine <= hunk.oldEnd && !lineKinds.has(contentLine)) contentLine += 1;
+    while (
+      contentLine <= hunk.oldEnd &&
+      (!lineKinds.has(contentLine) || THEMATIC_BREAK.test(oldLines[contentLine - 1]))
+    ) {
+      contentLine += 1;
+    }
     if (contentLine > hunk.oldEnd || !unitLines.has(contentLine)) continue;
     for (let headingLine = headingStart; headingLine <= lineNo; headingLine += 1) {
       if (lineKinds.has(headingLine) && lineKinds.get(headingLine) !== lineKinds.get(contentLine)) return null;

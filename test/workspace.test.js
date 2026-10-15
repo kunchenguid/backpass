@@ -949,3 +949,27 @@ test("a plain thematic break never ties an extraction to the deletion after it",
   );
   assert.equal(afterHeading?.length, 2);
 });
+
+test("a thematic break between a heading and its section never lets an extraction orphan the heading", () => {
+  const oldText = [
+    "# Guide",
+    "",
+    "Keep it small.",
+    "",
+    "## Notes",
+    "---",
+    "",
+    "Tag the commit before release.",
+    "",
+    "## Other",
+    "",
+    "Stay.",
+    "",
+  ].join("\n");
+  const skill = "---\nname: release\ndescription: Release steps.\n---\n\n# Release\n\nTag the commit before release.\n";
+  const hunk = { oldStart: 5, oldEnd: 9 };
+  assert.equal(
+    splitRemovalHunk(hunk, { oldText, oldLines: oldText.split("\n"), recovered: recoveredLineCounts([skill]) }),
+    null,
+  );
+});
