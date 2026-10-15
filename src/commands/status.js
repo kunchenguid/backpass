@@ -4,7 +4,14 @@ import path from "node:path";
 import { userClaudeSkillsDir } from "../config.js";
 import { color, json, out } from "../logger.js";
 import { memorySurfaceHash, resolveMemoryFiles } from "../memory.js";
-import { nestedBudget, nestedReachWarning, readNestedReach, resolveNestedMemoryFiles } from "../nested.js";
+import {
+  layerNestedWeights,
+  nestedBudget,
+  nestedReachWarning,
+  nestedStateDir,
+  readNestedReach,
+  resolveNestedMemoryFiles,
+} from "../nested.js";
 import {
   loadProjectSkills,
   resolveOverflowTarget,
@@ -16,7 +23,7 @@ import { HostCache, pruneHostCache } from "../discovery/cache.js";
 import { budgetBar, budgetStatus, formatTokens } from "../tokens.js";
 import { table } from "./scan.js";
 import { candidateKey, isProbeEntryFresh, resolvedEffort } from "../agents.js";
-import { MAX_UNPARSED_REPLIES } from "../state.js";
+import { MAX_UNPARSED_REPLIES, State } from "../state.js";
 
 export async function cmdStatus(ctx) {
   const { repo, config, scope } = ctx;
@@ -24,10 +31,6 @@ export async function cmdStatus(ctx) {
 
   const resolved = resolveMemoryFiles(repo.root, config.memoryFiles, { allowExternal: scope?.kind === "user" });
   const files = resolved.all;
-  const evidence = state.listEvidence();
-  const counts = { ok: 0, failed: 0, skipped: 0 };
-  for (const e of evidence) counts[e.status] = (counts[e.status] || 0) + 1;
-  const failed = evidence.filter((e) => e.status === "failed");
 
   const cache = state.readScanCache();
   pruneHostCache(state.root);
@@ -43,9 +46,34 @@ export async function cmdStatus(ctx) {
   const skillDirs = resolveProjectSkillDirs(repo.root, overflow.dir, config.skillsDirs || [], { exact: userScope });
   const skills = loadProjectSkills(repo.root, overflow.dir, config.skillsDirs || [], { exact: userScope });
   const descriptionTokens = skillDescriptionTokens(skills);
-  const memoryHash = memorySurfaceHash(resolved.hash, skills);
-  const givenUp = (record) => isGivenUp(record, memoryHash);
-  const gaveUp = failed.filter(givenUp).length;
+  const nestedWeights = resolveNestedMemoryFiles(repo.root, config);
+
+  // Each trained memory file keeps its own evidence store, keyed to its own surface hash.
+  const trained = nestedWeights.filter((weight) => weight.file && !weight.pointerTo);
+  const stores = [
+    { path: resolved.primary?.path ?? null, state, memoryHash: memorySurfaceHash(resolved.hash, skills) },
+    ...(resolved.primary ? layerNestedWeights(resolved.primary, trained, skills) : []).map((weight) => ({
+      path: weight.path,
+      state: new State(repo.root, { stateDir: nestedStateDir(state, weight.path) }),
+      memoryHash: weight.hash,
+    })),
+  ];
+  const counts = { ok: 0, failed: 0, skipped: 0 };
+  const failed = [];
+  const evidenceByFile = stores.map((store) => {
+    const own = { path: store.path, ok: 0, failed: 0, skipped: 0, gaveUp: 0 };
+    for (const e of store.state.listEvidence()) {
+      counts[e.status] = (counts[e.status] || 0) + 1;
+      own[e.status] = (own[e.status] || 0) + 1;
+      if (e.status !== "failed") continue;
+      const givenUp = isGivenUp(e, store.memoryHash);
+      if (givenUp) own.gaveUp += 1;
+      failed.push({ record: e, memory: store.path, givenUp });
+    }
+    return own;
+  });
+  const gaveUp = failed.filter((f) => f.givenUp).length;
+  const labelMemory = stores.length > 1;
 
   const duplicates = files
     .filter((file) => !resolved.pointers.includes(file))
@@ -65,7 +93,6 @@ export async function cmdStatus(ctx) {
     };
   });
   // Nested memory files are weights of their own, each under its own budget.
-  const nestedWeights = resolveNestedMemoryFiles(repo.root, config);
   for (const weight of nestedWeights) {
     budgets.push({
       path: weight.path,
@@ -108,7 +135,7 @@ export async function cmdStatus(ctx) {
       budgets,
       ...(nestedAttribution ? { nestedAttribution } : {}),
       crossSurfaceDuplicates: duplicates,
-      evidence: { ...counts, gaveUp },
+      evidence: { ...counts, gaveUp, files: evidenceByFile },
       scanCacheEntries: Object.keys(cache.entries).length,
       hosts: hostCache,
       summary: summary ? { analyzedSessions: summary.analyzedSessions, totals: summary.totals } : null,
@@ -217,20 +244,26 @@ export async function cmdStatus(ctx) {
 
   if (counts.failed) {
     out(color.dim("FAILED TRANSCRIPTS (retried on the next run unless skipped)"));
-    const rows = [["HARNESS", "SESSION", "REPLY", "NEXT RUN", "ERROR"]];
-    for (const e of failed.slice(0, 10)) {
+    const rows = [[...(labelMemory ? ["MEMORY"] : []), "HARNESS", "SESSION", "REPLY", "NEXT RUN", "ERROR"]];
+    for (const { record: e, memory, givenUp } of failed.slice(0, 10)) {
       rows.push([
+        ...(labelMemory ? [memory] : []),
         e.transcript.harness,
         String(e.transcript.id).slice(-12),
         describeReply(e.reply),
-        givenUp(e) ? `skipped after ${MAX_UNPARSED_REPLIES} failures` : "retry",
+        givenUp ? `skipped after ${MAX_UNPARSED_REPLIES} failures` : "retry",
         String(e.error).slice(0, 60),
       ]);
     }
     out(table(rows));
-    if (failed.some((e) => e.reply)) {
+    if (failed.some((f) => f.record.reply)) {
       out(
-        color.dim("  each unparseable reply's redacted head and tail are kept in .backpass/evidence/<identity>.json"),
+        color.dim(
+          labelMemory
+            ? "  each unparseable reply's redacted head and tail are kept in its memory file's evidence/<identity>.json" +
+                " (.backpass/ for the root, .backpass/nested/<file>/ for a nested file)"
+            : "  each unparseable reply's redacted head and tail are kept in .backpass/evidence/<identity>.json",
+        ),
       );
     }
     out("");

@@ -416,7 +416,7 @@ Calls already in flight finish, and their successful evidence is cached for reus
 Per-transcript failures, such as timeouts or unparseable output, still let the run continue; they are recorded, listed by `backpass status`, and retried on the next run.
 A reply with no parseable JSON keeps a trace in its evidence record: `reply.class`, `reply.chars` (the reply's length), and its first and last 300 characters (`reply.head`, `reply.tail`), redacted before they are cut.
 The class is judged from the reply text alone, since acpx reports no stop reason: `empty` (whitespace only), `truncated` (a code fence or `{` that never closes), `unparsed` (closed JSON-like text the extractor still rejected), or `prose` (no JSON shape at all).
-After 3 unparseable replies in a row for the same transcript content, memory surface, analysis agent, model, effort, and analysis prompt, the transcript is skipped instead of retried: the run summary and `backpass status` say `skipped after 3 failures`, the last reply trace is kept, and it never counts as evidence.
+After 3 unparseable replies in a row for the same transcript content, memory surface, analysis agent, model, effort, and analysis prompt, the transcript is skipped instead of retried: the run summary and `backpass status` say `skipped after 3 failures` (status reads each nested memory file's own evidence too and names the file), the last reply trace is kept, and it never counts as evidence.
 Changing any of those inputs, or `--force`, analyzes it again; a timeout or exec failure resets the count and is always retried.
 
 An acpx `PERMISSION_DENIED` exit does not discard a completed, valid analysis. Backpass

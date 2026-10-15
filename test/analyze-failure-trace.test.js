@@ -40,7 +40,10 @@ if (argv.includes("config") && argv.includes("show")) {
 }
 if (argv.includes("--file")) {
   fs.appendFileSync(process.env.FAKE_CALL_LOG, "call\\n");
-  const reply = fs.readFileSync(process.env.FAKE_REPLY_FILE, "utf8");
+  // A nested memory file's analysis answers from FAKE_NESTED_REPLY_FILE when it is set.
+  const prompt = fs.readFileSync(argv[argv.indexOf("--file") + 1], "utf8");
+  const nested = process.env.FAKE_NESTED_REPLY_FILE && prompt.includes("## The memory file under audit: apps/");
+  const reply = fs.readFileSync(nested ? process.env.FAKE_NESTED_REPLY_FILE : process.env.FAKE_REPLY_FILE, "utf8");
   // acpx's own timeout exit: a per-transcript failure with no reply to keep.
   if (reply === "__TIMEOUT__") process.exit(3);
   process.stdout.write(reply);
@@ -118,12 +121,17 @@ function git(args, cwd) {
   spawnSync("git", args, { cwd, stdio: "ignore" });
 }
 
-function initRepo(memory) {
+function initRepo(memory, nested) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "backpass-failtrace-repo-")));
   git(["init", "--quiet", "-b", "main"], dir);
   git(["config", "user.email", "test@example.com"], dir);
   git(["config", "user.name", "test"], dir);
   fs.writeFileSync(path.join(dir, "AGENTS.md"), memory);
+  if (nested) {
+    fs.mkdirSync(path.join(dir, "apps", "api"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "apps", "api", "AGENTS.md"), "# API memory\n\n- Handlers live in src/routes.\n");
+    fs.writeFileSync(path.join(dir, ".backpassrc.json"), JSON.stringify({ nestedMemoryFiles: ["apps/api/AGENTS.md"] }));
+  }
   git(["add", "-A"], dir);
   git(["commit", "-q", "-m", "memory"], dir);
   return dir;
@@ -142,13 +150,16 @@ function writeSession(home, id, cwd) {
   fs.writeFileSync(path.join(dir, `1_${id}.jsonl`), `${entries.map((e) => JSON.stringify(e)).join("\n")}\n`);
 }
 
-function harness() {
+function harness({ nested = false } = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-failtrace-home-"));
-  const dir = initRepo("# Agent instructions\n\n- Run `make build` before every push.\n");
-  writeSession(home, "session-a", dir);
+  const dir = initRepo("# Agent instructions\n\n- Run `make build` before every push.\n", nested);
+  // A nested run's session works under apps/api, so both the root and the nested file analyze it.
+  writeSession(home, "session-a", nested ? path.join(dir, "apps", "api") : dir);
   const replyFile = path.join(home, "reply.txt");
+  const nestedReplyFile = path.join(home, "nested-reply.txt");
   const callLog = path.join(home, "calls.log");
   fs.writeFileSync(replyFile, PROSE);
+  fs.writeFileSync(nestedReplyFile, PROSE);
   const env = {
     ...process.env,
     HOME: home,
@@ -157,6 +168,7 @@ function harness() {
     BACKPASS_ACPX_BIN: fakeAcpx,
     FAKE_REPLY_FILE: replyFile,
     FAKE_CALL_LOG: callLog,
+    ...(nested ? { FAKE_NESTED_REPLY_FILE: nestedReplyFile } : {}),
     NO_COLOR: "1",
   };
   const cli = (args) => {
@@ -269,6 +281,35 @@ test("status names a give-up only while the memory surface it gave up at is curr
   assert.doesNotMatch(status.stdout, /skipped after/);
   assert.equal(JSON.parse(h.cli(["status", "--json"]).stdout).evidence.gaveUp, 0);
   assert.equal(h.analyzeJson().summary.gaveUp, 0, "the next run does retry it");
+});
+
+test("status reads a nested memory file's own evidence store and names its give-up", () => {
+  const h = harness({ nested: true });
+  fs.writeFileSync(h.replyFile, JSON.stringify({ positive: [], negative: [], gaps: [] }));
+  for (let n = 1; n <= MAX_UNPARSED_REPLIES; n += 1) h.analyzeJson();
+  assert.equal(h.calls(), 1 + MAX_UNPARSED_REPLIES, "the root answers once; the nested file asks every run");
+  assert.equal(h.record().status, "ok", "the root analysis succeeded");
+
+  const status = h.cli(["status"]);
+  assert.equal(status.status, 0, status.output);
+  assert.match(status.stdout, /1 ok · 0 skipped · 1 failed \(1 skipped after 3 failures\)/);
+  assert.match(status.stdout, /MEMORY\s+HARNESS\s+SESSION\s+REPLY\s+NEXT RUN\s+ERROR/);
+  assert.match(
+    status.stdout,
+    new RegExp(`apps/api/AGENTS\\.md\\s+pi\\s+\\S+\\s+prose · ${PROSE.length} chars\\s+skipped after 3 failures`),
+  );
+  const structured = JSON.parse(h.cli(["status", "--json"]).stdout).evidence;
+  assert.deepEqual([structured.ok, structured.failed, structured.gaveUp], [1, 1, 1]);
+  assert.deepEqual(structured.files, [
+    { path: "AGENTS.md", ok: 1, failed: 0, skipped: 0, gaveUp: 0 },
+    { path: "apps/api/AGENTS.md", ok: 0, failed: 1, skipped: 0, gaveUp: 1 },
+  ]);
+
+  // A change to the nested file is a new surface for its evidence: status shows a retry.
+  fs.appendFileSync(path.join(h.dir, "apps", "api", "AGENTS.md"), "- Run the contract tests.\n");
+  const changed = JSON.parse(h.cli(["status", "--json"]).stdout).evidence;
+  assert.equal(changed.gaveUp, 0);
+  assert.match(h.cli(["status"]).stdout, new RegExp(`prose · ${PROSE.length} chars\\s+retry`));
 });
 
 test("a timeout resets the streak and keeps no reply trace", () => {

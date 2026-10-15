@@ -4,12 +4,12 @@ import { UserError, color, info, json, out, warn } from "../logger.js";
 import { memorySurfaceHash, resolveMemoryFiles, separateFileWarning } from "../memory.js";
 import {
   attributeTranscripts,
+  layerNestedWeights,
   nestedContext,
   renderAlsoLoaded,
   reportNestedMemoryFiles,
   resolveNestedMemoryFiles,
   nestedReach,
-  nestedSurfaceHash,
   workedUnder,
   writeNestedReach,
 } from "../nested.js";
@@ -64,13 +64,7 @@ export function primaryMemoryFile(repo, config, scope = null) {
   // Nested memory files are weights of their own, named in `nestedMemoryFiles` - never a
   // separate root file to consolidate (`src/nested.js`).
   const named = reportNestedMemoryFiles(resolveNestedMemoryFiles(repo.root, config));
-  const nested = named.map((weight) => {
-    const ancestors = named
-      .filter((candidate) => weight.dir.startsWith(`${candidate.dir}/`))
-      .sort((a, b) => a.dir.length - b.dir.length);
-    const layered = { ...weight, ancestors };
-    return { ...layered, hash: nestedSurfaceHash(resolved.primary, layered, skills) };
-  });
+  const nested = layerNestedWeights(resolved.primary, named, skills);
   return {
     file: resolved.primary,
     all: resolved.all,
