@@ -258,6 +258,19 @@ test(`after ${MAX_UNPARSED_REPLIES} unparseable replies in a row a transcript is
   assert.equal(h.record().status, "ok");
 });
 
+test("status names a give-up only while the memory surface it gave up at is current", () => {
+  const h = harness();
+  for (let n = 1; n <= MAX_UNPARSED_REPLIES; n += 1) h.analyzeJson();
+  assert.equal(JSON.parse(h.cli(["status", "--json"]).stdout).evidence.gaveUp, 1);
+
+  fs.writeFileSync(path.join(h.dir, "AGENTS.md"), "# Agent instructions\n\n- Always run lint.\n");
+  const status = h.cli(["status"]);
+  assert.match(status.stdout, new RegExp(`prose · ${PROSE.length} chars\\s+retry`));
+  assert.doesNotMatch(status.stdout, /skipped after/);
+  assert.equal(JSON.parse(h.cli(["status", "--json"]).stdout).evidence.gaveUp, 0);
+  assert.equal(h.analyzeJson().summary.gaveUp, 0, "the next run does retry it");
+});
+
 test("a timeout resets the streak and keeps no reply trace", () => {
   const h = harness();
   h.analyzeJson();

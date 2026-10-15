@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { userClaudeSkillsDir } from "../config.js";
 import { color, json, out } from "../logger.js";
-import { resolveMemoryFiles } from "../memory.js";
+import { memorySurfaceHash, resolveMemoryFiles } from "../memory.js";
 import { nestedBudget, nestedReachWarning, readNestedReach, resolveNestedMemoryFiles } from "../nested.js";
 import {
   loadProjectSkills,
@@ -28,7 +28,6 @@ export async function cmdStatus(ctx) {
   const counts = { ok: 0, failed: 0, skipped: 0 };
   for (const e of evidence) counts[e.status] = (counts[e.status] || 0) + 1;
   const failed = evidence.filter((e) => e.status === "failed");
-  const gaveUp = failed.filter(isGivenUp).length;
 
   const cache = state.readScanCache();
   pruneHostCache(state.root);
@@ -44,6 +43,9 @@ export async function cmdStatus(ctx) {
   const skillDirs = resolveProjectSkillDirs(repo.root, overflow.dir, config.skillsDirs || [], { exact: userScope });
   const skills = loadProjectSkills(repo.root, overflow.dir, config.skillsDirs || [], { exact: userScope });
   const descriptionTokens = skillDescriptionTokens(skills);
+  const memoryHash = memorySurfaceHash(resolved.hash, skills);
+  const givenUp = (record) => isGivenUp(record, memoryHash);
+  const gaveUp = failed.filter(givenUp).length;
 
   const duplicates = files
     .filter((file) => !resolved.pointers.includes(file))
@@ -221,7 +223,7 @@ export async function cmdStatus(ctx) {
         e.transcript.harness,
         String(e.transcript.id).slice(-12),
         describeReply(e.reply),
-        isGivenUp(e) ? `skipped after ${MAX_UNPARSED_REPLIES} failures` : "retry",
+        givenUp(e) ? `skipped after ${MAX_UNPARSED_REPLIES} failures` : "retry",
         String(e.error).slice(0, 60),
       ]);
     }
@@ -277,12 +279,16 @@ function describeRole(config, role) {
 }
 
 /**
- * Whether the analysis stage gave up on a failed record. `status` does not resolve the
- * analysis agent, so it reads only the streak: a changed transcript, memory surface, or
- * agent still analyzes it again on the next run (`hasGivenUp` in src/analyze.js).
+ * Whether the analysis stage gave up on a failed record at the current memory surface.
+ * `status` neither discovers transcripts nor resolves the analysis agent, so a changed
+ * transcript or agent still analyzes it again on the next run (`hasGivenUp` in src/analyze.js).
  */
-function isGivenUp(record) {
-  return Number.isInteger(record.unparsedReplies) && record.unparsedReplies >= MAX_UNPARSED_REPLIES;
+function isGivenUp(record, memoryHash) {
+  return (
+    record.memoryHash === memoryHash &&
+    Number.isInteger(record.unparsedReplies) &&
+    record.unparsedReplies >= MAX_UNPARSED_REPLIES
+  );
 }
 
 /** The class and size of an unparseable reply; "-" for any other failure or an older record. */
