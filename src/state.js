@@ -251,10 +251,9 @@ function migrateEvidenceRecord(record, transcript, identity) {
 export const ANALYSIS_INDEX_VERSION = 4;
 
 /**
- * Consecutive unparseable analysis replies at one evidence key after which the transcript
- * is skipped rather than retried every run (`hasGivenUp` in `src/analyze.js`). A changed
- * key - transcript content, memory surface, or `ANALYSIS_INDEX_VERSION` - or `--force`
- * analyzes it again.
+ * Consecutive unparseable analysis replies at one `replyFailureKey` after which the
+ * transcript is skipped rather than retried every run (`hasGivenUp` in `src/analyze.js`).
+ * A changed key (see `replyFailureKey`) or `--force` analyzes it again.
  */
 export const MAX_UNPARSED_REPLIES = 3;
 
