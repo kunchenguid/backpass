@@ -16,6 +16,7 @@ import { HostCache, pruneHostCache } from "../discovery/cache.js";
 import { budgetBar, budgetStatus, formatTokens } from "../tokens.js";
 import { table } from "./scan.js";
 import { candidateKey, isProbeEntryFresh, resolvedEffort } from "../agents.js";
+import { MAX_UNPARSED_REPLIES } from "../state.js";
 
 export async function cmdStatus(ctx) {
   const { repo, config, scope } = ctx;
@@ -26,6 +27,8 @@ export async function cmdStatus(ctx) {
   const evidence = state.listEvidence();
   const counts = { ok: 0, failed: 0, skipped: 0 };
   for (const e of evidence) counts[e.status] = (counts[e.status] || 0) + 1;
+  const failed = evidence.filter((e) => e.status === "failed");
+  const gaveUp = failed.filter(isGivenUp).length;
 
   const cache = state.readScanCache();
   pruneHostCache(state.root);
@@ -103,7 +106,7 @@ export async function cmdStatus(ctx) {
       budgets,
       ...(nestedAttribution ? { nestedAttribution } : {}),
       crossSurfaceDuplicates: duplicates,
-      evidence: counts,
+      evidence: { ...counts, gaveUp },
       scanCacheEntries: Object.keys(cache.entries).length,
       hosts: hostCache,
       summary: summary ? { analyzedSessions: summary.analyzedSessions, totals: summary.totals } : null,
@@ -183,7 +186,8 @@ export async function cmdStatus(ctx) {
   out(color.dim("CACHE"));
   out(`  scan cache      ${Object.keys(cache.entries).length} file(s) fingerprinted`);
   out(
-    `  evidence        ${counts.ok || 0} ok · ${counts.skipped || 0} skipped · ${color.red(String(counts.failed || 0))} failed`,
+    `  evidence        ${counts.ok || 0} ok · ${counts.skipped || 0} skipped · ${color.red(String(counts.failed || 0))} failed` +
+      (gaveUp ? ` (${gaveUp} skipped after ${MAX_UNPARSED_REPLIES} failures)` : ""),
   );
   if (summary) {
     const eligibleClusters = summary.totals.gapClusters;
@@ -210,12 +214,23 @@ export async function cmdStatus(ctx) {
   }
 
   if (counts.failed) {
-    out(color.dim("FAILED TRANSCRIPTS (retried on the next run)"));
-    const rows = [["HARNESS", "SESSION", "ERROR"]];
-    for (const e of evidence.filter((x) => x.status === "failed").slice(0, 10)) {
-      rows.push([e.transcript.harness, String(e.transcript.id).slice(-12), String(e.error).slice(0, 60)]);
+    out(color.dim("FAILED TRANSCRIPTS (retried on the next run unless skipped)"));
+    const rows = [["HARNESS", "SESSION", "REPLY", "NEXT RUN", "ERROR"]];
+    for (const e of failed.slice(0, 10)) {
+      rows.push([
+        e.transcript.harness,
+        String(e.transcript.id).slice(-12),
+        describeReply(e.reply),
+        isGivenUp(e) ? `skipped after ${MAX_UNPARSED_REPLIES} failures` : "retry",
+        String(e.error).slice(0, 60),
+      ]);
     }
     out(table(rows));
+    if (failed.some((e) => e.reply)) {
+      out(
+        color.dim("  each unparseable reply's redacted head and tail are kept in .backpass/evidence/<identity>.json"),
+      );
+    }
     out("");
   }
 
@@ -259,6 +274,21 @@ function describeRole(config, role) {
     typeof config[role].effort === "string" && config[role].effort.trim() ? config[role].effort.trim() : null;
   const count = `auto - ${config.agents.ladder(role).length} candidates, none probed yet`;
   return color.dim(configured ? `${count} (effort ${configured})` : count);
+}
+
+/**
+ * Whether the analysis stage gave up on a failed record. `status` does not resolve the
+ * analysis agent, so it reads only the streak: a changed transcript, memory surface, or
+ * agent still analyzes it again on the next run (`hasGivenUp` in src/analyze.js).
+ */
+function isGivenUp(record) {
+  return Number.isInteger(record.unparsedReplies) && record.unparsedReplies >= MAX_UNPARSED_REPLIES;
+}
+
+/** The class and size of an unparseable reply; "-" for any other failure or an older record. */
+function describeReply(reply) {
+  if (!reply || typeof reply.class !== "string") return "-";
+  return Number.isInteger(reply.chars) ? `${reply.class} · ${reply.chars} chars` : reply.class;
 }
 
 function formatBytes(bytes) {
