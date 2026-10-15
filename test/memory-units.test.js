@@ -54,10 +54,12 @@ test("a dash run directly under a paragraph is a setext heading, not a unit", ()
   );
 });
 
-test("a dash run under a list item, quote, or fence is a break, not a setext underline", () => {
+test("a dash run under a list item, quote, indented code, or fence is a break, not a setext underline", () => {
   assert.deepEqual(texts("- Keep it small.\n---\nNext.\n"), ["- Keep it small.", "Next."]);
   assert.deepEqual(texts("> Quoted rule.\n---\nNext.\n"), ["> Quoted rule.", "Next."]);
   assert.deepEqual(texts("```\ncode\n```\n---\nNext.\n"), ["```\ncode\n```", "Next."]);
+  assert.deepEqual(texts("    npm test\n---\nNext.\n"), ["    npm test", "Next."], "indented code is not a title");
+  assert.deepEqual(texts("\tnpm test\n---\nNext.\n"), ["\tnpm test", "Next."], "tab-indented code is not a title");
   assert.deepEqual(texts("Paragraph.\n***\nNext.\n"), ["Paragraph.", "Next."], "only dashes underline a heading");
 });
 

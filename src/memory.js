@@ -107,12 +107,13 @@ export function parseMemoryUnits(text) {
 
     // A break-only line is never an instruction. Directly under a plain paragraph a
     // `---` run is a setext H2 underline instead, so that paragraph is a heading, as
-    // in CommonMark; under a list item, quote, or fence it stays a break. Checked
-    // before list items because `* * *` and `- - -` are breaks, not items.
+    // in CommonMark; under a list item, quote, indented code, or fence it stays a
+    // break. Checked before list items because `* * *` and `- - -` are breaks, not items.
     if (THEMATIC_BREAK.test(line)) {
       const setext =
         /^ {0,3}-+[ \t]*$/.test(line) &&
         buffer.length &&
+        /^ {0,3}\S/.test(buffer[0]) &&
         !LIST_ITEM.test(buffer[0]) &&
         !/^\s*>/.test(buffer[0]) &&
         !buffer.some((bufferLine) => FENCE.test(bufferLine));
