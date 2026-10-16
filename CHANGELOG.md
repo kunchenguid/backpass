@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.36](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.35...backpass-v0.1.36) (2026-10-16)
+
+
+### Bug Fixes
+
+* **memory:** recognize CLAUDE.md symlinks as pointers ([#217](https://github.com/kunchenguid/backpass/issues/217)) ([8f1eda3](https://github.com/kunchenguid/backpass/commit/8f1eda38d27eab2466b920a5100e84c8b639a719))
+
 ## [0.1.35](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.34...backpass-v0.1.35) (2026-10-16)
 
 
