@@ -4,9 +4,9 @@ import { applyDecisions, budgetMismatchHint, budgetMismatchMessage, budgetMismat
 import { closeApplySurface, openApplySurface, pollDecisions, renderApplySurface } from "../apply/lavish.js";
 import { reviewInTerminal } from "../apply/terminal.js";
 import { openInBrowser } from "../apply/browser.js";
-import { REJECT_REASONS } from "../state.js";
+import { REJECT_REASONS, proposalHash } from "../state.js";
 import { budgetBar, formatTokens } from "../tokens.js";
-import { describeTarget } from "../target.js";
+import { applyCommand, describeTarget, stateCommand } from "../target.js";
 
 /**
  * The human gate. `backpass apply` is the only command that writes to the repo.
@@ -68,12 +68,25 @@ export function parseDecisionsFlag(vectors, editIds) {
   return { decisions, reasons };
 }
 
+/** Names the target proposals waiting beside the one this apply reads, or null when there are none. */
+function waitingProposals(state, scope) {
+  const others = state.listTargetProposals();
+  if (!others.length) return null;
+  return `proposals for other memory files are waiting: ${others.map((other) => `\`${applyCommand({ surface: other.path }, scope)}\``).join(", ")}`;
+}
+
 export async function cmdApply(ctx) {
   const { config, repo } = ctx;
   const proposal = config.state.readProposal();
+  // Hashed as read, before the review: the marker names exactly the proposal that was reviewed.
+  const reviewed = proposal && proposalHash(proposal);
+  const run = stateCommand("", config.state, ctx.scope);
 
   if (!proposal) {
-    throw new UserError("no proposal to apply", "run `backpass` first to produce one");
+    throw new UserError(
+      "no proposal to apply",
+      waitingProposals(config.state, ctx.scope) || `run \`${run}\` first to produce one`,
+    );
   }
   const proposalScope = proposal.scope || "project";
   const runScope = ctx.scope?.kind || "project";
@@ -86,20 +99,24 @@ export async function cmdApply(ctx) {
   if (ctx.flags.target !== undefined && !sameTarget) {
     throw new UserError(
       `this proposal targets ${describeTarget(savedTarget)}, not ${describeTarget(config.target)}`,
-      "apply it without --target, or run backpass again with the target you want",
+      `apply it with \`${applyCommand(config.state, ctx.scope)}\`, or run backpass again with the target you want`,
     );
   }
   if (savedTarget.kind !== "surface") info(`${color.cyan("·")} proposal targets ${describeTarget(savedTarget)}`);
   if (proposal.violations?.length) {
     throw new UserError(
       "the saved proposal failed its mechanical gates and was never approved for apply",
-      "run `backpass propose` again",
+      [`run \`${stateCommand("propose", config.state, ctx.scope)}\` again`, waitingProposals(config.state, ctx.scope)]
+        .filter(Boolean)
+        .join("; "),
     );
   }
   if (proposal.appliedAt) {
     throw new UserError(
       `the last proposal was already applied by ${proposal.appliedBy || "a previous apply"} (${proposal.appliedAt})`,
-      "run `backpass` again to produce a fresh one",
+      [`run \`${run}\` again to produce a fresh one`, waitingProposals(config.state, ctx.scope)]
+        .filter(Boolean)
+        .join("; "),
     );
   }
   if (!proposal.edits.length) {
@@ -154,6 +171,12 @@ export async function cmdApply(ctx) {
   });
 
   if (surfaceFile) await closeApplySurface(surfaceFile);
+  // Every edit decided and nothing failed: the review is done, so this target proposal stops being
+  // listed as waiting. Only target states are listed, so the default `.backpass/` gets no marker.
+  const done = !ctx.flags["dry-run"] && !results.failed.length && editIds.every((id) => decisions[id] !== "skipped");
+  if (config.state.surface && done) {
+    config.state.markReviewed(reviewed);
+  }
 
   if (ctx.flags.json) {
     json({ decisions, rejectReasons, results, mix: proposal.stats.corpusMix || null });

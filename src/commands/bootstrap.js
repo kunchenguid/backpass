@@ -45,7 +45,7 @@ export async function bootstrapRun(ctx, deps = {}) {
     return await bootstrapRunCore(ctx, deps);
   } finally {
     await closeRemoteDiscovery(ctx);
-    pruneHostCache(ctx.config.state.root);
+    pruneHostCache(ctx.config.state.scopeRoot);
   }
 }
 

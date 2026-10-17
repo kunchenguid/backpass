@@ -8,6 +8,7 @@ import { skillDescriptionTokens } from "../skills.js";
 import { startTui } from "../tui/index.js";
 import { resolveMemoryFiles } from "../memory.js";
 import { nestedBudget } from "../nested.js";
+import { applyCommand, stateCommand } from "../target.js";
 
 /**
  * The default command: one full backward pass.
@@ -117,13 +118,16 @@ export async function cmdRun(ctx) {
       return 0;
     }
 
-    printProposal(proposal, { analysisUsage: analysis.summary?.usage || [] });
+    printProposal(proposal, {
+      analysisUsage: analysis.summary?.usage || [],
+      apply: applyCommand(config.state, scope),
+    });
     return 0;
   } catch (err) {
     tui?.stop();
     if (err instanceof ProposalViolation) {
       printSynthesisFailure(err, config.state);
-      throw new UserError(err.message, synthesisFailureHint(err));
+      throw new UserError(err.message, synthesisFailureHint(err, stateCommand("propose", config.state, scope)));
     }
     throw err;
   } finally {

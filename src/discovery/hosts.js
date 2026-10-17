@@ -465,7 +465,7 @@ const SQLITE_HARNESSES = new Set(["opencode", "hermes", "cursor", "cursor-ide"])
  * @param {{ config: object }} options
  */
 export async function prefetchRemoteTranscripts(transcripts, { config }) {
-  const cache = new HostCache(config.state.root);
+  const cache = new HostCache(config.state.scopeRoot);
   const index = cache.readIndex();
   const stats = { fetched: 0, reused: 0, failed: 0, bytes: 0 };
   const remote = transcripts.filter((t) => t.remote?.host);

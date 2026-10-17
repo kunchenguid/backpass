@@ -6,6 +6,7 @@ import { UserError, info } from "./logger.js";
 import { pointerImportPath, resolveMemoryFiles } from "./memory.js";
 import { pathInRoot, resolveInRoot } from "./scope.js";
 import { loadProjectSkills, resolveOverflowTarget } from "./skills.js";
+import { State, targetStateDir } from "./state.js";
 import { skillStagingRefusal } from "./workspace.js";
 
 /**
@@ -20,8 +21,10 @@ import { skillStagingRefusal } from "./workspace.js";
  * (after the same path normalization the scope applies) or a loaded skill's `name`.
  * Nothing else resolves: no basename, directory, glob, or arbitrary existing file.
  * A spec that matches nothing, or more than one thing, is an error that lists the
- * valid names. The target is a write surface, not a second scope: analysis, evidence,
- * and state are unchanged, only staging and the proposal gate narrow.
+ * valid names. The target is a write surface, not a second scope: a skill target, or a
+ * memory target naming the default file, keeps the surface's analysis, evidence, and
+ * state, and only staging and the proposal gate narrow. A memory target naming another
+ * root file trains a different weight, so it keeps its own state (`surfaceState`).
  */
 
 export const SURFACE_TARGET = Object.freeze({ kind: "surface" });
@@ -107,4 +110,56 @@ export function printTargetNote(target) {
   if (!target || target.kind === "surface") return;
   const rest = target.kind === "skill" ? "the memory file and other skills" : "existing skills";
   info(`targeting ${describeTarget(target)}; ${rest} are read-only this run`);
+}
+
+/**
+ * The state a run keeps its per-surface files in: the scope root when the run trains the
+ * file a default run would, otherwise that file's own `targets/` directory, sharing the
+ * scope-level files (`src/state.js`). Without this, two root files trained in turn with
+ * `--memory-file` or `--target` overwrite each other's evidence and proposal, and every
+ * switch re-analyzes every transcript. Keyed on the resolved primary path, so a run named
+ * by `--memory-file X` and one named by `--target X` share one directory.
+ *
+ * @param {State} rootState the scope's state, already ensured
+ * @param {{ root: string, user: boolean, memoryFiles: string[], defaultMemoryFiles: string[] }} run
+ */
+export function surfaceState(rootState, { root, user, memoryFiles, defaultMemoryFiles }) {
+  const trained = trainedMemoryPath(root, memoryFiles, user);
+  if (!trained || trained === trainedMemoryPath(root, defaultMemoryFiles, user)) return rootState;
+  return new State(root, {
+    stateDir: targetStateDir(rootState, trained),
+    mode: rootState.dirMode,
+    exclude: false,
+    shared: rootState,
+    surface: trained,
+  }).ensure();
+}
+
+/** The root file a run with these entries trains: the first that exists, else the first named. */
+function trainedMemoryPath(root, files, user) {
+  if (!files?.length) return null;
+  try {
+    const primary = resolveMemoryFiles(root, files, { allowExternal: user }).primary;
+    if (primary) return pathInRoot(primary.path, root);
+  } catch {
+    // An unresolvable entry is named by the command that reads it, not here.
+  }
+  return pathInRoot(files[0], root);
+}
+
+/** The `backpass` command (`subcommand` empty for a full run) that reads and writes the state in `state`. */
+export function stateCommand(subcommand, state, scope) {
+  const command = subcommand ? `backpass ${subcommand}` : "backpass";
+  if (!state?.surface) return command;
+  return `${command}${scope?.kind === "user" ? " --scope user" : ""} --memory-file ${shellQuote(state.surface)}`;
+}
+
+/** One POSIX shell word for `value`: bare when it is plainly safe, else single-quoted. */
+function shellQuote(value) {
+  return /^[\w./@%+=:,-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+/** The apply command that reads the proposal kept in `state`. */
+export function applyCommand(state, scope) {
+  return stateCommand("apply", state, scope);
 }
