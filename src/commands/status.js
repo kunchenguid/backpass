@@ -3,8 +3,15 @@ import path from "node:path";
 
 import { userClaudeSkillsDir } from "../config.js";
 import { color, json, out } from "../logger.js";
-import { resolveMemoryFiles } from "../memory.js";
-import { nestedBudget, nestedReachWarning, readNestedReach, resolveNestedMemoryFiles } from "../nested.js";
+import { memorySurfaceHash, resolveMemoryFiles } from "../memory.js";
+import {
+  layerNestedWeights,
+  nestedBudget,
+  nestedReachWarning,
+  nestedStateDir,
+  readNestedReach,
+  resolveNestedMemoryFiles,
+} from "../nested.js";
 import {
   loadProjectSkills,
   resolveOverflowTarget,
@@ -16,6 +23,7 @@ import { HostCache, pruneHostCache } from "../discovery/cache.js";
 import { budgetBar, budgetStatus, formatTokens } from "../tokens.js";
 import { table } from "./scan.js";
 import { candidateKey, isProbeEntryFresh, resolvedEffort } from "../agents.js";
+import { MAX_UNPARSED_REPLIES, State } from "../state.js";
 
 export async function cmdStatus(ctx) {
   const { repo, config, scope } = ctx;
@@ -23,9 +31,6 @@ export async function cmdStatus(ctx) {
 
   const resolved = resolveMemoryFiles(repo.root, config.memoryFiles, { allowExternal: scope?.kind === "user" });
   const files = resolved.all;
-  const evidence = state.listEvidence();
-  const counts = { ok: 0, failed: 0, skipped: 0 };
-  for (const e of evidence) counts[e.status] = (counts[e.status] || 0) + 1;
 
   const cache = state.readScanCache();
   pruneHostCache(state.root);
@@ -41,6 +46,34 @@ export async function cmdStatus(ctx) {
   const skillDirs = resolveProjectSkillDirs(repo.root, overflow.dir, config.skillsDirs || [], { exact: userScope });
   const skills = loadProjectSkills(repo.root, overflow.dir, config.skillsDirs || [], { exact: userScope });
   const descriptionTokens = skillDescriptionTokens(skills);
+  const nestedWeights = resolveNestedMemoryFiles(repo.root, config);
+
+  // Each trained memory file keeps its own evidence store, keyed to its own surface hash.
+  const trained = nestedWeights.filter((weight) => weight.file && !weight.pointerTo);
+  const stores = [
+    { path: resolved.primary?.path ?? null, state, memoryHash: memorySurfaceHash(resolved.hash, skills) },
+    ...(resolved.primary ? layerNestedWeights(resolved.primary, trained, skills) : []).map((weight) => ({
+      path: weight.path,
+      state: new State(repo.root, { stateDir: nestedStateDir(state, weight.path) }),
+      memoryHash: weight.hash,
+    })),
+  ];
+  const counts = { ok: 0, failed: 0, skipped: 0 };
+  const failed = [];
+  const evidenceByFile = stores.map((store) => {
+    const own = { path: store.path, ok: 0, failed: 0, skipped: 0, gaveUp: 0 };
+    for (const e of store.state.listEvidence()) {
+      counts[e.status] = (counts[e.status] || 0) + 1;
+      own[e.status] = (own[e.status] || 0) + 1;
+      if (e.status !== "failed") continue;
+      const givenUp = isGivenUp(e, store.memoryHash);
+      if (givenUp) own.gaveUp += 1;
+      failed.push({ record: e, memory: store.path, givenUp });
+    }
+    return own;
+  });
+  const gaveUp = failed.filter((f) => f.givenUp).length;
+  const labelMemory = stores.length > 1;
 
   const duplicates = files
     .filter((file) => !resolved.pointers.includes(file))
@@ -60,7 +93,6 @@ export async function cmdStatus(ctx) {
     };
   });
   // Nested memory files are weights of their own, each under its own budget.
-  const nestedWeights = resolveNestedMemoryFiles(repo.root, config);
   for (const weight of nestedWeights) {
     budgets.push({
       path: weight.path,
@@ -103,7 +135,7 @@ export async function cmdStatus(ctx) {
       budgets,
       ...(nestedAttribution ? { nestedAttribution } : {}),
       crossSurfaceDuplicates: duplicates,
-      evidence: counts,
+      evidence: { ...counts, gaveUp, files: evidenceByFile },
       scanCacheEntries: Object.keys(cache.entries).length,
       hosts: hostCache,
       summary: summary ? { analyzedSessions: summary.analyzedSessions, totals: summary.totals } : null,
@@ -183,7 +215,8 @@ export async function cmdStatus(ctx) {
   out(color.dim("CACHE"));
   out(`  scan cache      ${Object.keys(cache.entries).length} file(s) fingerprinted`);
   out(
-    `  evidence        ${counts.ok || 0} ok · ${counts.skipped || 0} skipped · ${color.red(String(counts.failed || 0))} failed`,
+    `  evidence        ${counts.ok || 0} ok · ${counts.skipped || 0} skipped · ${color.red(String(counts.failed || 0))} failed` +
+      (gaveUp ? ` (${gaveUp} skipped after ${MAX_UNPARSED_REPLIES} failures)` : ""),
   );
   if (summary) {
     const eligibleClusters = summary.totals.gapClusters;
@@ -210,12 +243,29 @@ export async function cmdStatus(ctx) {
   }
 
   if (counts.failed) {
-    out(color.dim("FAILED TRANSCRIPTS (retried on the next run)"));
-    const rows = [["HARNESS", "SESSION", "ERROR"]];
-    for (const e of evidence.filter((x) => x.status === "failed").slice(0, 10)) {
-      rows.push([e.transcript.harness, String(e.transcript.id).slice(-12), String(e.error).slice(0, 60)]);
+    out(color.dim("FAILED TRANSCRIPTS (retried on the next run unless skipped)"));
+    const rows = [[...(labelMemory ? ["MEMORY"] : []), "HARNESS", "SESSION", "REPLY", "NEXT RUN", "ERROR"]];
+    for (const { record: e, memory, givenUp } of failed.slice(0, 10)) {
+      rows.push([
+        ...(labelMemory ? [memory] : []),
+        e.transcript.harness,
+        String(e.transcript.id).slice(-12),
+        describeReply(e.reply),
+        givenUp ? `skipped after ${MAX_UNPARSED_REPLIES} failures` : "retry",
+        String(e.error).slice(0, 60),
+      ]);
     }
     out(table(rows));
+    if (failed.some((f) => f.record.reply)) {
+      out(
+        color.dim(
+          labelMemory
+            ? "  each unparseable reply's redacted head and tail are kept in its memory file's evidence/<identity>.json" +
+                " (.backpass/ for the root, .backpass/nested/<file>/ for a nested file)"
+            : "  each unparseable reply's redacted head and tail are kept in .backpass/evidence/<identity>.json",
+        ),
+      );
+    }
     out("");
   }
 
@@ -259,6 +309,25 @@ function describeRole(config, role) {
     typeof config[role].effort === "string" && config[role].effort.trim() ? config[role].effort.trim() : null;
   const count = `auto - ${config.agents.ladder(role).length} candidates, none probed yet`;
   return color.dim(configured ? `${count} (effort ${configured})` : count);
+}
+
+/**
+ * Whether the analysis stage gave up on a failed record at the current memory surface.
+ * `status` neither discovers transcripts nor resolves the analysis agent, so a changed
+ * transcript or agent still analyzes it again on the next run (`hasGivenUp` in src/analyze.js).
+ */
+function isGivenUp(record, memoryHash) {
+  return (
+    record.memoryHash === memoryHash &&
+    Number.isInteger(record.unparsedReplies) &&
+    record.unparsedReplies >= MAX_UNPARSED_REPLIES
+  );
+}
+
+/** The class and size of an unparseable reply; "-" for any other failure or an older record. */
+function describeReply(reply) {
+  if (!reply || typeof reply.class !== "string") return "-";
+  return Number.isInteger(reply.chars) ? `${reply.class} · ${reply.chars} chars` : reply.class;
 }
 
 function formatBytes(bytes) {

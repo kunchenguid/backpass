@@ -1,6 +1,7 @@
 import { UserError, color, info, json, out } from "../logger.js";
 import { ProposalViolation } from "../proposal.js";
 import { runAnalysis } from "./analyze.js";
+import { gaveUpNote } from "../analyze.js";
 import { bootstrapJson, bootstrapRun, printBootstrap } from "./bootstrap.js";
 import { printProposal, printSynthesisFailure, runProposal, synthesisFailureHint } from "./propose.js";
 import { budgetBar, formatTokens } from "../tokens.js";
@@ -91,7 +92,7 @@ export async function cmdRun(ctx) {
     if (analysis.summary) {
       info(
         `${color.cyan("·")} evidence: ${analysis.summary.analyzed} new · ${analysis.summary.cached} cached · ` +
-          `${analysis.summary.skipped} too short · ${analysis.summary.failed} failed`,
+          `${analysis.summary.skipped} too short · ${analysis.summary.failed} failed${gaveUpNote(analysis.summary)}`,
       );
     }
     for (const { weight, summary } of analysis.nested || []) {
@@ -104,7 +105,7 @@ export async function cmdRun(ctx) {
       if (summary) {
         info(
           `  evidence: ${summary.analyzed} new · ${summary.cached} cached · ${summary.skipped} too short · ` +
-            `${summary.failed} failed`,
+            `${summary.failed} failed${gaveUpNote(summary)}`,
         );
       }
     }

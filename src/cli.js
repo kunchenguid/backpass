@@ -139,7 +139,8 @@ APPLY
                            are checked together, and no edit may be decided twice
   --no-open                print the review surface URL without opening a browser
   --dry-run                show what would be written, write nothing
-  --force                  re-analyze transcripts that already have fresh evidence,
+  --force                  re-analyze transcripts that already have fresh evidence
+                           or were skipped after repeated unparseable replies,
                            and re-probe agents instead of trusting the probe cache
 
 OTHER

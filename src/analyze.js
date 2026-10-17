@@ -4,13 +4,14 @@ import { randomUUID } from "node:crypto";
 
 import { extractJson, runModelCall, usageRecord } from "./acpx.js";
 import { distill } from "./distill.js";
+import { redact } from "./redact.js";
 import { classifyInteraction } from "./interaction.js";
 import { getAdapter, readTranscript } from "./discovery/index.js";
 import { instructionUnits, renderInstructionIndex } from "./memory.js";
 import { renderSkillIndexForAnalysis } from "./skills.js";
-import { renderPrompt } from "./prompts.js";
+import { loadPrompt, renderPrompt } from "./prompts.js";
 import { renderOpenGapIndex } from "./gap-ledger.js";
-import { evidenceKey, isEvidenceFresh, safeFileName } from "./state.js";
+import { MAX_UNPARSED_REPLIES, evidenceKey, isEvidenceFresh, safeFileName, sha256 } from "./state.js";
 import { emitProgress } from "./progress.js";
 import { UserError, color, info, warn } from "./logger.js";
 import { corroborationIdentityOf, transcriptIdentity } from "./transcript.js";
@@ -227,6 +228,93 @@ export function transcriptLabel(transcript) {
   return "(untitled)";
 }
 
+/** Characters kept from each end of an unparseable reply, after redaction. */
+export const REPLY_SNIPPET_CHARS = 300;
+
+/**
+ * Whether a reply opens a JSON object or a code fence and never closes it - the shape a
+ * reply cut off at an output-length limit leaves. An odd number of ``` fences is an
+ * unclosed fence. Otherwise the first `{` is scanned (string- and escape-aware) until
+ * its depth returns to zero: a closed first object means the reply was complete and
+ * failed to parse for some other reason.
+ */
+function opensUnclosed(text) {
+  if ((text.match(/```/g) || []).length % 2 === 1) return true;
+  const start = text.indexOf("{");
+  if (start === -1) return false;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (const ch of text.slice(start)) {
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+    } else if (ch === '"') {
+      inString = true;
+    } else if (ch === "{") {
+      depth += 1;
+    } else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Names why a reply had no parseable JSON, deterministically from the reply text alone.
+ * acpx's `--format quiet` output carries no harness stop reason, so none is read or
+ * guessed; truncation is judged from the reply's structure. Checked in order:
+ *
+ * - `empty`: whitespace only.
+ * - `truncated`: an opening fence or `{` that never closes (`opensUnclosed`).
+ * - `unparsed`: a `{` or a fence, all closed, that `extractJson` still could not parse.
+ * - `prose`: anything else - an answer with no JSON shape at all.
+ *
+ * @returns {"empty" | "truncated" | "unparsed" | "prose"}
+ */
+export function classifyUnparsedReply(text) {
+  const reply = String(text ?? "");
+  if (!reply.trim()) return "empty";
+  if (opensUnclosed(reply)) return "truncated";
+  if (reply.includes("{") || reply.includes("```")) return "unparsed";
+  return "prose";
+}
+
+/**
+ * The trace an unparseable reply leaves in its failed evidence record, so a later reader
+ * can tell its class apart without re-running the call: the class, the reply's length in
+ * characters, and its first and last `REPLY_SNIPPET_CHARS` characters. The whole reply is
+ * redacted before it is cut, so a secret is never split where a pattern would miss it; a
+ * reply no longer than both snippets together is kept whole in `head`, with no `tail`.
+ */
+export function unparsedReplyTrace(text) {
+  const reply = String(text ?? "");
+  const chars = Array.from(redact(reply) || "");
+  const trace = {
+    class: classifyUnparsedReply(reply),
+    chars: Array.from(reply).length,
+    head: chars.slice(0, REPLY_SNIPPET_CHARS).join(""),
+  };
+  if (chars.length > REPLY_SNIPPET_CHARS * 2) trace.tail = chars.slice(-REPLY_SNIPPET_CHARS).join("");
+  else if (chars.length > REPLY_SNIPPET_CHARS) trace.head = chars.join("");
+  return trace;
+}
+
+/**
+ * A reply arrived but held no parseable JSON. `reply` is what the evidence record keeps;
+ * `pick` is the agent, model, and effort that produced it.
+ */
+class UnparsedReplyError extends Error {
+  constructor(text, pick) {
+    const reply = unparsedReplyTrace(text);
+    super(`analysis returned no parseable JSON (${reply.class})`);
+    this.reply = reply;
+    this.pick = pick;
+  }
+}
+
 function promptPathFor(state, transcript) {
   return path.join(state.applyDir, "..", "prompts", `${safeFileName(transcriptIdentity(transcript))}.md`);
 }
@@ -312,9 +400,10 @@ async function analyzeOne({
     fs.mkdirSync(path.dirname(promptFile), { recursive: true });
     fs.writeFileSync(promptFile, prompt);
 
+    /** @type {{ agent: string, model?: string | null, effort?: string | null } | null} */
     let ranWith = null;
     const result = await config.agents.withFallthrough("analysis", async (pick) => {
-      ranWith = pick.agent;
+      ranWith = pick;
       const call = {
         agent: pick.agent,
         model: pick.model,
@@ -332,19 +421,54 @@ async function analyzeOne({
     for (const note of result.notes || []) noteOnce(note);
 
     const parsed = extractJson(result.text);
-    if (!parsed) {
-      throw new Error("analysis returned no parseable JSON");
-    }
+    if (!parsed) throw new UnparsedReplyError(result.text, ranWith);
 
     return {
       status: "ok",
       evidence: sanitizeEvidence(parsed, memoryFile, distilled.trace),
-      usage: usageRecord(ranWith, result),
+      usage: usageRecord(ranWith?.agent, result),
       distilled,
     };
   } finally {
     if (rawFile) releaseRawFile(rawFile);
   }
+}
+
+/**
+ * What a streak of unparseable replies is counted against: the evidence key (transcript
+ * content, memory surface, analysis index) plus the call that answered - agent, model,
+ * effort, and the analysis prompt template. Changing any of them is a new question, so
+ * the streak starts over.
+ */
+export function replyFailureKey(key, pick) {
+  const template = sha256(loadPrompt("analysis")).slice(0, 16);
+  return [key, pick?.agent || "", pick?.model || "", pick?.effort || "", `prompt-${template}`].join("|");
+}
+
+/**
+ * Consecutive unparseable replies a failed record has seen at `failureKey`. A record from
+ * before the count existed, any other failure, or a different key counts zero.
+ */
+function unparsedRepliesBefore(existing, failureKey) {
+  if (existing?.status !== "failed" || existing.failureKey !== failureKey) return 0;
+  return Number.isInteger(existing.unparsedReplies) ? existing.unparsedReplies : 0;
+}
+
+/**
+ * A transcript whose analysis came back unparseable `MAX_UNPARSED_REPLIES` times in a row
+ * for the same `replyFailureKey` is not called again: the record keeps its last reply
+ * trace and stays `failed`, so it never counts as evidence. Only unparseable replies
+ * count; a timeout or exec failure says nothing about the transcript, resets the streak,
+ * and is always retried.
+ */
+export function hasGivenUp(existing, transcript, memoryHash, pick) {
+  const failureKey = replyFailureKey(evidenceKey(transcript, memoryHash), pick);
+  return unparsedRepliesBefore(existing, failureKey) >= MAX_UNPARSED_REPLIES;
+}
+
+/** The run-summary suffix for transcripts given up on; empty when there are none. */
+export function gaveUpNote(summary) {
+  return summary?.gaveUp ? ` · ${summary.gaveUp} skipped after ${MAX_UNPARSED_REPLIES} failures` : "";
 }
 
 /**
@@ -394,18 +518,21 @@ export async function analyzeTranscripts({
   alsoLoaded = "",
 }) {
   const state = config.state;
-  const pending = [];
+  let pending = [];
   const summary = {
     total: transcripts.length,
     cached: 0,
     analyzed: 0,
     skipped: 0,
     failed: 0,
+    gaveUp: 0,
     usage: [],
     staleMemoryHash: 0,
     quotesNotInTrace: 0,
   };
   const priorHashes = new Set();
+  /** Prior failed records, read once here so a new failure can extend their streak. */
+  const priorFailures = new Map();
   const transcriptMetadata = (transcript) => ({
     harness: transcript.harness,
     id: transcript.id,
@@ -436,6 +563,7 @@ export async function analyzeTranscripts({
       summary.cached += 1;
       continue;
     }
+    if (existing?.status === "failed") priorFailures.set(transcript, existing);
     // Distinguish "no prior evidence" from "prior evidence exists, but it was judged
     // against a memory surface that no longer matches" - a re-analysis here, not a miss.
     if (existing?.status === "ok" && existing.memoryHash && existing.memoryHash !== memoryHash) {
@@ -443,6 +571,27 @@ export async function analyzeTranscripts({
       priorHashes.add(existing.memoryHash);
     }
     pending.push(transcript);
+  }
+
+  // A streak only holds for the agent that produced it, so a candidate for giving up costs
+  // the pick resolution here (cached for the fan-out below); a run with none skips it.
+  const streaks = force
+    ? []
+    : pending.filter((transcript) => priorFailures.get(transcript)?.unparsedReplies >= MAX_UNPARSED_REPLIES);
+  if (streaks.length) {
+    const current = await config.agents.resolve("analysis");
+    const givenUp = new Set(
+      streaks.filter((transcript) => hasGivenUp(priorFailures.get(transcript), transcript, memoryHash, current)),
+    );
+    summary.gaveUp = givenUp.size;
+    pending = pending.filter((transcript) => !givenUp.has(transcript));
+  }
+  if (summary.gaveUp) {
+    warn(
+      `${summary.gaveUp} transcript(s) skipped after ${MAX_UNPARSED_REPLIES} unparseable replies in a row; ` +
+        `\`backpass status\` lists them with their last reply, and a changed transcript, memory surface, ` +
+        `analysis model, or --force analyzes them again`,
+    );
   }
 
   if (summary.staleMemoryHash) {
@@ -545,10 +694,18 @@ export async function analyzeTranscripts({
       }
     } catch (err) {
       if (err instanceof UserError) throw err;
-      // Per-transcript fail-soft: recorded, listed by `backpass status`, retried next run.
+      // Per-transcript fail-soft: recorded, listed by `backpass status`, retried next run -
+      // except after `MAX_UNPARSED_REPLIES` unparseable replies in a row (`hasGivenUp`).
       summary.failed += 1;
       warn(`${transcript.harness} ${transcriptLabel(transcript)}: ${err.message}`);
-      state.writeEvidence(transcript, { ...base, status: "failed", error: err.message });
+      const record = { ...base, status: "failed", error: err.message };
+      if (err instanceof UnparsedReplyError) {
+        const failureKey = replyFailureKey(base.key, err.pick);
+        const unparsedReplies = unparsedRepliesBefore(priorFailures.get(transcript), failureKey) + 1;
+        state.writeEvidence(transcript, { ...record, reply: err.reply, failureKey, unparsedReplies });
+      } else {
+        state.writeEvidence(transcript, record);
+      }
     } finally {
       done += 1;
       emitProgress("analyze:tick", {
