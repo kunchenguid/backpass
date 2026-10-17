@@ -155,8 +155,8 @@ export function contentToEvents(role, content, events) {
     }
   }
   if (texts.length) {
-    const joined = texts.join("\n").trim();
-    if (joined) events.push({ kind: "message", role, text: joined });
+    const joined = texts.join("\n");
+    if (joined.trim()) events.push({ kind: "message", role, text: joined });
   }
 }
 

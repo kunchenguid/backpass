@@ -42,6 +42,11 @@ Each owning file's comments and tests hold the detail; read them before touching
 - **Quotes must be found in the trace they cite** (`sanitizeEvidence` in `src/analyze.js`), so fake agents in
   tests must quote real session text. Bump `ANALYSIS_INDEX_VERSION` (`src/state.js`) for any change to what
   analysis accepts.
+- **Direct task/steering instructions are addressable** (`src/directives.js`): the first substantive user turn is
+  `TASK-1`, later ones `STEER-<turn>`, each with `direct-task`/`direct-steering` authority and a lifetime from
+  its turn onward. Only the carved envelope indexes (fenced blocks and `>` quotes excluded); assistant/tool text
+  never indexes. Spans render by turn reference, never duplicated text; only ids plus metadata persist. The fold
+  has no directive rows: cites stay session authority, and recurrence reaches synthesis as ordinary gaps.
 - **Sampling is deterministic and sticky** (`src/sample.js`): a per-transcript hash of `transcriptIdentity` and
   `config.seed`, never `Math.random()` or an index/position-derived draw.
 - **Corpus mix is interactive vs non-interactive, never an unknown bucket** (`src/interaction.js`).

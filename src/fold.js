@@ -2,6 +2,7 @@ import fs from "node:fs";
 
 import { loadConfig } from "./config.js";
 import { classifyInteraction, INTERACTIVE, NON_INTERACTIVE } from "./interaction.js";
+import { isDirectiveId } from "./directives.js";
 import { findInstructionUnit, instructionUnits, resolveMemoryFiles, similarity } from "./memory.js";
 import { rootOwnsGap } from "./nested.js";
 import {
@@ -141,6 +142,9 @@ export function foldEvidence(
 
     for (const polarity of ["positive", "negative"]) {
       for (const item of record[polarity] || []) {
+        // A direct task/steering cite is session authority, not memory content, so it
+        // never becomes a memory-instruction row; the gap sightings carry recurrence.
+        if (isDirectiveId(item.instruction)) continue;
         const entry = touch(item.instruction);
         entry[polarity] += 1;
         const category = classifyInteraction(record.transcript);
