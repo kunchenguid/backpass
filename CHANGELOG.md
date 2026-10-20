@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.37](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.36...backpass-v0.1.37) (2026-10-20)
+
+
+### Bug Fixes
+
+* **acpx:** treat a model the adapter turns down as model-unavailable ([#219](https://github.com/kunchenguid/backpass/issues/219)) ([3986087](https://github.com/kunchenguid/backpass/commit/398608764b6a7d40de142eafbf2e568921406fa9))
+
 ## [0.1.36](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.35...backpass-v0.1.36) (2026-10-16)
 
 
