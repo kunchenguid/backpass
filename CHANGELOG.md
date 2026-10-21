@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.38](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.37...backpass-v0.1.38) (2026-10-21)
+
+
+### Bug Fixes
+
+* **workspace:** keep VCS internals and binary files out of the staging copy ([#220](https://github.com/kunchenguid/backpass/issues/220)) ([46a2169](https://github.com/kunchenguid/backpass/commit/46a21696be63197815346d01f6d4e116c16b4c10))
+
 ## [0.1.37](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.36...backpass-v0.1.37) (2026-10-20)
 
 
