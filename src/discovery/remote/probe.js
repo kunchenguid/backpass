@@ -11,6 +11,7 @@ import * as opencode from "../adapters/opencode.js";
 import * as hermes from "../adapters/hermes.js";
 import * as cursorCli from "../adapters/cursor-cli.js";
 import * as cursorIde from "../adapters/cursor-ide.js";
+import * as dsh from "../adapters/dsh.js";
 
 import { isSelfSession } from "../self.js";
 import { SELF_SESSION_SENTINEL } from "../../sentinel.js";
@@ -51,6 +52,7 @@ const ADAPTERS = Object.assign(Object.create(null), {
   hermes,
   cursor: cursorCli,
   "cursor-ide": cursorIde,
+  dsh,
 });
 
 function rawPathOf(adapter, ref) {
@@ -104,7 +106,7 @@ async function descriptorFrom(adapter, row, id) {
   };
 }
 
-async function discoverHarness(adapter, { cutoffMs, includeOmp }) {
+async function discoverHarness(adapter, { cutoffMs, includeOmp, includeDsh }) {
   const stats = { scanned: 0, classified: 0, self: 0, error: null };
   const out = [];
   const warnings = [];
@@ -127,7 +129,7 @@ async function discoverHarness(adapter, { cutoffMs, includeOmp }) {
     return { stats, descriptors: out, warnings };
   }
 
-  const candidates = adapter.enumerate({ cutoffMs, config: { discovery: { includeOmp } } });
+  const candidates = adapter.enumerate({ cutoffMs, config: { discovery: { includeOmp, includeDsh } } });
   const scanContext = adapter.createScanContext?.();
   for (const candidate of candidates) {
     if (cutoffMs && candidate.mtimeMs < cutoffMs) continue;
@@ -162,8 +164,8 @@ async function discoverHarness(adapter, { cutoffMs, includeOmp }) {
   return { stats, descriptors: out, warnings };
 }
 
-/** @param {{ harnesses?: string[], cutoffMs?: number | null, includeOmp?: boolean }} request */
-export async function discover({ harnesses = [], cutoffMs = null, includeOmp = false } = {}) {
+/** @param {{ harnesses?: string[], cutoffMs?: number | null, includeOmp?: boolean, includeDsh?: boolean }} request */
+export async function discover({ harnesses = [], cutoffMs = null, includeOmp = false, includeDsh = false } = {}) {
   const harnessStats = Object.create(null);
   const descriptors = [];
   const warnings = [];
@@ -181,7 +183,7 @@ export async function discover({ harnesses = [], cutoffMs = null, includeOmp = f
       continue;
     }
     try {
-      const result = await discoverHarness(adapter, { cutoffMs, includeOmp });
+      const result = await discoverHarness(adapter, { cutoffMs, includeOmp, includeDsh });
       harnessStats[harness] = result.stats;
       descriptors.push(...result.descriptors);
       warnings.push(...result.warnings);

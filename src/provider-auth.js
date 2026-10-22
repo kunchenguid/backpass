@@ -16,8 +16,8 @@ import path from "node:path";
  * status / native CLIs; auth *types* only, never secret values):
  *
  *   pi        `provider/id`. Duplicate bare ids: yes - `openai` vs `openai-codex` for
- *             seven gpt-5.x ids when `OPENAI_API_KEY` is set (reproduced with a dummy
- *             key). Dual-auth providers exist (`xai`, `anthropic`, `openrouter`,
+ *             several versioned ids when `OPENAI_API_KEY` is set (reproduced with a
+ *             dummy key). Dual-auth providers exist (`xai`, `anthropic`, `openrouter`,
  *             `radius`) but share one advertised id. Auth type is not on the ACP list;
  *             Pi's provider definitions plus `~/.pi/agent/auth.json` `type` (honours
  *             `PI_CODING_AGENT_DIR`). Env-var keys never appear in that file.
@@ -34,11 +34,11 @@ import path from "node:path";
  *   claude    Aliases (`default`, `sonnet`, `opus[1m]`, ...). `TRUSTING_MODEL_AGENTS`
  *             skips resolve. Dual auth (`claude.ai` vs API key) is on `claude auth
  *             status` (`authMethod` / `subscriptionType`), not used for id ranking.
- *   grok      Bare ids (`grok-4.6`, `grok-4.5`), no collision. grok.com OIDC vs API
- *             key is one namespace. No prefix to rank.
- *   cursor    Parameterized bare ids (`gpt-5.6-luna[context=...]`), no prefixes, no
- *             collision. Dual auth (`login` vs `--api-key`) is process-level. Not on
- *             the default ladder; a custom ladder uses the same resolver.
+ *   grok      Bare versioned ids, no collision. grok.com OIDC vs API key is one
+ *             namespace. No prefix to rank.
+ *   cursor    Parameterized bare ids (`<id>[context=...]`), no prefixes, no collision.
+ *             Dual auth (`login` vs `--api-key`) is process-level. Not on the default
+ *             ladder; a custom ladder uses the same resolver.
  *   hermes    Discovery only; not an acpx model-resolution backend.
  *
  * Harnesses with no auth-class signal (codex/claude/grok/cursor, and custom-ladder

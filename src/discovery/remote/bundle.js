@@ -34,6 +34,7 @@ export const PROBE_MANIFEST = [
   "discovery/adapters/hermes.js",
   "discovery/adapters/cursor-cli.js",
   "discovery/adapters/cursor-ide.js",
+  "discovery/adapters/dsh.js",
   "discovery/remote/frames.js",
   "discovery/remote/git-facts.js",
   "discovery/remote/runtime.js",

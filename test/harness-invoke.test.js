@@ -139,6 +139,10 @@ if (argv.includes("status")) {
 const setAt = argv.indexOf("set");
 if (setAt >= 0) {
   const key = argv[setAt + 1];
+  if (process.env.FAKE_SET_REJECT_KEY === key) {
+    process.stderr.write("config option " + key + " rejected\\n");
+    process.exit(1);
+  }
   if (key === "model" || key === "thought_level") {
     fs.writeFileSync(settings, JSON.stringify({ mutated: true, key }));
   }
@@ -1131,4 +1135,109 @@ test("an unsupported harness with a requested model stops instead of persisting"
   );
   assert.equal(settingsBytes().compare(before), 0);
   assert.deepEqual(acpxCalls(), []);
+});
+
+test("omp session passes the provider-qualified model at create and ACP set thinking, never set model", async () => {
+  resetLogsAndSettings();
+  const before = Buffer.from(settingsBytes());
+  const session = await openSession({
+    agent: "omp",
+    model: "openai-codex/gpt-6.1-sol",
+    effort: "high",
+    sessionName: "bp-omp",
+    cwd: workDir,
+  });
+  await session.close();
+  assert.equal(settingsBytes().compare(before), 0);
+  const calls = acpxCalls();
+  const created = calls.find((c) => c.argv.includes("new"));
+  assert.equal(created.argv[created.argv.indexOf("--model") + 1], "openai-codex/gpt-6.1-sol");
+  assert.deepEqual(setCalls(calls).map(setKey), ["thinking"]);
+  assert.equal(setCalls(calls)[0].argv.at(-1), "high");
+  assert.ok(!setCalls(calls).some((c) => setKey(c) === "model"));
+  assert.ok(!calls.some((c) => c.argv.includes("config") && c.argv.includes("show")), "omp is not a built-in adapter");
+});
+
+test("omp carries thinking off as off, not as no override", async () => {
+  resetLogsAndSettings();
+  const session = await openSession({
+    agent: "omp",
+    model: "openai-codex/gpt-6-luna",
+    effort: "off",
+    sessionName: "bp-omp-off",
+    cwd: workDir,
+  });
+  await session.close();
+  const calls = acpxCalls();
+  assert.deepEqual(setCalls(calls).map(setKey), ["thinking"]);
+  assert.equal(setCalls(calls)[0].argv.at(-1), "off");
+});
+
+test("omp refuses a level it does not advertise before any acpx call", async () => {
+  resetLogsAndSettings();
+  await assert.rejects(
+    () =>
+      openSession({
+        agent: "omp",
+        model: "openai-codex/gpt-6-luna",
+        effort: "medium",
+        sessionName: "bp-omp-medium",
+        cwd: workDir,
+      }),
+    { name: "UserError", message: /omp cannot apply effort=medium/ },
+  );
+  assert.deepEqual(acpxCalls(), []);
+});
+
+test("omp with no effort override passes only the model and sets nothing", async () => {
+  resetLogsAndSettings();
+  const session = await openSession({
+    agent: "omp",
+    model: "openai-codex/gpt-6-luna",
+    sessionName: "bp-omp-model-only",
+    cwd: workDir,
+  });
+  await session.close();
+  const calls = acpxCalls();
+  const created = calls.find((c) => c.argv.includes("new"));
+  assert.equal(created.argv[created.argv.indexOf("--model") + 1], "openai-codex/gpt-6-luna");
+  assert.deepEqual(setCalls(calls).map(setKey), []);
+});
+
+test("an omp that rejects the thinking set fails the call loudly, naming omp", async () => {
+  resetLogsAndSettings();
+  process.env.FAKE_SET_REJECT_KEY = "thinking";
+  try {
+    await assert.rejects(
+      () =>
+        openSession({
+          agent: "omp",
+          model: "openai-codex/gpt-6.1-sol",
+          effort: "high",
+          sessionName: "bp-omp-rejected",
+          cwd: workDir,
+        }),
+      { name: "AcpxError", message: /acpx omp could not apply invocation-scoped effort=high/ },
+    );
+  } finally {
+    delete process.env.FAKE_SET_REJECT_KEY;
+  }
+});
+
+test("a configured omp agent entry is accepted, because omp is not a built-in adapter", async () => {
+  resetLogsAndSettings();
+  process.env.FAKE_REPLACEMENT_AGENT = "omp";
+  try {
+    const session = await openSession({
+      agent: "omp",
+      model: "openai-codex/gpt-6.1-sol",
+      effort: "low",
+      sessionName: "bp-omp-configured",
+      cwd: workDir,
+    });
+    await session.close();
+  } finally {
+    delete process.env.FAKE_REPLACEMENT_AGENT;
+  }
+  assert.ok(acpxCalls().some((c) => c.argv.includes("new")));
 });

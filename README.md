@@ -31,7 +31,7 @@ It finds the agent sessions that actually ran in your repo, reads
 what happened in them, and proposes evidence-backed edits to your memory surface - the
 memory file and project skills - under a token budget, gated by you.
 
-- **Local-first** - Reads the transcript stores of seven agent harnesses directly from disk,
+- **Local-first** - Reads the transcript stores of eight agent harnesses directly from disk,
   locally or over SSH to your own machines. No API, no upload; transcripts never leave your
   machines except into an agent you already authenticated, and obvious secrets are redacted
   before they do.
@@ -218,17 +218,18 @@ It cannot be combined with
 
 ### 1. Collect samples - which sessions belong to this repo
 
-backpass reads the local transcript stores of seven harnesses directly. No API, no upload.
+backpass reads the local transcript stores of eight harnesses directly. No API, no upload.
 
-| Harness        | Store                                           | Repo tie                                            |
-| -------------- | ----------------------------------------------- | --------------------------------------------------- |
-| **claude**     | `~/.claude/projects/<munged-cwd>/<uuid>.jsonl`  | per-line `cwd`                                      |
-| **codex**      | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`  | `cwd` + recorded `git.repository_url`               |
-| **pi**         | standalone, OMP, and BB-managed Pi JSONL stores | session-header `cwd`                                |
-| **opencode**   | `~/.local/share/opencode/opencode.db` (sqlite)  | `session.directory` / `session_v2.directory`        |
-| **grok**       | `~/.grok/sessions/<encoded-cwd>/<uuid>/`        | `summary.json` `cwd` + `git_remotes`                |
-| **cursor CLI** | `~/.cursor/chats/<md5(cwd)>/<uuid>/`            | `meta.json` `cwd`                                   |
-| **hermes**     | `~/.hermes/state.db` (sqlite)                   | session cwd, with CLI prompt / ACP config fallbacks |
+| Harness        | Store                                                           | Repo tie                                            |
+| -------------- | --------------------------------------------------------------- | --------------------------------------------------- |
+| **claude**     | `~/.claude/projects/<munged-cwd>/<uuid>.jsonl`                  | per-line `cwd`                                      |
+| **codex**      | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`                  | `cwd` + recorded `git.repository_url`               |
+| **pi**         | standalone, OMP, and BB-managed Pi JSONL stores                 | session-header `cwd`                                |
+| **opencode**   | `~/.local/share/opencode/opencode.db` (sqlite)                  | `session.directory` / `session_v2.directory`        |
+| **grok**       | `~/.grok/sessions/<encoded-cwd>/<uuid>/`                        | `summary.json` `cwd` + `git_remotes`                |
+| **cursor CLI** | `~/.cursor/chats/<md5(cwd)>/<uuid>/`                            | `meta.json` `cwd`                                   |
+| **hermes**     | `~/.hermes/state.db` (sqlite)                                   | session cwd, with CLI prompt / ACP config fallbacks |
+| **dsh**        | `~/.dsh/sessions/<encoded-cwd>/<session>/session.v4.jsonl.zstd` | session-header `cwd`                                |
 
 Claude collection covers `$CLAUDE_CONFIG_DIR/projects` alongside the default store, so a
 relocated config dir does not hide its sessions. The variable is read from backpass's own
@@ -266,6 +267,23 @@ descendants share one corroborating observer, including across synced SSH stores
 root is unreadable, the highest readable ancestor is used; without one, the file retains
 its own observer identity. Matching descendant copies link their families without merging
 distinct roots on the same host that share a native ID.
+
+dsh collection is **off by default**. Set `discovery.includeDsh` to `true` in
+`.backpassrc.json` or your [personal config](#configuration) to read
+`~/.dsh/sessions/`. Each session directory holds `session.v4.jsonl.zstd`, an
+append-only zstd stream of JSONL records; backpass reads its complete frames and uses
+the session header's `cwd` for repo association:
+
+```json
+{ "discovery": { "includeDsh": true } }
+```
+
+Then run `backpass scan --harness dsh` (or a normal `backpass` run). The `dsh` row is
+listed in the scan table with the setting off too, where it scans nothing. Only the v4
+session file is read; a session still being appended to loses only an incomplete final
+frame. The setting also applies to configured SSH hosts. For `--scope user`, set it in
+`user.discovery` and include `"dsh"` in `user.discovery.harnesses`; user scope
+otherwise collects only Claude and Codex.
 
 OpenCode collection reads both store layouts: OpenCode 1.x (`session`, `message`, `part`) and OpenCode 2.x (`session_v2`, `session_message`).
 For 2.x, session activity uses the later of the session's update time and its newest message's update time.
@@ -523,7 +541,9 @@ Not every annotate turn is an answer, and the three cases are kept apart because
 for different things:
 
 - **the agent edited the copy again** - the ids it was given no longer describe the files.
-  It is shown the fresh measurement and answers again; this costs no re-prompt.
+  It is shown the fresh measurement and answers again; this costs no re-prompt. Editing is
+  how a model reverts a change it decides cannot ship, so it is never itself a failure: a
+  run is bounded by its total annotate turns, not by how many times the files moved.
 - **the turn came back empty** - the harness returned success with no text at all. Nothing
   was said, so there is nothing to correct: the annotation is retried once in a **new**
   session, since the accumulated context of the old one is the likeliest cause.
@@ -783,13 +803,45 @@ with `--theme dark|light` or `"theme"` in `.backpassrc.json`.
 
 Cheap analysis, smart synthesis. Both go through acpx, so backpass uses the harnesses you
 already have - and by default it works out which ones those are. Each pass has an ordered
-ladder of candidates, and the first one that is installed, logged in, and serves the model
-wins:
+ladder of candidates, and the first one that is installed, logged in, and serves its rung
+wins. A rung names either a family plus tier or a bare alias, and every rung declares the
+provider it may resolve from. A family rung is resolved to the newest model that harness
+advertises in that family and tier _from that provider_ at probe time, so a new generation
+needs no release:
 
-| pass      | effort | 1st                                    | 2nd                          | 3rd                               |
-| --------- | ------ | -------------------------------------- | ---------------------------- | --------------------------------- |
-| analysis  | medium | `gpt-5.6-luna` via pi, opencode, codex | `claude-sonnet-5` via claude | `grok-4.6` via pi, opencode, grok |
-| synthesis | high   | `gpt-5.6-sol` via pi, opencode, codex  | `claude-opus-5` via claude   | `grok-4.6` via pi, opencode, grok |
+| pass      | effort | 1st                              | 2nd                 | 3rd                             |
+| --------- | ------ | -------------------------------- | ------------------- | ------------------------------- |
+| analysis  | medium | newest `gpt` luna via omp, codex | `sonnet` via claude | newest `deepseek` flash via omp |
+| synthesis | high   | newest `gpt` sol via omp, codex  | `opus` via claude   | newest `deepseek` flash via omp |
+
+`omp` (Oh My Pi) is also a runner: name it in a rung, with the provider it should resolve from. A rung
+that declares `"provider": "openai-codex"` only accepts the ids the adapter advertises under that
+provider - the same generation is also listed under the API-billed `openai/` and `openrouter/`
+namespaces, and a rung never crosses over to them:
+
+```json
+{
+  "ladders": {
+    "analysis": [
+      { "family": "gpt", "tier": "luna", "provider": "openai-codex", "agents": ["omp"] },
+      { "family": "deepseek", "tier": "flash", "provider": "deepseek", "agents": ["omp"] },
+      { "model": "sonnet", "provider": "anthropic", "agents": ["claude"] }
+    ],
+    "synthesis": [
+      { "family": "gpt", "tier": "sol", "provider": "openai-codex", "agents": ["omp"] },
+      { "family": "deepseek", "tier": "flash", "provider": "deepseek", "agents": ["omp"] },
+      { "model": "opus", "provider": "anthropic", "agents": ["claude"] }
+    ]
+  }
+}
+```
+
+Its model and reasoning level travel over acpx: `--model` at session create, and the ACP `thinking` session option
+(`off`, `auto`, `low`, `high`, `max`). A level you set that omp does not advertise, such as `medium`, is refused before any call.
+A role must run at an explicit effort: when neither the config nor the role default is a level the chosen harness
+applies, backpass refuses that pass with the flag that sets one instead of running with `effort=unset`. omp's
+analysis role default `medium` is one such case - pin it with `--analysis-effort low` or
+`"analysis": { "effort": "low" }`.
 
 Each candidate is checked with a zero-token acpx probe (claude also uses `claude auth status`,
 because its adapter accepts sessions while logged out). Session creation may wait up to three
@@ -799,20 +851,26 @@ durable verdicts are cached in
 `.backpass/agent-probe-cache.json` for 12h (30min for negatives). Pi and OpenCode entries
 are re-probed when their credential or auth-file state changes; `--force` re-probes every
 entry. The probe is a filter, not a promise: if the chosen harness answers `AUTH_REQUIRED`,
-rejects the model, or returns a clean exit with no output at all (a provider account out
-of quota or credits, often swallowed before it reaches stderr) mid-run, backpass falls
-through to the next candidate and says so.
+rejects the model, refuses the reasoning-effort option it was handed (`Invalid params` on
+`session/set_config_option`), or returns a clean exit with no output at all (a provider
+account out of quota or credits, often swallowed before it reaches stderr) mid-run,
+backpass states the refusal in the adapter's own words - naming the model or effort level
+it turned down - then falls through to the next candidate and announces what ran instead.
+A refused effort is never silently dropped to run the same model at another level.
 Model-turn timeouts never fall through, whether enforced by backpass or reported by acpx itself; in analysis, only that transcript fails and is retried next run, including with a pinned agent.
 A clean blank exit that consumed nearly the whole `--timeout` budget is also treated as a timeout, for compatibility with older acpx versions.
 When a whole ladder is exhausted the error lists every candidate with what to run to fix it.
 
-Bare model ids are resolved against what each adapter advertises (`openai-codex/gpt-5.6-luna`
-on pi, `openai/gpt-5.6-luna` on opencode, `gpt-5.6-luna` on codex), so nothing is hardcoded
-per harness. When the same bare id is advertised under more than one provider, backpass
-ranks by auth class - a subscription/OAuth provider over an API-key provider - from that
-harness's provider definitions and auth file (see `src/provider-auth.js`). An unrankable
-collision is refused with the colliding ids named; it is never an arbitrary pick. Ladders
-are ordinary config - reorder or shorten them under `"ladders"`.
+Bare model ids are resolved against what each adapter advertises, and a family rung is
+resolved from that same catalog (`src/model-family.js`): the newest advertised id whose
+provider, family, and - when the rung names one - tier match. Nothing is hardcoded per
+harness. A catalog with no id from the rung's declared provider is a hard, named non-match:
+the rung is skipped and the error names the provider, never a pick from another namespace.
+When the same bare id is advertised under more than one provider, backpass ranks by auth
+class - a subscription/OAuth provider over an API-key provider - from that harness's
+provider definitions and auth file (see `src/provider-auth.js`). An unrankable collision
+is refused with the colliding ids named; it is never an arbitrary pick. Ladders are
+ordinary config - reorder or shorten them under `"ladders"`.
 
 Pinning an agent skips its candidate ladder. A bare pinned model id is still resolved
 against that harness's advertised models, including the same collision handling above.
@@ -822,7 +880,7 @@ keeps the pin rather than falling through or printing a raw stack:
 ```sh
 backpass \
   --analysis-agent codex  --analysis-model gpt-5.5        --analysis-effort low \
-  --synthesis-agent claude --synthesis-model claude-opus-5 --synthesis-effort high
+  --synthesis-agent claude --synthesis-model opus --synthesis-effort high
 ```
 
 `--no-auto-agent` pins the pre-ladder defaults (codex / claude). Model and effort
@@ -853,22 +911,23 @@ CLI flags on top:
   "synthesis": { "agent": null, "model": null, "effort": null },
   "ladders": {
     "analysis": [
-      { "model": "gpt-5.6-luna", "agents": ["pi", "opencode", "codex"] },
-      { "model": "claude-sonnet-5", "agents": ["claude"] },
-      { "model": "grok-4.6", "agents": ["pi", "opencode", "grok"] }
+      { "family": "gpt", "tier": "luna", "provider": "openai-codex", "agents": ["omp", "codex"] },
+      { "model": "sonnet", "provider": "anthropic", "agents": ["claude"] },
+      { "family": "deepseek", "tier": "flash", "provider": "deepseek", "agents": ["omp"] }
     ],
     "synthesis": [
-      { "model": "gpt-5.6-sol", "agents": ["pi", "opencode", "codex"] },
-      { "model": "claude-opus-5", "agents": ["claude"] },
-      { "model": "grok-4.6", "agents": ["pi", "opencode", "grok"] }
+      { "family": "gpt", "tier": "sol", "provider": "openai-codex", "agents": ["omp", "codex"] },
+      { "model": "opus", "provider": "anthropic", "agents": ["claude"] },
+      { "family": "deepseek", "tier": "flash", "provider": "deepseek", "agents": ["omp"] }
     ]
   },
   "discovery": {
-    "harnesses": ["claude", "codex", "pi", "opencode", "grok", "cursor", "hermes"],
+    "harnesses": ["claude", "codex", "pi", "opencode", "grok", "cursor", "hermes", "dsh"],
     "since": "30d",
     "worktreeGlobs": [],
     "cloneRoots": [],
     "includeOmp": false,
+    "includeDsh": false,
     "minUserTurns": 2
   },
   "jobs": 4

@@ -51,8 +51,10 @@ import { UserError, color, info, warn } from "./logger.js";
  *
  *   the files moved      the ids the agent was asked about no longer exist. It is shown the
  *                        fresh measurement and answers again; this is not a failed
- *                        annotation and never costs an annotation attempt (REMEASURE_TURNS
- *                        bounds it instead).
+ *                        annotation and never costs an annotation attempt. Re-measuring is
+ *                        how a model that edits-then-answers converges, so an edit is never
+ *                        itself a failure; MAX_ANNOTATE_TURNS bounds only a run that never
+ *                        stops moving the files.
  *   the turn was empty   the adapter returned success with no text at all. The model never
  *                        spoke, so there is nothing to correct - the annotation is retried
  *                        once in a NEW session, since the accumulated context of the old
@@ -63,14 +65,15 @@ import { UserError, color, info, warn } from "./logger.js";
 
 /** Annotation attempts per run: the first answer plus re-prompts with the exact violations. */
 export const ANNOTATE_TURNS = 3;
-/**
- * Turns per run the agent may spend re-editing instead of answering. Counted for the whole
- * run, not consecutively: an agent that alternates editing and answering is still an agent
- * that never finishes, and the loop has to end.
- */
-export const REMEASURE_TURNS = 3;
 /** Fresh-session retries for an adapter turn that produced no text at all. */
 export const EMPTY_TURN_RETRIES = 1;
+/**
+ * Total annotate turns per run, re-measurements included. Editing during annotation is
+ * progress, not a failure, so the run ends on convergence (a valid annotation of the
+ * measurement actually taken) or on a judged answer's budget - this only bounds a model
+ * that never stops moving the files.
+ */
+export const MAX_ANNOTATE_TURNS = 12;
 
 const EMPTY_TURN_VIOLATION =
   "the synthesis harness ended its turn with no output at all - no JSON, no prose, no tool call";
@@ -333,13 +336,16 @@ function prefaceFor({ memoryFile, summary, config, repo, workspaceRoot, descript
 }
 
 const REMEASURE_NOTICE =
-  `\n\n## The files moved after they were measured\n\nYou changed the files again during your last turn, so the ids you were given no longer ` +
+  `\n\n## The files moved after they were measured\n\nThe files changed after that measurement, so the ids you were given no longer ` +
   `describe them. Nothing is wrong with the shape of your answer - annotate the re-measured ` +
-  `changes above instead. This did not use up an annotation attempt.\n`;
+  `changes above instead. The editing phase is over: do not change the files again in this ` +
+  `turn. This did not use up an annotation attempt.\n`;
 
 const rejectionBlock = (violations) =>
-  `\n\n## Your previous answer was rejected\n\nIt violated these hard rules. Fix every one of them ` +
-  `(edit the files first if a change must go or move) and return the corrected JSON object only.\n\n` +
+  `\n\n## Your previous answer was rejected\n\nIt violated these hard rules. Return the corrected JSON object only. ` +
+  `If a change must go or move, revert exactly that change in the file and end this turn without ` +
+  `JSON - backpass re-measures and asks again about the new ids, and a turn that edits the files ` +
+  `has its answer discarded.\n\n` +
   `${violations.map((v) => `- ${v}`).join("\n")}\n`;
 
 /** The headline of a failed run, named after the condition it actually ended on. */
@@ -348,7 +354,10 @@ function terminalMessage(reason, attempts, violations) {
     return "synthesis ended its turn with no output, in the run's session and again in a fresh one";
   }
   if (reason === "editing") {
-    return `synthesis kept editing the staging copy instead of annotating it (${REMEASURE_TURNS} re-measurements)`;
+    return (
+      `synthesis did not converge: it kept editing the staging copy instead of annotating it ` +
+      `(${MAX_ANNOTATE_TURNS} annotate turns)`
+    );
   }
   if (reason === "edit-empty") {
     return "synthesis made no changes to the staging copy during the edit turn, so its first annotate turn had nothing to describe";
@@ -405,6 +414,10 @@ async function annotateLoop({
   let editMadeNoChanges = false;
 
   for (let turn = 1; ; turn += 1) {
+    if (turn > MAX_ANNOTATE_TURNS) {
+      terminal = { reason: "editing", violations: [KEPT_EDITING_VIOLATION] };
+      break;
+    }
     assertRepoUntouched(repo, fingerprint, workspace.root);
     const measured = measureWorkspace(workspace);
     if (turn === 1) editMadeNoChanges = measured.changes.length === 0 && !(measured.stray || []).length;
@@ -433,19 +446,18 @@ async function annotateLoop({
 
     // The agent may keep editing during an annotate turn; the ids it was answering about
     // are then stale, so the answer is dropped and the fresh measurement shown instead.
-    // That is a measurement problem, not a failed annotation: it costs no attempt.
+    // That is progress, not a failed annotation: the copy it edits is the copy it has to
+    // annotate, so the run stays alive and asks again about the measurement actually on
+    // disk. It costs no annotation attempt; MAX_ANNOTATE_TURNS stops a model that never
+    // answers at all.
     assertRepoUntouched(repo, fingerprint, workspace.root);
     if (measureWorkspace(workspace).signature !== measured.signature) {
       remeasures += 1;
       justRemeasured = true;
       violationsToShow = [];
-      if (remeasures >= REMEASURE_TURNS) {
-        terminal = { reason: "editing", violations: [KEPT_EDITING_VIOLATION] };
-        break;
-      }
       warn(
         `synthesis edited the staging copy again; re-measuring and re-annotating ` +
-          `(annotation attempt ${attempts + 1} of ${ANNOTATE_TURNS} is still unspent)`,
+          `(annotate turn ${turn} of ${MAX_ANNOTATE_TURNS}; no annotation attempt was spent)`,
       );
       emitProgress("synth:remeasure", { turn, attempt: attempts + 1, remeasures });
       continue;
@@ -716,6 +728,19 @@ export async function synthesizeProposal({
   });
   usage.push(usageRecord(ranWith, editResult));
   for (const note of editResult.notes || []) noteOnce(note);
+
+  // An edit turn that returns no text made no edits, but the cause is the harness,
+  // not the model's judgement: say so here rather than letting the annotate turn
+  // fail later and blame the edit turn for "making no changes".
+  if (isBlankOutput(editResult.text)) {
+    await holder.session.close();
+    throw new ProposalViolation(
+      `the synthesis edit turn produced no output at all - ${ranWith} never ran a turn (no prose, no tool call), so nothing was edited. ` +
+        `That usually means the harness could not reach its model (an expired login, a provider error): fix ${ranWith}, or pin a harness that works with --synthesis-agent.`,
+      [EMPTY_TURN_VIOLATION],
+      { reason: "edit-blank", attempts: 0, saved: null, proposalPath: null },
+    );
+  }
 
   let serial = 1;
   const freshSession = () =>

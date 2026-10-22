@@ -39,7 +39,7 @@ export function acpxAgentName(agent) {
  * (`src/harness-invoke.js`). Grok uses process `--reasoning-effort`. OpenCode
  * uses ACP `set effort`, which is session-local variant state.
  */
-export const EFFORT_OPTION_KEYS = { codex: "reasoning_effort", claude: "effort", opencode: "effort" };
+export const EFFORT_OPTION_KEYS = { codex: "reasoning_effort", claude: "effort", opencode: "effort", omp: "thinking" };
 
 export function effortOptionKey(agent) {
   return EFFORT_OPTION_KEYS[agent] || null;
@@ -169,6 +169,16 @@ const MODEL_REJECTED =
   /did not advertise that model|does not support this model|session\/set_(?:config_option|model) for model/i;
 
 /**
+ * What acpx prints when an adapter rejects the invocation-scoped effort overlay:
+ * `Agent rejected session/set_config_option for "reasoning_effort"="high": Invalid params
+ * (ACP -32602)`. That is a harness capability gap for this call - the level was refused,
+ * not the session - so it is classifiable: the resolver states the refusal and moves to
+ * the next candidate instead of dying on an unhandled acpx error.
+ */
+const EFFORT_REJECTED =
+  /session\/set_config_option[^\n]*(?:invalid params|-32602|not supported|unsupported|unknown option|invalid value)/i;
+
+/**
  * Availability verdicts for a failed acpx call. Only a *classifiable* failure is a
  * reason to drop a candidate and fall through to the next one; anything else (a
  * timeout on a long prompt, garbage output) stays a plain error so a run never
@@ -181,7 +191,7 @@ const MODEL_REJECTED =
  * that (it sends no prompt), so it is classified here.
  *
  * @param {{ stderr?: string, spawnError?: { code?: string } | null, timedOut?: boolean, emptyOutput?: boolean }} failure
- * @returns {"unauthenticated" | "model-unavailable" | "unreachable" | "empty-output" | null}
+ * @returns {"unauthenticated" | "model-unavailable" | "effort-rejected" | "unreachable" | "empty-output" | null}
  */
 export function classifyAcpxFailure(failure) {
   if (!failure) return null;
@@ -189,6 +199,7 @@ export function classifyAcpxFailure(failure) {
   const text = failure.stderr || "";
   if (/AUTH_REQUIRED|authentication required/i.test(text)) return "unauthenticated";
   if (MODEL_REJECTED.test(text)) return "model-unavailable";
+  if (EFFORT_REJECTED.test(text)) return "effort-rejected";
   if (/\b(ENOENT|command not found|not found on PATH|failed to spawn|spawn .* ENOENT)\b/i.test(text)) {
     return "unreachable";
   }
@@ -225,7 +236,53 @@ export function stripAcpxNoise(text) {
 }
 
 /**
+ * The index of the `}` that closes the object opened at `start`, or -1. Braces inside
+ * JSON strings do not count, so a quote like `"}{"` cannot end the object early.
+ */
+function closingBraceAt(text, start) {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i += 1) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{") depth += 1;
+    else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/** The first balanced `{...}` span in `text` that parses as JSON, or null. */
+function firstJsonObject(text) {
+  for (let start = text.indexOf("{"); start !== -1; start = text.indexOf("{", start + 1)) {
+    const end = closingBraceAt(text, start);
+    if (end === -1) continue;
+    try {
+      return JSON.parse(text.slice(start, end + 1));
+    } catch {
+      // Not this span; try the next opening brace.
+    }
+  }
+  return null;
+}
+
+/**
  * Pull a JSON object out of a model reply, tolerating prose or a fenced block around it.
+ *
+ * The object is taken as the first *balanced* span, not "everything from the first `{`
+ * to the last `}`". An ACP adapter has been seen to emit the final assistant message
+ * twice in one quiet-mode turn (omp), which makes the reply two identical objects back
+ * to back: the old first-to-last slice spans both and parses as neither, so a perfectly
+ * well-formed answer was recorded as "no parseable JSON".
  */
 export function extractJson(text) {
   const cleaned = stripAcpxNoise(text);
@@ -241,15 +298,8 @@ export function extractJson(text) {
     } catch {
       // fall through to brace scanning
     }
-    const start = trimmed.indexOf("{");
-    const end = trimmed.lastIndexOf("}");
-    if (start !== -1 && end > start) {
-      try {
-        return JSON.parse(trimmed.slice(start, end + 1));
-      } catch {
-        // keep trying
-      }
-    }
+    const parsed = firstJsonObject(trimmed);
+    if (parsed !== null) return parsed;
   }
   return null;
 }
@@ -459,7 +509,7 @@ export async function acpxVersion({ timeoutMs = 10_000 } = {}) {
  * real auth gate (ACP -32000); for claude it is not, which is why `src/agents.js`
  * checks `claude auth status` before ever calling this.
  *
- * @returns {Promise<{ verdict: "ok" | "unauthenticated" | "model-unavailable" | "unreachable" | "timeout" | "empty-output",
+ * @returns {Promise<{ verdict: "ok" | "unauthenticated" | "model-unavailable" | "effort-rejected" | "unreachable" | "timeout" | "empty-output",
  *   detail: string, availableModels: string[], transient?: boolean }>}
  */
 export async function probeSession({

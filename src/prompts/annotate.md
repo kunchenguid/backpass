@@ -67,6 +67,10 @@ Hard rules - a violation fails the whole proposal:
    `remove` edit, and any unmatched addition needs its normal evidence.
 8. **Budget:** {{BUDGET_RULE}}
 
-If you still need to change the files, do that first and then answer; backpass
-re-measures after this reply and shows you the new ids if anything moved. Re-measuring
-does not use up an annotation attempt.
+## The editing phase is over
+
+Do not change any file in this turn. The measured changes above are the copy as it stands
+now, and the JSON object is the only thing this turn is for. If one of the changes cannot
+ship at all, revert exactly that change and end the turn without a JSON answer: backpass
+re-measures and asks you about the remaining ids on the next turn. A turn that edits the
+files has its answer discarded, so editing costs a turn rather than saving one.

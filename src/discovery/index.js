@@ -8,6 +8,7 @@ import * as opencode from "./adapters/opencode.js";
 import * as hermes from "./adapters/hermes.js";
 import * as cursorCli from "./adapters/cursor-cli.js";
 import * as cursorIde from "./adapters/cursor-ide.js";
+import * as dsh from "./adapters/dsh.js";
 
 import { associate, passesStrict } from "./association.js";
 import { collectHosts, resolveHostList } from "./hosts.js";
@@ -29,6 +30,7 @@ export const ADAPTERS = Object.assign(Object.create(null), {
   hermes,
   cursor: cursorCli,
   "cursor-ide": cursorIde,
+  dsh,
 });
 
 export function getAdapter(harness) {
@@ -153,6 +155,7 @@ export async function discoverTranscripts({
       harnesses: selected.filter((h) => getAdapter(h)),
       cutoffMs,
       includeOmp: config.discovery.includeOmp,
+      includeDsh: config.discovery.includeDsh,
       controlPath: createControlPath(),
     });
     remoteMasters.push(...collected.map((result) => result.master).filter(Boolean));
@@ -431,7 +434,7 @@ function discoverFiles(
     }
     // backpass's own acpx runs land in this store under this cwd; drop them here so
     // they never reach sampling or analysis (see ./self.js).
-    if (isSelfSession(transcript, { stateDir })) {
+    if (descriptor.self || isSelfSession(transcript, { stateDir })) {
       stats.self += 1;
       continue;
     }

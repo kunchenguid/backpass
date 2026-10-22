@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { annotatePrompts, makeCliRepo, readJson, runCli, snapshotTree } from "./helpers/synthesis-cli.js";
+import { MAX_ANNOTATE_TURNS } from "../src/synthesize.js";
 
 /**
  * The synthesis orchestration, through `backpass propose` as a user runs it.
@@ -104,6 +105,8 @@ const SKILL_BODIES = {
   ].join("\n"),
 };
 const skill = (name) => `---\nname: ${name}\ndescription: Load before ${name} work.\n---\n\n${SKILL_BODIES[name]}`;
+const extraSkill = (n) =>
+  `---\nname: extra-${n}\ndescription: Load before extra-${n} work.\n---\n\n## Extra ${n}\n\n- Extra line ${n}.\n`;
 
 const EDIT_TURN = {
   "AGENTS.md": { replace: [[BOTH_SECTIONS, POINTERS]] },
@@ -213,23 +216,62 @@ test("a remeasurement is not a failed annotation: it costs no attempt, and the n
   assert.ok(prompts[3].includes("is not part of any edit"));
 });
 
-test("the remeasurement limit stops on the declared third file-moving turn", () => {
+test("a model that corrects the files across several annotate turns converges on the latest measurement", () => {
   const dir = makeCliRepo({ memory: MEMORY });
+  // Four skills the editing turn created that the model then decides, one per annotate
+  // turn, should not ship: it reverts one, and backpass re-measures. The ids move on every
+  // turn, so each answer the model gives describes the previous measurement and is
+  // discarded - until the fifth turn annotates the copy as it stands. This is the shape
+  // the failing default runs took, with one legitimate revert per turn, and the old loop
+  // aborted on the third re-measurement with the edits it wanted already on disk.
+  const extras = Object.fromEntries([1, 2, 3, 4].map((n) => [`.agents/skills/extra-${n}/SKILL.md`, extraSkill(n)]));
+  const corrections = [1, 2, 3, 4].map((n) => ({
+    editFirst: { [`.agents/skills/extra-${n}/SKILL.md`]: null },
+    reply: COALESCED_ANSWER,
+  }));
   const run = runCli(dir, ["propose", ...PIN], {
     script: {
-      edit: EDIT_TURN,
-      annotations: [
-        SPLIT_THE_COPY,
-        { editFirst: { "AGENTS.md": { replace: [[SPLIT, POINTERS]] } }, reply: { edits: [] } },
-        SPLIT_THE_COPY,
-        { reply: SPLIT_ANSWER },
-      ],
+      edit: { ...EDIT_TURN, ...extras },
+      annotations: [...corrections, { reply: COALESCED_ANSWER }],
     },
   });
 
-  assert.equal(run.status, 1, `the run should stop at the limit:\n${run.output}`);
-  assert.equal(run.annotateTurns(), 3);
-  assert.match(run.stderr, /kept editing the staging copy instead of annotating it \(3 re-measurements\)/);
+  assert.equal(run.status, 0, `the run should converge instead of aborting on the fourth edit:\n${run.output}`);
+  assert.equal(run.annotateTurns(), 5, "four turns corrected the files, and the fifth answered the latest ids");
+  assert.equal(run.editTurns(), 1, "the expensive edit turn is still not repeated");
+
+  const prompts = annotatePrompts(dir);
+  assert.ok(prompts[0].includes("[H7: new file"), "the edit turn's four extra skills were measured");
+  assert.ok(prompts[3].includes("[H4: new file"), "by the fourth turn the stale ids are almost gone");
+  assert.ok(prompts[4].includes("[H3: new file"), "the fifth turn is asked about the latest measurement");
+  for (const prompt of prompts.slice(1)) {
+    assert.ok(prompt.includes("The files moved after they were measured"), "each re-measure says why the ids moved");
+  }
+  assert.ok(prompts[4].includes("The editing phase is over"), "the annotate prompt closes the editing phase");
+
+  const proposal = proposalOf(dir);
+  assert.deepEqual(proposal.violations ?? [], []);
+  assert.equal(proposal.edits.length, 1);
+  assert.equal(proposal.attempt, 1, "an editing turn is not an annotation attempt");
+});
+
+test("a run that never stops editing still ends at the turn budget instead of looping forever", () => {
+  const dir = makeCliRepo({ memory: MEMORY });
+  // A model that only ever moves the copy between two layouts, never answering: the
+  // measurement changes on every turn, so this run can only end on the budget.
+  const annotations = Array.from({ length: MAX_ANNOTATE_TURNS }, (_, i) =>
+    i % 2 === 0
+      ? SPLIT_THE_COPY
+      : { editFirst: { "AGENTS.md": { replace: [[SPLIT, POINTERS]] } }, reply: { edits: [] } },
+  );
+  const run = runCli(dir, ["propose", ...PIN], {
+    script: { edit: EDIT_TURN, annotations },
+  });
+
+  assert.equal(run.status, 1, `the run should stop at the budget:\n${run.output}`);
+  assert.equal(run.annotateTurns(), MAX_ANNOTATE_TURNS);
+  assert.match(run.stderr, /did not converge: it kept editing the staging copy instead of annotating it/);
+  assert.match(run.stderr, new RegExp(`${MAX_ANNOTATE_TURNS} annotate turns`));
 });
 
 test("an empty turn is retried once in a fresh session, with the evidence it would otherwise have lost", () => {
