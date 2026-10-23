@@ -238,7 +238,7 @@ test("root and nested synthesis both refuse direct writes to the other memory fi
       (err) =>
         err instanceof UserError &&
         err.message.includes(
-          `synthesis changed ${pass === "root" ? nestedPath : "AGENTS.md"} in the repository directly`,
+          `${pass === "root" ? nestedPath : "AGENTS.md"} changed in the repository during synthesis`,
         ),
     );
     assert.equal(fs.readFileSync(target, "utf8"), "# Direct write\n");
@@ -440,7 +440,49 @@ test("a harness that writes to the repository instead of the staging copy is ref
   );
   await assert.rejects(run(), (err) => {
     assert.ok(err instanceof UserError);
-    assert.match(err.message, /synthesis changed AGENTS\.md in the repository directly/);
+    assert.match(err.message, /AGENTS\.md changed in the repository during synthesis/);
+    return true;
+  });
+});
+
+test("a change to a watched repo file during synthesis is reported as observed, not blamed on the harness", async () => {
+  const { repo, run } = setup({ edit: {} });
+  // The fake cannot tell a concurrent editor from a harness: it just writes the repo file.
+  fs.writeFileSync(
+    process.env.FAKE_ACPX_SCRIPT,
+    JSON.stringify({
+      edit: { [path.join(repo.root, "AGENTS.md")]: { replace: [[TWO_ITEMS, ""]] } },
+      annotations: [{ reply: { edits: [] } }],
+    }),
+  );
+  await assert.rejects(run(), (err) => {
+    assert.ok(err instanceof UserError);
+    assert.match(err.message, /AGENTS\.md changed in the repository during synthesis; nothing was proposed/);
+    assert.doesNotMatch(err.message, /harness|staging copy|directly/);
+    assert.match(err.hint, /another process \(a concurrent agent session or a scheduled job\)/);
+    assert.doesNotMatch(err.hint, /cannot be trusted/);
+    return true;
+  });
+});
+
+test("a repo file that now equals the staging copy is still attributed to the harness", async () => {
+  const { repo, run } = setup({ edit: {} });
+  const edit = { replace: [[TWO_ITEMS, ""]] };
+  fs.writeFileSync(
+    process.env.FAKE_ACPX_SCRIPT,
+    JSON.stringify({
+      edit: { "AGENTS.md": edit, [path.join(repo.root, "AGENTS.md")]: edit },
+      annotations: [{ reply: { edits: [] } }],
+    }),
+  );
+  await assert.rejects(run(), (err) => {
+    assert.ok(err instanceof UserError);
+    assert.match(err.message, /AGENTS\.md changed in the repository during synthesis/);
+    assert.match(
+      err.message,
+      /AGENTS\.md now matches the staging copy .*so the synthesis harness likely wrote it directly/,
+    );
+    assert.match(err.hint, /cannot be trusted with the synthesis role/);
     return true;
   });
 });
@@ -724,7 +766,7 @@ test("a skill target stages that skill alone; a staged write to AGENTS.md is ref
       annotations: [{ reply: { edits: [] } }],
     }),
   );
-  await assert.rejects(direct.run(), /synthesis changed AGENTS\.md in the repository directly/);
+  await assert.rejects(direct.run(), /AGENTS\.md changed in the repository during synthesis/);
 });
 
 test("an ordinary in-repo skill stays fingerprinted, whether or not the run narrows to it", async () => {
@@ -747,10 +789,114 @@ test("an ordinary in-repo skill stays fingerprinted, whether or not the run narr
 
     await assert.rejects(guarded.run(), (err) => {
       assert.ok(err instanceof UserError, `${target ? "targeted" : "surface"} run: ${err}`);
-      assert.match(err.message, /synthesis changed \.agents\/skills\/db\/SKILL\.md in the repository directly/);
+      assert.match(err.message, /\.agents\/skills\/db\/SKILL\.md changed in the repository during synthesis/);
       return true;
     });
   }
+});
+
+test("a skill another process edits after the fingerprint but before staging is rebuilt is not blamed on the harness", async () => {
+  const { repo, config, run } = setup({
+    edit: { "AGENTS.md": { replace: [[TWO_ITEMS, ""]] } },
+    annotations: [{ reply: { edits: [removal(["H1"])] } }],
+  });
+  const skill = path.join(repo.root, ".agents/skills/db/SKILL.md");
+  fs.mkdirSync(path.dirname(skill), { recursive: true });
+  fs.writeFileSync(skill, DB_SKILL);
+  // `resolve` runs after the fingerprint is taken and before the staging copy is rebuilt.
+  config.agents = {
+    ...agents,
+    resolve: async () => {
+      fs.writeFileSync(skill, DB_SKILL.replace("Keep transactions short.", "Keep every transaction short."));
+      return pick;
+    },
+  };
+
+  const { proposal, violations } = await run();
+  assert.deepEqual(violations, []);
+  assert.equal(proposal.edits.length, 1);
+  const staged = path.join(config.state.root, "synthesis/.agents/skills/db/SKILL.md");
+  assert.match(fs.readFileSync(staged, "utf8"), /Keep every transaction short\./);
+});
+
+test("an edit after the staging rebuild is still reported even when an earlier one was absorbed", async () => {
+  const { repo, config, run } = setup({ edit: {} });
+  const skill = path.join(repo.root, ".agents/skills/db/SKILL.md");
+  fs.mkdirSync(path.dirname(skill), { recursive: true });
+  fs.writeFileSync(skill, DB_SKILL);
+  config.agents = {
+    ...agents,
+    resolve: async () => {
+      fs.writeFileSync(skill, DB_SKILL.replace("Keep transactions short.", "Keep every transaction short."));
+      return pick;
+    },
+  };
+  fs.writeFileSync(
+    process.env.FAKE_ACPX_SCRIPT,
+    JSON.stringify({
+      edit: { [skill]: { replace: [["Keep every transaction short.", "Keep transactions under a second."]] } },
+      annotations: [{ reply: { edits: [] } }],
+    }),
+  );
+
+  await assert.rejects(run(), (err) => {
+    assert.ok(err instanceof UserError);
+    assert.match(err.message, /\.agents\/skills\/db\/SKILL\.md changed in the repository during synthesis/);
+    assert.doesNotMatch(err.message, /staging copy/);
+    return true;
+  });
+});
+
+test("a direct write by a candidate that then falls through is reported, not absorbed by the next rebuild", async () => {
+  const { repo, config, run } = setup({ edit: {} });
+  const skill = path.join(repo.root, ".agents/skills/db/SKILL.md");
+  fs.mkdirSync(path.dirname(skill), { recursive: true });
+  fs.writeFileSync(skill, DB_SKILL);
+  // The first candidate edits the repository skill and is then given up on (an expired login,
+  // say); the second candidate must not start from a staging copy that includes that write.
+  config.agents = {
+    resolve: async () => pick,
+    withFallthrough: async (_role, fn) => {
+      await fn(pick);
+      return fn(pick);
+    },
+  };
+  fs.writeFileSync(
+    process.env.FAKE_ACPX_SCRIPT,
+    JSON.stringify({
+      edit: { [skill]: DB_SKILL.replace("Keep transactions short.", "Keep every transaction short.") },
+      annotations: [{ reply: { edits: [] } }],
+    }),
+  );
+
+  await assert.rejects(run(), (err) => {
+    assert.ok(err instanceof UserError);
+    assert.match(err.message, /\.agents\/skills\/db\/SKILL\.md changed in the repository during synthesis/);
+    return true;
+  });
+});
+
+test("a write-through to a memory file configured by absolute path is still attributed to the harness", async () => {
+  const { repo, run } = setup({ edit: {} });
+  const absolute = path.join(repo.root, "AGENTS.md");
+  const edit = { replace: [[TWO_ITEMS, ""]] };
+  fs.writeFileSync(
+    process.env.FAKE_ACPX_SCRIPT,
+    JSON.stringify({
+      edit: { [workspacePathFor(absolute)]: edit, [absolute]: edit },
+      annotations: [{ reply: { edits: [] } }],
+    }),
+  );
+
+  await assert.rejects(run({ memoryFile: readMemoryFile(repo.root, absolute) }), (err) => {
+    assert.ok(err instanceof UserError);
+    assert.match(
+      err.message,
+      new RegExp(`${absolute.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} now matches the staging copy`),
+    );
+    assert.match(err.hint, /cannot be trusted with the synthesis role/);
+    return true;
+  });
 });
 
 test("a staged skill that resolves outside the repository is reported as such, not as a direct repo edit", async () => {
@@ -774,7 +920,7 @@ test("a staged skill that resolves outside the repository is reported as such, n
       err.message.includes(`${skillPath} changed during synthesis; that path resolves outside the repository`),
       err.message,
     );
-    assert.doesNotMatch(err.message, /in the repository directly/);
+    assert.doesNotMatch(err.message, /in the repository during synthesis/);
     assert.match(err.hint, /another process changed the shared library mid-run/);
     return true;
   });
