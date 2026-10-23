@@ -68,6 +68,29 @@ async function run(h, records, file = memoryFile(), memoryHash = "h1") {
 const GAP = "Read docs/db.md before writing queries.";
 const GAP_REPHRASED = "Read docs/db.md before writing any queries";
 
+test("ledger-built gap clusters keep each quote's distilled-trace window", async () => {
+  const h = harness();
+  const windowed = (id) => ({
+    proposedInstruction: GAP,
+    locator: { foldedOffset: 12, turn: 3, role: "assistant" },
+    before: `before ${id} `,
+    after: ` after ${id}`,
+  });
+  const summary = await run(h, [record("claude-a", [windowed("a")]), record("claude-b", [windowed("b")])]);
+
+  assert.equal(summary.gaps.length, 1);
+  const quotes = [...summary.gaps[0].quotes].sort((x, y) => x.text.localeCompare(y.text));
+  assert.deepEqual(
+    quotes.map((q) => ({ text: q.text, locator: q.locator, before: q.before, after: q.after })),
+    ["a", "b"].map((id) => ({
+      text: `quote from claude-${id}`,
+      locator: { foldedOffset: 12, turn: 3, role: "assistant" },
+      before: `before ${id} `,
+      after: ` after ${id}`,
+    })),
+  );
+});
+
 test("keyless legacy evidence stays out of the fold", async () => {
   const h = harness();
   const stale = record("claude-old", [GAP]);

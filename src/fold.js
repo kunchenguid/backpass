@@ -50,7 +50,7 @@ import { corroborationIdentityOf } from "./transcript.js";
  */
 
 /**
- * Locator fields analysis attached after a distilled-trace hit. Ledger-only rows omit them.
+ * Locator fields analysis attached after a distilled-trace hit; ledger rows carry them too.
  *
  * @param {object} [item]
  * @returns {{ locator?: { foldedOffset: number, turn?: number, role?: string }, before?: string, after?: string }}
