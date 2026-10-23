@@ -230,6 +230,26 @@ test("a quote that matches the distilled trace keeps a window sliced from that s
   assert.equal(located.after, clean.positive[0].after);
 });
 
+test("with usedRawTranscript, quotes found in the distilled trace still get a window", () => {
+  const trace = "### turn 3 · assistant\nthe agent posted the full URL\n";
+  const clean = sanitizeEvidence(
+    {
+      positive: [
+        { instruction: "AG-001", quote: "the agent posted the full URL" },
+        { instruction: "AG-002", quote: "text the distiller elided entirely" },
+      ],
+      usedRawTranscript: true,
+    },
+    null,
+    trace,
+  );
+  assert.equal(clean.positive.length, 2);
+  assert.equal(clean.positive[0].locator.turn, 3);
+  assert.ok(trace.includes(clean.positive[0].before + "the agent posted the full URL" + clean.positive[0].after));
+  assert.equal(clean.positive[1].locator, undefined);
+  assert.equal(clean.positive[1].before, undefined);
+});
+
 test("a quote that is not in the distilled trace is a paraphrase and is discarded", () => {
   const trace = "turn 3\n  the agent posted the full URL\n\nturn 4\n  it used a  bare #2731\n  reference\n";
   const clean = sanitizeEvidence(

@@ -22,6 +22,8 @@ import { isSuppressedByRejection, recordRejection, State } from "../src/state.js
 import { applyDecisions } from "../src/apply/writer.js";
 import { injectPayload, parseDecisions, renderApplySurface } from "../src/apply/lavish.js";
 import { renderEdit } from "../src/apply/terminal.js";
+import { stripAnsi } from "../src/tui/render.js";
+import { locateQuote, sanitizeEvidence } from "../src/analyze.js";
 import { extractJson, parseTokenLine, stripAcpxNoise } from "../src/acpx.js";
 import { STRAY_OUTSIDE_REPO, STRAY_OUTSIDE_SURFACE, STRAY_UNWRITABLE, strayAliasReason } from "../src/workspace.js";
 import { makeRepo, stageAndMeasure, writeIn } from "./helpers/staging.js";
@@ -737,9 +739,51 @@ test("a unique catalog substring inherits polarity, class, and locator", () => {
   assert.equal(inherited.polarity, "negative");
   assert.equal(inherited.class, "harm");
   assert.equal(inherited.text, "posted the full URL");
-  assert.deepEqual(inherited.locator, locator);
+  assert.deepEqual(inherited.locator, { ...locator, foldedOffset: locator.foldedOffset + "the agent ".length });
   assert.equal(inherited.before, "### turn 3 · assistant\nthe agent ");
   assert.equal(inherited.after, " in the comment and then continued");
+});
+
+test("a cited substring binds to its own span in the distilled trace", () => {
+  const trace =
+    "### turn 3 · assistant\nI ran the suite.\n\n### turn 4 · user\nwhy did you\n  skip the lint step\nbefore pushing?\n";
+  const quote = "I ran the suite.\n\n### turn 4 · user\nwhy did you\n  skip the lint step\nbefore pushing?";
+  const analysis = (id, day, text) => ({
+    status: "ok",
+    transcript: { id, harness: "claude", startedAt: Date.parse(`2026-08-${day}T00:00:00Z`) },
+    ...sanitizeEvidence(
+      { negative: [{ instruction: "AG-001", quote: text, class: "harm", effect: "lint skipped" }] },
+      null,
+      text === quote ? trace : text,
+    ),
+  });
+  const summary = foldEvidence(
+    [analysis("b859b8f3deadbeef", "18", quote), analysis("c0ffee00deadbeef", "19", "the PR was named without a link")],
+    { memoryFile: { units: parseMemoryUnits(MEMORY_TEXT) }, minGapEvidence: 2 },
+  );
+  const [first, second] = summary.sources;
+  const cited = "skip the lint step";
+  const { proposal, violations } = gate({
+    edit: memoryEdit(REWRITE_SHAPES["append a sentence"]),
+    annotation: {
+      edits: [
+        claim(["H1"], {
+          kind: "rewrite",
+          evidence: [
+            { polarity: "negative", text: cited, source: first },
+            { polarity: "negative", text: "the PR was named without a link", source: second },
+          ],
+        }),
+      ],
+    },
+    context: { summary },
+  });
+  assert.deepEqual(violations, [], violations.join("\n"));
+  const bound = proposal.edits[0].evidence.find((item) => item.source === first);
+  assert.deepEqual(bound.locator, locateQuote(trace, cited).locator);
+  assert.equal(bound.locator.turn, 4);
+  assert.ok(trace.includes(bound.before + cited + bound.after));
+  assert.ok(bound.before.endsWith("why did you\n  "));
 });
 
 test("a catalog quote copied with its display ellipsis still binds", () => {
@@ -3287,6 +3331,39 @@ test("terminal review prints a distilled quote window only when one is present",
   assert.match(withoutWindow, /claude · abc · 2026-08-18/);
   assert.doesNotMatch(withoutWindow, /turn 3/);
   assert.equal((withoutWindow.match(/it used a bare #2731 reference/g) || []).length, 1);
+});
+
+test("terminal review blanks control bytes and marks a truncated quote", () => {
+  const long = `start ${"x".repeat(240)} tail-of-quote`;
+  const output = renderEdit(
+    {
+      kind: "rewrite",
+      title: "spell out the URL",
+      file: "AGENTS.md",
+      targetsMemoryFile: true,
+      transcripts: 1,
+      hunks: [{ file: "AGENTS.md", lines: [{ type: "ins", text: "- include the full URL" }] }],
+      evidence: [
+        {
+          polarity: "negative",
+          text: `bare\u001b[2J reference\u009b`,
+          source: "claude · abc\u0007 · 2026-08-18",
+          before: "then \u001b]0;owned\u0007",
+          after: " follow-up\u001b[1A\u001b[2K",
+        },
+        { polarity: "negative", text: long, source: "claude · def · 2026-08-19", before: "B ", after: " A" },
+      ],
+    },
+    0,
+    1,
+  );
+  const plain = stripAnsi(output);
+  // eslint-disable-next-line no-control-regex -- control bytes from the transcript are the point
+  assert.doesNotMatch(plain, /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/);
+  assert.match(plain, /bare \[2J reference/);
+  assert.match(plain, /\.\.\." \(quote truncated\)/);
+  assert.doesNotMatch(plain, /tail-of-quote/);
+  assert.match(plain, /"bare \[2J reference "/);
 });
 
 test("the decision vector from the review surface is parsed back into decisions", () => {

@@ -184,8 +184,8 @@ function foldSpaceMapped(text) {
 
 /**
  * After a quote has already passed the folded-trace check, recover a window of the
- * distilled string around that hit. Quotes that only passed via `usedRawTranscript`
- * are not located: there is no distilled span to show.
+ * distilled string around that hit. A quote that is not in the distilled trace (one taken
+ * from the raw transcript) is not located: there is no distilled span to show.
  *
  * @param {string} trace
  * @param {string} quote
@@ -214,6 +214,34 @@ export function locateQuote(trace, quote) {
   };
 }
 
+/**
+ * Narrow a located quote to a cited substring of it: the locator moves to the cited span and
+ * the rest of the quote, in its original whitespace, joins the window on either side.
+ *
+ * @param {string} quote the located quote's text
+ * @param {{ locator?: { foldedOffset: number, turn?: number, role?: string }, before: string, after: string }} located
+ * @param {string} cited whitespace-folded text found inside `quote`
+ * @returns {{ locator?: { foldedOffset: number, turn?: number, role?: string }, before: string, after: string } | null}
+ */
+export function narrowLocated(quote, located, cited) {
+  const raw = String(quote);
+  const { folded, indexMap } = foldSpaceMapped(raw);
+  const offset = cited ? folded.indexOf(cited) : -1;
+  if (offset < 0) return null;
+  const start = indexMap[offset];
+  const end = indexMap[offset + cited.length - 1] + 1;
+  const narrowed = { before: located.before + raw.slice(0, start), after: raw.slice(end) + located.after };
+  if (located.locator) {
+    narrowed.locator = { ...located.locator, foldedOffset: located.locator.foldedOffset + offset };
+    const heading = headingBefore(raw, start);
+    if (heading) {
+      narrowed.locator.turn = heading.turn;
+      narrowed.locator.role = heading.role;
+    }
+  }
+  return narrowed;
+}
+
 /** @param {string} trace @param {number} offset */
 function headingBefore(trace, offset) {
   const prefix = trace.slice(0, offset);
@@ -226,8 +254,8 @@ function headingBefore(trace, offset) {
 }
 
 /** Copy a mechanical locator onto a stored evidence item when the trace check found it. */
-function attachLocator(entry, quote, trace, usedRawTranscript) {
-  if (usedRawTranscript || typeof trace !== "string") return;
+function attachLocator(entry, quote, trace) {
+  if (typeof trace !== "string") return;
   const located = locateQuote(trace, quote);
   if (!located) return;
   entry.locator = located.locator;
@@ -283,7 +311,7 @@ export function sanitizeEvidence(parsed, memoryFile = null, trace = null) {
       // rule caused harm" downstream. Only an explicit judged value is kept; records
       // from before the field existed simply carry none, and none never counts as harm.
       if (key === "negative" && NEGATIVE_CLASSES.includes(item.class)) entry.class = item.class;
-      attachLocator(entry, entry.quote, trace, clean.usedRawTranscript);
+      attachLocator(entry, entry.quote, trace);
       clean[key].push(entry);
     }
   }
@@ -297,7 +325,7 @@ export function sanitizeEvidence(parsed, memoryFile = null, trace = null) {
       quote: item.quote.trim().slice(0, 600),
       domain: item.domain === "orchestration" ? "orchestration" : "project",
     };
-    attachLocator(gap, gap.quote, trace, clean.usedRawTranscript);
+    attachLocator(gap, gap.quote, trace);
     if (typeof item.matchesGap === "string" && /^[0-9a-f]{16}$/.test(item.matchesGap.trim())) {
       gap.matchesGap = item.matchesGap.trim();
     }

@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import { foldSpace } from "./analyze.js";
+import { foldSpace, narrowLocated } from "./analyze.js";
 import { renderHunkLines } from "./diff.js";
 import { normalizeSourceLabel } from "./gap-ledger.js";
 import { mixFromCounts } from "./interaction.js";
@@ -240,12 +240,8 @@ function bindCatalogQuote(item, match) {
     source: item.source,
   };
   if (match.class) bound.class = match.class;
-  if (match.locator) bound.locator = match.locator;
   if (typeof match.before === "string" && typeof match.after === "string") {
-    const catalog = foldSpace(match.text);
-    const offset = catalog.indexOf(text);
-    bound.before = match.before + catalog.slice(0, offset);
-    bound.after = catalog.slice(offset + text.length) + match.after;
+    Object.assign(bound, narrowLocated(match.text, match, text));
   }
   return bound;
 }
