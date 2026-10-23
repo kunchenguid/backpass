@@ -1,7 +1,7 @@
 import readline from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 
-import { UserError, color } from "../logger.js";
+import { UserError, color, terminalSafe } from "../logger.js";
 import { editSkills } from "../skills.js";
 import { formatTokens } from "../tokens.js";
 
@@ -43,6 +43,11 @@ function renderDiff(edit) {
   return lines.join("\n");
 }
 
+/** Untrusted transcript text on one terminal line, with control bytes blanked. */
+function oneLine(text) {
+  return terminalSafe(text).replace(/\s+/g, " ");
+}
+
 export function renderEdit(edit, index, total) {
   const out = [];
   const kind = edit.kind === "extract" ? "EXTRACT -> SKILL" : edit.kind.toUpperCase();
@@ -82,8 +87,16 @@ export function renderEdit(edit, index, total) {
     out.push(color.dim(`  evidence (${edit.transcripts} transcript(s)):`));
     for (const quote of edit.evidence.slice(0, 4)) {
       const mark = quote.polarity === "positive" ? color.green("+") : color.red("-");
-      out.push(`    ${mark} "${quote.text.replace(/\s+/g, " ").slice(0, 200)}"`);
-      out.push(`      ${color.dim(quote.source)}`);
+      const text = oneLine(quote.text);
+      const quoted = text.length > 200 ? `"${text.slice(0, 200)}..." (quote truncated)` : `"${text}"`;
+      if (typeof quote.before === "string" && typeof quote.after === "string") {
+        out.push(`    ${mark} ${color.dim(oneLine(quote.before))}`);
+        out.push(`      ${quoted}`);
+        out.push(`      ${color.dim(oneLine(quote.after))}`);
+      } else {
+        out.push(`    ${mark} ${quoted}`);
+      }
+      out.push(`      ${color.dim(terminalSafe(quote.source))}`);
     }
   }
 
