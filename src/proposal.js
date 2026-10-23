@@ -211,10 +211,37 @@ function occurrences(haystack, needle) {
   return count;
 }
 
+/** `Error.code` of a `find` that matches more than once, so callers can tell it from a stale one. */
+export const AMBIGUOUS_FIND = "AMBIGUOUS_FIND";
+
+/** 1-based line where each occurrence of `needle` starts (overlapping ones included), capped for display. */
+function occurrenceLines(haystack, needle, cap = 5) {
+  const lines = [];
+  let index = haystack.indexOf(needle);
+  while (index !== -1 && lines.length < cap) {
+    // A tail `find` carries the newline before its first line (see `span` in diff.js).
+    const start = index + (needle.startsWith("\n") ? 1 : 0);
+    lines.push(haystack.slice(0, start).split("\n").length);
+    index = haystack.indexOf(needle, index + 1);
+  }
+  return lines;
+}
+
+function ambiguousFind(text, find, found, label, file) {
+  const lines = occurrenceLines(text, find);
+  const more = found > lines.length ? `, and ${found - lines.length} more` : "";
+  return Object.assign(
+    new Error(
+      `${label}: "find" text appears ${found} times in ${file} (lines ${lines.join(", ")}${more}); must be unique`,
+    ),
+    { code: AMBIGUOUS_FIND },
+  );
+}
+
 function replaceOnce(text, find, replace, label, file) {
   const found = occurrences(text, find);
   if (found === 0) throw new Error(`${label}: "find" text does not appear in ${file}`);
-  if (found > 1) throw new Error(`${label}: "find" text appears ${found} times in ${file}; must be unique`);
+  if (found > 1) throw ambiguousFind(text, find, found, label, file);
   return text.replace(find, () => replace);
 }
 
@@ -380,6 +407,7 @@ export function buildProposal(rawResult, context) {
     scope = null,
     target = { kind: "surface" },
     routing = null,
+    dropAmbiguous = false,
   } = context;
 
   const violations = [];
@@ -754,35 +782,52 @@ export function buildProposal(rawResult, context) {
   // description line, or the description line(s) a created skill adds. Bodies stay
   // free-until-triggered and never enter it.
   const running = new Map();
-  for (const edit of accepted) {
+  /** @type {{ id: string, title: string, reason: string }[]} */
+  const dropped = [];
+  for (const edit of [...accepted]) {
     const targets = filesOfEdit(edit);
     let memoryDelta = 0;
     let otherDelta = 0;
     let descriptionDelta = edit.kind === "extract" ? createdDescriptionCost(edit) : 0;
+    // Staged until the whole edit applies, so a dropped edit leaves no half-applied file behind.
+    const next = new Map();
     try {
       for (const target of targets) {
         const slice = sliceEditForFile(edit, target);
         const before =
           running.get(target) ??
           (target === memoryFile.path ? memoryFile.text : (measured.originals?.get(target) ?? ""));
-        const next = applyEdit(before, slice);
-        running.set(target, next);
-        const delta = estimateTokens(next) - estimateTokens(before);
+        const after = applyEdit(before, slice);
+        next.set(target, after);
+        const delta = estimateTokens(after) - estimateTokens(before);
         if (target === memoryFile.path) memoryDelta += delta;
         else {
           otherDelta += delta;
           if (isSkillFilePath(target, config.skillDirs || config.skillsDir)) {
-            descriptionDelta += descriptionLineDelta(before, next) * loadedCopies(repo.root, skillFiles, target);
+            descriptionDelta += descriptionLineDelta(before, after) * loadedCopies(repo.root, skillFiles, target);
           }
         }
       }
     } catch (err) {
-      violations.push(err.message);
+      const ambiguous = err.code === AMBIGUOUS_FIND;
+      if (ambiguous && dropAmbiguous) {
+        // Only the still-ambiguous edit goes; every other edit already cleared its gates.
+        accepted.splice(accepted.indexOf(edit), 1);
+        dropped.push({ id: edit.id, title: edit.title, reason: err.message });
+        notes.push(`dropped edit ${edit.id} (${edit.title}): ${err.message}`);
+        continue;
+      }
+      violations.push(
+        ambiguous
+          ? `${err.message}; an earlier change in this proposal repeats it (line numbers count the file as the changes before it leave it) - reword or remove the repeated copy, or merge the two changes into one edit`
+          : err.message,
+      );
       edit.applicable = false;
       edit.deltaTokens = 0;
       edit.descriptionDelta = 0;
       continue;
     }
+    for (const [target, text] of next) running.set(target, text);
     edit.applicable = true;
     edit.deltaTokens = edit.targetsMemoryFile ? memoryDelta : otherDelta;
     edit.descriptionDelta = descriptionDelta;
@@ -901,7 +946,7 @@ export function buildProposal(rawResult, context) {
     notes,
   };
 
-  return { proposal, violations };
+  return { proposal, violations, dropped };
 }
 
 // Display counter for the apply surface's funnel: the instructions that drew a negative

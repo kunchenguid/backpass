@@ -493,7 +493,17 @@ async function annotateLoop({
       continue;
     }
 
-    const { proposal, violations } = buildProposal(parsed, { ...context, measured });
+    let built = buildProposal(parsed, { ...context, measured });
+    // The re-prompts are spent: an edit whose `find` is still ambiguous goes alone, named in
+    // the notes, instead of discarding every other edit that cleared its gates (#200).
+    if (built.violations.length && attempts >= ANNOTATE_TURNS) {
+      const retried = buildProposal(parsed, { ...context, measured, dropAmbiguous: true });
+      if (retried.dropped.length) {
+        built = retried;
+        for (const { id, title, reason } of retried.dropped) warn(`dropping edit ${id} (${title}): ${reason}`);
+      }
+    }
+    const { proposal, violations } = built;
     proposal.notes = [...proposal.notes, ...notes];
     proposal.usage = usage;
     proposal.overflowTarget = overflow;

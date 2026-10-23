@@ -412,6 +412,66 @@ test("the budget gate is measured on the staged file: growth on an over-budget f
   assert.ok(proposal.usage.length >= 3, "the re-prompt turn is accounted");
 });
 
+// An edit copies a bullet and another rewrites the original: each `find` is unique in the
+// file as read, but the second is ambiguous once the first has landed (#200).
+const COPY_AGENTS = [
+  "# Memory",
+  "",
+  ...Array.from({ length: 6 }, (_, i) => `- Rule number ${i + 1} is unique.`),
+  "- Keep transactions short.",
+  "- Rule number 7 is unique.",
+  "- Rule number 8 is unique.",
+  "",
+].join("\n");
+const copyScript = (annotation) => ({
+  edit: {
+    "AGENTS.md": {
+      replace: [
+        ["- Rule number 1 is unique.\n", "- Rule number 1 is unique.\n- Keep transactions short.\n"],
+        ["- Keep transactions short.\n- Rule number 7", "- Keep every transaction short.\n- Rule number 7"],
+        ["- Rule number 8 is unique.", "- Rule number 8 is unique, and checked."],
+      ],
+    },
+  },
+  annotations: [{ reply: annotation }],
+});
+const titled = (changes, title, extra = {}) => ({ ...tighten(changes), title, ...extra });
+
+test("one still-ambiguous edit is dropped and named after the re-prompts, and the other edits survive", async () => {
+  const { repo, run } = setup(
+    copyScript({ edits: [titled(["H1"], "copy"), titled(["H2"], "rewrite"), titled(["H3"], "tail")] }),
+    { text: COPY_AGENTS },
+  );
+  const { proposal, violations } = await run();
+  assert.deepEqual(violations, []);
+  assert.deepEqual(
+    proposal.edits.map((e) => e.title),
+    ["copy", "tail"],
+  );
+  assert.ok(
+    proposal.notes.some((n) => /^dropped edit .* \(rewrite\): .*appears 2 times in AGENTS\.md \(lines 4, 10\)/.test(n)),
+    proposal.notes.join("\n"),
+  );
+  const reprompt = fs.readFileSync(path.join(repo.root, ".backpass", "prompts", "synthesis-annotate-2.md"), "utf8");
+  assert.match(reprompt, /appears 2 times in AGENTS\.md \(lines 4, 10\)/);
+  assert.match(reprompt, /an earlier change in this proposal repeats it/);
+});
+
+test("dropping an ambiguous edit never hides another gate violation", async () => {
+  const { run } = setup(
+    copyScript({
+      edits: [titled(["H1"], "copy"), titled(["H2"], "rewrite"), titled(["H3"], "tail", { evidence: [] })],
+    }),
+    { text: COPY_AGENTS },
+  );
+  await assert.rejects(run(), (err) => {
+    assert.ok(err instanceof ProposalViolation);
+    assert.ok(err.violations.some((v) => /carries no verbatim evidence quote/.test(v)));
+    assert.ok(!err.violations.some((v) => /must be unique/.test(v)), "the dropped edit is no longer a violation");
+    return true;
+  });
+});
+
 test("when every re-prompt fails the gates, synthesis fails loudly and keeps the rejected proposal", async () => {
   const { config, run } = setup({
     edit: { "AGENTS.md": { replace: [[TWO_ITEMS, ""]] } },

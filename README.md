@@ -516,7 +516,10 @@ keeps the merged change rather than guessing.
 
 A malformed answer or gate violation triggers a re-prompt naming the exact breach (at
 most two). If those also fail, backpass **fails loudly** and preserves the latest parseable
-rejected proposal, if one was produced. It never silently truncates. A harness that writes
+rejected proposal, if one was produced. It never silently truncates. The one edit it will
+drop is a change whose anchor text still occurs more than once after the re-prompts
+(an earlier edit repeats it); that edit alone is dropped, named in a warning and in the
+proposal's notes, and the rest of the proposal goes to review. A harness that writes
 past the staging copy into the repo is an error, never an apply.
 
 Not every annotate turn is an answer, and the three cases are kept apart because they call
