@@ -882,6 +882,54 @@ test("a substring that matches two catalog quotes from the same source is a viol
   );
 });
 
+test("a verbatim catalog quote binds to itself over a longer quote that contains it", () => {
+  const foldRecord = (id, day, quotes) => ({
+    status: "ok",
+    transcript: { id, harness: "claude", startedAt: Date.parse(`2026-08-${day}T00:00:00Z`) },
+    positive: quotes.filter((q) => q.polarity === "positive"),
+    negative: quotes.filter((q) => q.polarity === "negative"),
+    gaps: [],
+  });
+  const summary = foldEvidence(
+    [
+      foldRecord("b859b8f3deadbeef", "18", [
+        {
+          polarity: "positive",
+          instruction: "AG-001",
+          quote: "the agent posted the full URL and then continued",
+        },
+        { polarity: "negative", instruction: "AG-001", quote: "the agent posted the full URL", class: "harm" },
+      ]),
+      foldRecord("c0ffee00deadbeef", "19", [
+        { polarity: "negative", instruction: "AG-001", quote: "the PR was named without a link", class: "harm" },
+      ]),
+    ],
+    { memoryFile: { units: parseMemoryUnits(MEMORY_TEXT) }, minGapEvidence: 2 },
+  );
+  const [first, second] = summary.sources;
+  const { proposal, violations } = gate({
+    edit: memoryEdit(REWRITE_SHAPES["append a sentence"]),
+    annotation: {
+      edits: [
+        claim(["H1"], {
+          kind: "rewrite",
+          title: "verbatim short quote",
+          evidence: [
+            { polarity: "positive", text: "the agent posted the full URL", source: first },
+            { polarity: "negative", text: "the PR was named without a link", source: second },
+          ],
+        }),
+      ],
+    },
+    context: { summary },
+  });
+  assert.deepEqual(violations, [], violations.join("\n"));
+  assert.equal(proposal.edits[0].transcripts, 2);
+  const bound = proposal.edits[0].evidence.find((item) => item.source === first);
+  assert.equal(bound.polarity, "negative");
+  assert.equal(bound.class, "harm");
+});
+
 test("countedEvidenceProjects credits a unique substring of a gap quote", () => {
   const edit = memoryEdit((text) => `${text}- Include the full pull request URL.\n`);
   const longGap = "it used a bare #2731 reference in the pull request body";

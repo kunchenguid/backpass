@@ -201,7 +201,8 @@ function isCatalogSubstring(itemText, catalogText) {
 /**
  * Catalog quotes from one source that contain the annotate text. Duplicates of the same
  * folded text count once per explicit polarity, and a polarity-less gap quote folds into
- * any polarized twin; a positive and a negative that share a span stay two.
+ * any polarized twin; a positive and a negative that share a span stay two. When some
+ * candidate equals the cited text exactly, only exact hits count.
  */
 function matchingCatalogQuotes(item, catalog, knownSources) {
   const source = normalizeSourceLabel(item?.source);
@@ -209,9 +210,13 @@ function matchingCatalogQuotes(item, catalog, knownSources) {
   if (knownSources && !knownSources.has(source)) return [];
   /** @type {Map<string, Map<string, object>>} */
   const byText = new Map();
-  for (const candidate of catalog) {
-    if (normalizeSourceLabel(candidate?.source) !== source) continue;
-    if (!isCatalogSubstring(item?.text, candidate?.text)) continue;
+  const hits = catalog.filter(
+    (candidate) =>
+      normalizeSourceLabel(candidate?.source) === source && isCatalogSubstring(item?.text, candidate?.text),
+  );
+  const cited = citedText(item?.text);
+  const exact = hits.filter((candidate) => foldSpace(candidate?.text) === cited);
+  for (const candidate of exact.length ? exact : hits) {
     const key = catalogQuoteKey(candidate);
     if (!byText.has(key)) byText.set(key, new Map());
     const byPolarity = byText.get(key);
