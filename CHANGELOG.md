@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.39](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.38...backpass-v0.1.39) (2026-10-23)
+
+
+### Bug Fixes
+
+* run first Claude analysis call alone before fan-out ([#226](https://github.com/kunchenguid/backpass/issues/226)) ([3882b86](https://github.com/kunchenguid/backpass/commit/3882b86d84017bcdbf5e2cbe2e8c1fa9abeb3126))
+
 ## [0.1.38](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.37...backpass-v0.1.38) (2026-10-21)
 
 
