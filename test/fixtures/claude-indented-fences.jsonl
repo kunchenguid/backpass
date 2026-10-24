@@ -1,0 +1,7 @@
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"    ```\npasted\n \t  ```\nKeep the public API stable."}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"    ```\npasted\n  \t  ```\nKeep the public API stable."}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"    ```\npasted\n   \t  ```\nKeep the public API stable."}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"    ~~~\npasted\n \t  ~~~\nKeep the public API stable."}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"    ~~~\npasted\n  \t  ~~~\nKeep the public API stable."}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"    ~~~\npasted\n   \t  ~~~\nKeep the public API stable."}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":" \t\n "}]}}

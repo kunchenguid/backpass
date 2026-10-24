@@ -1,3 +1,4 @@
+import { carveEnvelope } from "./directives.js";
 import { redact } from "./redact.js";
 import { estimateTokens } from "./tokens.js";
 
@@ -100,6 +101,18 @@ export function isBoilerplate(text) {
 export function distill(events, meta, options = {}) {
   const maxTraceTokens = options.maxTraceTokens ?? 12000;
   const lines = [];
+  let bodyChars = 0;
+  const push = (line) => {
+    lines.push(line);
+    bodyChars += line.length + 1;
+  };
+  // Message turns in trace order, with the same turn numbers the trace prints: the
+  // single source of truth for anything that points at a turn (directive spans in
+  // `src/directives.js`). Text is the redacted form the model actually sees; the
+  // envelope is carved from the full pre-clamp text, so a closing fence that the clamp
+  // elides cannot turn an instruction into a paste.
+  const turns = [];
+  const turnSpans = [];
   let userTurns = 0;
   let assistantTurns = 0;
   let toolCalls = 0;
@@ -108,21 +121,35 @@ export function distill(events, meta, options = {}) {
   for (const event of events) {
     if (!event) continue;
     if (event.kind === "message") {
-      const text = clampMessage(redact(event.text));
+      const redacted = redact(event.text);
+      const text = clampMessage(redacted);
       if (!text || isBoilerplate(text)) continue;
       turn += 1;
       if (event.role === "user") userTurns += 1;
       else assistantTurns += 1;
-      lines.push(`### turn ${turn} · ${event.role}`);
-      lines.push(text);
-      lines.push("");
+      turns.push({
+        turn,
+        role: event.role,
+        text,
+        envelope: event.role === "user" ? carveEnvelope(redacted) : "",
+        // The envelope is carved pre-clamp, so a clamped turn's instruction may be absent
+        // from what the model reads; the index must not point at it.
+        clamped: text !== redacted.trim(),
+        // Set once the trace cap is known, below.
+        elided: false,
+      });
+      const from = bodyChars;
+      push(`### turn ${turn} · ${event.role}`);
+      push(text);
+      turnSpans.push([from, bodyChars - 1]);
+      push("");
     } else if (event.kind === "tool") {
       toolCalls += 1;
       const input = redact(describeToolInput(event.input));
       const result = redact(describeToolResult(event.result));
       const status = event.status && event.status !== "completed" ? ` [${event.status}]` : "";
       const arrow = result ? ` -> ${result}` : "";
-      lines.push(`tool: ${event.name || "unknown"}${input ? ` ${JSON.stringify(input)}` : ""}${status}${arrow}`);
+      push(`tool: ${event.name || "unknown"}${input ? ` ${JSON.stringify(input)}` : ""}${status}${arrow}`);
     }
   }
 
@@ -147,11 +174,17 @@ export function distill(events, meta, options = {}) {
     "transcript only if a specific claim needs the full text.",
   ].join("\n");
 
-  const { body, elided } = capTrace(lines.join("\n").trim(), maxTraceTokens);
+  const rawBody = lines.join("\n").trim();
+  const { body, elided, kept } = capTrace(rawBody, maxTraceTokens);
+  turns.forEach((entry, index) => {
+    const [from, to] = turnSpans[index];
+    entry.elided = !kept.some(([keptFrom, keptTo]) => from >= keptFrom && to <= keptTo);
+  });
   const trace = `${header}\n${body}\n${footer}\n`;
 
   return {
     trace,
+    turns,
     stats: {
       userTurns,
       assistantTurns,
@@ -168,7 +201,7 @@ export function distill(events, meta, options = {}) {
  * raw transcript path in the footer remains the escape hatch for anything in between.
  */
 function capTrace(body, maxTraceTokens) {
-  if (estimateTokens(body) <= maxTraceTokens) return { body, elided: false };
+  if (estimateTokens(body) <= maxTraceTokens) return { body, elided: false, kept: [[0, body.length]] };
   const budgetChars = maxTraceTokens * 4;
   const headChars = Math.floor(budgetChars * 0.45);
   const tailChars = Math.floor(budgetChars * 0.45);
@@ -178,5 +211,9 @@ function capTrace(body, maxTraceTokens) {
   return {
     body: `${head}\n\n[... middle of session elided: ~${droppedTokens} tokens. Open the raw transcript below if a claim needs it ...]\n\n${tail}`,
     elided: true,
+    kept: [
+      [0, headChars],
+      [body.length - tailChars, body.length],
+    ],
   };
 }

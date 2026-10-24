@@ -494,11 +494,11 @@ test("the process wrapper escalates when its harness child ignores termination",
     signalChild,
     `#!${process.execPath}
 const fs = require("node:fs");
-fs.writeFileSync(${JSON.stringify(readyPath)}, String(process.pid));
 process.on("SIGTERM", () => {
   fs.writeFileSync(${JSON.stringify(signalPath)}, "SIGTERM");
 });
 setInterval(() => {}, 1000);
+fs.writeFileSync(${JSON.stringify(readyPath)}, String(process.pid));
 `,
   );
   fs.chmodSync(signalChild, 0o755);
