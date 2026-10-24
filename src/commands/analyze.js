@@ -83,11 +83,11 @@ export function primaryMemoryFile(repo, config, scope = null) {
 
 export async function runAnalysis(ctx) {
   try {
-    reclaimExpiredRawFiles(ctx.config.state.root);
+    reclaimExpiredRawFiles(ctx.config.state.scopeRoot);
     return await runAnalysisCore(ctx);
   } finally {
     await closeRemoteDiscovery(ctx);
-    pruneHostCache(ctx.config.state.root);
+    pruneHostCache(ctx.config.state.scopeRoot);
   }
 }
 

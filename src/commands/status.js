@@ -16,6 +16,7 @@ import { HostCache, pruneHostCache } from "../discovery/cache.js";
 import { budgetBar, budgetStatus, formatTokens } from "../tokens.js";
 import { table } from "./scan.js";
 import { candidateKey, isProbeEntryFresh, resolvedEffort } from "../agents.js";
+import { applyCommand, stateCommand } from "../target.js";
 
 export async function cmdStatus(ctx) {
   const { repo, config, scope } = ctx;
@@ -28,11 +29,14 @@ export async function cmdStatus(ctx) {
   for (const e of evidence) counts[e.status] = (counts[e.status] || 0) + 1;
 
   const cache = state.readScanCache();
-  pruneHostCache(state.root);
-  const hostCache = new HostCache(state.root).stats();
+  pruneHostCache(state.scopeRoot);
+  const hostCache = new HostCache(state.scopeRoot).stats();
   const summary = state.readSummary();
   const proposal = state.readProposal();
   const rejections = state.readRejections();
+  const waiting = state
+    .listTargetProposals()
+    .map((other) => ({ ...other, apply: applyCommand({ surface: other.path }, scope) }));
   const userScope = scope?.kind === "user";
   const overflow = resolveOverflowTarget(repo.root, config.skillsDir, {
     claudeSkillsDir: userScope ? userClaudeSkillsDir() : undefined,
@@ -108,6 +112,7 @@ export async function cmdStatus(ctx) {
       hosts: hostCache,
       summary: summary ? { analyzedSessions: summary.analyzedSessions, totals: summary.totals } : null,
       proposal: proposal ? { generatedAt: proposal.generatedAt, edits: proposal.edits.length } : null,
+      targetProposals: waiting,
       rejections: Object.keys(rejections.entries).length,
       skills: skills.length,
     });
@@ -221,7 +226,7 @@ export async function cmdStatus(ctx) {
 
   out(color.dim("PROPOSAL"));
   if (!proposal) {
-    out("  none yet - run `backpass`");
+    out(`  none yet - run \`${stateCommand("", state, scope)}\``);
   } else {
     out(`  generated       ${proposal.generatedAt}`);
     out(
@@ -229,7 +234,10 @@ export async function cmdStatus(ctx) {
     );
     const surface = path.join(state.applyDir, "apply.html");
     if (fs.existsSync(surface)) out(color.dim(`  surface         ${surface}`));
-    if (!proposal.violations?.length && proposal.edits.length) out("  review with `backpass apply`");
+    if (!proposal.violations?.length && proposal.edits.length) out(`  review with \`${applyCommand(state, scope)}\``);
+  }
+  for (const other of waiting) {
+    out(`  ${other.path.padEnd(15)} ${other.edits} edit(s) · review with \`${other.apply}\``);
   }
 
   out("");

@@ -36,7 +36,7 @@ export async function cmdScan(ctx) {
     return await cmdScanCore(ctx);
   } finally {
     await closeRemoteDiscovery(ctx);
-    pruneHostCache(ctx.config.state.root);
+    pruneHostCache(ctx.config.state.scopeRoot);
   }
 }
 

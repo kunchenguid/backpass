@@ -6,9 +6,9 @@ import { fileURLToPath } from "node:url";
 import { UserError, fail, setQuiet } from "./logger.js";
 import { applyHostFlag, loadConfig, parseMaxTranscripts, parseScopeKind } from "./config.js";
 import { resolveRepo } from "./repo.js";
-import { printScopeNote, resolveScope } from "./scope.js";
+import { pathInRoot, printScopeNote, resolveScope } from "./scope.js";
 import { applyNestedMemoryConfig } from "./nested.js";
-import { printTargetNote, resolveTarget, TARGET_COMMANDS } from "./target.js";
+import { printTargetNote, resolveTarget, surfaceState, TARGET_COMMANDS } from "./target.js";
 import { State } from "./state.js";
 import { AgentResolver } from "./agents.js";
 import { AcpxError } from "./acpx.js";
@@ -301,11 +301,23 @@ export async function main(argv) {
     config.memoryFiles = config.target.kind === "memory" ? [config.target.path] : scope.memoryFiles;
     config.skillsDir = scope.overflowDir;
     if (scope.skillDirs.length) config.skillsDirs = scope.skillDirs;
-    config.state = new State(scope.root, {
+    const rootState = new State(scope.root, {
       stateDir: scope.stateDir,
       mode: kind === "user" ? 0o700 : undefined,
       exclude: kind === "user" ? false : undefined,
     }).ensure();
+    // A run that names a root memory file other than the default keeps its evidence and
+    // proposal apart from the default's (`surfaceState`); a default run is untouched.
+    const namesMemory = Boolean(overrides.memoryFiles) || config.target.kind === "memory";
+    config.state =
+      namesMemory && commandName !== "init"
+        ? surfaceState(rootState, {
+            root: scope.root,
+            user: kind === "user",
+            memoryFiles: config.memoryFiles,
+            defaultMemoryFiles: defaultMemoryFiles(kind, repo, overrides, scope),
+          })
+        : rootState;
     config.agents = new AgentResolver(config, {
       state: config.state,
       cwd: scope.modelCwd,
@@ -327,6 +339,21 @@ export async function main(argv) {
   } catch (err) {
     return reportError(err);
   }
+}
+
+/**
+ * The root memory files a run without `--memory-file` would train: the configured list,
+ * minus nested entries, spelled the way the scope spells it. Only the default's identity
+ * is needed here, so a run with no `--memory-file` reuses the scope's own list.
+ */
+function defaultMemoryFiles(kind, repo, overrides, scope) {
+  if (!overrides.memoryFiles) return scope.memoryFiles;
+  const rest = { ...overrides };
+  delete rest.memoryFiles;
+  delete rest.nestedMemoryFiles;
+  const configured = loadConfig(kind === "user" ? null : repo.root, rest, { kind });
+  const nested = new Set((configured.nestedMemoryFiles || []).map((entry) => pathInRoot(entry, scope.root)));
+  return configured.memoryFiles.map((entry) => pathInRoot(entry, scope.root)).filter((entry) => !nested.has(entry));
 }
 
 /** Print a failure that escaped a command and return the exit code. */

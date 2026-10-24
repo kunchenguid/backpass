@@ -208,8 +208,12 @@ backpass --scope user --target db    # the same, against the user-level surface
 A memory-file target may still extract a **new** skill (that is how the file shrinks). A
 skill target writes only that `SKILL.md`, and its budget is still the whole always-loaded
 surface: the memory file plus every description line, moved by the description-line delta
-of the edit. Analysis, evidence, and state are those of the whole surface; only staging and
-the proposal gate narrow. `--target` applies to the default run, `analyze`, `propose`, and
+of the edit. A skill target, or a target naming the file a default run trains, keeps the
+analysis, evidence, and state of the whole surface; only staging and the proposal gate
+narrow. A run that names any other root memory file, with `--target` or `--memory-file`,
+keeps its evidence and proposal in that file's own state directory (see [State](#state)),
+so two files can be trained in turn without re-analyzing either, and `backpass apply
+--memory-file <file>` reviews that file's proposal. `--target` applies to the default run, `analyze`, `propose`, and
 `apply`; on `apply` it is optional, but when supplied it must match the saved proposal's target.
 It cannot be combined with
 `--memory-file`, and a targeted run never bootstraps a missing memory file.
@@ -953,7 +957,18 @@ exclude (`.git/info/exclude`, written by `backpass init`) rather than the tracke
   hosts/                 transcripts fetched from SSH hosts (mode 0700), pruned after 30 days unused
   raw/                   temporary session events (see Distill)
   apply/apply.html       the rendered review surface
+  targets/<file>-<hash>/ another named root memory file's own evidence/, evidence-summary.json,
+                         proposal.json, prompts/, synthesis/, raw/, and apply/
 ```
+
+A run that trains the configured default memory file uses the layout above unchanged. A
+run that names a different root file (`--memory-file`, or a memory-file `--target`) keeps
+its per-surface files under `targets/`, so each file's cached evidence and pending
+proposal survive a run against the other; `backpass apply --memory-file <file>` and
+`backpass status --memory-file <file>` read that file's. The scan cache, rejections, gap
+ledger (its entries are keyed by memory file), probe cache, and fetched host transcripts
+stay shared in `.backpass/`. User scope uses the same layout inside its own state
+directory.
 
 For the user-scope state location and isolation contract, see
 [User-level memory](#user-level-memory).

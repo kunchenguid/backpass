@@ -73,7 +73,7 @@ export async function discoverTranscripts({
   const associateFn =
     scope?.associate ||
     ((descriptor) => associate(descriptor, repo, { worktreeGlobs: config.discovery.worktreeGlobs }));
-  const stateDir = config.state?.root;
+  const stateDir = config.state?.scopeRoot;
   const userFilter = scope?.kind === "user";
 
   const transcripts = [];

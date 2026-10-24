@@ -35,7 +35,7 @@ async function initUser(config, flags) {
     info(`${color.green("·")} wrote user block in ${target}`);
   }
 
-  const stateDir = config.state.root;
+  const stateDir = config.state.scopeRoot;
   fs.mkdirSync(stateDir, { recursive: true });
   try {
     fs.chmodSync(stateDir, 0o700);

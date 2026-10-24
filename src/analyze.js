@@ -96,15 +96,17 @@ function rawCleanupEntries(dir) {
 
 /**
  * Removes raw files whose lease expired - what an uncatchable exit such as SIGKILL leaves
- * behind - from the state root and its nested state directories.
+ * behind - from the state root and its nested and target state directories.
  */
 export function reclaimExpiredRawFiles(stateRoot) {
   if (!stateRoot) return;
   const now = Date.now();
   const roots = [stateRoot];
-  const nested = path.join(stateRoot, "nested");
-  for (const entry of rawCleanupEntries(nested)) {
-    if (entry.isDirectory()) roots.push(path.join(nested, entry.name));
+  for (const sub of ["nested", "targets"]) {
+    const parent = path.join(stateRoot, sub);
+    for (const entry of rawCleanupEntries(parent)) {
+      if (entry.isDirectory()) roots.push(path.join(parent, entry.name));
+    }
   }
   for (const root of roots) {
     const dir = path.resolve(root, "raw");

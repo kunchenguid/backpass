@@ -55,7 +55,8 @@ Each owning file's comments and tests hold the detail; read them before touching
   report-only.
 - **Scopes and targets**: user-scope state never enters `<repo>/.backpass/` and a project run never writes a
   user file (`src/scope.js`). `--target` accepts only an exact configured memory file or skill name
-  (`src/target.js`), never a basename, directory, or glob.
+  (`src/target.js`), never a basename, directory, or glob. A run naming a non-default root file keeps its
+  evidence and proposal in `.backpass/targets/` (`surfaceState`); a default run's layout never changes.
 - **SSH hosts** (`src/discovery/hosts.js`): `src/discovery/remote/ssh.js` is the only ssh spawn boundary; nothing
   installs remotely and the probe bundle must stay self-contained (`PROBE_MANIFEST`); `discovery.hosts` in a
   repo's `.backpassrc.json` is an error; host keys are never auto-accepted. Remote cache names are hashed

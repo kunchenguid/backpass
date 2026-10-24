@@ -30,11 +30,22 @@ export const STATE_EXCLUDE_LINE = `${STATE_DIRNAME}/`;
  *   raw/                   a SQLite-store session's events while its analysis call runs (src/analyze.js)
  *   synthesis/             the staging copy the synthesis agent edits natively (src/workspace.js)
  *   apply/                 the rendered Lavish apply surface
+ *   targets/<file>-<hash>/ one named root memory file's own evidence, summary, proposal,
+ *                          prompts, staging, and apply surface (`targetStateDir`)
+ *
+ * A run whose memory file is the configured default keeps every file above directly in
+ * `.backpass/`. A run that names another root file (`--memory-file`, or a memory
+ * `--target`) keeps the per-surface files in that file's `targets/` directory, so
+ * training two files in turn never overwrites one's evidence or proposal with the
+ * other's. The scope-level files - scan cache, rejections, gap ledger (keyed by memory
+ * path), probe cache, and fetched host transcripts - stay shared in the scope root.
  */
 export class State {
   /**
    * @param {string} repoRoot project checkout, or ignored when `options.stateDir` is set
-   * @param {{ stateDir?: string, mode?: number, exclude?: boolean }} [options]
+   * @param {{ stateDir?: string, mode?: number, exclude?: boolean, shared?: State, surface?: string }} [options]
+   *   `shared` is the scope's root state a target state shares its scope-level files with;
+   *   `surface` names the memory file a target state belongs to
    */
   constructor(repoRoot, options = {}) {
     this.root = options.stateDir || path.join(repoRoot, STATE_DIRNAME);
@@ -45,9 +56,19 @@ export class State {
     this.scanCachePath = path.join(this.root, "scan-cache.json");
     this.summaryPath = path.join(this.root, "evidence-summary.json");
     this.proposalPath = path.join(this.root, "proposal.json");
+    this.reviewedPath = path.join(this.root, "reviewed.json");
     this.rejectionsPath = path.join(this.root, "rejections.json");
     this.gapLedgerPath = path.join(this.root, "gap-ledger.json");
     this.probeCachePath = path.join(this.root, "agent-probe-cache.json");
+    // Discovery's self-session check and the fetched-host cache are scope-level.
+    this.scopeRoot = options.shared ? options.shared.scopeRoot : this.root;
+    this.surface = options.surface || null;
+    if (options.shared) {
+      this.scanCachePath = options.shared.scanCachePath;
+      this.rejectionsPath = options.shared.rejectionsPath;
+      this.gapLedgerPath = options.shared.gapLedgerPath;
+      this.probeCachePath = options.shared.probeCachePath;
+    }
   }
 
   /**
@@ -188,8 +209,41 @@ export class State {
     this.writeJsonFile(this.proposalPath, proposal);
   }
 
+  /**
+   * Records that every edit of the proposal hashing to `hash` (`proposalHash`) was decided.
+   * A marker beside proposal.json, never a rewrite of it: a newer proposal saved during
+   * the review hashes differently, so it stays intact and listed.
+   */
+  markReviewed(hash) {
+    this.writeJsonFile(this.reviewedPath, { proposal: hash });
+  }
+
   clearProposal() {
     fs.rmSync(this.proposalPath, { force: true });
+  }
+
+  /**
+   * Gate-clean proposals kept by this scope's target states that still wait for a review
+   * (not applied, and not the proposal `markReviewed` recorded), so a command reading the
+   * default proposal can name the ones it is not reading. Empty for a target state: only
+   * the scope root holds `targets/`.
+   */
+  listTargetProposals() {
+    const dir = path.join(this.root, "targets");
+    if (this.scopeRoot !== this.root || !fs.existsSync(dir)) return [];
+    return fs
+      .readdirSync(dir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => ({
+        proposal: this.readJsonFile(path.join(dir, entry.name, "proposal.json"), null),
+        reviewed: this.readJsonFile(path.join(dir, entry.name, "reviewed.json"), null)?.proposal,
+      }))
+      .filter(({ proposal, reviewed }) => proposal && reviewed !== proposalHash(proposal))
+      .map(({ proposal }) => proposal)
+      .filter((proposal) => proposal.memoryFile?.path && !proposal.appliedAt && !proposal.violations?.length)
+      .filter((proposal) => proposal.edits?.length)
+      .map((proposal) => ({ path: proposal.memoryFile.path, edits: proposal.edits.length }))
+      .sort((a, b) => a.path.localeCompare(b.path));
   }
 
   readRejections() {
@@ -234,6 +288,16 @@ export function safeFileName(id) {
   return String(id)
     .replace(/[^A-Za-z0-9._-]/g, "_")
     .slice(0, 120);
+}
+
+/** Where a named, non-default root memory file keeps its per-surface state. */
+export function targetStateDir(rootState, memoryPath) {
+  return path.join(rootState.root, "targets", `${safeFileName(memoryPath)}-${sha256(memoryPath).slice(0, 8)}`);
+}
+
+/** The content identity of a proposal as read from proposal.json. */
+export function proposalHash(proposal) {
+  return sha256(JSON.stringify(proposal));
 }
 
 export function sha256(text) {
