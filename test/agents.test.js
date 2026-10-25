@@ -4,10 +4,12 @@ import assert from "node:assert/strict";
 import {
   AgentResolver,
   candidateKey,
+  candidateLabel,
   flattenLadder,
   isProbeEntryFresh,
   probeCandidate,
   resolveModelId,
+  resolvedEffort,
 } from "../src/agents.js";
 import { AcpxError, acpxAgentName, classifyAcpxFailure, effortOptionKey, probeSession } from "../src/acpx.js";
 import { DEFAULT_LADDERS, loadConfig } from "../src/config.js";
@@ -53,6 +55,32 @@ function scriptedProbe(verdicts) {
 }
 
 /**
+ * Resolution fixtures for the model-id rung path. The shipped ladders name families
+ * and resolve a generation from the catalog; the walk order, caching, and fall-through
+ * tests below are about the resolver itself, so they pin this equivalent model ladder
+ * instead of depending on whichever generation is newest today. The family-rung path
+ * has its own tests.
+ */
+const TEST_LADDERS = {
+  analysis: [
+    { model: "gpt-5.6-luna", provider: "openai-codex", agents: ["pi", "opencode", "codex"] },
+    { model: "claude-sonnet-5", provider: "anthropic", agents: ["claude"] },
+    { model: "grok-4.6", provider: "xai", agents: ["pi", "opencode", "grok"] },
+  ],
+  synthesis: [
+    { model: "gpt-5.6-sol", provider: "openai-codex", agents: ["pi", "opencode", "codex"] },
+    { model: "claude-opus-5", provider: "anthropic", agents: ["claude"] },
+    { model: "grok-4.6", provider: "xai", agents: ["pi", "opencode", "grok"] },
+  ],
+};
+
+function testConfig() {
+  const config = loadConfig(tmpRepo());
+  config.ladders = structuredClone(TEST_LADDERS);
+  return config;
+}
+
+/**
  * @param {Record<string, any>} verdicts
  * @param {{ config?: any, state?: ReturnType<typeof memoryState>, now?: () => number,
  *   bypassCache?: boolean, acpxVersion?: () => Promise<string | null>,
@@ -61,7 +89,7 @@ function scriptedProbe(verdicts) {
  */
 function resolverWith(
   verdicts,
-  { config = loadConfig(tmpRepo()), state = memoryState(), sleep = async () => {}, ...deps } = {},
+  { config = testConfig(), state = memoryState(), sleep = async () => {}, ...deps } = {},
 ) {
   const { probe, calls } = scriptedProbe(verdicts);
   const resolver = new AgentResolver(config, {
@@ -102,30 +130,138 @@ function emptyOutput(agent, model, stderr = "") {
 
 test("the ladders flatten model-outer, harness-inner, in the captain's order", () => {
   assert.deepEqual(
-    flattenLadder(DEFAULT_LADDERS.analysis).map((c) => `${c.model}@${c.agent}`),
-    [
-      "gpt-5.6-luna@pi",
-      "gpt-5.6-luna@opencode",
-      "gpt-5.6-luna@codex",
-      "claude-sonnet-5@claude",
-      "grok-4.6@pi",
-      "grok-4.6@opencode",
-      "grok-4.6@grok",
-    ],
+    flattenLadder(DEFAULT_LADDERS.analysis).map((c) => `${candidateLabel(c)}@${c.agent}`),
+    ["gpt/luna@omp", "gpt/luna@codex", "sonnet@claude", "deepseek/flash@omp"],
   );
-  assert.equal(flattenLadder(DEFAULT_LADDERS.synthesis)[0].model, "gpt-5.6-sol");
-  assert.equal(flattenLadder(DEFAULT_LADDERS.synthesis)[3].model, "claude-opus-5");
+  assert.equal(candidateLabel(flattenLadder(DEFAULT_LADDERS.synthesis)[0]), "gpt/sol");
+  assert.equal(candidateLabel(flattenLadder(DEFAULT_LADDERS.synthesis)[2]), "opus");
+});
+
+test("a family rung takes the newest generation the harness advertises, at probe time", async () => {
+  const config = loadConfig(tmpRepo());
+  config.ladders.analysis = [{ family: "gpt", tier: "sol", provider: "openai-codex", agents: ["pi"] }];
+  const advertised = ["openai-codex/gpt-6.1-sol", "openai-codex/gpt-6-luna", "openai-codex/gpt-5.6-sol"];
+  const resolver = new AgentResolver(config, {
+    state: memoryState(),
+    acpxVersion: async () => "0.13.0",
+    probeCandidate: (candidate, options) =>
+      probeCandidate(candidate, {
+        ...options,
+        probeSession: async () => ({ verdict: "ok", detail: "", availableModels: advertised }),
+      }),
+  });
+
+  const pick = await resolver.resolve("analysis");
+  assert.equal(pick.agent, "pi");
+  assert.equal(pick.model, "openai-codex/gpt-6.1-sol", "the catalog's newest tier member wins");
+  assert.equal(pick.family, "gpt");
+  assert.equal(pick.tier, "sol");
+  assert.equal(pick.ladderModel, undefined, "a family rung has no bare id of its own");
+});
+
+test("a family rung with no catalog match falls through to the next rung", async () => {
+  const config = loadConfig(tmpRepo());
+  config.ladders.analysis = [
+    { family: "gpt", tier: "sol", provider: "openai-codex", agents: ["pi"] },
+    { family: "grok", provider: "xai", agents: ["pi"] },
+  ];
+  const catalogs = {
+    "family:gpt/sol": ["openai-codex/gpt-6.1-luna"],
+    "family:grok/": ["openai-codex/gpt-6.1-luna", "xai/grok-4.6"],
+  };
+  const resolver = new AgentResolver(config, {
+    state: memoryState(),
+    acpxVersion: async () => "0.13.0",
+    probeCandidate: (candidate, options) =>
+      probeCandidate(candidate, {
+        ...options,
+        probeSession: async () => ({
+          verdict: "ok",
+          detail: "",
+          availableModels:
+            catalogs[candidate.family ? `family:${candidate.family}/${candidate.tier ?? ""}` : candidate.model],
+        }),
+      }),
+  });
+
+  const pick = await resolver.resolve("analysis");
+  assert.equal(pick.model, "xai/grok-4.6");
+  assert.equal(pick.family, "grok");
+  assert.match(pick.reason, /pi\/gpt\/sol \(model not available\)/, "the skipped family rung renders family/tier");
+});
+
+test("a family rung demoted mid-run is skipped by the next walk, not re-chosen", { timeout: 10_000 }, async () => {
+  const config = loadConfig(tmpRepo());
+  config.ladders.analysis = [
+    { family: "gpt", tier: "sol", provider: "openai-codex", agents: ["pi"] },
+    { family: "grok", provider: "xai", agents: ["pi"] },
+  ];
+  const resolver = new AgentResolver(config, {
+    state: memoryState(),
+    acpxVersion: async () => "0.13.0",
+    probeCandidate: (candidate, options) =>
+      probeCandidate(candidate, {
+        ...options,
+        probeSession: async () => ({
+          verdict: "ok",
+          detail: "",
+          availableModels: ["openai-codex/gpt-6.1-sol", "xai/grok-4.6"],
+        }),
+      }),
+  });
+
+  const attempts = [];
+  const result = await resolver.withFallthrough("analysis", async (pick) => {
+    attempts.push(candidateLabel(pick));
+    if (pick.family === "gpt") {
+      throw new AcpxError('Cannot apply --model "x": the ACP agent did not advertise that model.', {
+        stderr: 'Cannot apply --model "x": the ACP agent did not advertise that model.',
+        code: 1,
+      });
+    }
+    return "evidence";
+  });
+  assert.equal(result, "evidence");
+  assert.deepEqual(attempts, ["gpt/sol", "grok"]);
+  assert.equal((await resolver.resolve("analysis")).family, "grok", "the demotion is remembered for the run");
+});
+
+test("an exhausted ladder of family rungs names each rung as family/tier", async () => {
+  const config = loadConfig(tmpRepo());
+  config.ladders.synthesis = [
+    { family: "gpt", tier: "sol", provider: "openai-codex", agents: ["pi"] },
+    { family: "grok", provider: "xai", agents: ["grok"] },
+  ];
+  const { resolver } = resolverWith(
+    {
+      "pi|family:openai-codex/gpt/sol": "unauthenticated",
+      "grok|family:xai/grok/": "timeout",
+    },
+    { config },
+  );
+  await assert.rejects(
+    () => resolver.resolve("synthesis"),
+    (err) => {
+      assert.ok(err instanceof UserError);
+      assert.match(err.message, /no available agent for the synthesis pass/);
+      assert.match(err.message, /gpt\/sol\s+pi\s+not logged in.*pi login/);
+      assert.match(err.message, /grok\s+grok\s+probe timed out/);
+      assert.doesNotMatch(err.message, /undefined/);
+      assert.match(err.hint, /--synthesis-agent <agent> --synthesis-model <id>/);
+      return true;
+    },
+  );
 });
 
 test("ordered selection picks the first available+authed candidate per role", async () => {
   const { resolver, calls } = resolverWith({
-    "pi|gpt-5.6-luna": "unauthenticated",
-    "opencode|gpt-5.6-luna": "model-unavailable",
-    "codex|gpt-5.6-luna": { resolvedModel: "gpt-5.6-luna" },
-    "pi|gpt-5.6-sol": "timeout",
-    "opencode|gpt-5.6-sol": "model-unavailable",
-    "codex|gpt-5.6-sol": "unauthenticated",
-    "claude|claude-opus-5": { resolvedModel: "claude-opus-5" },
+    "pi|openai-codex/gpt-5.6-luna": "unauthenticated",
+    "opencode|openai-codex/gpt-5.6-luna": "model-unavailable",
+    "codex|openai-codex/gpt-5.6-luna": { resolvedModel: "gpt-5.6-luna" },
+    "pi|openai-codex/gpt-5.6-sol": "timeout",
+    "opencode|openai-codex/gpt-5.6-sol": "model-unavailable",
+    "codex|openai-codex/gpt-5.6-sol": "unauthenticated",
+    "claude|anthropic/claude-opus-5": { resolvedModel: "claude-opus-5" },
   });
 
   const analysis = await resolver.resolve("analysis");
@@ -143,21 +279,21 @@ test("ordered selection picks the first available+authed candidate per role", as
   assert.deepEqual(
     calls,
     [
-      "pi|gpt-5.6-luna",
-      "opencode|gpt-5.6-luna",
-      "codex|gpt-5.6-luna",
-      "pi|gpt-5.6-sol",
-      "pi|gpt-5.6-sol",
-      "opencode|gpt-5.6-sol",
-      "codex|gpt-5.6-sol",
-      "claude|claude-opus-5",
+      "pi|openai-codex/gpt-5.6-luna",
+      "opencode|openai-codex/gpt-5.6-luna",
+      "codex|openai-codex/gpt-5.6-luna",
+      "pi|openai-codex/gpt-5.6-sol",
+      "pi|openai-codex/gpt-5.6-sol",
+      "opencode|openai-codex/gpt-5.6-sol",
+      "codex|openai-codex/gpt-5.6-sol",
+      "claude|anthropic/claude-opus-5",
     ],
     "the walk stops at the first ok and never probes lower rungs",
   );
 });
 
 test("the resolved model id is the adapter's spelling, never the bare id", async () => {
-  const { resolver } = resolverWith({ "pi|gpt-5.6-luna": { resolvedModel: "openai-codex/gpt-5.6-luna" } });
+  const { resolver } = resolverWith({ "pi|openai-codex/gpt-5.6-luna": { resolvedModel: "openai-codex/gpt-5.6-luna" } });
   const pick = await resolver.resolve("analysis");
   assert.equal(pick.agent, "pi");
   assert.equal(pick.model, "openai-codex/gpt-5.6-luna");
@@ -166,7 +302,7 @@ test("the resolved model id is the adapter's spelling, never the bare id", async
 
 test("the real ladder keeps Pi when its ambiguous model has a subscription winner", async () => {
   const config = loadConfig(tmpRepo());
-  config.ladders.analysis = [{ model: "gpt-5.6-luna", agents: ["pi", "codex"] }];
+  config.ladders.analysis = [{ model: "gpt-5.6-luna", provider: "openai-codex", agents: ["pi", "codex"] }];
   const calls = [];
   const resolver = new AgentResolver(config, {
     state: memoryState(),
@@ -262,7 +398,9 @@ test("an unclassified acpx probe exit remains transient when stderr has detail",
 test("native probe transients retry without caching while unsupported models demote", async () => {
   function nativeResolver(agent, nativeResults) {
     const config = loadConfig(tmpRepo());
-    config.ladders.analysis = [{ model: "gpt-5.6-luna", agents: [agent, "codex"] }];
+    config.ladders.analysis = [{ model: "gpt-5.6-luna", provider: "openai-codex", agents: [agent, "codex"] }];
+    // OpenCode has no safe role default effort; name one so a native-probe win can be resolved.
+    config.analysis.effort = "medium";
     const state = memoryState();
     const results = [...nativeResults];
     let nativeCalls = 0;
@@ -297,12 +435,12 @@ test("native probe transients retry without caching while unsupported models dem
   const empty = nativeResolver("opencode", [{ code: 0, stdout: "", stderr: "" }]);
   assert.equal((await empty.resolver.resolve("analysis")).agent, "codex");
   assert.equal(empty.nativeCalls(), 2);
-  assert.equal(empty.state.cache.entries["opencode|gpt-5.6-luna"], undefined);
+  assert.equal(empty.state.cache.entries["opencode|openai-codex/gpt-5.6-luna"], undefined);
 
   const timedOut = nativeResolver("claude", [{ code: null, stdout: "", stderr: "", timedOut: true }]);
   assert.equal((await timedOut.resolver.resolve("analysis")).agent, "codex");
   assert.equal(timedOut.nativeCalls(), 2);
-  assert.equal(timedOut.state.cache.entries["claude|gpt-5.6-luna"], undefined);
+  assert.equal(timedOut.state.cache.entries["claude|openai-codex/gpt-5.6-luna"], undefined);
 
   const stderrThenReady = nativeResolver("claude", [
     { code: 1, stdout: "", stderr: "another session is already running\n" },
@@ -314,7 +452,7 @@ test("native probe transients retry without caching while unsupported models dem
   const unsupported = nativeResolver("opencode", [{ code: 0, stdout: "anthropic/claude-opus-5\n", stderr: "" }]);
   assert.equal((await unsupported.resolver.resolve("analysis")).agent, "codex");
   assert.equal(unsupported.nativeCalls(), 1);
-  assert.equal(unsupported.state.cache.entries["opencode|gpt-5.6-luna"].verdict, "model-unavailable");
+  assert.equal(unsupported.state.cache.entries["opencode|openai-codex/gpt-5.6-luna"].verdict, "model-unavailable");
 });
 
 test("non-claude candidates resolve the bare id against the advertised list", async () => {
@@ -349,9 +487,9 @@ test("non-claude candidates resolve the bare id against the advertised list", as
 test("AUTH_REQUIRED mid-run falls through to the next candidate", async () => {
   const authState = () => "auth-a";
   const verdicts = {
-    "pi|gpt-5.6-luna": { resolvedModel: "openai-codex/gpt-5.6-luna" },
-    "opencode|gpt-5.6-luna": "model-unavailable",
-    "codex|gpt-5.6-luna": { resolvedModel: "gpt-5.6-luna" },
+    "pi|openai-codex/gpt-5.6-luna": { resolvedModel: "openai-codex/gpt-5.6-luna" },
+    "opencode|openai-codex/gpt-5.6-luna": "model-unavailable",
+    "codex|openai-codex/gpt-5.6-luna": { resolvedModel: "gpt-5.6-luna" },
   };
   const { resolver, calls, state } = resolverWith(verdicts, { providerAuthState: authState });
 
@@ -364,9 +502,17 @@ test("AUTH_REQUIRED mid-run falls through to the next candidate", async () => {
 
   assert.equal(result, "evidence");
   assert.deepEqual(attempts, ["pi/openai-codex/gpt-5.6-luna", "codex/gpt-5.6-luna"]);
-  assert.deepEqual(calls, ["pi|gpt-5.6-luna", "opencode|gpt-5.6-luna", "codex|gpt-5.6-luna"]);
-  assert.equal(state.cache.entries["pi|gpt-5.6-luna"].verdict, "unauthenticated", "the failure is remembered");
-  assert.equal(state.cache.entries["pi|gpt-5.6-luna"].authState, "auth-a");
+  assert.deepEqual(calls, [
+    "pi|openai-codex/gpt-5.6-luna",
+    "opencode|openai-codex/gpt-5.6-luna",
+    "codex|openai-codex/gpt-5.6-luna",
+  ]);
+  assert.equal(
+    state.cache.entries["pi|openai-codex/gpt-5.6-luna"].verdict,
+    "unauthenticated",
+    "the failure is remembered",
+  );
+  assert.equal(state.cache.entries["pi|openai-codex/gpt-5.6-luna"].authState, "auth-a");
   assert.equal((await resolver.resolve("analysis")).agent, "codex", "later calls in the run stay on the fallback");
 
   const replay = resolverWith(verdicts, { state, providerAuthState: authState });
@@ -376,9 +522,9 @@ test("AUTH_REQUIRED mid-run falls through to the next candidate", async () => {
 
 test("a clean exit with no output (e.g. exhausted provider credits) falls through to the next candidate", async () => {
   const verdicts = {
-    "pi|gpt-5.6-luna": { resolvedModel: "openai/gpt-5.6-luna" },
-    "opencode|gpt-5.6-luna": "model-unavailable",
-    "codex|gpt-5.6-luna": { resolvedModel: "gpt-5.6-luna" },
+    "pi|openai-codex/gpt-5.6-luna": { resolvedModel: "openai/gpt-5.6-luna" },
+    "opencode|openai-codex/gpt-5.6-luna": "model-unavailable",
+    "codex|openai-codex/gpt-5.6-luna": { resolvedModel: "gpt-5.6-luna" },
   };
   const { resolver, calls, state } = resolverWith(verdicts);
 
@@ -391,15 +537,23 @@ test("a clean exit with no output (e.g. exhausted provider credits) falls throug
 
   assert.equal(result, "evidence");
   assert.deepEqual(attempts, ["pi/openai/gpt-5.6-luna", "codex/gpt-5.6-luna"]);
-  assert.deepEqual(calls, ["pi|gpt-5.6-luna", "opencode|gpt-5.6-luna", "codex|gpt-5.6-luna"]);
-  assert.equal(state.cache.entries["pi|gpt-5.6-luna"].verdict, "empty-output", "the failure is remembered");
+  assert.deepEqual(calls, [
+    "pi|openai-codex/gpt-5.6-luna",
+    "opencode|openai-codex/gpt-5.6-luna",
+    "codex|openai-codex/gpt-5.6-luna",
+  ]);
+  assert.equal(
+    state.cache.entries["pi|openai-codex/gpt-5.6-luna"].verdict,
+    "empty-output",
+    "the failure is remembered",
+  );
   assert.equal((await resolver.resolve("analysis")).agent, "codex", "later calls in the run stay on the fallback");
 });
 
 test("parallel workers failing on the same candidate fall through once, together", async () => {
   const { resolver } = resolverWith({
-    "pi|gpt-5.6-luna": { resolvedModel: "openai-codex/gpt-5.6-luna" },
-    "codex|gpt-5.6-luna": { resolvedModel: "gpt-5.6-luna" },
+    "pi|openai-codex/gpt-5.6-luna": { resolvedModel: "openai-codex/gpt-5.6-luna" },
+    "codex|openai-codex/gpt-5.6-luna": { resolvedModel: "gpt-5.6-luna" },
   });
   const picks = [];
   await Promise.all(
@@ -417,8 +571,8 @@ test("parallel workers failing on the same candidate fall through once, together
 
 test("only classifiable failures fall through; real-work errors propagate unchanged", async () => {
   const { resolver } = resolverWith({
-    "pi|gpt-5.6-luna": { resolvedModel: "openai-codex/gpt-5.6-luna" },
-    "codex|gpt-5.6-luna": { resolvedModel: "gpt-5.6-luna" },
+    "pi|openai-codex/gpt-5.6-luna": { resolvedModel: "openai-codex/gpt-5.6-luna" },
+    "codex|openai-codex/gpt-5.6-luna": { resolvedModel: "gpt-5.6-luna" },
   });
   const timeout = new AcpxError("acpx pi session prompt timed out after 300s", { timedOut: true, stderr: "" });
   await assert.rejects(
@@ -470,9 +624,12 @@ test("explicit config or CLI flags pin the role and skip the ladder entirely", a
     { agent: synthesis.agent, model: synthesis.model, effort: synthesis.effort, pinned: synthesis.pinned },
     { agent: "claude", model: "claude-opus-5", effort: "max", pinned: true },
   );
-  const opencodeConfig = loadConfig(tmpRepo({ analysis: { agent: "opencode", model: "xai/grok-4.6" } }), {
-    synthesis: { agent: "opencode", model: "xai/grok-4.6", effort: "xhigh" },
-  });
+  const opencodeConfig = loadConfig(
+    tmpRepo({ analysis: { agent: "opencode", model: "xai/grok-4.6", effort: "medium" } }),
+    {
+      synthesis: { agent: "opencode", model: "xai/grok-4.6", effort: "xhigh" },
+    },
+  );
   const { resolver: opencodeResolver, calls: opencodeCalls } = resolverWith({}, { config: opencodeConfig });
   const opencodeAnalysis = await opencodeResolver.resolve("analysis");
   assert.deepEqual(
@@ -482,7 +639,7 @@ test("explicit config or CLI flags pin the role and skip the ladder entirely", a
       effort: opencodeAnalysis.effort,
       pinned: opencodeAnalysis.pinned,
     },
-    { agent: "opencode", model: "xai/grok-4.6", effort: null, pinned: true },
+    { agent: "opencode", model: "xai/grok-4.6", effort: "medium", pinned: true },
   );
   const opencodeSynthesis = await opencodeResolver.resolve("synthesis");
   assert.equal(opencodeSynthesis.effort, "xhigh");
@@ -498,7 +655,7 @@ test("explicit config or CLI flags pin the role and skip the ladder entirely", a
   const barePick = await bareResolver.resolve("analysis");
   assert.equal(barePick.model, "openai-codex/gpt-5.6-luna");
   assert.equal(barePick.pinned, true);
-  assert.deepEqual(bareCalls, ["pi|gpt-5.6-luna"]);
+  assert.deepEqual(bareCalls, ["pi|gpt-5.6-luna"], "a pinned id has no rung provider to key by");
 
   const { resolver: refusedPinned } = resolverWith(
     {
@@ -621,10 +778,10 @@ test("--no-auto-agent pins the pre-ladder defaults", async () => {
 
 test("an exhausted ladder fails with one actionable error listing every candidate", async () => {
   const { resolver } = resolverWith({
-    "pi|gpt-5.6-sol": "unauthenticated",
-    "codex|gpt-5.6-sol": "unauthenticated",
-    "claude|claude-opus-5": "unauthenticated",
-    "grok|grok-4.6": "timeout",
+    "pi|openai-codex/gpt-5.6-sol": "unauthenticated",
+    "codex|openai-codex/gpt-5.6-sol": "unauthenticated",
+    "claude|anthropic/claude-opus-5": "unauthenticated",
+    "grok|xai/grok-4.6": "timeout",
   });
   await assert.rejects(
     () => resolver.resolve("synthesis"),
@@ -648,13 +805,13 @@ test("an exhausted ladder fails with one actionable error listing every candidat
 
 test("an exhausted ladder that failed only on empty output points at the provider, not login", async () => {
   const { resolver } = resolverWith({
-    "pi|gpt-5.6-sol": "empty-output",
-    "opencode|gpt-5.6-sol": "empty-output",
-    "codex|gpt-5.6-sol": "empty-output",
-    "claude|claude-opus-5": "empty-output",
-    "pi|grok-4.6": "empty-output",
-    "opencode|grok-4.6": "empty-output",
-    "grok|grok-4.6": "empty-output",
+    "pi|openai-codex/gpt-5.6-sol": "empty-output",
+    "opencode|openai-codex/gpt-5.6-sol": "empty-output",
+    "codex|openai-codex/gpt-5.6-sol": "empty-output",
+    "claude|anthropic/claude-opus-5": "empty-output",
+    "pi|xai/grok-4.6": "empty-output",
+    "opencode|xai/grok-4.6": "empty-output",
+    "grok|xai/grok-4.6": "empty-output",
   });
   await assert.rejects(
     () => resolver.resolve("synthesis"),
@@ -671,8 +828,8 @@ test("an exhausted ladder that failed only on empty output points at the provide
 
 test("an exhausted ladder's empty-output line surfaces the harness's own stderr", async () => {
   const config = loadConfig(tmpRepo());
-  config.ladders.analysis = [{ model: "gpt-5.6-luna", agents: ["pi"] }];
-  const { resolver } = resolverWith({ "pi|gpt-5.6-luna": { resolvedModel: "gpt-5.6-luna" } }, { config });
+  config.ladders.analysis = [{ model: "gpt-5.6-luna", provider: "openai-codex", agents: ["pi"] }];
+  const { resolver } = resolverWith({ "pi|openai-codex/gpt-5.6-luna": { resolvedModel: "gpt-5.6-luna" } }, { config });
 
   await assert.rejects(
     resolver.withFallthrough("analysis", async () => {
@@ -710,10 +867,10 @@ test("probe verdicts are cached with TTLs and invalidated on an acpx version cha
   let now = Date.parse("2026-08-22T00:00:00Z");
   const state = memoryState();
   const config = loadConfig(tmpRepo());
-  config.ladders.analysis = [{ model: "gpt-5.6-luna", agents: ["codex", "grok"] }];
+  config.ladders.analysis = [{ model: "gpt-5.6-luna", provider: "openai-codex", agents: ["codex", "grok"] }];
   const verdicts = {
-    "codex|gpt-5.6-luna": "unauthenticated",
-    "grok|gpt-5.6-luna": { resolvedModel: "gpt-5.6-luna" },
+    "codex|openai-codex/gpt-5.6-luna": "unauthenticated",
+    "grok|openai-codex/gpt-5.6-luna": { resolvedModel: "gpt-5.6-luna" },
   };
 
   const first = resolverWith(verdicts, { config, state, now: () => now });
@@ -727,11 +884,11 @@ test("probe verdicts are cached with TTLs and invalidated on an acpx version cha
 
   now += 35 * 60 * 1000;
   const third = resolverWith(
-    { ...verdicts, "codex|gpt-5.6-luna": { resolvedModel: "gpt-5.6-luna" } },
+    { ...verdicts, "codex|openai-codex/gpt-5.6-luna": { resolvedModel: "gpt-5.6-luna" } },
     { config, state, now: () => now },
   );
   assert.equal((await third.resolver.resolve("analysis")).agent, "codex", "logging in is picked up within 30min");
-  assert.deepEqual(third.calls, ["codex|gpt-5.6-luna"]);
+  assert.deepEqual(third.calls, ["codex|openai-codex/gpt-5.6-luna"]);
 
   const forced = resolverWith(verdicts, { config, state, now: () => now, bypassCache: true });
   await forced.resolver.resolve("analysis");
@@ -744,7 +901,7 @@ test("probe verdicts are cached with TTLs and invalidated on an acpx version cha
     acpxVersion: async () => "0.14.0",
   });
   await upgraded.resolver.resolve("analysis");
-  assert.deepEqual(upgraded.calls, ["codex|gpt-5.6-luna", "grok|gpt-5.6-luna"]);
+  assert.deepEqual(upgraded.calls, ["codex|openai-codex/gpt-5.6-luna", "grok|openai-codex/gpt-5.6-luna"]);
   assert.equal(state.cache.acpxVersion, "0.14.0");
 
   assert.equal(isProbeEntryFresh(null), false);
@@ -774,7 +931,7 @@ test("provider-auth-sensitive cache entries are reused only while auth state mat
     version: 1,
     acpxVersion: "0.13.0",
     entries: {
-      "pi|gpt-5.6-luna": {
+      "pi|openai-codex/gpt-5.6-luna": {
         verdict: "ok",
         detail: "",
         resolvedModel: "openai/gpt-5.6-luna",
@@ -784,19 +941,19 @@ test("provider-auth-sensitive cache entries are reused only while auth state mat
     },
   });
   const unchanged = resolverWith(
-    { "pi|gpt-5.6-luna": { resolvedModel: "openai-codex/gpt-5.6-luna" } },
+    { "pi|openai-codex/gpt-5.6-luna": { resolvedModel: "openai-codex/gpt-5.6-luna" } },
     { state, now: () => now + 60_000, providerAuthState: () => "auth-a" },
   );
   assert.equal((await unchanged.resolver.resolve("analysis")).model, "openai/gpt-5.6-luna");
   assert.deepEqual(unchanged.calls, []);
 
   const changed = resolverWith(
-    { "pi|gpt-5.6-luna": { resolvedModel: "openai-codex/gpt-5.6-luna" } },
+    { "pi|openai-codex/gpt-5.6-luna": { resolvedModel: "openai-codex/gpt-5.6-luna" } },
     { state, now: () => now + 60_000, providerAuthState: () => "auth-b" },
   );
   assert.equal((await changed.resolver.resolve("analysis")).model, "openai-codex/gpt-5.6-luna");
-  assert.deepEqual(changed.calls, ["pi|gpt-5.6-luna"]);
-  assert.equal(state.cache.entries["pi|gpt-5.6-luna"].authState, "auth-b");
+  assert.deepEqual(changed.calls, ["pi|openai-codex/gpt-5.6-luna"]);
+  assert.equal(state.cache.entries["pi|openai-codex/gpt-5.6-luna"].authState, "auth-b");
 });
 
 test("a transient probe timeout retries once and does not poison the cache", async () => {
@@ -804,7 +961,7 @@ test("a transient probe timeout retries once and does not poison the cache", asy
   const state = memoryState();
   const first = resolverWith(
     {
-      "pi|gpt-5.6-luna": ["timeout", { resolvedModel: "openai-codex/gpt-5.6-luna" }],
+      "pi|openai-codex/gpt-5.6-luna": ["timeout", { resolvedModel: "openai-codex/gpt-5.6-luna" }],
     },
     {
       state,
@@ -816,33 +973,37 @@ test("a transient probe timeout retries once and does not poison the cache", asy
 
   const pick = await first.resolver.resolve("analysis");
   assert.equal(pick.agent, "pi");
-  assert.deepEqual(first.calls, ["pi|gpt-5.6-luna", "pi|gpt-5.6-luna"]);
+  assert.deepEqual(first.calls, ["pi|openai-codex/gpt-5.6-luna", "pi|openai-codex/gpt-5.6-luna"]);
   assert.deepEqual(delays, [1000], "the retry waits one backoff interval");
-  assert.equal(state.cache.entries["pi|gpt-5.6-luna"].verdict, "ok");
+  assert.equal(state.cache.entries["pi|openai-codex/gpt-5.6-luna"].verdict, "ok");
 
   const poisoned = memoryState();
   const miss = resolverWith(
     {
-      "pi|gpt-5.6-luna": "timeout",
-      "opencode|gpt-5.6-luna": { resolvedModel: "openai/gpt-5.6-luna" },
+      "pi|openai-codex/gpt-5.6-luna": "timeout",
+      "opencode|openai-codex/gpt-5.6-luna": { resolvedModel: "openai-codex/gpt-5.6-luna" },
     },
-    { state: poisoned },
+    { state: poisoned, config: { ...testConfig(), analysis: { agent: null, model: null, effort: "medium" } } },
   );
   assert.equal((await miss.resolver.resolve("analysis")).agent, "opencode");
-  assert.equal(miss.calls.filter((c) => c === "pi|gpt-5.6-luna").length, 2, "timeout retries once then falls through");
-  assert.equal(poisoned.cache.entries["pi|gpt-5.6-luna"], undefined, "the timeout is not persisted");
+  assert.equal(
+    miss.calls.filter((c) => c === "pi|openai-codex/gpt-5.6-luna").length,
+    2,
+    "timeout retries once then falls through",
+  );
+  assert.equal(poisoned.cache.entries["pi|openai-codex/gpt-5.6-luna"], undefined, "the timeout is not persisted");
 
   const replay = resolverWith(
     {
-      "pi|gpt-5.6-luna": { resolvedModel: "openai-codex/gpt-5.6-luna" },
+      "pi|openai-codex/gpt-5.6-luna": { resolvedModel: "openai-codex/gpt-5.6-luna" },
     },
     { state: poisoned },
   );
   assert.equal((await replay.resolver.resolve("analysis")).agent, "pi", "the next run is free to re-probe");
-  assert.deepEqual(replay.calls, ["pi|gpt-5.6-luna"]);
+  assert.deepEqual(replay.calls, ["pi|openai-codex/gpt-5.6-luna"]);
 
   const busyExit = resolverWith({
-    "pi|gpt-5.6-luna": [
+    "pi|openai-codex/gpt-5.6-luna": [
       {
         verdict: "unreachable",
         detail: "another session is already running",
@@ -853,23 +1014,23 @@ test("a transient probe timeout retries once and does not poison the cache", asy
     ],
   });
   assert.equal((await busyExit.resolver.resolve("analysis")).agent, "pi");
-  assert.deepEqual(busyExit.calls, ["pi|gpt-5.6-luna", "pi|gpt-5.6-luna"]);
+  assert.deepEqual(busyExit.calls, ["pi|openai-codex/gpt-5.6-luna", "pi|openai-codex/gpt-5.6-luna"]);
 });
 
 test("a busy empty advertised-model list retries; a genuine unsupported model still demotes", async () => {
   const emptyThenOk = resolverWith({
-    "pi|gpt-5.6-luna": [
+    "pi|openai-codex/gpt-5.6-luna": [
       { verdict: "model-unavailable", detail: "adapter advertised no models", resolvedModel: null },
       { resolvedModel: "openai-codex/gpt-5.6-luna" },
     ],
   });
   assert.equal((await emptyThenOk.resolver.resolve("analysis")).agent, "pi");
-  assert.deepEqual(emptyThenOk.calls, ["pi|gpt-5.6-luna", "pi|gpt-5.6-luna"]);
+  assert.deepEqual(emptyThenOk.calls, ["pi|openai-codex/gpt-5.6-luna", "pi|openai-codex/gpt-5.6-luna"]);
 
   const { resolver, calls, state } = resolverWith({
-    "pi|gpt-5.6-luna": { resolvedModel: "openai-codex/gpt-5.6-luna" },
-    "opencode|gpt-5.6-luna": "model-unavailable",
-    "codex|gpt-5.6-luna": { resolvedModel: "gpt-5.6-luna" },
+    "pi|openai-codex/gpt-5.6-luna": { resolvedModel: "openai-codex/gpt-5.6-luna" },
+    "opencode|openai-codex/gpt-5.6-luna": "model-unavailable",
+    "codex|openai-codex/gpt-5.6-luna": { resolvedModel: "gpt-5.6-luna" },
   });
   const attempts = [];
   const result = await resolver.withFallthrough("analysis", async (pick) => {
@@ -885,11 +1046,11 @@ test("a busy empty advertised-model list retries; a genuine unsupported model st
   assert.equal(result, "evidence");
   assert.deepEqual(attempts, ["pi/openai-codex/gpt-5.6-luna", "codex/gpt-5.6-luna"]);
   assert.equal(
-    calls.filter((c) => c === "opencode|gpt-5.6-luna").length,
+    calls.filter((c) => c === "opencode|openai-codex/gpt-5.6-luna").length,
     1,
     "a listed-but-missing model is not retried",
   );
-  assert.equal(state.cache.entries["pi|gpt-5.6-luna"].verdict, "model-unavailable");
+  assert.equal(state.cache.entries["pi|openai-codex/gpt-5.6-luna"].verdict, "model-unavailable");
   assert.equal((await resolver.resolve("analysis")).agent, "codex");
 });
 
@@ -1047,7 +1208,7 @@ test("a winning subscription tie-break is visible on the probe trail", async () 
   setLoggerSink((line) => lines.push(String(line)));
   try {
     const { resolver } = resolverWith({
-      "pi|gpt-5.6-luna": {
+      "pi|openai-codex/gpt-5.6-luna": {
         resolvedModel: "openai-codex/gpt-5.6-luna",
         tieBreak: { preferred: "openai-codex/gpt-5.6-luna", over: ["openai/gpt-5.6-luna"] },
       },
@@ -1128,6 +1289,20 @@ test("acpx failure classification and the per-adapter tables", () => {
     }),
     "model-unavailable",
   );
+  assert.equal(
+    classifyAcpxFailure({
+      stderr: 'Agent rejected session/set_config_option for "reasoning_effort"="high": Invalid params (ACP -32602)',
+    }),
+    "effort-rejected",
+    "a rejected effort option is a harness capability gap, not a generic failure",
+  );
+  assert.equal(
+    classifyAcpxFailure({
+      stderr: 'Agent rejected session/set_config_option for "thinking"="high": Invalid params (ACP -32602)',
+    }),
+    "effort-rejected",
+    "the same refusal is classifiable for any adapter's effort option",
+  );
   assert.equal(classifyAcpxFailure({ spawnError: { code: "ENOENT" } }), "unreachable");
   assert.equal(classifyAcpxFailure({ stderr: "[acpx] error: TIMEOUT prompt exceeded 300s" }), null);
   assert.equal(classifyAcpxFailure({ stderr: "" }), null);
@@ -1140,4 +1315,290 @@ test("acpx failure classification and the per-adapter tables", () => {
   assert.equal(effortOptionKey("opencode"), "effort");
   assert.equal(effortOptionKey("pi"), null, "Pi effort is process --thinking, not ACP set");
   assert.equal(effortOptionKey("grok"), null);
+  assert.equal(effortOptionKey("omp"), "thinking", "omp reasoning is the ACP thinking session option");
+});
+
+test("an unnamed role effort is refused, never passed through as unset", () => {
+  const unset = { analysis: { effort: null }, synthesis: { effort: null } };
+  assert.throws(
+    () => resolvedEffort("analysis", "omp", unset),
+    (err) =>
+      err instanceof UserError &&
+      /analysis pass has no explicit effort for omp/.test(err.message) &&
+      /medium/.test(err.message) &&
+      /--analysis-effort/.test(err.hint),
+    "medium is not an omp thinking level, so omp analysis has no explicit effort",
+  );
+  assert.throws(
+    () => resolvedEffort("analysis", "opencode", unset),
+    (err) => err instanceof UserError && /no explicit effort for opencode/.test(err.message),
+  );
+  const configured = { analysis: { effort: "low" }, synthesis: { effort: null } };
+  assert.equal(resolvedEffort("analysis", "omp", configured), "low");
+  assert.equal(
+    resolvedEffort("synthesis", "omp", unset),
+    "high",
+    "high is an omp thinking level, so the default is explicit",
+  );
+  assert.equal(resolvedEffort("analysis", "pi", unset), "medium");
+  assert.equal(resolvedEffort("synthesis", "claude", unset), "high");
+});
+
+test("the auto ladder skips a harness that cannot name the role effort instead of ending the run", async () => {
+  const config = testConfig();
+  config.ladders.analysis = [{ family: "gpt", tier: "luna", provider: "openai-codex", agents: ["omp", "codex"] }];
+  const { resolver, calls } = resolverWith(
+    {
+      "omp|family:openai-codex/gpt/luna": { resolvedModel: "openai-codex/gpt-6-luna" },
+      "codex|family:openai-codex/gpt/luna": { resolvedModel: "gpt-6-luna" },
+    },
+    { config },
+  );
+
+  const pick = await resolver.resolve("analysis");
+  assert.equal(pick.agent, "codex", "the next harness in the same rung runs");
+  assert.equal(pick.model, "gpt-6-luna");
+  assert.equal(pick.effort, "medium");
+  assert.deepEqual(calls, ["omp|family:openai-codex/gpt/luna", "codex|family:openai-codex/gpt/luna"]);
+});
+
+test("a pinned harness that cannot name the role effort still reports it to the user", async () => {
+  const config = testConfig();
+  config.analysis = { ...config.analysis, agent: "omp", model: null };
+  const { resolver } = resolverWith({}, { config });
+  await assert.rejects(
+    () => resolver.resolve("analysis"),
+    (err) =>
+      err instanceof UserError &&
+      /analysis pass has no explicit effort for omp/.test(err.message) &&
+      /--analysis-effort/.test(err.hint),
+  );
+});
+
+test("an omp probe maps a bare ladder id to the openai-codex route", async () => {
+  const advertised = ["openai-codex/gpt-6-luna", "openai-codex/gpt-6.1-sol", "deepseek/deepseek-v4-flash"];
+  const probe = async () => ({ verdict: "ok", detail: "", availableModels: advertised });
+  const luna = await probeCandidate({ agent: "omp", model: "gpt-6-luna" }, { probeSession: probe });
+  assert.equal(luna.verdict, "ok");
+  assert.equal(luna.resolvedModel, "openai-codex/gpt-6-luna");
+  const sol = await probeCandidate({ agent: "omp", model: "gpt-6.1-sol" }, { probeSession: probe });
+  assert.equal(sol.resolvedModel, "openai-codex/gpt-6.1-sol");
+  const deepseek = await probeCandidate({ agent: "omp", model: "deepseek/deepseek-v4-flash" }, { probeSession: probe });
+  assert.equal(deepseek.resolvedModel, "deepseek/deepseek-v4-flash");
+});
+
+test("an omp probe keeps a provider-qualified ladder id when other routes are advertised too", async () => {
+  const advertised = [
+    "other-provider/gpt-6-luna",
+    "relay/other-provider/gpt-6-luna",
+    "openai-codex/gpt-6-luna",
+    "openai-codex/gpt-6.1-sol",
+    "other-provider/gpt-6.1-sol",
+  ];
+  const probe = async () => ({ verdict: "ok", detail: "", availableModels: advertised });
+  for (const model of ["openai-codex/gpt-6-luna", "openai-codex/gpt-6.1-sol"]) {
+    const result = await probeCandidate({ agent: "omp", model }, { probeSession: probe });
+    assert.equal(result.verdict, "ok");
+    assert.equal(result.resolvedModel, model);
+  }
+});
+
+test("a family rung resolves only the advertised id from its declared provider", async () => {
+  const config = loadConfig(tmpRepo());
+  config.ladders.analysis = [
+    { family: "gpt", tier: "luna", provider: "openai-codex", agents: ["pi"] },
+    { family: "gpt", tier: "luna", provider: "openai", agents: ["pi"] },
+  ];
+  const advertised = ["openai/gpt-6-luna", "openrouter/openai/gpt-6-luna", "openai-codex/gpt-6-luna"];
+  const resolver = new AgentResolver(config, {
+    state: memoryState(),
+    acpxVersion: async () => "0.13.0",
+    probeCandidate: (candidate, options) =>
+      probeCandidate(candidate, {
+        ...options,
+        probeSession: async () => ({ verdict: "ok", detail: "", availableModels: advertised }),
+      }),
+  });
+
+  const pick = await resolver.resolve("analysis");
+  assert.equal(pick.agent, "pi");
+  assert.equal(pick.model, "openai-codex/gpt-6-luna", "the declared provider's id wins over the API namespace");
+  assert.equal(pick.provider, "openai-codex");
+  assert.equal(pick.family, "gpt");
+  assert.equal(pick.tier, "luna");
+});
+
+test("a family rung with no id from its declared provider is a hard, named non-match", async () => {
+  const config = loadConfig(tmpRepo());
+  config.ladders.analysis = [{ family: "gpt", tier: "luna", provider: "openai-codex", agents: ["pi"] }];
+  const resolver = new AgentResolver(config, {
+    state: memoryState(),
+    acpxVersion: async () => "0.13.0",
+    probeCandidate: (candidate, options) =>
+      probeCandidate(candidate, {
+        ...options,
+        // The API-billed namespace is advertised; the declared subscription provider is not.
+        probeSession: async () => ({ verdict: "ok", detail: "", availableModels: ["openai/gpt-6-luna"] }),
+      }),
+  });
+
+  await assert.rejects(
+    () => resolver.resolve("analysis"),
+    (err) => {
+      assert.ok(err instanceof UserError);
+      assert.match(err.message, /no available agent for the analysis pass/);
+      assert.match(err.message, /gpt\/luna/);
+      assert.match(err.message, /provider openai-codex/);
+      return true;
+    },
+    "a catalog without the declared provider's id is refused, never resolved from another provider",
+  );
+});
+
+test("a model rung never takes the same bare id from another provider", async () => {
+  const config = loadConfig(tmpRepo());
+  config.ladders.analysis = [{ model: "gpt-5.6-luna", provider: "openai-codex", agents: ["pi"] }];
+  const resolver = new AgentResolver(config, {
+    state: memoryState(),
+    acpxVersion: async () => "0.13.0",
+    probeCandidate: (candidate, options) =>
+      probeCandidate(candidate, {
+        ...options,
+        probeSession: async () => ({ verdict: "ok", detail: "", availableModels: ["openai/gpt-5.6-luna"] }),
+      }),
+  });
+
+  await assert.rejects(
+    () => resolver.resolve("analysis"),
+    (err) => err instanceof UserError && /not the rung's provider openai-codex/.test(err.message),
+  );
+});
+
+test("an exhausted ladder names the effort a skipped harness could not run", async () => {
+  const config = loadConfig(tmpRepo());
+  const { resolver } = resolverWith(
+    {
+      "omp|family:openai-codex/gpt/luna": { resolvedModel: "openai-codex/gpt-6-luna" },
+      "omp|family:openai-codex/gpt/sol": { resolvedModel: "openai-codex/gpt-6.1-sol" },
+    },
+    { config },
+  );
+  await assert.rejects(
+    () => resolver.resolve("analysis"),
+    (err) =>
+      err instanceof UserError &&
+      /no available agent for the analysis pass/.test(err.message) &&
+      /no explicit effort for omp/.test(err.message),
+    "the effort refusal is the skip reason, and no candidate ever runs effort=unset",
+  );
+  assert.equal((await resolver.resolve("synthesis")).effort, "high");
+});
+
+test("a mid-run model refusal is reported in the adapter's own words", async () => {
+  const lines = [];
+  setQuiet(false);
+  setLoggerSink((line) => lines.push(String(line)));
+  try {
+    const config = loadConfig(tmpRepo());
+    config.ladders.synthesis = [
+      { family: "gpt", tier: "sol", provider: "openai-codex", agents: ["omp"] },
+      { family: "gpt", tier: "sol", provider: "openai-codex", agents: ["codex"] },
+    ];
+    const { resolver } = resolverWith(
+      {
+        "omp|family:openai-codex/gpt/sol": { resolvedModel: "openai-codex/gpt-6.1-sol" },
+        "codex|family:openai-codex/gpt/sol": { resolvedModel: "gpt-6.1-sol" },
+      },
+      { config },
+    );
+    const refusal = 'Cannot apply --model "openai-codex/gpt-6.1-sol": the ACP agent did not advertise that model.';
+    const result = await resolver.withFallthrough("synthesis", async (pick) => {
+      if (pick.agent === "omp") {
+        throw new AcpxError(`acpx omp session create failed: ${refusal} Available models: a, b`, {
+          stderr: `${refusal} Available models: a, b\n`,
+          code: 1,
+        });
+      }
+      return `${pick.agent}/${pick.model}`;
+    });
+
+    assert.equal(result, "codex/gpt-6.1-sol", "the next candidate runs");
+    const warning = lines.find((line) => /falling through/.test(line));
+    assert.ok(warning, "the demotion is announced");
+    assert.match(
+      warning,
+      /Cannot apply --model "openai-codex\/gpt-6\.1-sol": the ACP agent did not advertise that model\./,
+      "acpx's refusal reaches the user verbatim",
+    );
+    assert.doesNotMatch(warning, /model not available/, "the refusal is never paraphrased into a verdict label");
+  } finally {
+    setLoggerSink(null);
+    setQuiet(true);
+  }
+});
+
+test("a harness that rejects the effort option falls through instead of crashing the run", async () => {
+  const lines = [];
+  setQuiet(false);
+  setLoggerSink((line) => lines.push(String(line)));
+  try {
+    const config = loadConfig(tmpRepo());
+    config.ladders.synthesis = [
+      { family: "gpt", tier: "sol", provider: "openai-codex", agents: ["codex"] },
+      { model: "opus", provider: "anthropic", agents: ["claude"] },
+    ];
+    const { resolver } = resolverWith(
+      {
+        "codex|family:openai-codex/gpt/sol": { resolvedModel: "gpt-6.1-sol" },
+        "claude|anthropic/opus": { resolvedModel: "opus" },
+      },
+      { config },
+    );
+    const rejection =
+      'Agent rejected session/set_config_option for "reasoning_effort"="high": Invalid params (ACP -32602)';
+    const result = await resolver.withFallthrough("synthesis", async (pick) => {
+      if (pick.agent === "codex") {
+        throw new AcpxError(`acpx codex could not apply invocation-scoped effort=high: ${rejection}`, {
+          stderr: `${rejection}\n`,
+          code: 1,
+        });
+      }
+      return `ran ${pick.agent}/${pick.model} effort=${pick.effort}`;
+    });
+
+    assert.equal(result, "ran claude/opus effort=high", "the next candidate runs");
+    const warning = lines.find((line) => /falling through/.test(line));
+    assert.ok(warning, "the refusal is announced");
+    assert.match(warning, /effort=high/, "the refused level is named");
+    assert.match(warning, /Invalid params \(ACP -32602\)/, "the adapter's own rejection is surfaced verbatim");
+    assert.ok(
+      lines.some((line) => /synthesis: claude \(opus\) effort=high/.test(line)),
+      "the level that actually ran is stated",
+    );
+  } finally {
+    setLoggerSink(null);
+    setQuiet(true);
+  }
+});
+
+test("a pinned harness that rejects the effort option reports it instead of throwing acpx out", async () => {
+  const config = loadConfig(tmpRepo({ synthesis: { agent: "codex", model: "gpt-5.6-sol", effort: "high" } }));
+  const { resolver } = resolverWith({ "codex|gpt-5.6-sol": { resolvedModel: "gpt-6.1-sol" } }, { config });
+  const rejection =
+    'Agent rejected session/set_config_option for "reasoning_effort"="high": Invalid params (ACP -32602)';
+  await assert.rejects(
+    () =>
+      resolver.withFallthrough("synthesis", async () => {
+        throw new AcpxError(`acpx codex could not apply invocation-scoped effort=high: ${rejection}`, {
+          stderr: `${rejection}\n`,
+          code: 1,
+        });
+      }),
+    (err) => {
+      assert.ok(err instanceof UserError, "a pinned capability gap is a user-facing error, not an AcpxError");
+      assert.match(err.message, /pinned synthesis agent codex/);
+      assert.match(err.message, /effort=high/);
+      return true;
+    },
+  );
 });

@@ -93,7 +93,7 @@ COMMANDS
 COLLECT SAMPLES
   --since <dur>            only sessions newer than this (30d, 12h, 2w, all)  [30d]
   --harness <a,b>          limit to these harnesses
-                           (claude, codex, pi, opencode, grok, cursor, hermes)
+                           (claude, codex, pi, opencode, grok, cursor, hermes, dsh)
   --strict                 deterministic associations only (tiers 1, 1.5, and 2)
   --host <dest>            also collect from this SSH host this run (repeatable;
                            "none" collects locally only). Configure hosts once in
@@ -106,9 +106,11 @@ COLLECT SAMPLES
 
 MODELS (two-tier: cheap analysis, smart synthesis - all through acpx)
   By default each pass auto-picks the first harness in its ladder that is installed,
-  logged in, and serves the model (a cached zero-token probe; cold starts may take 3m):
-    analysis   gpt-5.6-luna via pi, opencode, codex  >  claude-sonnet-5 via claude  >  grok-4.6 via pi, opencode, grok
-    synthesis  gpt-5.6-sol  via pi, opencode, codex  >  claude-opus-5  via claude  >  grok-4.6 via pi, opencode, grok
+  logged in, and serves the rung (a cached zero-token probe; cold starts may take 3m).
+  A family rung names no generation: the newest model that harness advertises in that
+  family/tier is used, so a newer model needs no release.
+    analysis   newest gpt luna via omp, codex  >  sonnet via claude  >  newest deepseek flash via omp
+    synthesis  newest gpt sol  via omp, codex  >  opus via claude    >  newest deepseek flash via omp
   Setting an agent pins that pass and skips its ladder.
   --analysis-agent <a>     acpx agent for the per-transcript pass       [auto]
   --analysis-model <id>    model id for the analysis pass (needs --analysis-agent)
@@ -159,7 +161,7 @@ EXAMPLES
   backpass scan --host mac-home             also collect this repo's sessions from mac-home
   backpass --scope user                     train the user-level memory file and skills
   backpass --target db                      train only the skill named db
-  backpass --synthesis-agent claude --synthesis-model claude-opus-5
+  backpass --synthesis-agent claude --synthesis-model opus
   backpass apply --no-ui                    review and write from the terminal
 `;
 

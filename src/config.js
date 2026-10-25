@@ -8,32 +8,42 @@ import { normalizeSkillsDir } from "./skills.js";
 export const CONFIG_FILENAME = ".backpassrc.json";
 export const STATE_DIRNAME = ".backpass";
 
-export const ALL_HARNESSES = ["claude", "codex", "pi", "opencode", "grok", "cursor", "hermes"];
+export const ALL_HARNESSES = ["claude", "codex", "pi", "opencode", "grok", "cursor", "hermes", "dsh"];
 /** Cursor IDE is deferred to v1.1 and only ever runs behind --include-cursor-ide. */
 export const OPT_IN_HARNESSES = ["cursor-ide"];
 
 /**
  * The ordered candidate ladders behind the auto-pick (ordered-defaults design, section 8.2).
- * Each rung is one model id served by several harnesses in preference order; rungs are
+ * Each rung names a model served by several harnesses in preference order; rungs are
  * flattened model-outer / harness-inner, and the first candidate that is installed,
- * authenticated, and serves the model wins. Model ids are the bare ids the vendors use;
- * per-harness spellings (`openai-codex/...`, `openai/...`, `xai/...`) are resolved at
- * probe time against what the adapter advertises - never hard-coded. A collision of the
- * same bare id under two providers is ranked by auth class (subscription over API key;
- * see `src/provider-auth.js`); an unrankable collision is refused, not guessed. Ladders
- * live in config so a user can reorder or shorten them in `.backpassrc.json` without a
- * release.
+ * authenticated, and serves the model wins.
+ *
+ * A rung is either a bare `model` id or a `family` plus optional `tier`
+ * (`{ family: "gpt", tier: "sol" }`), and every rung declares its `provider`
+ * (`openai-codex`, `anthropic`, `deepseek`, ...). A family rung carries no generation:
+ * the newest matching id *from that provider* is resolved at probe time from what the
+ * adapter advertises (`src/model-family.js`), so a newer model in that family/tier is
+ * picked up with no release, and a generation advertised under another provider is
+ * never substituted. That is deliberate: the catalog also lists the same GPT generation
+ * under the API-billed `openai/` and `openrouter/` namespaces, and a rung that declares
+ * `openai-codex` must not be routed to them. A catalog with no id from the declared
+ * provider is a hard, named non-match. A collision of the same bare id under two
+ * providers is ranked by auth class (subscription over API key; see
+ * `src/provider-auth.js`); an unrankable collision is refused, not guessed. Ladders live
+ * in config so a user can reorder or shorten them in `.backpassrc.json` without a
+ * release. `sonnet` and `opus` are the harness's own unversioned aliases: the harness
+ * keeps them current, so they need no family rung.
  */
 export const DEFAULT_LADDERS = {
   analysis: [
-    { model: "gpt-5.6-luna", agents: ["pi", "opencode", "codex"] },
-    { model: "claude-sonnet-5", agents: ["claude"] },
-    { model: "grok-4.6", agents: ["pi", "opencode", "grok"] },
+    { family: "gpt", tier: "luna", provider: "openai-codex", agents: ["omp", "codex"] },
+    { model: "sonnet", provider: "anthropic", agents: ["claude"] },
+    { family: "deepseek", tier: "flash", provider: "deepseek", agents: ["omp"] },
   ],
   synthesis: [
-    { model: "gpt-5.6-sol", agents: ["pi", "opencode", "codex"] },
-    { model: "claude-opus-5", agents: ["claude"] },
-    { model: "grok-4.6", agents: ["pi", "opencode", "grok"] },
+    { family: "gpt", tier: "sol", provider: "openai-codex", agents: ["omp", "codex"] },
+    { model: "opus", provider: "anthropic", agents: ["claude"] },
+    { family: "deepseek", tier: "flash", provider: "deepseek", agents: ["omp"] },
   ],
 };
 
@@ -85,8 +95,11 @@ export const DEFAULT_CONFIG = {
   seed: null,
   /**
    * `agent: null` means auto-pick from `ladders[role]`; `effort: null` means
-   * `DEFAULT_EFFORT[role]`, except OpenCode which omits the overlay until effort
-   * is set. Setting `agent` pins the role and skips the ladder.
+   * `DEFAULT_EFFORT[role]` when the chosen harness can name that level. Where it cannot
+   * (OpenCode's per-model variants, an omp role default omp does not advertise) the
+   * role is refused with the flag that sets an explicit effort (`resolvedEffort`,
+   * `src/agents.js`) - a run never proceeds with an unnamed effort. Setting `agent`
+   * pins the role and skips the ladder.
    */
   analysis: { agent: null, model: null, effort: null },
   synthesis: { agent: null, model: null, effort: null },
@@ -121,6 +134,8 @@ export const DEFAULT_CONFIG = {
     opencodeStores: [],
     /** Include Oh My Pi's default session store in Pi discovery; opt-in only. */
     includeOmp: false,
+    /** Include the dsh session store; opt-in only. */
+    includeDsh: false,
     minUserTurns: 2,
     includeCursorIde: false,
   },
@@ -450,11 +465,33 @@ function validate(config, { kind = "project", repoRoot = null } = {}) {
     }
     const ladder = config.ladders?.[role];
     if (!Array.isArray(ladder) || ladder.length === 0) {
-      throw new UserError(`config.ladders.${role} must be a non-empty array of { model, agents } rungs`);
+      throw new UserError(`config.ladders.${role} must be a non-empty array of rungs`);
     }
     for (const rung of ladder) {
-      if (!rung || typeof rung.model !== "string" || !Array.isArray(rung.agents) || !rung.agents.length) {
-        throw new UserError(`config.ladders.${role} rungs must look like { "model": "<id>", "agents": ["<harness>"] }`);
+      const shape =
+        '{ "model": "<id>", "provider": "<provider>", "agents": ["<harness>"] } or ' +
+        '{ "family": "<name>", "tier": "<tier>", "provider": "<provider>", "agents": ["<harness>"] }';
+      if (!rung || typeof rung !== "object" || !Array.isArray(rung.agents) || !rung.agents.length) {
+        throw new UserError(`config.ladders.${role} rungs must look like ${shape}`);
+      }
+      if (typeof rung.provider !== "string" || !rung.provider.trim()) {
+        throw new UserError(
+          `config.ladders.${role} rungs must declare "provider" (e.g. "openai-codex"): ${shape}`,
+          "a rung resolves only ids from its declared provider, so the provider is never guessed",
+        );
+      }
+      const hasModel = typeof rung.model === "string" && Boolean(rung.model.trim());
+      const hasFamily = typeof rung.family === "string" && Boolean(rung.family.trim());
+      if (hasModel === hasFamily) {
+        throw new UserError(`config.ladders.${role} rungs must set exactly one of "model" or "family": ${shape}`);
+      }
+      if (rung.tier !== undefined) {
+        if (!hasFamily) {
+          throw new UserError(`config.ladders.${role} rung sets "tier" without "family": ${shape}`);
+        }
+        if (typeof rung.tier !== "string" || !rung.tier.trim()) {
+          throw new UserError(`config.ladders.${role} rung "tier" must be a non-empty string: ${shape}`);
+        }
       }
     }
   }
@@ -471,6 +508,9 @@ function validate(config, { kind = "project", repoRoot = null } = {}) {
   parseSince(config.discovery.since);
   if (typeof config.discovery.includeOmp !== "boolean") {
     throw new UserError("config.discovery.includeOmp must be a boolean");
+  }
+  if (typeof config.discovery.includeDsh !== "boolean") {
+    throw new UserError("config.discovery.includeDsh must be a boolean");
   }
   if (!Array.isArray(config.discovery.cloneRoots) || config.discovery.cloneRoots.some((p) => typeof p !== "string")) {
     throw new UserError("config.discovery.cloneRoots must be an array of paths");

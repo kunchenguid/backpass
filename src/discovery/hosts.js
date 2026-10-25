@@ -216,10 +216,17 @@ async function locate(entry, controlPath) {
 /**
  * Discover on every configured host, fail-soft per host.
  *
- * @param {{ hosts: object[], harnesses: string[], cutoffMs: number | null, controlPath: string, includeOmp?: boolean }} options
+ * @param {{ hosts: object[], harnesses: string[], cutoffMs: number | null, controlPath: string, includeOmp?: boolean, includeDsh?: boolean }} options
  * @returns {Promise<object[]>} one result per host, in configured order
  */
-export async function collectHosts({ hosts, harnesses, cutoffMs, controlPath, includeOmp = false }) {
+export async function collectHosts({
+  hosts,
+  harnesses,
+  cutoffMs,
+  controlPath,
+  includeOmp = false,
+  includeDsh = false,
+}) {
   const results = [];
   for (const entry of hosts) {
     const result = emptyHostResult(entry);
@@ -243,7 +250,7 @@ export async function collectHosts({ hosts, harnesses, cutoffMs, controlPath, in
         result.error = `failed to start ssh control master: ${masterFailure.message}`;
       } else {
         result.master = masterCall.master;
-        await collectOneHost(entry, { harnesses, cutoffMs, includeOmp }, result);
+        await collectOneHost(entry, { harnesses, cutoffMs, includeOmp, includeDsh }, result);
       }
     } catch (err) {
       if (err instanceof UserError) {
@@ -272,7 +279,7 @@ export async function collectHosts({ hosts, harnesses, cutoffMs, controlPath, in
   return results;
 }
 
-async function collectOneHost(entry, { harnesses, cutoffMs, includeOmp }, result) {
+async function collectOneHost(entry, { harnesses, cutoffMs, includeOmp, includeDsh }, result) {
   const located = await locate(entry, result.master.controlPath);
   if (located.failure) {
     result.error = located.failure.message;
@@ -318,7 +325,7 @@ async function collectOneHost(entry, { harnesses, cutoffMs, includeOmp }, result
   }
 
   const program = buildProbeProgram(
-    { protocol: PROTOCOL, op: "discover", harnesses: selected, cutoffMs, includeOmp },
+    { protocol: PROTOCOL, op: "discover", harnesses: selected, cutoffMs, includeOmp, includeDsh },
     {
       env: entry.env,
     },

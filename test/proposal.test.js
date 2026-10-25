@@ -2876,7 +2876,18 @@ test("JSON is recovered from a fenced or prose-wrapped model reply", () => {
   assert.deepEqual(extractJson('{"a":1}'), { a: 1 });
   assert.deepEqual(extractJson('Here you go:\n```json\n{"a":2}\n```\nhope that helps'), { a: 2 });
   assert.deepEqual(extractJson('prefix {"a":3} suffix'), { a: 3 });
+  assert.deepEqual(extractJson('{"a":{"b":1}}'), { a: { b: 1 } }, "nested braces stay one object");
+  assert.deepEqual(extractJson('{"a":"}{"}'), { a: "}{" }, "braces inside a string do not end the object");
   assert.equal(extractJson("no json at all"), null);
+});
+
+test("a final message an adapter emitted twice is still one parseable reply", () => {
+  const reply = '{"positive":[],"negative":[],"gaps":[],"usedRawTranscript":false}';
+  assert.deepEqual(
+    extractJson(`${reply}\n${reply}`),
+    JSON.parse(reply),
+    "omp has emitted the complete assistant message twice in one quiet-mode turn",
+  );
 });
 
 // ---------- the budget gate's two modes ----------
