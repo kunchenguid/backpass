@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.40](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.39...backpass-v0.1.40) (2026-10-25)
+
+
+### Bug Fixes
+
+* deduplicate symlinked skills in the analysis index ([#231](https://github.com/kunchenguid/backpass/issues/231)) ([9ded619](https://github.com/kunchenguid/backpass/commit/9ded6192cd7eae8c63e40559b7832774b3bac2fb))
+
 ## [0.1.39](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.38...backpass-v0.1.39) (2026-10-23)
 
 
