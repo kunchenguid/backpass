@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.41](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.40...backpass-v0.1.41) (2026-10-26)
+
+
+### Bug Fixes
+
+* **synthesize:** report a mid-run change to a watched repo file as observed ([#224](https://github.com/kunchenguid/backpass/issues/224)) ([1a1a175](https://github.com/kunchenguid/backpass/commit/1a1a17531de333d8095a944baa884a0896d5672d))
+
 ## [0.1.40](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.39...backpass-v0.1.40) (2026-10-25)
 
 
