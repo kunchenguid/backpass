@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.42](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.41...backpass-v0.1.42) (2026-10-29)
+
+
+### Bug Fixes
+
+* recognize CLAUDE.md import pointers with leading headings ([#240](https://github.com/kunchenguid/backpass/issues/240)) ([df9cdce](https://github.com/kunchenguid/backpass/commit/df9cdcebab3fd4520a2a0d09bc696d9438f3cb24))
+* redact standalone apikey_ credentials ([#147](https://github.com/kunchenguid/backpass/issues/147)) ([#242](https://github.com/kunchenguid/backpass/issues/242)) ([24f8283](https://github.com/kunchenguid/backpass/commit/24f8283930119250593dd70e6d62d67f4c8801bc))
+* report prompt size when synthesis fails ([#243](https://github.com/kunchenguid/backpass/issues/243)) ([a2d710b](https://github.com/kunchenguid/backpass/commit/a2d710b5c6fe9ba529ebd5c2356a73689a38f28e))
+
 ## [0.1.41](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.40...backpass-v0.1.41) (2026-10-26)
 
 
