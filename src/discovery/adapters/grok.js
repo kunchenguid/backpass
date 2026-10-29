@@ -61,7 +61,7 @@ export function read(ref) {
   const chatPath = ref.extra?.chatPath || path.join(ref.path, "chat_history.jsonl");
   if (!fs.existsSync(chatPath)) return { events: [], model: null };
 
-  const entries = readJsonl(chatPath);
+  const { entries, prefixDiscarded } = readJsonl(chatPath);
   const events = [];
   let model = null;
 
@@ -91,7 +91,7 @@ export function read(ref) {
     }
   }
 
-  return { events: attachToolResults(events), model };
+  return { events: attachToolResults(events), model, prefixDiscarded };
 }
 
 /** Exported for the raw-transcript escape hatch: the analysis agent opens this file. */

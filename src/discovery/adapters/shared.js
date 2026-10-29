@@ -41,9 +41,11 @@ export function readJsonFile(file) {
 
 export function readJsonl(file, { maxBytes = 64 * 1024 * 1024 } = {}) {
   let text;
+  let prefixDiscarded = false;
   try {
     const stat = fs.statSync(file);
     if (stat.size > maxBytes) {
+      prefixDiscarded = true;
       // Very large sessions are read tail-first: recent turns carry the loss signal.
       const fd = fs.openSync(file, "r");
       const buffer = Buffer.alloc(maxBytes);
@@ -55,7 +57,7 @@ export function readJsonl(file, { maxBytes = 64 * 1024 * 1024 } = {}) {
       text = fs.readFileSync(file, "utf8");
     }
   } catch {
-    return [];
+    return { entries: [], prefixDiscarded };
   }
   const out = [];
   for (const line of text.split("\n")) {
@@ -63,7 +65,7 @@ export function readJsonl(file, { maxBytes = 64 * 1024 * 1024 } = {}) {
     const value = parseJsonLine(line);
     if (value) out.push(value);
   }
-  return out;
+  return { entries: out, prefixDiscarded };
 }
 
 export function statOrNull(file) {
@@ -155,8 +157,8 @@ export function contentToEvents(role, content, events) {
     }
   }
   if (texts.length) {
-    const joined = texts.join("\n").trim();
-    if (joined) events.push({ kind: "message", role, text: joined });
+    const joined = texts.join("\n");
+    if (joined.trim()) events.push({ kind: "message", role, text: joined });
   }
 }
 

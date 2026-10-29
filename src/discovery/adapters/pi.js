@@ -226,7 +226,7 @@ export function classify(candidate, options = {}) {
 }
 
 export function read(ref) {
-  const entries = readJsonl(ref.path);
+  const { entries, prefixDiscarded } = readJsonl(ref.path);
   const events = [];
   let model = null;
   const omp = entries[0]?.type === "title";
@@ -248,7 +248,7 @@ export function read(ref) {
     contentToEvents(role, message.content, events);
   }
 
-  return { events: attachToolResults(events), model };
+  return { events: attachToolResults(events), model, prefixDiscarded };
 }
 
 function textOf(content) {

@@ -518,6 +518,7 @@ export async function readTranscript(transcript) {
     return {
       events: result.events || [],
       model: result.model || transcript.model || null,
+      prefixDiscarded: result.prefixDiscarded === true,
       rawPath: cached,
     };
   }
@@ -526,6 +527,7 @@ export async function readTranscript(transcript) {
   return {
     events: result.events || [],
     model: result.model || transcript.model || null,
+    prefixDiscarded: result.prefixDiscarded === true,
     rawPath: adapter.rawPath ? adapter.rawPath(transcript) : transcript.path,
   };
 }

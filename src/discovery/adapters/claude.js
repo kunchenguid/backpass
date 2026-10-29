@@ -83,7 +83,7 @@ export function classify(candidate) {
 }
 
 export function read(ref) {
-  const entries = readJsonl(ref.path);
+  const { entries, prefixDiscarded } = readJsonl(ref.path);
   const events = [];
   let model = null;
 
@@ -98,5 +98,5 @@ export function read(ref) {
     }
   }
 
-  return { events: attachToolResults(events), model };
+  return { events: attachToolResults(events), model, prefixDiscarded };
 }
