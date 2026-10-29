@@ -12,6 +12,10 @@ import { discoverForRun } from "../src/commands/scan.js";
 import { State } from "../src/state.js";
 import { resolveMemoryFiles } from "../src/memory.js";
 import { foldForRun } from "../src/commands/propose.js";
+import { emptyGapLedger, gapEntryId, mergeGapEntries, recordGapObservations } from "../src/gap-ledger.js";
+import { readTranscript } from "../src/discovery/index.js";
+import { distill } from "../src/distill.js";
+import { redact } from "../src/redact.js";
 
 /**
  * The reuse-miss incident, through the public CLI (design section on evidence keys,
@@ -33,6 +37,7 @@ const CLI = path.join(ROOT, "bin", "backpass.js");
 const binDir = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-reuse-bin-"));
 const fakePi = path.join(binDir, "pi");
 const fakeAcpx = path.join(binDir, "acpx");
+const renderedToolQuote = String.raw`echo \"before\" echo PASSWORD=[redacted]`;
 
 fs.writeFileSync(fakePi, `#!${process.execPath}\nprocess.exit(0);\n`);
 fs.chmodSync(fakePi, 0o755);
@@ -49,10 +54,26 @@ if (argv.includes("config") && argv.includes("show")) {
   process.exit(0);
 }
 if (argv.includes("--file")) {
+  const prompt = require("node:fs").readFileSync(argv[argv.indexOf("--file") + 1], "utf8");
+  const marker = prompt.match(/\\[\\.\\.\\. \\d+ chars elided \\.\\.\\.\\]/)?.[0];
+  const growth = prompt.includes("session-growth");
+  const redaction = prompt.includes("session-redaction");
+  const renderedTool = prompt.includes("session-rendered-tool");
   process.stdout.write(JSON.stringify({
     positive: [{ instruction: "AG-001", moment: "start", effect: "followed it", quote: "Ran make build as instructed." }],
-    negative: [],
-    gaps: [{ mistake: "skipped lint", proposedInstruction: "Always run lint before pushing.", recurrenceRisk: "high", quote: "Now run the tests too." }],
+    negative: marker ? [{ instruction: "AG-001", quote: marker, class: "harm" }] : [],
+    gaps: [{ mistake: "skipped lint", proposedInstruction: "Always run lint before pushing.", recurrenceRisk: "high", quote: "Now run the tests too." },
+      ...(growth ? [
+        { proposedInstruction: "Check generated elisions before planning.", quote: "[... 2000 chars elided ...]", quoteProvenance: { kind: "source", event: 0, field: ["text"], start: 0, end: 26 } },
+        { proposedInstruction: "Validate architecture decisions using recorded tradeoffs.", quote: "The genuine database contract was overlooked." },
+      ] : []),
+      ...(redaction ? [
+        { proposedInstruction: "Document configuration failures using sanitized command output.", quote: "The command printed PASSWORD=[redacted]" },
+      ] : []),
+      ...(renderedTool ? [
+        { proposedInstruction: "Keep rendered command evidence.", quote: ${JSON.stringify(renderedToolQuote)} },
+      ] : [])],
+    usedRawTranscript: growth,
   }) + "\\n");
   process.exit(0);
 }
@@ -214,6 +235,396 @@ test("evidence from the previous analysis index is reanalyzed once without --for
   const reused = runAnalyze(dir, home);
   assert.equal(reused.status, 0, reused.output);
   assert.deepEqual([reused.summary.analyzed, reused.summary.cached], [0, 1]);
+});
+
+test("analysis rejects a distiller marker before caching evidence", (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-elision-home-"));
+  const dir = initRepo(MEMORY);
+  t.after(() => {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  const file = writeSession(home, "session-elision", dir);
+  fs.appendFileSync(
+    file,
+    `${JSON.stringify({ type: "message", message: { role: "assistant", content: "x".repeat(8000) } })}\n`,
+  );
+
+  const analyzed = runAnalyze(dir, home);
+  assert.equal(analyzed.status, 0, analyzed.output);
+  assert.equal(analyzed.summary.analyzed, 1);
+  assert.equal(analyzed.summary.quotesNotInTrace, 1);
+  const [record] = new State(dir).ensure().listEvidence();
+  assert.equal(record.positive.length, 1, "the real session quote survives");
+  assert.deepEqual(record.negative, [], "the generated quote never reaches the evidence cache");
+});
+
+test("upgrade revalidates persisted gap quotes before folding selected sessions", async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-ledger-upgrade-home-"));
+  const dir = initRepo(MEMORY);
+  t.after(() => {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  const buriedQuote = "Buried original evidence remains valid.";
+  for (const id of ["session-a", "session-b"]) {
+    const file = writeSession(home, id, dir);
+    const content = "x".repeat(4800) + buriedQuote + "x".repeat(3200 - buriedQuote.length);
+    fs.appendFileSync(file, `${JSON.stringify({ type: "message", message: { role: "assistant", content } })}\n`);
+  }
+  assert.equal(runAnalyze(dir, home).status, 0);
+  const state = new State(dir).ensure();
+  const records = state.listEvidence();
+  const fabricated = "Check generated elisions before planning.";
+  const overlapping = "Require caution when interpreting truncated session boundaries.";
+  const legitimate = "Read docs/db.md before writing queries.";
+  const rawBacked = "Validate architecture decisions using recorded tradeoffs.";
+  const ledger = emptyGapLedger();
+  recordGapObservations(
+    ledger,
+    records.map((record) => ({
+      ...record,
+      gaps: [
+        { proposedInstruction: fabricated, quote: "[... 2000 chars elided ...]" },
+        { proposedInstruction: overlapping, quote: "xxxxx [... 2000 chars elided ...] xxxxx" },
+        { proposedInstruction: legitimate, quote: "Ran make build as instructed." },
+        { proposedInstruction: rawBacked, quote: buriedQuote },
+      ],
+    })),
+  );
+  const nestedId = gapEntryId("docs/AGENTS.md", fabricated);
+  ledger.entries[nestedId] = {
+    ...structuredClone(ledger.entries[gapEntryId("AGENTS.md", fabricated)]),
+    id: nestedId,
+    memoryPath: "docs/AGENTS.md",
+  };
+  for (const entry of Object.values(ledger.entries)) {
+    const first = records[0].transcript;
+    entry.sessions["old-linked-observer"] = entry.sessions[first.identity];
+    delete entry.sessions[first.identity];
+    const second = records[1].transcript;
+    entry.sessions[second.id] = entry.sessions[second.identity];
+    delete entry.sessions[second.identity];
+    delete entry.sessions[second.id].sourceSessionId;
+  }
+  state.writeGapLedger(ledger);
+  const persisted = state.readGapLedger();
+  for (const record of records) {
+    state.writeEvidence(record.transcript, {
+      ...record,
+      key: record.key.replace(/analysis-index-v\d+$/, "analysis-index-v4"),
+    });
+  }
+
+  const upgraded = runAnalyze(dir, home);
+  assert.equal(upgraded.status, 0, upgraded.output);
+  assert.deepEqual([upgraded.summary.analyzed, upgraded.summary.cached], [2, 0]);
+  const revalidated = state.readGapLedger();
+  for (const proposal of [fabricated, overlapping]) {
+    const entry = revalidated.entries[gapEntryId("AGENTS.md", proposal)];
+    assert.ok(Object.values(entry.sessions).every((observation) => observation.quoteProvenance.kind === "unverified"));
+  }
+  assert.ok(
+    Object.values(revalidated.entries[nestedId].sessions).every(
+      (observation) => observation.quoteProvenance.kind === "unverified",
+    ),
+    "all memory surfaces for the source are revalidated",
+  );
+  for (const proposal of [legitimate, rawBacked]) {
+    const id = gapEntryId("AGENTS.md", proposal);
+    for (const [session, observation] of Object.entries(revalidated.entries[id].sessions)) {
+      const { quoteProvenance, ...history } = observation;
+      assert.equal(quoteProvenance.kind, "source");
+      assert.deepEqual(history, persisted.entries[id].sessions[session], "valid history and timestamps survive");
+    }
+  }
+  const current = state.listEvidence();
+  const repo = resolveRepo(dir);
+  const memoryFile = resolveMemoryFiles(dir, ["AGENTS.md", "CLAUDE.md"]).primary;
+  const ctx = { repo, config: { state, minGapEvidence: 2, gapLedgerMaxAge: "90d" } };
+  const summary = await foldForRun(
+    ctx,
+    memoryFile,
+    current[0].memoryHash,
+    [],
+    current.map((r) => r.transcript),
+  );
+  assert.equal(summary.analyzedSessions, 2);
+  assert.ok(!summary.gaps.some((gap) => gap.proposedInstruction === fabricated), "generated quotes cannot corroborate");
+  assert.equal(summary.gaps.find((gap) => gap.proposedInstruction === legitimate)?.sessions, 2);
+  assert.equal(summary.gaps.find((gap) => gap.proposedInstruction === rawBacked)?.sessions, 2);
+  const cached = runAnalyze(dir, home);
+  assert.equal(cached.status, 0, cached.output);
+  assert.deepEqual([cached.summary.analyzed, cached.summary.cached], [0, 2]);
+});
+
+test("redacted quotes retain fresh and legacy corroboration through growth and merges", async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-redaction-home-"));
+  const dir = initRepo(MEMORY);
+  t.after(() => {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  const secret = "synthetic-" + "ledger-password";
+  const quote = "The command printed PASSWORD=[redacted]";
+  const files = [];
+  const appendTurn = (file, content) =>
+    fs.appendFileSync(file, `${JSON.stringify({ type: "message", message: { role: "assistant", content } })}\n`);
+  for (const id of ["session-redaction-a", "session-redaction-b"]) {
+    const file = writeSession(home, id, dir);
+    files.push(file);
+    for (let i = 0; i < 7; i += 1) appendTurn(file, "p".repeat(3000));
+    appendTurn(file, `${"x".repeat(3000)}The command printed PASSWORD=${secret}\n${"x".repeat(5000)}`);
+  }
+  const first = runAnalyze(dir, home);
+  assert.equal(first.status, 0, first.output);
+  const state = new State(dir).ensure();
+  const records = state.listEvidence();
+  const fresh = "Document configuration failures using sanitized command output.";
+  const legacy = "Read docs/database.md before provisioning databases.";
+  const generated = "Check generated elisions before planning.";
+  const ledger = emptyGapLedger();
+  recordGapObservations(
+    ledger,
+    records.map((record) => ({
+      ...record,
+      gaps: [
+        ...record.gaps.filter((gap) => gap.proposedInstruction === fresh),
+        { proposedInstruction: legacy, quote },
+        { proposedInstruction: generated, quote: "[... 2000 chars elided ...]" },
+      ],
+    })),
+  );
+  state.writeGapLedger(ledger);
+  const historyBefore = state.readGapLedger();
+  for (const file of files) {
+    for (let i = 0; i < 10; i += 1) appendTurn(file, "t".repeat(3000));
+  }
+  const grown = runAnalyze(dir, home);
+  assert.equal(grown.status, 0, grown.output);
+  assert.deepEqual([grown.summary.analyzed, grown.summary.cached], [2, 0]);
+  const current = state.listEvidence();
+  for (const record of current) {
+    const gap = record.gaps.find((gap) => gap.proposedInstruction === fresh);
+    assert.ok(gap, "fresh redacted quotes are admitted");
+    assert.equal(gap.quote, quote);
+    const raw = await readTranscript(record.transcript);
+    assert.ok(!distill(raw.events, record.transcript).trace.includes(quote), "growth hides the original quote");
+    const { event, field, start, end } = gap.quoteProvenance;
+    const source = field.reduce((value, key) => value[key], raw.events[event]);
+    assert.equal(redact(source.slice(start, end)), quote, "offsets still identify the genuine original span");
+  }
+  const repo = resolveRepo(dir);
+  const memoryFile = resolveMemoryFiles(dir, ["AGENTS.md", "CLAUDE.md"]).primary;
+  const summary = await foldForRun(
+    { repo, config: { state, minGapEvidence: 2, gapLedgerMaxAge: "90d" } },
+    memoryFile,
+    current[0].memoryHash,
+    [],
+    current.map((record) => record.transcript),
+  );
+  for (const instruction of [fresh, legacy]) {
+    assert.equal(summary.gaps.find((gap) => gap.proposedInstruction === instruction)?.sessions, 2);
+  }
+  assert.ok(!summary.gaps.some((gap) => gap.proposedInstruction === generated));
+  const persisted = state.readGapLedger();
+  const legacyId = gapEntryId("AGENTS.md", legacy);
+  const freshId = gapEntryId("AGENTS.md", fresh);
+  for (const [session, observation] of Object.entries(persisted.entries[freshId].sessions)) {
+    assert.deepEqual(observation.quoteProvenance, historyBefore.entries[freshId].sessions[session].quoteProvenance);
+    assert.equal(observation.firstObservedAt, historyBefore.entries[freshId].sessions[session].firstObservedAt);
+  }
+  for (const [session, observation] of Object.entries(persisted.entries[legacyId].sessions)) {
+    const { quoteProvenance, ...history } = observation;
+    assert.deepEqual(history, historyBefore.entries[legacyId].sessions[session], "legacy history is retained");
+    assert.deepEqual(
+      quoteProvenance,
+      current.find((record) => record.transcript.identity === session).gaps.at(-1).quoteProvenance,
+    );
+  }
+  for (const reverse of [false, true]) {
+    const merged = structuredClone(persisted);
+    const expected = structuredClone(merged.entries[legacyId].sessions);
+    mergeGapEntries(merged, [reverse ? [legacyId, freshId] : [freshId, legacyId]]);
+    const sessions = (merged.entries[legacyId] || merged.entries[freshId]).sessions;
+    assert.deepEqual(Object.keys(sessions), Object.keys(expected));
+    for (const [session, observation] of Object.entries(sessions)) {
+      assert.equal(observation.quote, expected[session].quote);
+      assert.deepEqual(observation.quoteProvenance, expected[session].quoteProvenance);
+      assert.equal(observation.firstObservedAt, expected[session].firstObservedAt);
+    }
+    assert.ok(!JSON.stringify(merged).includes(secret), "merged ledger records exclude the original secret");
+  }
+  for (const record of [persisted, current, summary, first.output, grown.output]) {
+    assert.ok(!JSON.stringify(record).includes(secret), "stored and reported evidence excludes the original secret");
+  }
+});
+
+test("rendered tool quotes retain fresh and legacy ledger corroboration", async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-tool-home-"));
+  const dir = initRepo(MEMORY);
+  t.after(() => {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  const secret = "synthetic-" + "tool-password";
+  for (const id of ["session-rendered-tool-a", "session-rendered-tool-b"]) {
+    const file = writeSession(home, id, dir);
+    const toolCall = {
+      type: "toolCall",
+      id: "bash",
+      name: "Bash",
+      arguments: { command: `echo "before"\necho PASSWORD=${secret}` },
+    };
+    fs.appendFileSync(
+      file,
+      `${JSON.stringify({ type: "message", message: { role: "assistant", content: [toolCall] } })}\n`,
+    );
+  }
+  const first = runAnalyze(dir, home);
+  assert.equal(first.status, 0, first.output);
+  const state = new State(dir).ensure();
+  const records = state.listEvidence();
+  for (const record of records) {
+    const gap = record.gaps.find((item) => item.proposedInstruction === "Keep rendered command evidence.");
+    assert.ok(gap, "fresh rendered quotes are admitted");
+    assert.equal(gap.quote, renderedToolQuote);
+  }
+  const legacy = "Preserve legacy command evidence.";
+  const ledger = emptyGapLedger();
+  recordGapObservations(
+    ledger,
+    records.map((record) => ({ ...record, gaps: [{ proposedInstruction: legacy, quote: renderedToolQuote }] })),
+  );
+  state.writeGapLedger(ledger);
+  const before = state.readGapLedger();
+  const rerun = runAnalyze(dir, home, ["--force"]);
+  assert.equal(rerun.status, 0, rerun.output);
+  const persisted = state.readGapLedger();
+  const id = gapEntryId("AGENTS.md", legacy);
+  for (const [session, observation] of Object.entries(persisted.entries[id].sessions)) {
+    const { quoteProvenance, ...history } = observation;
+    assert.equal(quoteProvenance.kind, "source");
+    assert.deepEqual(history, before.entries[id].sessions[session]);
+    const record = state.listEvidence().find((item) => item.transcript.identity === session);
+    const raw = await readTranscript(record.transcript);
+    const { event, field, start, end } = quoteProvenance;
+    const source = field.reduce((value, key) => value[key], raw.events[event]);
+    assert.equal(JSON.stringify(redact(source.slice(start, end).replace(/\s+/g, " "))).slice(1, -1), renderedToolQuote);
+  }
+  const memoryFile = resolveMemoryFiles(dir, ["AGENTS.md", "CLAUDE.md"]).primary;
+  const summary = await foldForRun(
+    { repo: resolveRepo(dir), config: { state, minGapEvidence: 2, gapLedgerMaxAge: "90d" } },
+    memoryFile,
+    records[0].memoryHash,
+    [],
+    records.map((record) => record.transcript),
+  );
+  assert.equal(summary.gaps.find((gap) => gap.proposedInstruction === legacy)?.sessions, 2);
+  for (const record of [persisted, state.listEvidence(), summary, first.output, rerun.output]) {
+    assert.ok(!JSON.stringify(record).includes(secret));
+  }
+});
+
+test("source provenance rejects new and persisted generated quotes after session growth", async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-growth-home-"));
+  const dir = initRepo(MEMORY);
+  t.after(() => {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  const hidden = "The genuine database contract was overlooked.";
+  const files = [];
+  const appendTurn = (file, text) =>
+    fs.appendFileSync(file, `${JSON.stringify({ type: "message", message: { role: "assistant", content: text } })}\n`);
+  for (const id of ["session-growth-a", "session-growth-b"]) {
+    const file = writeSession(home, id, dir);
+    files.push(file);
+    for (let i = 0; i < 7; i += 1) appendTurn(file, "p".repeat(3000));
+    appendTurn(file, "x".repeat(4800) + hidden + "x".repeat(3200 - hidden.length));
+  }
+  const first = runAnalyze(dir, home);
+  assert.equal(first.status, 0, first.output);
+  const state = new State(dir).ensure();
+  const records = state.listEvidence();
+  const fabricated = "Check generated elisions before planning.";
+  const legitimate = "Read docs/db.md before writing queries.";
+  const ledger = emptyGapLedger();
+  recordGapObservations(
+    ledger,
+    records.map((record) => ({
+      ...record,
+      gaps: [
+        { proposedInstruction: fabricated, quote: "[... 2000 chars elided ...]" },
+        { proposedInstruction: legitimate, quote: hidden },
+      ],
+    })),
+  );
+  state.writeGapLedger(ledger);
+  for (const file of files) {
+    for (let i = 0; i < 10; i += 1) appendTurn(file, "t".repeat(3000));
+  }
+
+  const grown = runAnalyze(dir, home);
+  assert.equal(grown.status, 0, grown.output);
+  assert.deepEqual([grown.summary.analyzed, grown.summary.cached], [2, 0]);
+  const current = state.listEvidence();
+  for (const record of current) {
+    const raw = await readTranscript(record.transcript);
+    const distilled = distill(raw.events, record.transcript);
+    assert.equal(distilled.stats.elided, true);
+    assert.ok(!distilled.trace.includes("[... 2000 chars elided ...]"), "growth hides the old message marker");
+  }
+  assert.ok(
+    current.every((record) => !record.gaps.some((gap) => gap.proposedInstruction === fabricated)),
+    "new generated quotes are rejected even when the model claims raw access",
+  );
+  assert.ok(
+    current.every((record) => record.gaps.some((gap) => gap.quote === hidden && gap.quoteProvenance.kind === "source")),
+    "new genuine quotes hidden from the trace carry measured provenance",
+  );
+  const repo = resolveRepo(dir);
+  const memoryFile = resolveMemoryFiles(dir, ["AGENTS.md", "CLAUDE.md"]).primary;
+  const ctx = { repo, config: { state, minGapEvidence: 2, gapLedgerMaxAge: "90d" } };
+  const summary = await foldForRun(
+    ctx,
+    memoryFile,
+    current[0].memoryHash,
+    [],
+    current.map((r) => r.transcript),
+  );
+  assert.ok(
+    !summary.gaps.some((gap) => gap.proposedInstruction === fabricated),
+    "persisted generated quotes do not corroborate",
+  );
+  assert.equal(summary.gaps.find((gap) => gap.proposedInstruction === legitimate)?.sessions, 2);
+  assert.equal(
+    summary.gaps.find((gap) => gap.proposedInstruction === "Validate architecture decisions using recorded tradeoffs.")
+      ?.sessions,
+    2,
+  );
+  const persisted = state.readGapLedger();
+  assert.equal(persisted.version, 1);
+  assert.equal(
+    Object.keys(persisted.entries[gapEntryId("AGENTS.md", fabricated)].sessions).length,
+    2,
+    "unverified legacy records are preserved",
+  );
+  for (const observation of Object.values(persisted.entries[gapEntryId("AGENTS.md", legitimate)].sessions)) {
+    assert.equal(observation.quoteProvenance.kind, "source");
+    const record = current.find((candidate) => candidate.transcript.identity === observation.sourceSessionId);
+    const raw = await readTranscript(record.transcript);
+    const { event, field, start, end } = observation.quoteProvenance;
+    const text = field.reduce((value, key) => value[key], raw.events[event]);
+    assert.equal(text.slice(start, end), hidden, "stored offsets identify a genuine source span");
+    assert.equal(
+      observation.firstObservedAt,
+      ledger.entries[gapEntryId("AGENTS.md", legitimate)].sessions[observation.sourceSessionId].firstObservedAt,
+    );
+  }
+  const cached = runAnalyze(dir, home);
+  assert.equal(cached.status, 0, cached.output);
+  assert.deepEqual([cached.summary.analyzed, cached.summary.cached], [0, 2]);
 });
 
 test("editing AGENTS.md without --force reanalyzes and explains that prior evidence is stale, not missing", () => {

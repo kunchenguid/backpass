@@ -3,17 +3,18 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 
 import { extractJson, runModelCall, usageRecord } from "./acpx.js";
-import { distill } from "./distill.js";
+import { distill, findQuoteProvenance } from "./distill.js";
 import { classifyInteraction } from "./interaction.js";
 import { getAdapter, readTranscript } from "./discovery/index.js";
 import { instructionUnits, renderInstructionIndex } from "./memory.js";
 import { renderSkillIndexForAnalysis } from "./skills.js";
 import { renderPrompt } from "./prompts.js";
-import { renderOpenGapIndex } from "./gap-ledger.js";
+import { gapSource, renderOpenGapIndex } from "./gap-ledger.js";
 import { evidenceKey, isEvidenceFresh, safeFileName } from "./state.js";
 import { emitProgress } from "./progress.js";
 import { UserError, color, info, warn } from "./logger.js";
 import { corroborationIdentityOf, transcriptIdentity } from "./transcript.js";
+import { redact } from "./redact.js";
 
 /**
  * Stage 1 of the pipeline (design section 3): one cheap model call per transcript,
@@ -130,26 +131,12 @@ function noteOnce(note) {
 /** Negative evidence carries one of these classes; anything else is dropped as unjudged. */
 export const NEGATIVE_CLASSES = ["harm", "non-compliance", "irrelevant"];
 
-/** Whitespace-insensitive form used to check a quote against the trace it claims to come from. */
-function foldSpace(text) {
-  return String(text).replace(/\s+/g, " ").trim();
-}
-
 /**
  * Evidence items without a verbatim quote are dropped - the rubric's central rule.
- *
- * When `trace` is supplied and the model did not open the raw transcript, a quote must
- * also appear in that trace (whitespace folded). A quote that is long enough but not in
- * the trace is a paraphrase, and a paraphrase is a claim without evidence. When the model
- * reports `usedRawTranscript`, the quote may come from text the distiller truncated or
- * elided, so the substring check is skipped rather than punishing the honest path. Only
- * the literal boolean opts out: a model that answers `"false"` must still anchor its
- * quotes, or a stringly-typed reply would disable the check it is meant to fail.
- *
- * `quotesNotInTrace` counts what the trace check rejected, so a run whose analysis model
- * paraphrases everything reads as that rather than as a clean repo.
+ * Match source event fields or their source-mapped renderings, so generated elisions
+ * cannot supply evidence and raw-transcript access never disables validation.
  */
-export function sanitizeEvidence(parsed, memoryFile = null, trace = null) {
+export function sanitizeEvidence(parsed, memoryFile = null, sources = []) {
   const clean = {
     positive: [],
     negative: [],
@@ -160,24 +147,30 @@ export function sanitizeEvidence(parsed, memoryFile = null, trace = null) {
   if (!parsed || typeof parsed !== "object") return clean;
 
   const validInstructions = memoryFile ? new Set(instructionUnits(memoryFile).map((unit) => unit.id)) : null;
-  const foldedTrace = typeof trace === "string" && !clean.usedRawTranscript ? foldSpace(trace) : null;
-  const hasQuote = (item) => {
-    if (typeof item?.quote !== "string" || item.quote.trim().length < 8) return false;
-    if (foldedTrace === null || foldedTrace.includes(foldSpace(item.quote))) return true;
-    clean.quotesNotInTrace += 1;
-    return false;
+  const sourceQuote = (item) => {
+    if (typeof item?.quote !== "string" || item.quote.trim().length < 8) return null;
+    const redacted = redact(item.quote);
+    if (!findQuoteProvenance(redacted, sources)) {
+      clean.quotesNotInTrace += 1;
+      return null;
+    }
+    const quote = redacted.trim().slice(0, 600);
+    const quoteProvenance = findQuoteProvenance(quote, sources);
+    return quoteProvenance ? { quote, quoteProvenance } : null;
   };
 
   for (const key of ["positive", "negative"]) {
     for (const item of Array.isArray(parsed[key]) ? parsed[key] : []) {
-      if (!hasQuote(item) || typeof item.instruction !== "string") continue;
-      const instruction = item.instruction.trim();
+      const quoted = sourceQuote(item);
+      if (!quoted || typeof item.instruction !== "string") continue;
+      const instruction = redact(item.instruction).trim();
       if (validInstructions && !validInstructions.has(instruction)) continue;
+      /** @type {ReturnType<typeof sourceQuote> & { instruction: string, moment: string, effect: string, class?: string }} */
       const entry = {
         instruction,
-        moment: String(item.moment ?? "").slice(0, 80),
-        effect: String(item.effect ?? "").slice(0, 400),
-        quote: item.quote.trim().slice(0, 600),
+        moment: redact(String(item.moment ?? "")).slice(0, 80),
+        effect: redact(String(item.effect ?? "")).slice(0, 400),
+        ...quoted,
       };
       // The class is what keeps "the agent skipped the rule" from being read as "the
       // rule caused harm" downstream. Only an explicit judged value is kept; records
@@ -188,12 +181,17 @@ export function sanitizeEvidence(parsed, memoryFile = null, trace = null) {
   }
 
   for (const item of Array.isArray(parsed.gaps) ? parsed.gaps : []) {
-    if (!hasQuote(item) || typeof item.proposedInstruction !== "string") continue;
+    const quoted = sourceQuote(item);
+    if (!quoted || typeof item.proposedInstruction !== "string") continue;
+    /** @type {ReturnType<typeof sourceQuote> & {
+     * mistake: string, proposedInstruction: string, recurrenceRisk: string, domain: string,
+     * matchesGap?: string, coveredBySkill?: string
+     * }} */
     const gap = {
-      mistake: String(item.mistake ?? "").slice(0, 400),
-      proposedInstruction: item.proposedInstruction.trim().slice(0, 400),
+      mistake: redact(String(item.mistake ?? "")).slice(0, 400),
+      proposedInstruction: redact(item.proposedInstruction).trim().slice(0, 400),
       recurrenceRisk: ["high", "medium", "low"].includes(item.recurrenceRisk) ? item.recurrenceRisk : "medium",
-      quote: item.quote.trim().slice(0, 600),
+      ...quoted,
       domain: item.domain === "orchestration" ? "orchestration" : "project",
     };
     if (typeof item.matchesGap === "string" && /^[0-9a-f]{16}$/.test(item.matchesGap.trim())) {
@@ -204,7 +202,7 @@ export function sanitizeEvidence(parsed, memoryFile = null, trace = null) {
     // failed triggers per skill; an absent or empty value simply means "no skill covers
     // this" and records nothing.
     if (typeof item.coveredBySkill === "string" && item.coveredBySkill.trim()) {
-      gap.coveredBySkill = item.coveredBySkill.trim().slice(0, 120);
+      gap.coveredBySkill = redact(item.coveredBySkill).trim().slice(0, 120);
     }
     clean.gaps.push(gap);
   }
@@ -262,6 +260,31 @@ async function analyzeOne({
     model: raw.model,
     rawPath: rawFile ?? raw.rawPath,
   });
+  {
+    const ledger = config.state.readGapLedger();
+    let updated = false;
+    for (const entry of Object.values(ledger.entries)) {
+      for (const [sessionId, observation] of Object.entries(entry.sessions)) {
+        const sourceId = observation.sourceSessionId || sessionId;
+        if (
+          sourceId !== transcriptIdentity(transcript) &&
+          !(sourceId === transcript.id && observation.source === gapSource(transcript))
+        )
+          continue;
+        const quote = redact(observation.quote);
+        if (quote !== observation.quote) {
+          observation.quote = quote;
+          updated = true;
+        }
+        if (observation.quoteProvenance?.kind === "source") continue;
+        observation.quoteProvenance = findQuoteProvenance(observation.quote, distilled.sources) || {
+          kind: "unverified",
+        };
+        updated = true;
+      }
+    }
+    if (updated) config.state.writeGapLedger(ledger);
+  }
 
   emitProgress("analyze:lane", {
     slot,
@@ -338,7 +361,7 @@ async function analyzeOne({
 
     return {
       status: "ok",
-      evidence: sanitizeEvidence(parsed, memoryFile, distilled.trace),
+      evidence: sanitizeEvidence(parsed, memoryFile, distilled.sources),
       usage: usageRecord(ranWith, result),
       distilled,
     };
@@ -600,7 +623,7 @@ export async function analyzeTranscripts({
   if (summary.quotesNotInTrace) {
     warn(
       `${summary.quotesNotInTrace} quote(s) were discarded because they do not appear in the ` +
-        `distilled trace they claim to come from; a model that paraphrases instead of copying ` +
+        `source events they claim to come from; a model that paraphrases instead of copying ` +
         `produces fewer findings, not cleaner ones - consider a stronger analysis model`,
     );
   }

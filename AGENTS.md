@@ -39,7 +39,7 @@ Each owning file's comments and tests hold the detail; read them before touching
   deletion inside a skill file is refused. Extraction and deletion never share one decision. Never add a
   lexical or text-shape classifier to these gates, and non-compliance never counts as harm. The >= 20%
   relevance placement table (`src/prompts/synthesis.md`) stays prompt guidance, never a `buildProposal` gate.
-- **Quotes must be found in the trace they cite** (`sanitizeEvidence` in `src/analyze.js`), so fake agents in
+- **Quotes must be found in genuine source events** (`sanitizeEvidence` in `src/analyze.js`), so fake agents in
   tests must quote real session text. Bump `ANALYSIS_INDEX_VERSION` (`src/state.js`) for any change to what
   analysis accepts.
 - **Sampling is deterministic and sticky** (`src/sample.js`): a per-transcript hash of `transcriptIdentity` and

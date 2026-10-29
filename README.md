@@ -380,13 +380,18 @@ orchestrating tool) - and the
 analysis is shown the ledger's open gaps so it can cite an existing gap id instead of
 coining a paraphrase of it.
 
-**Every claim must carry a verbatim quote, and the quote must be in the trace.** Quoteless
+**Every claim must carry a verbatim quote from a source event.** Quoteless
 items are discarded - the single most important defence against a model confabulating
-influence - and so are quotes that do not actually appear in the distilled trace they claim
-to come from, compared whitespace-folded so the trace's line wrapping never rejects a real
-quote. A paraphrase is a claim without evidence. The check is skipped only when the analysis
-reports `usedRawTranscript`, because then the quote may legitimately come from text the
-distiller truncated or elided. When a run discards quotes this way it says so on stderr:
+influence - and so are quotes without a whitespace-insensitive match in genuine source text
+or its redacted rendering. Tool quotes can retain the trace's flattened whitespace and JSON
+escaping. Measured offsets map these transformations back to the source, excluding generated
+truncation text. Stored quotes stay redacted.
+Each accepted quote records its source event, field, and character span. These spans remain
+valid when session growth hides text from the capped trace. Generated elisions cannot supply
+evidence, and a model's `usedRawTranscript` claim cannot bypass the check. Ledger v1 retains
+this provenance with each observation. Legacy observations remain on disk and contribute only
+after distillation verifies them against genuine source events.
+When a run discards quotes this way it says so on stderr:
 a model that paraphrases instead of copying produces fewer findings, not cleaner ones.
 Negative evidence is weighted highest, but its class determines what it supports:
 non-compliance supports reinforcement, while only harm supports removal.
@@ -975,10 +980,9 @@ For the user-scope state location and isolation contract, see
 
 ## Limitations
 
-- **Causal attribution is genuinely hard.** A model can confabulate influence. The
-  mitigations are structural - mandatory verbatim quotes checked against the trace they
-  claim to come from, the two-session rule, negative
-  evidence weighted highest, and a human gate - but read the evidence, not just the title.
+- **Causal attribution is genuinely hard.** A model can confabulate influence even with
+  the [evidence checks](#3-calculate-loss---one-cheap-call-per-transcript).
+  Read the evidence, not just the title.
 - **Transcript formats are undocumented** and can change without notice. Each adapter is
   pinned by a golden fixture and fails soft.
 - **Cursor IDE is deferred to v1.1.** Its composer→workspace link is version-dependent;

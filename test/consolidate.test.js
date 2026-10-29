@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { distill, findQuoteProvenance } from "../src/distill.js";
 
 /**
  * The pre-synthesis consolidation pass, end to end through `foldForRun` against a
@@ -48,6 +49,11 @@ const SIGHTING_B = "Require every published attestation to reference the precise
 const UNRELATED = "Never force-push to main.";
 
 function record(id, proposedInstruction) {
+  const quote = `quote from ${id}`;
+  const quoteProvenance = findQuoteProvenance(
+    quote,
+    distill([{ kind: "message", role: "assistant", text: quote }], {}).sources,
+  );
   const transcript = {
     id,
     identity: id,
@@ -63,7 +69,7 @@ function record(id, proposedInstruction) {
     key: evidenceKey(transcript, "h1"),
     positive: [],
     negative: [],
-    gaps: [{ proposedInstruction, mistake: "hit it", quote: `quote from ${id}`, recurrenceRisk: "high" }],
+    gaps: [{ proposedInstruction, mistake: "hit it", quote, quoteProvenance, recurrenceRisk: "high" }],
   };
 }
 
