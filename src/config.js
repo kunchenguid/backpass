@@ -50,10 +50,14 @@ export const DEFAULT_CONFIG = {
    * Nested memory files a surface run also trains, each as its own weight: a
    * repo-relative path like `apps/api/AGENTS.md`, fed only by the sessions that worked
    * under its directory (`src/nested.js`). Only files named here are ever trained;
-   * nothing is discovered. Project scope only.
+   * nothing is discovered. Project scope only. Split at load into this path list and
+   * `nestedBudgetTokensByPath` (`splitNestedMemoryFiles`).
    */
   nestedMemoryFiles: [],
-  /** Always-loaded budget per nested memory file; `null` means `budgetTokens`. */
+  /**
+   * Always-loaded budget per nested memory file; `null` means `budgetTokens`. A file
+   * listed as `{ "path", "budgetTokens" }` in `nestedMemoryFiles` has a cap of its own.
+   */
   nestedBudgetTokens: null,
   skillsDir: ".agents/skills",
   /**
@@ -332,6 +336,57 @@ export function sinceCutoff(since, now = Date.now()) {
   return window === null ? null : now - window;
 }
 
+const NESTED_ENTRY_KEYS = new Set(["path", "budgetTokens"]);
+
+/**
+ * Split `nestedMemoryFiles` into the path list every consumer reads and the per-file caps,
+ * once, at load. An entry is a repo-relative path, or `{ path, budgetTokens }` for a file
+ * that needs a cap of its own; a string entry keeps `nestedBudgetTokens` (then
+ * `budgetTokens`). The caps are keyed by the path as written - `applyNestedMemoryConfig`
+ * re-keys them to the normalized path - and are only ever read through `nestedBudget`
+ * (`src/nested.js`), so propose and apply hold a file to the same cap. Always derived
+ * here, so a `nestedBudgetTokensByPath` set in a config file is overwritten, never read.
+ */
+function splitNestedMemoryFiles(entries) {
+  const paths = [];
+  const budgets = {};
+  for (const entry of entries) {
+    if (typeof entry === "string") {
+      if (!entry.trim()) throw new UserError("config.nestedMemoryFiles must be an array of repo-relative paths");
+      paths.push(entry);
+      continue;
+    }
+    const shown = JSON.stringify(entry);
+    if (!isPlainObject(entry)) {
+      throw new UserError(
+        `config.nestedMemoryFiles entry ${shown} must be a repo-relative path or { "path", "budgetTokens" }`,
+      );
+    }
+    if (typeof entry.path !== "string" || !entry.path.trim()) {
+      throw new UserError(`config.nestedMemoryFiles entry ${shown} needs a "path" naming a repo-relative file`);
+    }
+    const unknown = Object.keys(entry).filter((key) => !NESTED_ENTRY_KEYS.has(key));
+    if (unknown.length) {
+      throw new UserError(
+        `config.nestedMemoryFiles entry for ${entry.path} has unknown key ${unknown.map((key) => `"${key}"`).join(", ")}`,
+        'an entry object takes only "path" and "budgetTokens"',
+      );
+    }
+    if (entry.budgetTokens !== undefined) {
+      if (!Number.isInteger(entry.budgetTokens) || entry.budgetTokens <= 0) {
+        throw new UserError(
+          `config.nestedMemoryFiles entry for ${entry.path} has budgetTokens ${JSON.stringify(entry.budgetTokens)}; ` +
+            "it must be a positive integer",
+          "omit budgetTokens to use nestedBudgetTokens",
+        );
+      }
+      budgets[entry.path] = entry.budgetTokens;
+    }
+    paths.push(entry.path);
+  }
+  return { nestedMemoryFiles: paths, nestedBudgetTokensByPath: budgets };
+}
+
 function validate(config, { kind = "project", repoRoot = null } = {}) {
   if (!Array.isArray(config.memoryFiles) || config.memoryFiles.length === 0) {
     throw new UserError("config.memoryFiles must be a non-empty array");
@@ -339,12 +394,10 @@ function validate(config, { kind = "project", repoRoot = null } = {}) {
   if (!Number.isFinite(config.budgetTokens) || config.budgetTokens <= 0) {
     throw new UserError("config.budgetTokens must be a positive number");
   }
-  if (
-    !Array.isArray(config.nestedMemoryFiles) ||
-    config.nestedMemoryFiles.some((entry) => typeof entry !== "string" || !entry.trim())
-  ) {
+  if (!Array.isArray(config.nestedMemoryFiles)) {
     throw new UserError("config.nestedMemoryFiles must be an array of repo-relative paths");
   }
+  Object.assign(config, splitNestedMemoryFiles(config.nestedMemoryFiles));
   if (kind === "user" && config.nestedMemoryFiles.length) {
     throw new UserError(
       "config.nestedMemoryFiles is project-scope only",
