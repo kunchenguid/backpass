@@ -5,8 +5,8 @@
  * scarce signal a robot-heavy corpus would otherwise drown).
  *
  * Non-interactive is detected best-effort from per-harness metadata (codex
- * `originator: codex_exec` / `source: exec`, claude `entrypoint` values that start
- * with `sdk`, an OpenCode child `parent_id`, an OMP subagent's nested layout,
+ * `originator: codex_exec` / `source: exec` and structured subagents, claude
+ * `entrypoint` values that start with `sdk`, an OpenCode child `parent_id`, an OMP subagent's nested layout,
  * Hermes cron/gateway/whatsapp if they ever leak past discovery) and from cwd (a
  * `.no-mistakes` path segment - pipeline worktrees are one kind of non-interactive run,
  * not their own category).
@@ -73,6 +73,7 @@ export function classifyInteraction(transcript) {
   const cwd = transcript?.cwd;
 
   if (harness === "codex") {
+    if (signals.parentId || signals.source === "subagent") return NON_INTERACTIVE;
     const originator = String(signals.originator || "")
       .toLowerCase()
       .replaceAll("-", "_");

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { emptyInteractionSignals, interactionSignals } from "../../interaction.js";
+import { interactionSignals } from "../../interaction.js";
 import {
   attachToolResults,
   contentToEvents,
@@ -19,9 +19,22 @@ import {
  * repo, `git.repository_url` - which is why codex stays deterministic even after the
  * worktree is deleted (tier 2). The store is date-sharded and large (10k+ rollouts on
  * a working machine), so discovery reads only line 1 and leans on the scan cache.
+ * Child rollouts replay parent conversation before their delegated assignment. They
+ * are never independent evidence, so discovery excludes them and read refuses them.
+ * This also excludes every descendant of a self session without needing its parent
+ * file, which may be missing or outside the discovery window.
  */
 
 export const name = "codex";
+
+/** Reclassify legacy scan entries that discarded rollout ancestry. */
+export function cacheDependency() {
+  return 1;
+}
+
+export function isIndependentSession(descriptor) {
+  return !descriptor.parentSessionId && descriptor.interactionSignals?.source !== "subagent";
+}
 
 export function storeRoot() {
   return process.env.CODEX_HOME ? path.join(process.env.CODEX_HOME, "sessions") : home(".codex", "sessions");
@@ -87,21 +100,29 @@ export function classify(candidate) {
   if (!entry || entry.type !== "session_meta") return null;
   const payload = entry.payload || {};
   const git = payload.git || {};
+  const subagent = payload.source && typeof payload.source === "object" && "subagent" in payload.source;
+  const parentSessionId = payload.parent_thread_id || payload.source?.subagent?.thread_spawn?.parent_thread_id;
   return {
-    id: payload.session_id || payload.id || path.basename(candidate.path, ".jsonl"),
+    id: payload.id || payload.session_id || path.basename(candidate.path, ".jsonl"),
+    parentSessionId: typeof parentSessionId === "string" && parentSessionId.trim() ? parentSessionId : null,
     cwd: payload.cwd || null,
     gitBranch: git.branch || null,
     remotes: git.repository_url ? [git.repository_url] : [],
     startedAt: payload.timestamp ? Date.parse(payload.timestamp) : candidate.mtimeMs,
     model: payload.model || null,
-    interactionSignals:
-      payload.originator || payload.source
-        ? interactionSignals({ originator: payload.originator, source: payload.source })
-        : emptyInteractionSignals(),
+    interactionSignals: interactionSignals({
+      originator: payload.originator,
+      source: subagent ? "subagent" : typeof payload.source === "string" ? payload.source : null,
+      parentId: parentSessionId,
+    }),
   };
 }
 
 export function read(ref) {
+  const descriptor = classify(ref);
+  if (descriptor && !isIndependentSession(descriptor)) {
+    throw new Error(`Codex delegated rollout ${descriptor.id} is not an independent session`);
+  }
   const entries = readJsonl(ref.path);
   const events = [];
   let model = null;

@@ -316,6 +316,11 @@ backpass's own loss and gradient-descent calls land in these same stores under t
 For OpenCode, this also excludes descendants of tagged sessions, including when the ancestor falls outside `--since`.
 OpenCode sessions with no recorded messages, such as unused agent probes, are not listed or counted as scanned; conversations without user text, such as attachment-only prompts, remain eligible.
 
+Codex excludes delegated child rollouts from local and SSH collection, and its transcript
+reader refuses them as independent sessions because they replay parent conversation.
+This also excludes descendants of backpass's own sessions, even when an ancestor is
+missing or outside `--since`.
+
 Every remaining session is labelled **interactive** or **non-interactive** (`src/interaction.js`).
 Codex `codex exec` / `originator: codex_exec`, Claude SDK, GitHub, action, and CI
 entrypoints, OpenCode child sessions (`parent_id`), OMP subagent transcripts, and a cwd
