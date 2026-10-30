@@ -25,6 +25,8 @@ const PATTERNS = [
     /\b([A-Za-z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|API_?KEY|ACCESS_?KEY)[A-Za-z0-9_]*)\s*[=:]\s*(?:"([^"]{8,})"(?=[ \t]*(?:$|[,;})\]]))|'([^']{8,})'(?=[ \t]*(?:$|[,;})\]]))|"([^"\n]{8,})"|'([^'\n]{8,})'|["']?([^\s"',]{8,}))/gim,
     "ASSIGNMENT",
   ],
+  // Run after assignments so a matching variable name cannot hide an unredacted value.
+  [/\b(apikey_[A-Za-z0-9_-]{16,})/gi, "API_KEY"],
 ];
 
 export function redact(text) {

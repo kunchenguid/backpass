@@ -250,11 +250,28 @@ export function renderSkillIndex(skills) {
  * The skill index the analysis prompt sees: name, path, and trigger description only.
  * Bodies are deliberately absent - the analysis turn opens a SKILL.md by path when a
  * description looks relevant to a mistake, instead of paying for every body on every
- * transcript.
+ * transcript. Each real file is listed once, with its first loaded path; the original
+ * entries stay intact for per-copy description billing. Relative paths belong to repoRoot,
+ * not necessarily the process cwd. If a file disappeared, keep its entry rather than
+ * treating all unresolved paths as the same skill.
  */
-export function renderSkillIndexForAnalysis(skills) {
+export function renderSkillIndexForAnalysis(skills, repoRoot = process.cwd()) {
   if (!skills.length) return "(this repo has no skills)";
-  return skills.map((s) => `- ${s.name} (${s.path}) :: ${s.description || "(no description)"}`).join("\n");
+  const seen = new Set();
+  return skills
+    .filter((skill) => {
+      let identity;
+      try {
+        identity = fs.realpathSync(path.resolve(repoRoot, skill.path));
+      } catch {
+        return true;
+      }
+      if (seen.has(identity)) return false;
+      seen.add(identity);
+      return true;
+    })
+    .map((s) => `- ${s.name} (${s.path}) :: ${s.description || "(no description)"}`)
+    .join("\n");
 }
 
 /** Serialize a skill draft to the common SKILL.md shape. */
@@ -520,7 +537,7 @@ export function removeOwnedSkillPaths(paths) {
  * `.claude/skills` is never clobbered: a symlink (to anywhere) is left as is, and a real
  * directory is reported so the user can merge it by hand.
  */
-export function ensureSkillsLayout(repoRoot, claudeSkillsDir = CLAUDE_SKILLS_LINK) {
+export function ensureSkillsLayout(repoRoot, claudeSkillsDir = CLAUDE_SKILLS_LINK, ownership = []) {
   const created = [];
   const warnings = [];
   const canonical = path.join(repoRoot, CANONICAL_SKILLS_DIR);
@@ -535,6 +552,7 @@ export function ensureSkillsLayout(repoRoot, claudeSkillsDir = CLAUDE_SKILLS_LIN
   if (claude.state === "missing") {
     fs.mkdirSync(path.dirname(link), { recursive: true });
     fs.symlinkSync(target, link, "dir");
+    ownership.push({ absolute: link, identity: pathIdentity(fs.lstatSync(link)), relative: claudeSkillsDir });
     created.push(`${claudeSkillsDir} -> ${target}`);
   } else if (claude.state === "dir") {
     warnings.push(claudeSkillsDirWarning(claudeSkillsDir, target));

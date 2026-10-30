@@ -707,12 +707,30 @@ function signatureOf(changes) {
   ).slice(0, 16);
 }
 
+/** Where a fingerprinted key lives on disk: configured memory paths may be absolute, skills are repo-relative. */
+export function repoFilePath(repo, file) {
+  return path.isAbsolute(file) ? file : path.join(repo.root, file);
+}
+
 /** The files backpass must find untouched in the repo after synthesis: a moved write is a bug, loudly. */
 export function repoFingerprint(repo, files) {
   const out = {};
   for (const relative of files) {
-    const absolute = path.isAbsolute(relative) ? relative : path.join(repo.root, relative);
+    const absolute = repoFilePath(repo, relative);
     out[relative] = fs.existsSync(absolute) ? sha256(fs.readFileSync(absolute, "utf8")) : null;
   }
   return out;
+}
+
+/**
+ * Point the fingerprint of each staged skill at the text its staging copy was built from.
+ * The workspace is rebuilt after the fingerprint is taken, and a skill another process edits
+ * in between is copied as the new text; leaving the old hash would later read that edit as
+ * a write-through that happens to equal the staging copy. The memory file is not rebased:
+ * it is staged from the text already loaded, not re-read from disk.
+ */
+export function rebaseFingerprint(fingerprint, workspace) {
+  for (const [file, text] of workspace.originals) {
+    if (file !== workspace.memoryPath && file in fingerprint) fingerprint[file] = sha256(text);
+  }
 }

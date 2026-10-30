@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.1.42](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.41...backpass-v0.1.42) (2026-10-29)
+
+
+### Bug Fixes
+
+* recognize CLAUDE.md import pointers with leading headings ([#240](https://github.com/kunchenguid/backpass/issues/240)) ([df9cdce](https://github.com/kunchenguid/backpass/commit/df9cdcebab3fd4520a2a0d09bc696d9438f3cb24))
+* redact standalone apikey_ credentials ([#147](https://github.com/kunchenguid/backpass/issues/147)) ([#242](https://github.com/kunchenguid/backpass/issues/242)) ([24f8283](https://github.com/kunchenguid/backpass/commit/24f8283930119250593dd70e6d62d67f4c8801bc))
+* report prompt size when synthesis fails ([#243](https://github.com/kunchenguid/backpass/issues/243)) ([a2d710b](https://github.com/kunchenguid/backpass/commit/a2d710b5c6fe9ba529ebd5c2356a73689a38f28e))
+
+## [0.1.41](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.40...backpass-v0.1.41) (2026-10-26)
+
+
+### Bug Fixes
+
+* **synthesize:** report a mid-run change to a watched repo file as observed ([#224](https://github.com/kunchenguid/backpass/issues/224)) ([1a1a175](https://github.com/kunchenguid/backpass/commit/1a1a17531de333d8095a944baa884a0896d5672d))
+
+## [0.1.40](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.39...backpass-v0.1.40) (2026-10-25)
+
+
+### Bug Fixes
+
+* deduplicate symlinked skills in the analysis index ([#231](https://github.com/kunchenguid/backpass/issues/231)) ([9ded619](https://github.com/kunchenguid/backpass/commit/9ded6192cd7eae8c63e40559b7832774b3bac2fb))
+
+## [0.1.39](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.38...backpass-v0.1.39) (2026-10-23)
+
+
+### Bug Fixes
+
+* run first Claude analysis call alone before fan-out ([#226](https://github.com/kunchenguid/backpass/issues/226)) ([3882b86](https://github.com/kunchenguid/backpass/commit/3882b86d84017bcdbf5e2cbe2e8c1fa9abeb3126))
+
 ## [0.1.38](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.37...backpass-v0.1.38) (2026-10-21)
 
 
