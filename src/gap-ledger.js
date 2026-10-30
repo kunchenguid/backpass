@@ -379,6 +379,11 @@ export function recordGapObservations(ledger, evidenceRecords, options = {}) {
         ...(priors.some(hasUnattributedSightings) ? { unattributedSightings: true } : {}),
         mistake: gap.mistake,
         quote: gap.quote,
+        // Analysis's distilled-trace window for the quote, carried so ledger-built gap
+        // clusters show the same context as in-run ones.
+        ...(gap.locator ? { locator: gap.locator } : {}),
+        ...(typeof gap.before === "string" ? { before: gap.before } : {}),
+        ...(typeof gap.after === "string" ? { after: gap.after } : {}),
         recurrenceRisk: gap.recurrenceRisk,
         phrasings,
         domain:
@@ -566,6 +571,9 @@ export function ledgerGapObservations(ledger, memoryPath, skills = null) {
         unattributedSightings: hasUnattributedSightings(obs),
         mistake: obs.mistake,
         quote: obs.quote,
+        ...(obs.locator ? { locator: obs.locator } : {}),
+        ...(typeof obs.before === "string" ? { before: obs.before } : {}),
+        ...(typeof obs.after === "string" ? { after: obs.after } : {}),
         recurrenceRisk: obs.recurrenceRisk,
         domain: obs.domain === "orchestration" ? "orchestration" : "project",
         ...(obs.coveredBySkill && (!skillNames || skillNames.has(obs.coveredBySkill))
