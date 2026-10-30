@@ -62,6 +62,9 @@ npx backpass
 ```
 
 Requires **Node >= 22.5** and [`acpx`](https://github.com/openclaw/acpx) on your PATH.
+The default `backpass apply` review UI also requires [`lavish-axi`](https://github.com/kunchenguid/lavish-axi)
+on your PATH; install it with `npm install -g lavish-axi`. To review in the terminal instead, run
+`backpass apply --no-ui`.
 
 backpass has **no API keys of its own**. Every model call goes through acpx to a harness
 you have already authenticated.
@@ -104,8 +107,8 @@ folder), backpass proceeds but warns that its privacy can't be verified.
 Harness load paths, verified for v1:
 
 - **Claude Code** loads `CLAUDE.md` from `CLAUDE_CONFIG_DIR` (default `~/.claude`)
-  and inlines `@` imports, including `~/` and absolute paths. A CLAUDE.md containing
-  only an import that resolves to the canonical user memory is a valid pointer, such
+  and inlines `@` imports, including `~/` and absolute paths. A CLAUDE.md
+  [import pointer](#9-which-file-is-the-weights) must resolve to the canonical user memory, such
   as `@~/.agents/AGENTS.md` with the default paths.
 - **Codex** loads `AGENTS.md` from `CODEX_HOME` (default `~/.codex`). It follows the
   AGENTS.md convention; `@` import is not assumed.
@@ -189,7 +192,7 @@ whole-surface run (see [Nested memory files](#10-nested-memory-files-in-a-monore
 Nothing else resolves - not a basename, a directory, a path to a SKILL.md, or an
 existing file the config does not name - and an
 unknown name fails, listing the valid ones, instead of falling back to the whole surface. A
-configured file that contains only an `@` import is rejected rather than rewritten or silently
+configured file using the [import pointer form](#9-which-file-is-the-weights) is rejected rather than rewritten or silently
 mapped to its import; the error names the imported memory file, which must itself be configured
 to be targeted. A correctly named skill whose file backpass cannot write - one resolving into a
 location nothing may write, or in project scope one resolving outside the repository - is refused
@@ -412,6 +415,11 @@ If an analysis worker hits a fatal error, backpass stops handing out new transcr
 Calls already in flight finish, and their successful evidence is cached for reuse.
 Per-transcript failures, such as timeouts or unparseable output, still let the run continue; they are recorded, listed by `backpass status`, and retried on the next run.
 
+An acpx `PERMISSION_DENIED` exit does not discard a completed, valid analysis. Backpass
+retains the evidence and prints a named warning. The evidence records `deniedRequests`
+from observed permission responses, or `null` with an explicit warning when acpx did
+not report a count. Incomplete or invalid answers and other failed exits still fail.
+
 ### 4. Aggregate gradients - and one judged consolidation call
 
 Evidence is grouped by instruction, giving each one a positive/negative count, a count of
@@ -464,7 +472,8 @@ A high-reasoning synthesis run turns the aggregated gradients into concrete edit
 REMOVE, REWRITE, EXTRACT→SKILL, or MOVE. The agent does not describe edits for backpass to
 splice in - it makes them, with its harness's own file tools, in a **staging copy** of the
 memory file and project skills under `.backpass/synthesis/` (the repo itself is read-only
-to it, for grounding). Named nested files use their own staging copies and do not stage skills
+to it, for grounding). Version-control internals (`.git`, `.hg`, `.svn`) and binary files
+under a skill directory stay out of the copy and are read-only. Named nested files use their own staging copies and do not stage skills
 (see [Nested memory files](#10-nested-memory-files-in-a-monorepo)). backpass then diffs
 against the originals and shows the agent the measured changes by id; the agent annotates each one with a title, rationale, and the
 verbatim evidence behind it. Nothing textual is ever taken from the model: every hunk's
@@ -529,7 +538,9 @@ for different things:
 
 When a run does fail, the advice it prints comes from the condition it ended on. If the
 rejected proposal included notes, the failure prints those too instead of hiding useful
-diagnostic context. Run `backpass propose` again to start a fresh synthesis.
+diagnostic context. A failed synthesis prompt call reports the assembled prompt's measured
+UTF-8 byte size without printing its contents. That size is diagnostic context, not a
+claim that the prompt was too large. Run `backpass propose` again to start a fresh synthesis.
 
 Token deltas shown to you are measured by backpass from the actual text - never taken from
 the model's own arithmetic.
@@ -582,6 +593,9 @@ every skill's name and trigger line, stamps a gap it judges covered by an existi
 with `coveredBySkill`, and the gap ledger corroborates those citations across sessions
 before synthesis is told to fix the trigger. The same coverage check retires a ledger gap
 once a skill's content answers it, so a gap resolved by extraction stops resurfacing.
+The analysis index lists each skill file once by realpath, keeping its first loaded path
+when symlinks across harness roots share a file. Distinct files remain separate even when
+their names match. This does not change [per-copy budget accounting](#6-the-budget---model-size).
 
 Skills are protected by the same floors as the memory file: text deleted from a skill
 file is a removal, and since no evidence can attribute to skill text, no deletion there
@@ -619,11 +633,20 @@ It cannot be combined with `--no-ui`.
 The flag is repeatable: all supplied vectors are checked together as one vector, each must name at least one edit, and naming an edit twice is refused, even across flags.
 Edits it does not name stay untouched, and every gate below still applies.
 
+After a successful non-dry-run apply with at least one accepted edit, the saved proposal
+records `appliedAt` and `appliedBy: "apply"`. A second apply refuses it before opening
+review or writing anything. Run `backpass` again to produce a fresh proposal, including
+for edits skipped in the completed review. Dry runs and reviews with no accepted edits
+leave the proposal unstamped and available to review again.
+
 The live budget gauge is not just a readout. Apply rechecks the accepted subset against
 the same budget gate as synthesis: stay under the cap, or shrink if the file is already
 over. An incompatible set writes nothing and does not record rejections, so you can pick
 a compatible set and try again. If the run shrinks the file but leaves it above the cap,
 that is progress, not a failure: it is written, and the remaining overage is printed.
+The cap is the one the proposal was made under: if the current config (or `--budget`) names
+a different budget for a file the proposal edits, apply refuses before the review, naming
+both numbers, and you either re-run apply with the original budget or propose again.
 
 Apply preflights every decided edit before writing. The proposal was measured against exact
 versions of your memory file and every skill file it proposes editing, so apply first checks
@@ -637,8 +660,9 @@ refuses the whole write if any created skill target already exists or two accept
 resolve to the same file.
 
 Skills and non-memory files are written only after every edit has composed, with the memory
-file committed last. A later write failure rolls back files, skills, and loading-layout
-entries created earlier in that round. If another process changes a committed file before
+file committed last. A later write failure, including failure to save the proposal's
+applied stamp, leaves the proposal unstamped and rolls back files, skills, and loading-layout
+entries created earlier in that round so the apply can be retried. If another process changes a committed file before
 rollback reaches it, apply leaves that change untouched and reports the rollback conflict.
 
 For compatibility, proposals created by older backpass versions that do not contain a
@@ -657,10 +681,14 @@ backpass apply --decisions "e1=accepted e2=rejected:disagree"   # decided elsewh
 `memoryFiles` is an ordered list (default `["AGENTS.md", "CLAUDE.md"]`); the first one
 that exists is the root file a run optimizes, so **AGENTS.md is canonical**. Named
 [nested files](#10-nested-memory-files-in-a-monorepo) are additional weights, not
-separate root files. Resolution is pointer-aware:
+separate root files. A `CLAUDE.md` is a pointer when it contains exactly one import
+resolving to the primary file, such as `@AGENTS.md` or `@./AGENTS.md`, with optional
+leading ATX headings (`#` through `######`), blank lines and HTML comments. Prose,
+additional imports, and headings after the import make it a separate file. A symlink
+resolving to the primary file is also a pointer:
 
-- `CLAUDE.md` containing only `@AGENTS.md` (the standard import) is a pointer: optimizing
-  AGENTS.md covers both harness families and the pointer stays valid. Nothing to report.
+- Optimizing AGENTS.md covers both harness families and the pointer stays valid. Nothing
+  to report.
 - Two separate full files are a divergence hazard. backpass optimizes AGENTS.md, leaves
   CLAUDE.md untouched, and warns each run until you consolidate: move CLAUDE.md's content
   into AGENTS.md and make CLAUDE.md the one-line pointer.
@@ -711,7 +739,8 @@ weight of its own; a missing file is reported, never created:
   to its own positive-integer cap; a plain path entry is held to `nestedBudgetTokens`
   (`budgetTokens`, which `--budget` sets, when unset). Propose and apply read the same cap.
   An entry object without a `path`, with a non-integer or non-positive `budgetTokens`, or
-  with any other key is a config error. An unchanged root over budget does not block
+  with any other key is a config error. Apply refuses a nested file whose configured
+  budget changed since the proposal was made. An unchanged root over budget does not block
   a combined proposal if at least one nested file actually runs synthesis with analyzed
   evidence; if every nested file is skipped, the normal root shrink gate still applies.
   Root edits must still clear that gate, and a nested edit must clear its own file's gate.
@@ -721,9 +750,25 @@ weight of its own; a missing file is reported, never created:
   with its file and each nested file with its own budget. Apply refuses a saved nested
   edit if that file is no longer named in the current config. The two-session evidence
   floor, remembered rejections, and `apply` as the only writer are unchanged.
+- **Reach.** Every in-repo path counts, reads included, so in a repo where most sessions
+  cross directories a nested file may see too few sessions to ever corroborate a gap. The
+  run summary and `backpass status` show, per nested file, how many sampled sessions
+  worked only under its directory, and warn below `minGapEvidence`, when no add, rewrite,
+  or remove can reach the file:
 
-Each nested directory keeps the pointer model above: name its canonical file, and a
-sibling `AGENTS.md` or `CLAUDE.md` that only imports it needs nothing, while a sibling
+  ```text
+  nested apps/api/AGENTS.md · 1 of 78 sampled session(s) worked only under apps/api/ · budget ...
+      below minGapEvidence (2); no add, rewrite, or remove edit can reach this file
+  ```
+
+  `status` reads the count recorded at the last attribution (`analyze`, `propose`, or a
+  full run), prints `not yet measured` before one, and reports it under
+  `nestedAttribution` in `--json`; the proposal's `nested` entries carry
+  `sampledSessions`, `minGapEvidence`, and `belowMinGapEvidence`. The count is
+  report-only and never gates a run.
+
+Each nested directory keeps the [pointer model above](#9-which-file-is-the-weights): name its canonical file, and a
+sibling `CLAUDE.md` that points to it needs nothing, while a sibling
 with content of its own is warned about. An entry that is only a pointer is refused. A file listed in both
 `memoryFiles` and `nestedMemoryFiles` is nested. `--target` and `--memory-file` name
 exactly the files a run trains, so neither trains a nested file.
@@ -737,7 +782,7 @@ exactly the files a run trains, so neither trains a nested file.
 | `backpass analyze` | calculate loss: the tier-1 pass over pending transcripts                                 |
 | `backpass propose` | aggregate gradients + gradient descent: the tier-2 pass from cached evidence             |
 | `backpass apply`   | review and write the accepted edits                                                      |
-| `backpass status`  | cache state, failed transcripts, budget bars, and cross-surface overlaps                 |
+| `backpass status`  | cache state, failed transcripts, budget bars, nested reach, and cross-surface overlaps   |
 | `backpass init`    | initialize the selected scope's config and state                                         |
 
 Run `backpass --help` for the full flag list.

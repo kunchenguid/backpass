@@ -8,8 +8,10 @@ import {
   renderAlsoLoaded,
   reportNestedMemoryFiles,
   resolveNestedMemoryFiles,
+  nestedReach,
   nestedSurfaceHash,
   workedUnder,
+  writeNestedReach,
 } from "../nested.js";
 import { transcriptIdentity } from "../transcript.js";
 import { loadProjectSkills, resolveOverflowTarget, skillDescriptionTokens } from "../skills.js";
@@ -22,10 +24,11 @@ import { pruneHostCache } from "../discovery/cache.js";
 
 /**
  * The memory file a run optimizes: the first configured file that exists (AGENTS.md by
- * default - canonical). Resolution is pointer-aware: a CLAUDE.md that is just
- * `@AGENTS.md` is covered by optimizing AGENTS.md and needs no mention. A second file
- * with its own content is NOT updated - that would either be ignored silently or
- * double-written into divergence - so the run says so and recommends consolidating.
+ * default - canonical). Resolution is pointer-aware: a CLAUDE.md that imports
+ * `@AGENTS.md` or resolves through a symlink to the same file is covered by optimizing
+ * AGENTS.md and needs no mention. A second file with its own content is NOT updated -
+ * that would either be ignored silently or double-written into divergence - so the run
+ * says so and recommends consolidating.
  *
  * `hash` is the memory-surface hash: the memory files plus the skill description
  * lines, since analysis is judged against both. Evidence keys, fold scoping, and the
@@ -127,6 +130,7 @@ async function runAnalysisCore(ctx) {
 /**
  * The sessions each nested memory file learns from: those that worked under its
  * directory (`src/nested.js`). Attribution is computed only when a nested file is named.
+ * Each file's share of the sample is recorded for `status` (`nestedReach`), report-only.
  */
 export async function nestedCorpora(ctx, weights, transcripts, attribution = null) {
   if (!weights.length) return { corpora: [], attribution: null };
@@ -137,6 +141,9 @@ export async function nestedCorpora(ctx, weights, transcripts, attribution = nul
       workedUnder(placed.get(transcriptIdentity(transcript)), weight.dir),
     ),
   }));
+  if (ctx.config?.state) {
+    writeNestedReach(ctx.config.state, nestedReach(corpora, transcripts.length, ctx.config.minGapEvidence));
+  }
   return { corpora, attribution: placed };
 }
 

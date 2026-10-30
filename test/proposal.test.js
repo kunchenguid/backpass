@@ -3371,6 +3371,8 @@ test("apply measures a legacy skill rewrite missing descriptionDelta", () => {
   });
   assert.deepEqual(built.violations, []);
   delete built.proposal.edits[0].descriptionDelta;
+  // Legacy in its cap too: a proposal that recorded none is gated at the current config.
+  delete built.proposal.budget.capTokens;
 
   const results = applyDecisions({
     proposal: built.proposal,
@@ -3386,15 +3388,20 @@ test("apply measures a legacy skill rewrite missing descriptionDelta", () => {
 test("post-apply warnings label a newly created skill description as always-loaded", () => {
   const skillText =
     "---\nname: release-signing\ndescription: Release.\n---\n\n- Use Node 18 via nvm before running any script.\n";
-  const built = gate({
-    edit: (root) => {
-      writeIn(root, "AGENTS.md", (text) =>
-        text.replace("- Use Node 18 via nvm before running any script.", "- Use the release skill."),
-      );
-      writeIn(root, ".agents/skills/release-signing/SKILL.md", skillText);
-    },
-    annotation: { edits: [claim(["H1", "H2"], { kind: "extract", title: "extract release setup" })] },
-  });
+  const extract = (budgetTokens = 5000) =>
+    gate({
+      edit: (root) => {
+        writeIn(root, "AGENTS.md", (text) =>
+          text.replace("- Use Node 18 via nvm before running any script.", "- Use the release skill."),
+        );
+        writeIn(root, ".agents/skills/release-signing/SKILL.md", skillText);
+      },
+      annotation: { edits: [claim(["H1", "H2"], { kind: "extract", title: "extract release setup" })] },
+      config: config({ budgetTokens }),
+    });
+  // A shrink step that lands one token over the cap it was made under.
+  const cap = extract().proposal.budget.projected - 1;
+  const built = extract(cap);
   assert.deepEqual(built.violations, []);
   assert.ok(built.proposal.budget.delta < 0);
   delete built.proposal.edits[0].descriptionDelta;
@@ -3404,7 +3411,7 @@ test("post-apply warnings label a newly created skill description as always-load
     decisions: { e1: "accepted" },
     repo: built.repo,
     state: built.state,
-    config: { budgetTokens: built.proposal.budget.projected - 1 },
+    config: { budgetTokens: cap },
     dryRun: true,
   });
   assert.deepEqual(results.failed, []);

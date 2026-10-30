@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync, spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 import { primaryMemoryFile } from "../src/commands/analyze.js";
 import { applyDecisions } from "../src/apply/writer.js";
@@ -85,6 +87,47 @@ test("isPointerTo accepts the @AGENTS.md import forms and nothing else", () => {
   assert.equal(isPointerTo("", "AGENTS.md"), false);
 });
 
+test("pointer imports allow leading Markdown headings, blanks and HTML comments", () => {
+  for (const text of [
+    "# my-repo\n\n@AGENTS.md\n",
+    "<!-- title -->\n\n# my-repo\n<!-- multi\nline -->\n\n@./AGENTS.md\n<!-- end -->\n",
+    "# Title\n## Subtitle\n### Context\n#### More\n##### Detail\n###### Last\n@AGENTS.md\n",
+    "#\n\n@AGENTS.md\n",
+    "# my-repo\r\n\r\n@AGENTS.md\r\n",
+  ]) {
+    assert.equal(isPointerTo(text, "AGENTS.md"), true, text);
+  }
+});
+
+for (const indent of ["", " ", "  ", "   ", "    ", "\t"]) {
+  const isHeading = indent.length < 4 && indent !== "\t";
+  test(`pointer heading indentation ${JSON.stringify(indent)} is ${isHeading ? "accepted" : "content"}`, () => {
+    for (let level = 1; level <= 6; level += 1) {
+      for (const newline of ["\n", "\r\n"]) {
+        const text = `${indent}${"#".repeat(level)} Never deploy without approval${newline}${newline}@AGENTS.md${newline}`;
+        assert.equal(isPointerTo(text, "AGENTS.md"), isHeading, text);
+      }
+    }
+  });
+}
+
+test("headings do not hide prose, multiple imports or other instruction content", () => {
+  for (const text of [
+    "# my-repo\nReal prose.\n@AGENTS.md\n",
+    "# my-repo\n@AGENTS.md\nReal prose.\n",
+    "# my-repo\n@AGENTS.md\n@AGENTS.md\n",
+    "# my-repo\n@AGENTS.md\n@OTHER.md\n",
+    "# my-repo\n@AGENTS.md\n- Follow this rule.\n",
+    "# my-repo\n```\n@AGENTS.md\n```\n",
+    "#not-a-heading\n@AGENTS.md\n",
+    "####### not-a-heading\n@AGENTS.md\n",
+    "@AGENTS.md\n# trailing heading\n",
+    "# heading without an import\n",
+  ]) {
+    assert.equal(isPointerTo(text, "AGENTS.md"), false, text);
+  }
+});
+
 test("a relative pointer resolves from the importing file's directory", () => {
   const repo = repoWith({
     ".agents/AGENTS.md": AGENTS,
@@ -121,7 +164,8 @@ test("only CLAUDE.md can cover a secondary memory file by import", () => {
 });
 
 test("CLAUDE.md as a pointer resolves AGENTS.md silently and only AGENTS.md is written", () => {
-  const repo = repoWith({ "AGENTS.md": AGENTS, "CLAUDE.md": renderPointer("AGENTS.md") });
+  const pointer = `# my-repo\n\n${renderPointer("AGENTS.md")}`;
+  const repo = repoWith({ "AGENTS.md": AGENTS, "CLAUDE.md": pointer });
   const config = loadConfig(repo.root);
 
   const { result, warnings } = captureWarnings(() => primaryMemoryFile(repo, config));
@@ -136,7 +180,68 @@ test("CLAUDE.md as a pointer resolves AGENTS.md silently and only AGENTS.md is w
     ["AGENTS.md"],
   );
   assert.match(fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8"), /full test suite/);
-  assert.equal(fs.readFileSync(path.join(repo.root, "CLAUDE.md"), "utf8"), renderPointer("AGENTS.md"));
+  assert.equal(fs.readFileSync(path.join(repo.root, "CLAUDE.md"), "utf8"), pointer);
+});
+
+for (const indent of ["", " ", "  ", "   ", "    ", "\t"]) {
+  const isHeading = indent.length < 4 && indent !== "\t";
+  test(`CLI ${isHeading ? "recognizes a pointer" : "warns about separate content"} with indentation ${JSON.stringify(indent)}`, () => {
+    const pointer = `${indent}# my-repo\n\n<!-- canonical memory -->\n@AGENTS.md\n`;
+    const repo = repoWith({
+      "AGENTS.md": AGENTS,
+      "CLAUDE.md": pointer,
+      ".backpassrc.json": JSON.stringify({ discovery: { harnesses: [] } }),
+    });
+    execFileSync("git", ["init", "-q"], { cwd: repo.root });
+    const cli = fileURLToPath(new URL("../bin/backpass.js", import.meta.url));
+    for (const command of ["status", "analyze"]) {
+      const result = spawnSync(process.execPath, [cli, command], {
+        cwd: repo.root,
+        encoding: "utf8",
+        env: { ...process.env, NO_COLOR: "1", CI: "1" },
+        timeout: 10_000,
+      });
+      const output = `${result.stdout}${result.stderr}`;
+      assert.equal(result.status, 0, output);
+      if (isHeading) {
+        assert.doesNotMatch(output, /separate memory file|separate - not optimized/);
+        if (command === "status") assert.match(output, /CLAUDE\.md\s+pointer to AGENTS\.md/);
+      } else if (command === "status") {
+        assert.match(output, /CLAUDE\.md[^\n]*separate - not optimized/);
+      } else {
+        assert.match(
+          output,
+          /CLAUDE\.md is a separate memory file and will NOT be updated - only AGENTS\.md is optimized/,
+        );
+      }
+      if (command === "analyze") assert.match(output, /no transcripts associated/);
+    }
+    assert.equal(fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8"), AGENTS);
+    assert.equal(fs.readFileSync(path.join(repo.root, "CLAUDE.md"), "utf8"), pointer);
+  });
+}
+
+test("CLAUDE.md symlink to AGENTS.md resolves silently and only AGENTS.md is written", () => {
+  const repo = repoWith({ "AGENTS.md": AGENTS });
+  fs.symlinkSync("AGENTS.md", path.join(repo.root, "CLAUDE.md"));
+  const config = loadConfig(repo.root);
+
+  const { result, warnings } = captureWarnings(() => primaryMemoryFile(repo, config));
+  assert.equal(result.file.path, "AGENTS.md");
+  assert.deepEqual(warnings, []);
+  assert.deepEqual(
+    result.resolved.pointers.map((file) => file.path),
+    ["CLAUDE.md"],
+  );
+  assert.deepEqual(result.resolved.separate, []);
+
+  const written = applyOneEdit(repo, config);
+  assert.deepEqual(
+    written.written.map((w) => w.file),
+    ["AGENTS.md"],
+  );
+  assert.match(fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8"), /full test suite/);
+  assert.equal(fs.readlinkSync(path.join(repo.root, "CLAUDE.md")), "AGENTS.md");
 });
 
 test("two separate full files: AGENTS.md is optimized, CLAUDE.md is left alone with a consolidate warning", () => {

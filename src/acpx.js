@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { UserError, warn } from "./logger.js";
 import { runCapture } from "./subprocess.js";
 import { prepareHarnessInvocation } from "./harness-invoke.js";
+import { readAcpxOutput } from "./acpx-output.js";
 import * as piStore from "./discovery/adapters/pi.js";
 import { readJsonl } from "./discovery/adapters/shared.js";
 
@@ -164,6 +165,10 @@ function sessionCreateTimeoutError({ agent, acpxAgentArgs, timeoutMs, result }) 
   );
 }
 
+/** What acpx prints when the adapter turns down the requested model after `session/new`. */
+const MODEL_REJECTED =
+  /did not advertise that model|does not support this model|session\/set_(?:config_option|model) for model/i;
+
 /**
  * Availability verdicts for a failed acpx call. Only a *classifiable* failure is a
  * reason to drop a candidate and fall through to the next one; anything else (a
@@ -184,7 +189,7 @@ export function classifyAcpxFailure(failure) {
   if (failure.spawnError?.code === "ENOENT") return "unreachable";
   const text = failure.stderr || "";
   if (/AUTH_REQUIRED|authentication required/i.test(text)) return "unauthenticated";
-  if (/did not advertise that model|does not support this model/i.test(text)) return "model-unavailable";
+  if (MODEL_REJECTED.test(text)) return "model-unavailable";
   if (/\b(ENOENT|command not found|not found on PATH|failed to spawn|spawn .* ENOENT)\b/i.test(text)) {
     return "unreachable";
   }
@@ -367,7 +372,7 @@ export async function runModelCall(call, pick, { sessionName }) {
  * staging workspace as `cwd` (`src/workspace.js`), never the repo. acpx's policy rules
  * match tool kinds, not paths, so the workspace is the blast-radius boundary.
  */
-function baseArgs({ cwd, model, timeoutSeconds, approveReads, approveAll = false, suppressReads }) {
+function baseArgs({ cwd, model, timeoutSeconds, approveReads, approveAll = false, suppressReads, format = "quiet" }) {
   const args = [];
   if (cwd) args.push("--cwd", cwd);
   if (approveAll) args.push("--approve-all");
@@ -377,7 +382,7 @@ function baseArgs({ cwd, model, timeoutSeconds, approveReads, approveAll = false
   args.push("--non-interactive-permissions", "deny");
   if (timeoutSeconds) args.push("--timeout", String(timeoutSeconds));
   if (model) args.push("--model", model);
-  args.push("--format", "quiet");
+  args.push("--format", format);
   return args;
 }
 
@@ -523,10 +528,18 @@ export async function execOneShot({
   approveReads = true,
   suppressReads = true,
   verifyTimeoutMs = VERIFY_CONFIG_TIMEOUT_MS,
+  acceptDeniedOutput = null,
 }) {
   const invocation = prepareHarnessInvocation({ agent, model, effort });
   const args = [
-    ...baseArgs({ cwd, model: invocation.acpxModel, timeoutSeconds, approveReads, suppressReads }),
+    ...baseArgs({
+      cwd,
+      model: invocation.acpxModel,
+      timeoutSeconds,
+      approveReads,
+      suppressReads,
+      format: acceptDeniedOutput ? "json" : "quiet",
+    }),
     "--prompt-retries",
     String(promptRetries),
     ...invocationAgentArgs(invocation, agent),
@@ -553,16 +566,11 @@ export async function execOneShot({
         { ...result, timedOut: true },
       );
     }
-    if (result.code !== 0) {
-      throw new AcpxError(
-        `acpx ${agent} exec failed (exit ${result.code}): ${firstLine(result.stderr) || `exit ${result.code}`}`,
-        result,
-      );
-    }
+    const reply = modelReply(result, acceptDeniedOutput, agent, "exec");
     assertNotAcpxBudgetKill({
       agent,
       label: "exec",
-      text: stripAcpxNoise(result.stdout),
+      text: reply.text,
       stdout: result.stdout,
       stderr: result.stderr,
       code: result.code,
@@ -570,13 +578,12 @@ export async function execOneShot({
       timeoutSeconds,
     });
 
-    const combined = `${result.stdout}\n${result.stderr}`;
-    const usage = parseTokenLine(combined) ?? recoverUsageFromStore({ agent, promptFile, cwd, startedAt });
+    const usage = reply.usage ?? recoverUsageFromStore({ agent, promptFile, cwd, startedAt });
     return {
-      text: stripAcpxNoise(result.stdout),
+      ...reply,
       usage,
       raw: result.stdout,
-      stderr: result.stderr,
+      stderr: reply.stderr,
       notes: invocation.notes,
     };
   } finally {
@@ -601,8 +608,10 @@ export async function execOneShot({
  *
  * @returns {Promise<{ notes: string[],
  *   prompt: (options: { promptFile: string, timeoutSeconds?: number, promptRetries?: number,
- *     approveReads?: boolean, approveAll?: boolean, suppressReads?: boolean }) =>
- *     Promise<{ text: string, usage: Record<string, number> | null, raw: string, stderr: string, notes: string[] }>,
+ *     approveReads?: boolean, approveAll?: boolean, suppressReads?: boolean,
+ *     acceptDeniedOutput?: (text: string) => boolean }) =>
+ *     Promise<{ text: string, usage: Record<string, number> | null, raw: string, stderr: string, notes: string[],
+ *       permissionDenied: boolean, deniedRequests: number | null }>,
  *   close: () => Promise<void> }>}
  */
 export async function openSession({
@@ -726,11 +735,20 @@ export async function openSession({
     approveReads = true,
     approveAll = false,
     suppressReads = true,
+    acceptDeniedOutput = null,
   }) => {
     if (closed) throw new AcpxError(`acpx ${agent} session ${sessionName} is closed`);
     firstPromptFile = firstPromptFile || promptFile;
     const args = [
-      ...baseArgs({ cwd, model: null, timeoutSeconds, approveReads, approveAll, suppressReads }),
+      ...baseArgs({
+        cwd,
+        model: null,
+        timeoutSeconds,
+        approveReads,
+        approveAll,
+        suppressReads,
+        format: acceptDeniedOutput ? "json" : "quiet",
+      }),
       "--prompt-retries",
       String(promptRetries),
       ...acpxAgentArgs,
@@ -756,23 +774,17 @@ export async function openSession({
         { ...result, timedOut: true },
       );
     }
-    if (result.code !== 0) {
-      throw new AcpxError(
-        `acpx ${agent} session prompt failed (exit ${result.code}): ${firstLine(result.stderr) || `exit ${result.code}`}`,
-        result,
-      );
-    }
+    const reply = modelReply(result, acceptDeniedOutput, agent, "session prompt");
 
-    const combined = `${result.stdout}\n${result.stderr}`;
     /** @type {Record<string, number> | null} */
-    let usage = parseTokenLine(combined);
+    let usage = reply.usage;
     if (!usage) {
       // The harness store holds the whole session's usage; this turn is the increase.
       const cumulative = recoverUsageFromStore({ agent, promptFile: firstPromptFile, cwd, startedAt });
       usage = cumulative ? subtractUsage(cumulative, storeUsageSeen) : null;
       if (cumulative) storeUsageSeen = cumulative;
     }
-    return { text: stripAcpxNoise(result.stdout), usage, raw: result.stdout, stderr: result.stderr, notes };
+    return { ...reply, usage, raw: result.stdout, notes };
   };
 
   return { notes, prompt, close };
@@ -805,6 +817,7 @@ export async function sessionPrompt({
   approveReads = true,
   suppressReads = true,
   createTimeoutMs = SESSION_CREATE_TIMEOUT_MS,
+  acceptDeniedOutput = null,
 }) {
   let session;
   try {
@@ -828,13 +841,21 @@ export async function sessionPrompt({
       promptRetries,
       approveReads,
       suppressReads,
+      acceptDeniedOutput,
     });
     return { ...fallback, notes };
   }
 
   const promptStartedAt = Date.now();
   try {
-    const result = await session.prompt({ promptFile, timeoutSeconds, promptRetries, approveReads, suppressReads });
+    const result = await session.prompt({
+      promptFile,
+      timeoutSeconds,
+      promptRetries,
+      approveReads,
+      suppressReads,
+      acceptDeniedOutput,
+    });
     assertNotAcpxBudgetKill({
       agent,
       label: "session prompt",
@@ -848,6 +869,26 @@ export async function sessionPrompt({
   } finally {
     await session.close();
   }
+}
+
+/** One policy boundary for both invocation routes, after their timeout checks. */
+function modelReply(result, acceptDeniedOutput, agent, label) {
+  const output = acceptDeniedOutput ? readAcpxOutput(result.stdout) : null;
+  const permissionDenied = result.code === 5 && output?.completed && Boolean(acceptDeniedOutput?.(output.text));
+  const stderr = [output?.diagnostic, result.stderr].filter(Boolean).join("\n");
+  if (result.code !== 0 && !permissionDenied) {
+    throw new AcpxError(
+      `acpx ${agent} ${label} failed (exit ${result.code}): ${firstLine(stderr) || `exit ${result.code}`}`,
+      { ...result, stderr },
+    );
+  }
+  return {
+    text: output?.text ?? stripAcpxNoise(result.stdout),
+    usage: output?.usage ?? parseTokenLine(acceptDeniedOutput ? result.stderr : `${result.stdout}\n${result.stderr}`),
+    permissionDenied: Boolean(permissionDenied),
+    deniedRequests: output?.deniedRequests ?? null,
+    stderr,
+  };
 }
 
 function firstLine(text) {

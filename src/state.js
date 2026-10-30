@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 import { STATE_DIRNAME } from "./config.js";
 import { UserError, warn } from "./logger.js";
@@ -184,7 +185,10 @@ export class State {
     return this.readJsonFile(this.proposalPath, null);
   }
 
-  writeProposal(proposal) {
+  writeProposal(proposal, reviewed = undefined) {
+    if (reviewed !== undefined && !isDeepStrictEqual(this.readProposal(), reviewed)) {
+      throw new UserError("the saved proposal changed during review; review the current proposal again");
+    }
     this.writeJsonFile(this.proposalPath, proposal);
   }
 
@@ -248,7 +252,7 @@ function migrateEvidenceRecord(record, transcript, identity) {
   };
 }
 
-export const ANALYSIS_INDEX_VERSION = 3;
+export const ANALYSIS_INDEX_VERSION = 4;
 
 /**
  * Cache key for a transcript's analysis: its content signature, the memory-surface hash,

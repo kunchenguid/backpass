@@ -130,6 +130,32 @@ function noteOnce(note) {
 /** Negative evidence carries one of these classes; anything else is dropped as unjudged. */
 export const NEGATIVE_CLASSES = ["harm", "non-compliance", "irrelevant"];
 
+/** Nonzero recovery requires the complete reply contract, before sanitizing quotes. */
+function acceptsDeniedAnalysis(text) {
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return false;
+  }
+  if (!parsed || Array.isArray(parsed) || typeof parsed.usedRawTranscript !== "boolean") return false;
+  const strings = (item, keys) => item && keys.every((key) => typeof item[key] === "string");
+  return (
+    ["positive", "negative", "gaps"].every((key) => Array.isArray(parsed[key])) &&
+    parsed.positive.every((item) => strings(item, ["instruction", "moment", "effect", "quote"])) &&
+    parsed.negative.every(
+      (item) => strings(item, ["instruction", "moment", "effect", "quote"]) && NEGATIVE_CLASSES.includes(item.class),
+    ) &&
+    parsed.gaps.every(
+      (item) =>
+        strings(item, ["mistake", "proposedInstruction", "quote"]) &&
+        ["high", "medium", "low"].includes(item.recurrenceRisk) &&
+        ["project", "orchestration"].includes(item.domain) &&
+        ["matchesGap", "coveredBySkill"].every((key) => item[key] === undefined || typeof item[key] === "string"),
+    )
+  );
+}
+
 /** Whitespace-insensitive form used to check a quote against the trace it claims to come from. */
 function foldSpace(text) {
   return String(text).replace(/\s+/g, " ").trim();
@@ -322,6 +348,7 @@ async function analyzeOne({
         cwd: modelCwd || repo.root,
         timeoutSeconds: config.timeoutSeconds,
         promptRetries: config.promptRetries,
+        acceptDeniedOutput: acceptsDeniedAnalysis,
       };
       // Route effortful calls through a fresh per-transcript session so each harness's
       // invocation-scoped overlay or safe fallback is applied; otherwise one-shot is cheaper.
@@ -335,13 +362,29 @@ async function analyzeOne({
     if (!parsed) {
       throw new Error("analysis returned no parseable JSON");
     }
+    if (result.permissionDenied) {
+      warn(
+        `acpx ${ranWith} PERMISSION_DENIED: completed analysis retained; ` +
+          (result.deniedRequests === null
+            ? "deniedRequests=unknown (count not reported)"
+            : `observed deniedRequests=${result.deniedRequests}`),
+      );
+    }
 
     return {
       status: "ok",
-      evidence: sanitizeEvidence(parsed, memoryFile, distilled.trace),
+      evidence: {
+        ...sanitizeEvidence(parsed, memoryFile, distilled.trace),
+        ...(result.permissionDenied ? { deniedRequests: result.deniedRequests } : {}),
+      },
       usage: usageRecord(ranWith, result),
       distilled,
     };
+  } catch (err) {
+    // Marks that this transcript reached the model-call attempt, regardless of how it
+    // failed, so callers can tell it apart from a failure that never got this far (#203).
+    err.modelCallAttempted = true;
+    throw err;
   } finally {
     if (rawFile) releaseRawFile(rawFile);
   }
@@ -492,11 +535,14 @@ export async function analyzeTranscripts({
           path: path.isAbsolute(skill.path) ? skill.path : path.join(repo.root, skill.path),
         }))
       : skills,
+    repo.root,
   );
 
   let done = 0;
   const evidenceTotals = { positive: 0, negative: 0, gaps: 0 };
-  await pool(pending, config.jobs, async (transcript, _index, slot) => {
+  const analyzePending = async (transcript, _index, slot) => {
+    /** @type {"ok" | "skipped" | "failed" | "failed-attempted"} */
+    let outcome;
     const base = {
       transcript: transcriptMetadata(transcript),
       memoryHash,
@@ -513,6 +559,7 @@ export async function analyzeTranscripts({
       phase: "distill",
     });
 
+    let modelCallMade = false;
     try {
       const result = await analyzeOne({
         transcript,
@@ -525,18 +572,21 @@ export async function analyzeTranscripts({
         skillIndex,
         alsoLoaded,
       });
+      modelCallMade = result.status !== "skipped";
       if (result.status === "skipped") {
-        summary.skipped += 1;
         state.writeEvidence(transcript, { ...base, status: "skipped", reason: result.reason });
+        outcome = "skipped";
+        summary.skipped += 1;
       } else {
-        summary.analyzed += 1;
-        summary.usage.push(result.usage);
         state.writeEvidence(transcript, {
           ...base,
           status: "ok",
           stats: result.distilled.stats,
           ...result.evidence,
         });
+        outcome = "ok";
+        summary.analyzed += 1;
+        summary.usage.push(result.usage);
         evidenceTotals.positive += result.evidence.positive.length;
         evidenceTotals.negative += result.evidence.negative.length;
         evidenceTotals.gaps += result.evidence.gaps.length;
@@ -549,6 +599,7 @@ export async function analyzeTranscripts({
       summary.failed += 1;
       warn(`${transcript.harness} ${transcriptLabel(transcript)}: ${err.message}`);
       state.writeEvidence(transcript, { ...base, status: "failed", error: err.message });
+      outcome = modelCallMade || err.modelCallAttempted ? "failed-attempted" : "failed";
     } finally {
       done += 1;
       emitProgress("analyze:tick", {
@@ -562,7 +613,27 @@ export async function analyzeTranscripts({
         info(`${color.dim(`  ${done}/${pending.length} analyzed`)}`);
       }
     }
-  });
+    return outcome;
+  };
+
+  // Claude refreshes a due OAuth token under a lock its owner must keep touching until the
+  // refresh ends. Each call here starts with a short-lived `sessions new` helper, so at
+  // jobs > 1 the first wave of helpers can abandon that lock and every session then fails
+  // (#203). Run transcripts one at a time until one has made a model call, so a due
+  // refresh finishes inside a single long-lived process before the fan-out. A skipped
+  // trivial session made no call, so it does not count; nor does a failure that never
+  // reached the model call (e.g. a corrupted transcript failing to read or distill).
+  // Not a retry: nothing re-runs.
+  let queue = pending;
+  if (pick.agent === "claude" && config.jobs > 1) {
+    let called = false;
+    while (!called && queue.length) {
+      const outcome = await analyzePending(queue[0], 0, 0);
+      called = outcome === "ok" || outcome === "failed-attempted";
+      queue = queue.slice(1);
+    }
+  }
+  await pool(queue, config.jobs, analyzePending);
 
   if (summary.quotesNotInTrace) {
     warn(

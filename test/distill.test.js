@@ -124,6 +124,54 @@ test("redaction leaves benign token-count arguments alone", () => {
   assert.equal(redact("token=abcdefgh1234,next=1"), "token=[redacted],next=1");
 });
 
+test("standalone apikey credentials are redacted case-insensitively with a 16-character floor", () => {
+  const lower = `apikey_${"a".repeat(64)}`;
+  const upper = `APIKEY_${"B".repeat(64)}`;
+  const mixed = "ApiKey_aB3_-aB3_-aB3_-x";
+  const label = "[redacted:API_KEY]";
+  for (const token of [lower, upper, mixed, `apikey_${"c".repeat(16)}`]) {
+    assert.equal(redact(token), label);
+    assert.equal(redact(`(${token}), next.`), `(${label}), next.`);
+  }
+  assert.equal(redact(`before\n${lower}\n${upper}\nafter`), `before\n${label}\n${label}\nafter`);
+  for (const text of [
+    "apikey",
+    "apikey_documentation",
+    `apikey_${"a".repeat(15)}`,
+    `APIKEY_${"B".repeat(15)}`,
+    `not${lower}`,
+  ]) {
+    assert.equal(redact(text), text);
+  }
+});
+
+test("standalone apikey matching cannot expose secret assignment values", () => {
+  for (const name of ["apikey_openrouter_production", "APIKEY_OPENROUTER_PRODUCTION"]) {
+    for (const separator of ["=", ":"]) {
+      for (const value of [
+        "hunter2hunter2",
+        '"hunter2hunter2,secret"',
+        "'hunter2hunter2,secret'",
+        '"hunter2\nhunter2"',
+      ]) {
+        const assignment = `${name} ${separator} ${value}`;
+        assert.equal(redact(assignment), "[redacted:API_KEY]=[redacted]");
+        const { trace } = distill(
+          [
+            { kind: "message", role: "user", text: assignment },
+            { kind: "message", role: "assistant", text: assignment },
+            { kind: "tool", name: "Bash", input: assignment, result: assignment },
+            { kind: "tool", name: "Bash", input: { command: assignment }, result: assignment },
+          ],
+          META,
+        );
+        assert.ok(!trace.includes("hunter2"), "assignment values must not survive in any trace field");
+        assert.equal(trace.match(/\[redacted:API_KEY\]=\[redacted\]/g)?.length, 6);
+      }
+    }
+  }
+});
+
 test("redaction runs on tool input and output inside the trace", () => {
   const { trace } = distill(
     [

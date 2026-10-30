@@ -11,6 +11,9 @@ import {
   ensureSkillsLayout,
   loadProjectSkills,
   loadSkills,
+  loadedCopies,
+  skillDescriptionTokens,
+  renderSkillIndexForAnalysis,
   parseFrontmatter,
   renderSkillFile,
   resolveOverflowTarget,
@@ -218,6 +221,62 @@ test("project skill discovery includes separate canonical and Claude roots witho
   assert.deepEqual(
     loadProjectSkills(root).map((skill) => skill.name),
     ["generated"],
+  );
+});
+
+test("analysis lists a shared user skill once while billing every harness copy", (t) => {
+  const root = tmpRepo();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const dirs = [".agents/skills", ".claude/skills", ".codex/skills"];
+  const file = path.join(root, dirs[0], "release-signing", "SKILL.md");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, renderSkillFile(SKILL));
+  for (const dir of dirs.slice(1)) {
+    fs.mkdirSync(path.join(root, dir), { recursive: true });
+    fs.symlinkSync(path.dirname(file), path.join(root, dir, "release-signing"), "dir");
+  }
+
+  const skills = loadProjectSkills(root, dirs[0], dirs, { exact: true });
+  const before = structuredClone(skills);
+  assert.equal(skills.length, 3);
+  assert.equal(loadedCopies(root, skills, file), 3);
+  assert.equal(skillDescriptionTokens(skills), 3 * skills[0].descriptionTokens);
+  const expected = `- ${skills[0].name} (${skills[0].path}) :: ${skills[0].description}`;
+  assert.equal(renderSkillIndexForAnalysis(skills, root), expected);
+  assert.equal(
+    renderSkillIndexForAnalysis(skills.map((skill) => ({ ...skill, path: path.join(root, skill.path) }))),
+    `- ${skills[0].name} (${path.join(root, skills[0].path)}) :: ${skills[0].description}`,
+  );
+  assert.deepEqual(skills, before, "rendering must not dedupe the accounting input");
+  assert.equal(loadedCopies(root, skills, file), 3);
+  assert.equal(skillDescriptionTokens(skills), 3 * skills[0].descriptionTokens);
+});
+
+test("analysis retains distinct files with identical names and descriptions", (t) => {
+  const root = tmpRepo();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const dirs = [".agents/skills", ".claude/skills"];
+  for (const dir of dirs) {
+    const file = path.join(root, dir, "release-signing", "SKILL.md");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, renderSkillFile(SKILL));
+  }
+  const skills = loadProjectSkills(root);
+  assert.equal(skills.length, 2);
+  assert.equal(renderSkillIndexForAnalysis(skills, root).split("\n").length, 2);
+  for (const skill of skills) assert.ok(renderSkillIndexForAnalysis(skills, root).includes(skill.path));
+});
+
+test("analysis preserves unresolved skill paths and the empty-index message", () => {
+  const skills = ["missing-one/SKILL.md", "missing-two/SKILL.md"].map((file) => ({
+    name: "missing",
+    path: file,
+    description: "",
+  }));
+  assert.equal(renderSkillIndexForAnalysis([]), "(this repo has no skills)");
+  assert.equal(
+    renderSkillIndexForAnalysis(skills),
+    "- missing (missing-one/SKILL.md) :: (no description)\n- missing (missing-two/SKILL.md) :: (no description)",
   );
 });
 

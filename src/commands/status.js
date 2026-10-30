@@ -4,7 +4,7 @@ import path from "node:path";
 import { userClaudeSkillsDir } from "../config.js";
 import { color, json, out } from "../logger.js";
 import { resolveMemoryFiles } from "../memory.js";
-import { nestedBudget, resolveNestedMemoryFiles } from "../nested.js";
+import { nestedBudget, nestedReachWarning, readNestedReach, resolveNestedMemoryFiles } from "../nested.js";
 import {
   loadProjectSkills,
   resolveOverflowTarget,
@@ -60,7 +60,8 @@ export async function cmdStatus(ctx) {
     };
   });
   // Nested memory files are weights of their own, each under its own budget.
-  for (const weight of resolveNestedMemoryFiles(repo.root, config)) {
+  const nestedWeights = resolveNestedMemoryFiles(repo.root, config);
+  for (const weight of nestedWeights) {
     budgets.push({
       path: weight.path,
       label: weight.path,
@@ -73,10 +74,34 @@ export async function cmdStatus(ctx) {
     });
   }
 
+  // How many sampled sessions each nested file could learn from at the last attribution,
+  // read back from state rather than re-discovered: `status` stays instant. Report-only.
+  const reach = nestedWeights.length ? readNestedReach(state) : null;
+  const nestedAttribution = nestedWeights.length
+    ? {
+        measuredAt: reach?.measuredAt ?? null,
+        files: nestedWeights
+          .filter((weight) => weight.file)
+          .map((weight) => {
+            const entry = reach?.files.find((candidate) => candidate.path === weight.path);
+            return {
+              path: weight.path,
+              dir: weight.dir,
+              measured: Boolean(entry),
+              sessions: entry?.sessions ?? null,
+              sampledSessions: entry?.sampledSessions ?? null,
+              minGapEvidence: entry?.minGapEvidence ?? null,
+              belowMinGapEvidence: entry?.belowMinGapEvidence ?? null,
+            };
+          }),
+      }
+    : null;
+
   if (ctx.flags.json) {
     json({
       repo: repo.name,
       budgets,
+      ...(nestedAttribution ? { nestedAttribution } : {}),
       crossSurfaceDuplicates: duplicates,
       evidence: counts,
       scanCacheEntries: Object.keys(cache.entries).length,
@@ -121,6 +146,24 @@ export async function cmdStatus(ctx) {
           `${formatTokens(descriptionTokens)} tok always loaded`,
       ),
     );
+  }
+  if (nestedAttribution?.files.length) {
+    out("");
+    const when = nestedAttribution.measuredAt
+      ? `sampled sessions at the last attribution, ${nestedAttribution.measuredAt.slice(0, 16).replace("T", " ")}; `
+      : "";
+    out(color.dim(`NESTED EVIDENCE REACH (${when}report-only)`));
+    for (const entry of nestedAttribution.files) {
+      if (!entry.measured) {
+        out(`  ${entry.path}: ${color.dim("not yet measured - run `backpass` or `backpass analyze`")}`);
+        continue;
+      }
+      out(
+        `  ${entry.path}: ${entry.sessions} of ${entry.sampledSessions} sampled session(s) worked only under ${entry.dir}/`,
+      );
+      const warning = nestedReachWarning(entry);
+      if (warning) out(`    ${color.yellow(warning)}`);
+    }
   }
   if (duplicates.length) {
     out("");

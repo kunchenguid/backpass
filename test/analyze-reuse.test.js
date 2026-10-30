@@ -77,12 +77,12 @@ function initRepo(memory) {
 }
 
 /** A minimal Pi session, non-trivial enough to clear the triviality filter. */
-function writeSession(home, id, cwd) {
+function writeSession(home, id, cwd, userText = "Please build the project.") {
   const dir = path.join(home, ".pi", "agent", "sessions", id);
   fs.mkdirSync(dir, { recursive: true });
   const entries = [
     { type: "session", version: 3, id, timestamp: new Date().toISOString(), cwd },
-    { type: "message", message: { role: "user", content: "Please build the project." } },
+    { type: "message", message: { role: "user", content: userText } },
     { type: "message", message: { role: "assistant", content: "Ran make build as instructed." } },
     { type: "message", message: { role: "user", content: "Now run the tests too." } },
     { type: "message", message: { role: "assistant", content: "Tests pass." } },
@@ -125,6 +125,43 @@ function runAnalyze(dir, home, extraArgs = []) {
 const MEMORY = "# Agent instructions\n\n- Run `make build` before every push.\n";
 const MEMORY_EDITED = "# Agent instructions\n\n- Run `make build` before every push.\n- Never skip the changelog.\n";
 
+test("standalone apikey credentials never reach the cached analysis prompt", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-redact-home-"));
+  const dir = initRepo(MEMORY);
+  const tokens = [`apikey_${"a".repeat(64)}`, `APIKEY_${"B".repeat(64)}`];
+  const assignments = [];
+  const secrets = [];
+  for (const name of ["apikey_openrouter_production", "APIKEY_OPENROUTER_PRODUCTION"]) {
+    for (const separator of ["=", ":"]) {
+      for (const quote of ["", '"', "'"]) {
+        const secret = `synthetic-secret-${secrets.length}`;
+        secrets.push(secret);
+        assignments.push(`${name}${separator}${quote}${secret}${quote}`);
+      }
+    }
+  }
+  writeSession(
+    home,
+    "redacted-session",
+    dir,
+    `Please build the project using (${tokens[0]}).\n${tokens[1]}\n${assignments.join("\n")}`,
+  );
+
+  const result = runAnalyze(dir, home);
+  assert.equal(result.status, 0, result.output);
+  assert.equal(result.summary.analyzed, 1);
+  const promptDir = path.join(dir, ".backpass", "prompts");
+  const prompts = fs.readdirSync(promptDir);
+  assert.equal(prompts.length, 1);
+  const prompt = fs.readFileSync(path.join(promptDir, prompts[0]), "utf8");
+  assert.match(prompt, /Please build the project using \(\[redacted:API_KEY\]\)\.\n\[redacted:API_KEY\]/);
+  for (const token of tokens)
+    assert.ok(!prompt.includes(token), "the cached model prompt must not contain a full credential");
+  for (const secret of secrets)
+    assert.ok(!prompt.includes(secret), "the cached model prompt must not contain an assignment secret");
+  assert.equal(prompt.match(/\[redacted:API_KEY\]=\[redacted\]/g)?.length, assignments.length);
+});
+
 test("the first analysis performs work, an unchanged second reuses it, and --force reanalyzes anyway", () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-reuse-home-"));
   const dir = initRepo(MEMORY);
@@ -150,6 +187,28 @@ test("the first analysis performs work, an unchanged second reuses it, and --for
     [1, 0],
     "--force reanalyzes even evidence that would otherwise still be fresh",
   );
+});
+
+test("successful v4 evidence remains reusable after permission-denial recovery is added", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-reuse-home-"));
+  const dir = initRepo(MEMORY);
+  writeSession(home, "session-a", dir);
+
+  const first = runAnalyze(dir, home);
+  assert.equal(first.status, 0, first.output);
+  const evidenceDir = path.join(dir, ".backpass", "evidence");
+  const evidenceFile = path.join(
+    evidenceDir,
+    fs.readdirSync(evidenceDir).find((name) => name.endsWith(".json")),
+  );
+  const evidence = JSON.parse(fs.readFileSync(evidenceFile, "utf8"));
+  evidence.key = evidence.key.replace(/:analysis-index-v\d+$/, ":analysis-index-v4");
+  fs.writeFileSync(evidenceFile, `${JSON.stringify(evidence, null, 2)}\n`);
+
+  const upgraded = runAnalyze(dir, home);
+  assert.equal(upgraded.status, 0, upgraded.output);
+  assert.deepEqual([upgraded.summary.analyzed, upgraded.summary.cached], [0, 1]);
+  assert.deepEqual(upgraded.summary.usage, []);
 });
 
 test("evidence from the previous analysis index is reanalyzed once without --force", () => {
