@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.43](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.42...backpass-v0.1.43) (2026-10-30)
+
+
+### Bug Fixes
+
+* mark successfully applied proposals to prevent replay ([#241](https://github.com/kunchenguid/backpass/issues/241)) ([0c864ce](https://github.com/kunchenguid/backpass/commit/0c864ce29e355590a4ccea6eea79e5c3147b302b))
+* retain completed analysis after acpx permission denials ([#245](https://github.com/kunchenguid/backpass/issues/245)) ([1ae68b8](https://github.com/kunchenguid/backpass/commit/1ae68b8f7e5134ee31edce39751927dc3e0ec290))
+
 ## [0.1.42](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.41...backpass-v0.1.42) (2026-10-29)
 
 
