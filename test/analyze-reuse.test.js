@@ -189,6 +189,28 @@ test("the first analysis performs work, an unchanged second reuses it, and --for
   );
 });
 
+test("successful v4 evidence remains reusable after permission-denial recovery is added", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-reuse-home-"));
+  const dir = initRepo(MEMORY);
+  writeSession(home, "session-a", dir);
+
+  const first = runAnalyze(dir, home);
+  assert.equal(first.status, 0, first.output);
+  const evidenceDir = path.join(dir, ".backpass", "evidence");
+  const evidenceFile = path.join(
+    evidenceDir,
+    fs.readdirSync(evidenceDir).find((name) => name.endsWith(".json")),
+  );
+  const evidence = JSON.parse(fs.readFileSync(evidenceFile, "utf8"));
+  evidence.key = evidence.key.replace(/:analysis-index-v\d+$/, ":analysis-index-v4");
+  fs.writeFileSync(evidenceFile, `${JSON.stringify(evidence, null, 2)}\n`);
+
+  const upgraded = runAnalyze(dir, home);
+  assert.equal(upgraded.status, 0, upgraded.output);
+  assert.deepEqual([upgraded.summary.analyzed, upgraded.summary.cached], [0, 1]);
+  assert.deepEqual(upgraded.summary.usage, []);
+});
+
 test("evidence from the previous analysis index is reanalyzed once without --force", () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-reuse-home-"));
   const dir = initRepo(MEMORY);

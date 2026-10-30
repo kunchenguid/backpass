@@ -130,6 +130,32 @@ function noteOnce(note) {
 /** Negative evidence carries one of these classes; anything else is dropped as unjudged. */
 export const NEGATIVE_CLASSES = ["harm", "non-compliance", "irrelevant"];
 
+/** Nonzero recovery requires the complete reply contract, before sanitizing quotes. */
+function acceptsDeniedAnalysis(text) {
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return false;
+  }
+  if (!parsed || Array.isArray(parsed) || typeof parsed.usedRawTranscript !== "boolean") return false;
+  const strings = (item, keys) => item && keys.every((key) => typeof item[key] === "string");
+  return (
+    ["positive", "negative", "gaps"].every((key) => Array.isArray(parsed[key])) &&
+    parsed.positive.every((item) => strings(item, ["instruction", "moment", "effect", "quote"])) &&
+    parsed.negative.every(
+      (item) => strings(item, ["instruction", "moment", "effect", "quote"]) && NEGATIVE_CLASSES.includes(item.class),
+    ) &&
+    parsed.gaps.every(
+      (item) =>
+        strings(item, ["mistake", "proposedInstruction", "quote"]) &&
+        ["high", "medium", "low"].includes(item.recurrenceRisk) &&
+        ["project", "orchestration"].includes(item.domain) &&
+        ["matchesGap", "coveredBySkill"].every((key) => item[key] === undefined || typeof item[key] === "string"),
+    )
+  );
+}
+
 /** Whitespace-insensitive form used to check a quote against the trace it claims to come from. */
 function foldSpace(text) {
   return String(text).replace(/\s+/g, " ").trim();
@@ -322,6 +348,7 @@ async function analyzeOne({
         cwd: modelCwd || repo.root,
         timeoutSeconds: config.timeoutSeconds,
         promptRetries: config.promptRetries,
+        acceptDeniedOutput: acceptsDeniedAnalysis,
       };
       // Route effortful calls through a fresh per-transcript session so each harness's
       // invocation-scoped overlay or safe fallback is applied; otherwise one-shot is cheaper.
@@ -335,10 +362,21 @@ async function analyzeOne({
     if (!parsed) {
       throw new Error("analysis returned no parseable JSON");
     }
+    if (result.permissionDenied) {
+      warn(
+        `acpx ${ranWith} PERMISSION_DENIED: completed analysis retained; ` +
+          (result.deniedRequests === null
+            ? "deniedRequests=unknown (count not reported)"
+            : `observed deniedRequests=${result.deniedRequests}`),
+      );
+    }
 
     return {
       status: "ok",
-      evidence: sanitizeEvidence(parsed, memoryFile, distilled.trace),
+      evidence: {
+        ...sanitizeEvidence(parsed, memoryFile, distilled.trace),
+        ...(result.permissionDenied ? { deniedRequests: result.deniedRequests } : {}),
+      },
       usage: usageRecord(ranWith, result),
       distilled,
     };

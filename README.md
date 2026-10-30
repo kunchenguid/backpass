@@ -415,6 +415,11 @@ If an analysis worker hits a fatal error, backpass stops handing out new transcr
 Calls already in flight finish, and their successful evidence is cached for reuse.
 Per-transcript failures, such as timeouts or unparseable output, still let the run continue; they are recorded, listed by `backpass status`, and retried on the next run.
 
+An acpx `PERMISSION_DENIED` exit does not discard a completed, valid analysis. Backpass
+retains the evidence and prints a named warning. The evidence records `deniedRequests`
+from observed permission responses, or `null` with an explicit warning when acpx did
+not report a count. Incomplete or invalid answers and other failed exits still fail.
+
 ### 4. Aggregate gradients - and one judged consolidation call
 
 Evidence is grouped by instruction, giving each one a positive/negative count, a count of
