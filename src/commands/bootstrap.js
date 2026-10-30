@@ -1,4 +1,4 @@
-import { analyzeTranscripts } from "../analyze.js";
+import { analyzeTranscripts, gaveUpNote } from "../analyze.js";
 import { applyDecisions, writeBootstrapFiles } from "../apply/writer.js";
 import { bootstrapTargets, renderPointer, starterMemoryFile } from "../bootstrap.js";
 import { UserError, color, info, json, out, warn } from "../logger.js";
@@ -114,7 +114,7 @@ async function bootstrapRunCore(ctx, deps) {
   });
   info(
     `${color.cyan("·")} evidence: ${result.summary.analyzed} new · ${result.summary.cached} cached · ` +
-      `${result.summary.skipped} too short · ${result.summary.failed} failed`,
+      `${result.summary.skipped} too short · ${result.summary.failed} failed${gaveUpNote(result.summary)}`,
   );
 
   const folded = await fold(ctx, memoryFile, memoryHash, [], transcripts);

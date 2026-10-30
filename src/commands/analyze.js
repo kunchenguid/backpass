@@ -1,15 +1,15 @@
-import { analyzeTranscripts, reclaimExpiredRawFiles } from "../analyze.js";
+import { analyzeTranscripts, gaveUpNote, reclaimExpiredRawFiles } from "../analyze.js";
 import { userClaudeSkillsDir } from "../config.js";
 import { UserError, color, info, json, out, warn } from "../logger.js";
 import { memorySurfaceHash, resolveMemoryFiles, separateFileWarning } from "../memory.js";
 import {
   attributeTranscripts,
+  layerNestedWeights,
   nestedContext,
   renderAlsoLoaded,
   reportNestedMemoryFiles,
   resolveNestedMemoryFiles,
   nestedReach,
-  nestedSurfaceHash,
   workedUnder,
   writeNestedReach,
 } from "../nested.js";
@@ -64,13 +64,7 @@ export function primaryMemoryFile(repo, config, scope = null) {
   // Nested memory files are weights of their own, named in `nestedMemoryFiles` - never a
   // separate root file to consolidate (`src/nested.js`).
   const named = reportNestedMemoryFiles(resolveNestedMemoryFiles(repo.root, config));
-  const nested = named.map((weight) => {
-    const ancestors = named
-      .filter((candidate) => weight.dir.startsWith(`${candidate.dir}/`))
-      .sort((a, b) => a.dir.length - b.dir.length);
-    const layered = { ...weight, ancestors };
-    return { ...layered, hash: nestedSurfaceHash(resolved.primary, layered, skills) };
-  });
+  const nested = layerNestedWeights(resolved.primary, named, skills);
   return {
     file: resolved.primary,
     all: resolved.all,
@@ -204,7 +198,7 @@ export async function cmdAnalyze(ctx) {
   out(`analyzed against ${file.path} (${file.units.length} instructions, ${file.tokens} tok)`);
   out(
     `  ${summary.analyzed} newly analyzed · ${summary.cached} cached · ` +
-      `${summary.skipped} skipped (too short) · ${summary.failed} failed`,
+      `${summary.skipped} skipped (too short) · ${summary.failed} failed${gaveUpNote(summary)}`,
   );
   if (summary.failed) {
     out(color.dim("  failed transcripts are listed by `backpass status` and retried next run"));
@@ -217,7 +211,7 @@ export async function cmdAnalyze(ctx) {
     if (nestedSummary) {
       out(
         `  ${nestedSummary.analyzed} newly analyzed · ${nestedSummary.cached} cached · ` +
-          `${nestedSummary.skipped} skipped (too short) · ${nestedSummary.failed} failed`,
+          `${nestedSummary.skipped} skipped (too short) · ${nestedSummary.failed} failed${gaveUpNote(nestedSummary)}`,
       );
     }
   }

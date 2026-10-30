@@ -164,6 +164,20 @@ export function nestedSurfaceHash(rootFile, weight, skills) {
   );
 }
 
+/**
+ * Each nested file with the named files above it, shallowest first, and the surface hash
+ * its evidence is keyed to (`nestedSurfaceHash`).
+ */
+export function layerNestedWeights(rootFile, weights, skills) {
+  return weights.map((weight) => {
+    const ancestors = weights
+      .filter((candidate) => weight.dir.startsWith(`${candidate.dir}/`))
+      .sort((a, b) => a.dir.length - b.dir.length);
+    const layered = { ...weight, ancestors };
+    return { ...layered, hash: nestedSurfaceHash(rootFile, layered, skills) };
+  });
+}
+
 export function nestedStateDir(rootState, weightPath) {
   return path.join(rootState.root, "nested", `${safeFileName(weightPath)}-${sha256(weightPath).slice(0, 8)}`);
 }
