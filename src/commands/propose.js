@@ -69,11 +69,10 @@ export async function foldForRun(ctx, memoryFile, memoryHash, skills = [], trans
   for (const record of evidence) {
     const currentTranscript = selectedByIdentity.get(transcriptIdentity(record.transcript));
     if (
-      record.memoryPath !== memoryFile.path ||
       record.memoryHash !== memoryHash ||
       (record.transcript?.interaction !== INTERACTIVE && record.transcript?.interaction !== NON_INTERACTIVE) ||
       !currentTranscript ||
-      !isEvidenceFresh(record, currentTranscript, memoryHash)
+      !isEvidenceFresh(record, currentTranscript, memoryHash, memoryFile.path)
     ) {
       continue;
     }

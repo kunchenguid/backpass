@@ -471,7 +471,7 @@ export async function analyzeTranscripts({
 
   for (const transcript of transcripts) {
     const existing = state.readEvidence(transcript);
-    if (!force && isEvidenceFresh(existing, transcript, memoryHash)) {
+    if (!force && isEvidenceFresh(existing, transcript, memoryHash, memoryFile.path)) {
       const updatedTranscript = { ...existing.transcript, ...transcriptMetadata(transcript) };
       if (JSON.stringify(existing.transcript) !== JSON.stringify(updatedTranscript)) {
         state.writeEvidence(transcript, { ...existing, transcript: updatedTranscript });

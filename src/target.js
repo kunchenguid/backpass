@@ -20,8 +20,8 @@ import { skillStagingRefusal } from "./workspace.js";
  * (after the same path normalization the scope applies) or a loaded skill's `name`.
  * Nothing else resolves: no basename, directory, glob, or arbitrary existing file.
  * A spec that matches nothing, or more than one thing, is an error that lists the
- * valid names. The target is a write surface, not a second scope: analysis, evidence,
- * and state are unchanged, only staging and the proposal gate narrow.
+ * valid names. The target restricts the write surface within the same scope; see
+ * README.md's cache rules for evidence reuse across memory targets.
  */
 
 export const SURFACE_TARGET = Object.freeze({ kind: "surface" });

@@ -23,10 +23,11 @@ import { prefetchRemoteTranscripts } from "../discovery/hosts.js";
 import { pruneHostCache } from "../discovery/cache.js";
 
 /**
- * The memory file a run optimizes: the first configured file that exists (AGENTS.md by
- * default - canonical). Resolution is pointer-aware: a CLAUDE.md that imports
- * `@AGENTS.md` or resolves through a symlink to the same file is covered by optimizing
- * AGENTS.md and needs no mention. A second file with its own content is NOT updated -
+ * The memory file a run optimizes: the named memory target, or the first configured
+ * file that exists (AGENTS.md by default - canonical). Resolution is pointer-aware:
+ * a CLAUDE.md that imports `@AGENTS.md` or resolves through a symlink to the same file
+ * is covered by optimizing AGENTS.md and needs no mention. Without a memory target,
+ * a second file with its own content is NOT updated -
  * that would either be ignored silently or double-written into divergence - so the run
  * says so and recommends consolidating.
  *
@@ -40,7 +41,12 @@ import { pruneHostCache } from "../discovery/cache.js";
  * other command fails with a pointer to that.
  */
 export function primaryMemoryFile(repo, config, scope = null) {
-  const resolved = resolveMemoryFiles(repo.root, config.memoryFiles, { allowExternal: scope?.kind === "user" });
+  const options = { allowExternal: scope?.kind === "user" };
+  const surface = resolveMemoryFiles(repo.root, config.memoryFiles, options);
+  // A memory target selects the weight, not the evidence namespace. Keep the full
+  // configured surface in the hash even when only one file is staged for editing.
+  const resolved =
+    config.target?.kind === "memory" ? resolveMemoryFiles(repo.root, [config.target.path], options) : surface;
   if (!resolved.primary) {
     if (scope?.kind === "user") {
       throw new UserError(
@@ -73,8 +79,8 @@ export function primaryMemoryFile(repo, config, scope = null) {
   });
   return {
     file: resolved.primary,
-    all: resolved.all,
-    hash: memorySurfaceHash(resolved.hash, skills),
+    all: surface.all,
+    hash: memorySurfaceHash(surface.hash, skills),
     resolved,
     skills,
     nested,

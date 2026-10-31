@@ -208,8 +208,10 @@ backpass --scope user --target db    # the same, against the user-level surface
 A memory-file target may still extract a **new** skill (that is how the file shrinks). A
 skill target writes only that `SKILL.md`, and its budget is still the whole always-loaded
 surface: the memory file plus every description line, moved by the description-line delta
-of the edit. Analysis, evidence, and state are those of the whole surface; only staging and
-the proposal gate narrow. `--target` applies to the default run, `analyze`, `propose`, and
+of the edit. The analysis surface hash and state remain shared across targets; only staging and
+the proposal gate narrow the write surface. Evidence reuse follows the
+[cache rules below](#3-calculate-loss---one-cheap-call-per-transcript).
+`--target` applies to the default run, `analyze`, `propose`, and
 `apply`; on `apply` it is optional, but when supplied it must match the saved proposal's target.
 It cannot be combined with
 `--memory-file`, and a targeted run never bootstraps a missing memory file.
@@ -400,7 +402,10 @@ items instead of adding a cosmetic label.
 
 Results are cached per transcript, keyed to the transcript's content, the effective
 memory-surface hash, and the analysis-index version. The surface hash covers the memory-file
-set plus every project skill's name and description. Edit a memory file or skill description
+set plus every project skill's name and description. Reuse also requires the same analyzed
+memory file: targeting the primary file reuses untargeted analysis, while switching to a
+separate memory file requires analysis for that file before proposing. Edit a memory file or
+skill description
 and the evidence correctly re-computes; edit only a skill body and the cache remains valid
 because bodies are inspected only for failed-trigger confirmation. A repo without skills
 keeps the prior memory-set hash. A surface edit therefore reanalyzes without `--force` - that
