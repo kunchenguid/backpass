@@ -441,7 +441,8 @@ it sees a gap already on the books, and, when at least two open entries exist, o
 consolidation call sees the full open gap set and merges entries that describe the same
 mistake. That second judgment is what lets two sightings of a brand-new gap in the same
 run's parallel fan-out corroborate. A failed consolidation call degrades the run to
-lexical identity and says so; it never aborts. All sightings cluster before their domain
+lexical identity and records the degradation in proposal summary notes as well as a warning;
+it never aborts. All sightings cluster before their domain
 is decided. Each corroborating observer contributes one `project` or `orchestration` vote;
 related sightings share a vote, with any project sighting making it project. Only a
 majority-orchestration cluster is excluded from synthesis, while a tie stays eligible. Mixed clusters are always
@@ -819,9 +820,10 @@ durable verdicts are cached in
 `.backpass/agent-probe-cache.json` for 12h (30min for negatives). Pi and OpenCode entries
 are re-probed when their credential or auth-file state changes; `--force` re-probes every
 entry. The probe is a filter, not a promise: if the chosen harness answers `AUTH_REQUIRED`,
-rejects the model, or returns a clean exit with no output at all (a provider account out
-of quota or credits, often swallowed before it reaches stderr) mid-run, backpass falls
-through to the next candidate and says so.
+rejects the model, reports exhausted billing, quota, or credits, or returns a clean exit
+with no output at all mid-run, backpass falls through to the next candidate and says so.
+Explicit funding refusals are cached as model-unavailable with the negative TTL above;
+ordinary upstream errors and transient rate limits do not trigger fallthrough.
 Model-turn timeouts never fall through, whether enforced by backpass or reported by acpx itself; in analysis, only that transcript fails and is retried next run, including with a pinned agent.
 A clean blank exit that consumed nearly the whole `--timeout` budget is also treated as a timeout, for compatibility with older acpx versions.
 When a whole ladder is exhausted the error lists every candidate with what to run to fix it.

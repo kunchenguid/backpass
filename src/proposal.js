@@ -384,6 +384,9 @@ export function buildProposal(rawResult, context) {
 
   const violations = [];
   const notes = Array.isArray(rawResult?.notes) ? rawResult.notes.map(String) : [];
+  if (summary?.consolidation?.failed) {
+    notes.push(`gap consolidation degraded to lexical gap identity: ${summary.consolidation.failed}`);
+  }
   const rawEdits = Array.isArray(rawResult?.edits) ? rawResult.edits : [];
   const knownSources = Array.isArray(summary?.sources)
     ? new Set(summary.sources.map(normalizeSourceLabel).filter(Boolean))

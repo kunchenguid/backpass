@@ -91,6 +91,15 @@ function gate({ text = MEMORY_TEXT, files = {}, edit, annotation, config: cfg = 
   return { ...result, ...staged, repo };
 }
 
+test("a degraded consolidation is retained as a proposal summary note", () => {
+  const { proposal } = gate({
+    edit: () => {},
+    annotation: { edits: [], notes: [] },
+    context: { summary: { consolidation: { failed: "no parseable merge list" } } },
+  });
+  assert.ok(proposal.notes.includes("gap consolidation degraded to lexical gap identity: no parseable merge list"));
+});
+
 /** Every instruction corroborated by enough harm-class sessions to clear the floors. */
 const aliasSummary = () => ({
   analyzedSessions: 4,
