@@ -32,7 +32,8 @@ import { transcriptIdentity } from "./transcript.js";
  *              every session behind it worked in (`owningFile`); evidence that spans
  *              unrelated directories, or any session that cannot be placed, stays with
  *              the root file
- *   budget     each nested file has its own, `nestedBudgetTokens` (`budgetTokens` when unset)
+ *   budget     each nested file has its own: the entry's `budgetTokens`, else
+ *              `nestedBudgetTokens`, else `budgetTokens` (`nestedBudget`)
  *   state      its own `.backpass/nested/<file>/` - evidence, gap ledger, prompts, staging -
  *              sharing only the rejections a human recorded at apply
  *
@@ -57,8 +58,14 @@ const PATH_FIELDS = ["file_path", "filePath", "notebook_path", "path"];
 /** File headers of the apply_patch grammar (Codex); each names one file the patch touches. */
 const PATCH_FILE = /^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$/gm;
 
-/** A nested file's always-loaded budget. */
-export function nestedBudget(config) {
+/**
+ * A nested file's always-loaded budget: its own `budgetTokens` when its entry names one,
+ * else `nestedBudgetTokens`, else `budgetTokens`. Propose, status, and apply all read the
+ * cap here, so a file is never trained under one cap and gated under another.
+ */
+export function nestedBudget(config, relative) {
+  const own = config.nestedBudgetTokensByPath;
+  if (own && Object.hasOwn(own, relative)) return own[relative];
   return config.nestedBudgetTokens ?? config.budgetTokens;
 }
 
@@ -94,6 +101,13 @@ export function applyNestedMemoryConfig(repoRoot, config) {
     byDir.set(dir, relative);
   }
   const nested = [...byDir.values()];
+  // Per-file caps were keyed by the entry as written; key them by the path every
+  // consumer sees.
+  const own = config.nestedBudgetTokensByPath || {};
+  const budgets = {};
+  for (const entry of entries) {
+    if (Object.hasOwn(own, entry)) budgets[pathInRoot(entry, repoRoot)] = own[entry];
+  }
   const rootFiles = config.memoryFiles.filter((entry) => !nested.includes(pathInRoot(entry, repoRoot)));
   if (!rootFiles.length) {
     throw new UserError(
@@ -103,6 +117,7 @@ export function applyNestedMemoryConfig(repoRoot, config) {
   }
   config.memoryFiles = rootFiles;
   config.nestedMemoryFiles = nested;
+  config.nestedBudgetTokensByPath = budgets;
   return config;
 }
 
@@ -187,7 +202,7 @@ export function nestedContext(ctx, weight) {
       ...ctx.config,
       state,
       memoryFiles: [weight.path],
-      budgetTokens: nestedBudget(ctx.config),
+      budgetTokens: nestedBudget(ctx.config, weight.path),
       target: { kind: "memory", path: weight.path, nested: true },
     },
   };

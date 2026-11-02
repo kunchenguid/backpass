@@ -95,7 +95,7 @@ export async function cmdRun(ctx) {
       );
     }
     for (const { weight, summary } of analysis.nested || []) {
-      const cap = nestedBudget(config);
+      const cap = nestedBudget(config, weight.path);
       const bar = budgetBar({ utilization: weight.file.tokens / cap, withinBudget: weight.file.tokens <= cap });
       info(
         `${color.cyan("·")} ${weight.path} (nested): ${bar} ${formatTokens(weight.file.tokens)} / ` +

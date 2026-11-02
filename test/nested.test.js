@@ -17,6 +17,7 @@ import {
   attributeTranscripts,
   checkoutRoots,
   mergeNestedProposals,
+  nestedBudget,
   nestedContext,
   owningFile,
   reportNestedMemoryFiles,
@@ -86,6 +87,55 @@ test("nestedMemoryFiles is validated as a list of paths, and only for project sc
   assert.throws(() => loadConfig(repo.root, { nestedBudgetTokens: 0 }), /nestedBudgetTokens must be a positive number/);
   assert.throws(
     () => loadConfig(null, { nestedMemoryFiles: ["apps/api/AGENTS.md"] }, { kind: "user" }),
+    /project-scope only/,
+  );
+});
+
+test("a nested entry may carry its own budget; a plain path keeps nestedBudgetTokens, then budgetTokens", () => {
+  const repo = makeRepo({ "AGENTS.md": "# root\n" });
+  const config = applyNestedMemoryConfig(
+    repo.root,
+    loadConfig(repo.root, {
+      budgetTokens: 5000,
+      nestedBudgetTokens: 2000,
+      nestedMemoryFiles: [WEB.path, { path: `./${API.path}`, budgetTokens: 8000 }],
+    }),
+  );
+  assert.deepEqual(config.nestedMemoryFiles, [WEB.path, API.path], "every consumer still sees a list of paths");
+  assert.equal(nestedBudget(config, API.path), 8000, "the cap is keyed by the normalized path");
+  assert.equal(nestedBudget(config, WEB.path), 2000);
+  assert.equal(nestedBudget({ ...config, nestedBudgetTokens: null }, WEB.path), 5000);
+
+  const plain = applyNestedMemoryConfig(repo.root, loadConfig(repo.root, { nestedMemoryFiles: [API.path] }));
+  assert.deepEqual(plain.nestedMemoryFiles, [API.path]);
+  assert.equal(nestedBudget(plain, API.path), 5000);
+  const smuggled = loadConfig(repo.root, {
+    nestedMemoryFiles: [API.path],
+    nestedBudgetTokensByPath: { [API.path]: 1 },
+  });
+  assert.equal(nestedBudget(smuggled, API.path), 5000, "per-file caps come only from nestedMemoryFiles entries");
+});
+
+test("a malformed nested entry is a named config error", () => {
+  const repo = makeRepo({ "AGENTS.md": "# root\n" });
+  const load = (entry) => () => loadConfig(repo.root, { nestedMemoryFiles: [entry] });
+  assert.throws(load({ budgetTokens: 8000 }), /nestedMemoryFiles entry .* needs a "path"/);
+  assert.throws(load({ path: 42, budgetTokens: 8000 }), /nestedMemoryFiles entry .* needs a "path"/);
+  assert.throws(load({ path: " ", budgetTokens: 8000 }), /nestedMemoryFiles entry .* needs a "path"/);
+  for (const budgetTokens of [0, -5, 1.5, "8000", null]) {
+    assert.throws(
+      load({ path: API.path, budgetTokens }),
+      /nestedMemoryFiles entry for apps\/api\/AGENTS\.md has budgetTokens .*positive integer/,
+    );
+  }
+  assert.throws(
+    load({ path: API.path, budget: 8000 }),
+    /nestedMemoryFiles entry for apps\/api\/AGENTS\.md has unknown key "budget"/,
+  );
+  assert.throws(load(["apps/api/AGENTS.md"]), /must be a repo-relative path or \{ "path", "budgetTokens" \}/);
+  assert.throws(load(7), /must be a repo-relative path/);
+  assert.throws(
+    () => loadConfig(null, { nestedMemoryFiles: [{ path: API.path, budgetTokens: 8000 }] }, { kind: "user" }),
     /project-scope only/,
   );
 });
@@ -732,6 +782,20 @@ test("a nested pass runs in its own state under its own budget, sharing only the
   );
 });
 
+test("a nested pass is proposed under its entry's own budget, and a plain entry beside it keeps the shared one", () => {
+  const repo = makeRepo({ "AGENTS.md": "# root\n", "apps/api/AGENTS.md": "# api\n", "apps/web/AGENTS.md": "# web\n" });
+  const config = applyNestedMemoryConfig(
+    repo.root,
+    loadConfig(repo.root, {
+      nestedBudgetTokens: 2000,
+      nestedMemoryFiles: [WEB.path, { path: API.path, budgetTokens: 8000 }],
+    }),
+  );
+  const ctx = { repo, config: { ...config, state: new State(repo.root).ensure() } };
+  assert.equal(nestedContext(ctx, API).config.budgetTokens, 8000);
+  assert.equal(nestedContext(ctx, WEB).config.budgetTokens, 2000);
+});
+
 /** `nestedCap` is the budget the nested pass is made under, recorded in `nested[].budget`. */
 function mergedProposal({ nestedCap = 5000 } = {}) {
   const repo = makeRepo({
@@ -849,6 +913,52 @@ test("apply holds each nested file to its own budget, and writes nothing when th
   assert.match(fs.readFileSync(path.join(within.repo.root, API.path), "utf8"), /Run the api contract tests/);
 });
 
+test("apply holds a nested file to its entry's own budget, the same cap propose read", () => {
+  const configFor = (repo, entry) =>
+    applyNestedMemoryConfig(
+      repo.root,
+      loadConfig(repo.root, { budgetTokens: 5000, nestedBudgetTokens: 200, nestedMemoryFiles: [entry] }),
+    );
+  const over = mergedProposal({ nestedCap: 20 });
+  const refused = applyDecisions({
+    proposal: over.proposal,
+    decisions: { e1: "accepted" },
+    repo: over.repo,
+    state: over.state,
+    config: configFor(over.repo, { path: API.path, budgetTokens: 20 }),
+  });
+  assert.equal(refused.written.length, 0);
+  assert.match(refused.failed[0]?.error ?? "", /over its 20-token budget/, "its own cap wins over nestedBudgetTokens");
+
+  const within = mergedProposal({ nestedCap: 300 });
+  const written = applyDecisions({
+    proposal: within.proposal,
+    decisions: { e1: "accepted" },
+    repo: within.repo,
+    state: within.state,
+    config: configFor(within.repo, { path: API.path, budgetTokens: 300 }),
+  });
+  assert.deepEqual(written.failed, []);
+  assert.deepEqual(
+    written.written.map((entry) => [entry.file, entry.budget?.capTokens]),
+    [[API.path, 300]],
+  );
+
+  const plain = mergedProposal({ nestedCap: 200 });
+  const shared = applyDecisions({
+    proposal: plain.proposal,
+    decisions: { e1: "accepted" },
+    repo: plain.repo,
+    state: plain.state,
+    config: configFor(plain.repo, API.path),
+  });
+  assert.deepEqual(
+    shared.written.map((entry) => [entry.file, entry.budget?.capTokens]),
+    [[API.path, 200]],
+    "a plain path entry keeps nestedBudgetTokens",
+  );
+});
+
 test("apply refuses a saved nested write after the named scope is removed", () => {
   const { repo, proposal, state } = mergedProposal({ nestedCap: 200 });
   const before = fs.readFileSync(path.join(repo.root, API.path), "utf8");
@@ -934,4 +1044,26 @@ test("budgetMismatches checks only the files the edits land in", () => {
     [[API.path, 200, 300]],
   );
   assert.deepEqual(budgetMismatches(proposal, { ...config, nestedBudgetTokens: 300 }, []), []);
+});
+
+test("budgetMismatches holds a nested file to its own cap, not the shared nestedBudgetTokens", () => {
+  const { repo, proposal } = mergedProposal({ nestedCap: 8000 });
+  const own = (budgetTokens) =>
+    applyNestedMemoryConfig(
+      repo.root,
+      loadConfig(repo.root, {
+        budgetTokens: 5000,
+        nestedBudgetTokens: 2000,
+        nestedMemoryFiles: [{ path: API.path, budgetTokens }],
+      }),
+    );
+  assert.deepEqual(
+    budgetMismatches(proposal, own(8000)),
+    [],
+    "an unchanged per-file cap matches even when nestedBudgetTokens differs",
+  );
+  assert.deepEqual(
+    budgetMismatches(proposal, own(20)).map((m) => [m.file, m.proposed, m.current, m.remedy]),
+    [[API.path, 8000, 20, "budgetTokens set to 8000 on its nestedMemoryFiles entry"]],
+  );
 });
