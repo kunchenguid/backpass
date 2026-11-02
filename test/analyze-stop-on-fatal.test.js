@@ -131,5 +131,8 @@ test("a fatal analysis error stops the run from starting more model calls", () =
   assert.equal(evidence.length, 1, "only the healthy in-flight session saved evidence");
   assert.equal(path.basename(evidence[0].transcript.path), "second.jsonl");
   assert.equal(evidence[0].status, "ok", "the in-flight analysis succeeded despite the fatal error");
-  assert.deepEqual(evidence[0].gaps, [gap], "the healthy call's evidence survives shutdown");
+  // Analysis also locates each accepted quote in the distilled trace; that window is
+  // covered by its own tests, so compare the model-supplied fields here.
+  const savedGaps = evidence[0].gaps.map(({ locator: _locator, before: _before, after: _after, ...fields }) => fields);
+  assert.deepEqual(savedGaps, [gap], "the healthy call's evidence survives shutdown");
 });
