@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.44](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.43...backpass-v0.1.44) (2026-11-02)
+
+
+### Bug Fixes
+
+* preserve evidence cache correctness across memory targets ([#238](https://github.com/kunchenguid/backpass/issues/238)) ([641b30f](https://github.com/kunchenguid/backpass/commit/641b30fadf9ba75d52524c79213f556083dfc22f))
+
 ## [0.1.43](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.42...backpass-v0.1.43) (2026-10-30)
 
 
