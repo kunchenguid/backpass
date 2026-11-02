@@ -812,6 +812,103 @@ test("one proposal covers every file: nested edits are renumbered, labeled by fi
   );
 });
 
+test("a root edit dropped from the middle never leaves its id to a nested edit", () => {
+  // The model's second edit rewrites a line the first one copied, so its `find` is ambiguous
+  // once the copy lands and the last run of synthesis drops it: the root is left with [e1, e3].
+  const rootText = [
+    ...Array.from({ length: 6 }, (_, i) => `- Rule number ${i + 1} is unique.`),
+    "- Keep transactions short.",
+    "- Rule number 7 is unique.",
+    "- Rule number 8 is unique.",
+    "",
+  ].join("\n");
+  const repo = makeRepo({ "AGENTS.md": rootText, [API.path]: "# API\n\n- Handlers live in src/routes.\n" });
+  const config = { budgetTokens: 5000, maxEditsPerRun: 5, minGapEvidence: 2, skillsDir: ".agents/skills" };
+  const evidence = [
+    { polarity: "negative", text: "it hit this twice", source: "a" },
+    { polarity: "negative", text: "and again", source: "b" },
+  ];
+  const edit = (change, title) => ({ changes: [change], kind: "rewrite", title, evidence });
+
+  const rootStaged = stageAndMeasure({
+    repo,
+    edit: (dir) =>
+      writeIn(dir, "AGENTS.md", (text) =>
+        text
+          .replace("- Rule number 1 is unique.\n", "- Rule number 1 is unique.\n- Keep transactions short.\n")
+          .replace("- Keep transactions short.\n- Rule number 7", "- Keep every transaction short.\n- Rule number 7")
+          .replace("- Rule number 8 is unique.", "- Rule number 8 is unique, and checked."),
+      ),
+  });
+  const root = buildProposal(
+    { edits: [edit("H1", "copy"), edit("H2", "rewrite"), edit("H3", "tail")] },
+    {
+      memoryFile: rootStaged.memoryFile,
+      config,
+      repo,
+      summary: null,
+      measured: rootStaged.measured,
+      dropAmbiguous: true,
+    },
+  );
+  assert.deepEqual(root.violations, []);
+  assert.deepEqual(
+    root.proposal.edits.map((e) => [e.id, e.title]),
+    [
+      ["e1", "copy"],
+      ["e3", "tail"],
+    ],
+  );
+
+  const apiStaged = stageAndMeasure({
+    repo,
+    memoryPath: API.path,
+    edit: (dir) => writeIn(dir, API.path, (text) => `${text}- Run the api contract tests before editing a handler.\n`),
+  });
+  const api = buildProposal(
+    { edits: [edit("H1", "contract tests")] },
+    {
+      memoryFile: apiStaged.memoryFile,
+      config,
+      repo,
+      summary: null,
+      measured: apiStaged.measured,
+      target: { kind: "memory", path: API.path, nested: true },
+    },
+  );
+  const proposal = mergeNestedProposals(root.proposal, [
+    {
+      weight: { ...API, file: apiStaged.memoryFile },
+      transcripts: [{}, {}],
+      proposal: api.proposal,
+      summary: null,
+      cap: 5000,
+      skipped: null,
+    },
+  ]);
+
+  const ids = proposal.edits.map((e) => e.id);
+  assert.equal(new Set(ids).size, ids.length, `edit ids must be unique: ${ids.join(", ")}`);
+  assert.deepEqual(ids, ["e1", "e3", "e4"]);
+  assert.deepEqual(proposal.nested[0].edits, ["e4"]);
+
+  // Rejecting the root's e3 must not take the nested edit with it.
+  const result = applyDecisions({
+    proposal,
+    decisions: { e1: "accepted", e3: "rejected", e4: "accepted" },
+    repo,
+    state: rootStaged.state,
+    config: { ...config, nestedBudgetTokens: 5000, nestedMemoryFiles: [API.path] },
+  });
+  assert.deepEqual(result.failed, []);
+  assert.equal(result.accepted, 2);
+  assert.equal(result.rejected, 1);
+  const rootAfter = fs.readFileSync(path.join(repo.root, "AGENTS.md"), "utf8");
+  assert.match(rootAfter, /- Rule number 1 is unique\.\n- Keep transactions short\./);
+  assert.doesNotMatch(rootAfter, /and checked/);
+  assert.match(fs.readFileSync(path.join(repo.root, API.path), "utf8"), /Run the api contract tests/);
+});
+
 test("apply holds each nested file to its own budget, and writes nothing when the accepted subset breaks it", () => {
   // Made under a cap its one edit breaks: the writer is the gate of last resort even
   // for a proposal `cmdApply` would refuse for its violations.

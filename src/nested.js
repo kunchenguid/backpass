@@ -380,7 +380,7 @@ export function owningFile(sessionIds, weights, attribution) {
 
 /**
  * One proposal over every trained file, reviewed in one apply: the root proposal, then
- * each nested file's edits renumbered after it and labeled with their file. A nested
+ * each nested file's edits numbered after it, never reusing an id, and labeled with their file. A nested
  * file's image joins `targetFiles`, so apply refuses it if it changed since, the same
  * freshness contract every non-root target has; `nested` carries each file's own budget,
  * which apply re-checks against the accepted subset. With `sampledSessions` and
@@ -391,11 +391,20 @@ export function mergeNestedProposals(root, passes, { sampledSessions = null, min
   const targetFiles = [...(root.targetFiles || [])];
   const usage = [...(root.usage || [])];
   const notes = [...(root.notes || [])];
+  // Review and apply key decisions by id, so an id is never reused. A root proposal can have
+  // a gap (a dropped ambiguous edit), which makes "one past the count" a live neighbour's id.
+  const taken = new Set(edits.map((edit) => edit.id));
+  const nextId = () => {
+    let serial = edits.length + 1;
+    while (taken.has(`e${serial}`)) serial += 1;
+    taken.add(`e${serial}`);
+    return `e${serial}`;
+  };
   const nested = passes.map((pass) => {
     const { weight, proposal } = pass;
     const ids = [];
     for (const edit of proposal?.edits || []) {
-      const id = `e${edits.length + 1}`;
+      const id = nextId();
       edits.push({ ...edit, id, targetsMemoryFile: false, nestedMemoryFile: weight.path });
       ids.push(id);
     }
