@@ -893,6 +893,65 @@ test("a busy empty advertised-model list retries; a genuine unsupported model st
   assert.equal((await resolver.resolve("analysis")).agent, "codex");
 });
 
+for (const [role, model] of /** @type {const} */ ([
+  ["analysis", "gpt-5.6-luna"],
+  ["synthesis", "gpt-5.6-sol"],
+])) {
+  test(`${role} falls through a successful probe when the paid call exhausts funds`, async () => {
+    const now = Date.now();
+    const { resolver, state } = resolverWith(
+      {
+        [`pi|${model}`]: "unreachable",
+        [`opencode|${model}`]: { resolvedModel: model },
+        [`codex|${model}`]: { resolvedModel: model },
+      },
+      { now: () => now },
+    );
+    const stderr = "[acpx] error: RUNTIME Internal error: Upstream request failed: Insufficient account funds";
+    const attempts = [];
+    assert.equal(
+      await resolver.withFallthrough(role, async (pick) => {
+        attempts.push(pick.agent);
+        if (pick.agent === "opencode") {
+          throw new AcpxError(`acpx opencode exec failed (exit 1): ${stderr}`, { stderr, code: 1 });
+        }
+        return "result";
+      }),
+      "result",
+    );
+    assert.deepEqual(attempts, ["opencode", "codex"]);
+    const entry = state.cache.entries[`opencode|${model}`];
+    assert.equal(entry.verdict, "model-unavailable");
+    assert.equal(entry.stderr, stderr);
+    assert.equal(isProbeEntryFresh(entry, { now: now + 29 * 60 * 1000 }), true);
+    assert.equal(isProbeEntryFresh(entry, { now: now + 30 * 60 * 1000 }), false);
+    assert.equal((await resolver.resolve(role)).agent, "codex");
+  });
+}
+
+test("billing classification excludes transient rate limits and ordinary upstream failures", () => {
+  for (const stderr of [
+    "insufficient_quota",
+    "Insufficient credits",
+    "Your credit balance is too low",
+    "billing_hard_limit_reached",
+    "You exceeded your current quota",
+    "HTTP 402 Payment Required",
+  ])
+    assert.equal(classifyAcpxFailure({ stderr }), "model-unavailable", stderr);
+  for (const stderr of [
+    "HTTP 429 Too Many Requests",
+    "rate limit exceeded",
+    "request quota per minute exceeded",
+    "Upstream request failed: Internal server error",
+    "HTTP 500",
+    "context window exceeded",
+    "billing service unavailable",
+    "maximum output tokens exceeded",
+  ])
+    assert.equal(classifyAcpxFailure({ stderr }), null, stderr);
+});
+
 test("bare model ids resolve by segment equality, never by prefix", () => {
   const opencode = ["opencode/free", "openai/gpt-5.6-luna", "openai/gpt-5.6-luna-fast", "openai/gpt-5.6-sol"];
   assert.equal(resolveModelId("gpt-5.6-luna", opencode).id, "openai/gpt-5.6-luna");
