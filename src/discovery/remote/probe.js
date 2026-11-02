@@ -135,6 +135,7 @@ async function discoverHarness(adapter, { cutoffMs, includeOmp }) {
     const classified = adapter.classify(candidate, { scanContext });
     if (!classified) continue;
     stats.classified += 1;
+    if (adapter.isIndependentSession?.(classified) === false) continue;
     const merged = { ...candidate, ...classified };
     let built;
     try {

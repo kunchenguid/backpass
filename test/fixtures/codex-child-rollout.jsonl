@@ -1,0 +1,5 @@
+{"type":"session_meta","payload":{"id":"child-rollout","session_id":"parent-rollout","parent_thread_id":"parent-rollout","cwd":"/repo/demo","originator":"codex-tui","source":{"subagent":{"thread_spawn":{"parent_thread_id":"parent-rollout","depth":1}}}}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Implement and ship the complete parser migration."}]}}
+{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"I will delegate the compatibility review."}]}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Review parser compatibility only. Do not implement or ship."}]}}
+{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"The compatibility review found no issues."}]}}
