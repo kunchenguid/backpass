@@ -267,9 +267,12 @@ export function evidenceKey(transcript, memoryHash) {
  * Only a successful analysis is worth caching. A `failed` entry is retried, and a
  * `skipped` entry is re-derived because the skip decision depends on configuration
  * (`minUserTurns`) rather than on the model - recomputing it costs one local file read.
+ * When supplied, `memoryPath` also scopes reuse to the instruction index analyzed;
+ * separate memory targets share a surface hash but have different instruction IDs.
  */
-export function isEvidenceFresh(evidence, transcript, memoryHash) {
+export function isEvidenceFresh(evidence, transcript, memoryHash, memoryPath = null) {
   if (!evidence || evidence.status !== "ok") return false;
+  if (memoryPath !== null && evidence.memoryPath !== memoryPath) return false;
   return evidence.key === evidenceKey(transcript, memoryHash);
 }
 

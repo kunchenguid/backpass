@@ -4,7 +4,7 @@ import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { memorySetHash, memoryTextHash } from "../../src/memory.js";
+import { resolveMemoryFiles } from "../../src/memory.js";
 import { evidenceKey } from "../../src/state.js";
 import { transcriptIdentity } from "../../src/transcript.js";
 
@@ -143,7 +143,7 @@ export function makeCliRepo({ memory, sessions = 3, files = {} }) {
   fs.mkdirSync(evidenceDir, { recursive: true });
   // Real evidence always carries the set hash it was judged against (`foldForRun` filters
   // on it); match what the CLI computes for this repo's memory files so fold picks it up.
-  const memoryHash = memorySetHash([{ path: "AGENTS.md", hash: memoryTextHash(memory) }]);
+  const memoryHash = resolveMemoryFiles(dir, ["AGENTS.md", "CLAUDE.md"]).hash;
   const projectDir = path.join(emptyHome, ".claude", "projects", dir.replaceAll(/[/\\.]/g, "-"));
   fs.mkdirSync(projectDir, { recursive: true });
   for (let i = 1; i <= sessions; i += 1) {

@@ -7,6 +7,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { loadConfig } from "../src/config.js";
+import { primaryMemoryFile } from "../src/commands/analyze.js";
 import { UserError } from "../src/logger.js";
 import { readMemoryFile } from "../src/memory.js";
 import { buildProposal } from "../src/proposal.js";
@@ -58,6 +59,24 @@ test("--target resolves only an exact configured memory-file entry or an exact l
   }
   // Configured is not enough: a targeted run never creates the file it is asked to train.
   assert.throws(() => resolveTarget("CLAUDE.md", scope), /is configured but does not exist/);
+});
+
+test("memory targets retain the full surface hash while selecting the named file", () => {
+  const { repo, config, scope } = projectScope({ "CLAUDE.md": "# Separate\n\n- Use another workflow.\n" });
+  const surface = primaryMemoryFile(repo, config, scope);
+  for (const name of ["AGENTS.md", "CLAUDE.md"]) {
+    const targeted = { ...config, target: resolveTarget(name, scope) };
+    const selected = primaryMemoryFile(repo, targeted, scope);
+    assert.equal(selected.file.path, name);
+    assert.equal(selected.hash, surface.hash);
+    assert.deepEqual(
+      selected.all.map((file) => file.path),
+      surface.all.map((file) => file.path),
+    );
+  }
+  writeIn(repo.root, "CLAUDE.md", "# Changed\n\n- Follow changed guidance.\n");
+  const changed = primaryMemoryFile(repo, { ...config, target: resolveTarget("AGENTS.md", scope) }, scope);
+  assert.notEqual(changed.hash, surface.hash, "a change outside the target still invalidates evidence");
 });
 
 test("a pointer-only memory target is rejected with its imported canonical file", () => {

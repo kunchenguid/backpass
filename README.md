@@ -208,8 +208,10 @@ backpass --scope user --target db    # the same, against the user-level surface
 A memory-file target may still extract a **new** skill (that is how the file shrinks). A
 skill target writes only that `SKILL.md`, and its budget is still the whole always-loaded
 surface: the memory file plus every description line, moved by the description-line delta
-of the edit. Analysis, evidence, and state are those of the whole surface; only staging and
-the proposal gate narrow. `--target` applies to the default run, `analyze`, `propose`, and
+of the edit. The analysis surface hash and state remain shared across targets; only staging and
+the proposal gate narrow the write surface. Evidence reuse follows the
+[cache rules below](#3-calculate-loss---one-cheap-call-per-transcript).
+`--target` applies to the default run, `analyze`, `propose`, and
 `apply`; on `apply` it is optional, but when supplied it must match the saved proposal's target.
 It cannot be combined with
 `--memory-file`, and a targeted run never bootstraps a missing memory file.
@@ -400,8 +402,10 @@ items instead of adding a cosmetic label.
 
 Results are cached per transcript, keyed to the transcript's content, the effective
 memory-surface hash, and the analysis-index version. The surface hash covers the memory-file
-set plus every project skill's name and description. Edit a memory file or skill description
-and the evidence correctly re-computes; edit only a skill body and the cache remains valid
+set plus every project skill's name and description. Reuse also requires the same analyzed
+memory file: targeting the primary file reuses untargeted analysis, while switching to a
+separate memory file requires analysis for that file before proposing. Edit a memory file or
+skill description and the evidence correctly re-computes; edit only a skill body and the cache remains valid
 because bodies are inspected only for failed-trigger confirmation. A repo without skills
 keeps the prior memory-set hash. A surface edit therefore reanalyzes without `--force` - that
 is not a cache miss, it is the cache doing its job - and the run says so on stderr, naming the
@@ -450,7 +454,7 @@ majority-excluded cluster, including a pure-orchestration cluster, remains clear
 as a report-only diagnostic rather than becoming an instruction in the project's memory
 file; an uncorroborated pure-orchestration singleton stays hidden.
 
-Only evidence with the current transcript, memory-surface, and analysis-index cache key,
+Only evidence meeting the [cache rules above](#3-calculate-loss---one-cheap-call-per-transcript),
 stamped with one of the two interaction categories, and belonging to this run's selected
 sample is folded into a proposal. A transcript that fell outside the time window or
 `maxTranscripts` cap, disappeared, or still has legacy evidence can leave an evidence file

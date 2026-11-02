@@ -11,6 +11,7 @@ import { loadConfig } from "../src/config.js";
 import { discoverForRun } from "../src/commands/scan.js";
 import { State } from "../src/state.js";
 import { resolveMemoryFiles } from "../src/memory.js";
+import { primaryMemoryFile } from "../src/commands/analyze.js";
 import { foldForRun } from "../src/commands/propose.js";
 
 /**
@@ -525,4 +526,46 @@ test("OMP analysis labels missing-ancestor child and grandchild as automation wi
   assert.equal(reused.status, 0, reused.output);
   assert.deepEqual([reused.summary.analyzed, reused.summary.cached], [0, 2]);
   assert.ok(state.listEvidence().every((record) => record.transcript.interaction === "non-interactive"));
+});
+
+test("selected memory transitions reanalyze under the same surface hash and remain foldable", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-reuse-home-"));
+  const dir = initRepo(MEMORY);
+  fs.writeFileSync(path.join(dir, "CLAUDE.md"), MEMORY_EDITED);
+  writeSession(home, "session-a", dir);
+  const state = new State(dir).ensure();
+  let surfaceHash;
+  for (const [target, analyzed, cached] of [
+    [null, 1, 0],
+    ["AGENTS.md", 0, 1],
+    ["CLAUDE.md", 1, 0],
+    ["CLAUDE.md", 0, 1],
+    [null, 1, 0],
+    [null, 0, 1],
+  ]) {
+    const result = runAnalyze(dir, home, target ? ["--target", target] : []);
+    assert.equal(result.status, 0, result.output);
+    assert.deepEqual([result.summary.analyzed, result.summary.cached], [analyzed, cached]);
+    const config = {
+      memoryFiles: ["AGENTS.md", "CLAUDE.md"],
+      ...(target ? { target: { kind: "memory", path: target } } : {}),
+      state,
+      minGapEvidence: 2,
+      gapLedgerMaxAge: "90d",
+    };
+    const { file, hash, skills } = primaryMemoryFile({ root: dir }, config);
+    surfaceHash ??= hash;
+    assert.equal(hash, surfaceHash);
+    const evidence = state.listEvidence();
+    assert.equal(evidence[0].memoryPath, target || "AGENTS.md");
+    const folded = await foldForRun(
+      { config },
+      file,
+      hash,
+      skills,
+      evidence.map((record) => record.transcript),
+    );
+    assert.equal(folded.analyzedSessions, 1);
+    assert.equal(folded.instructions.find((entry) => entry.instruction === "AG-001").positive, 1);
+  }
 });
