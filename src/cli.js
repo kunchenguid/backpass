@@ -298,7 +298,7 @@ export async function main(argv) {
     // Nested memory files are trained by a run over the whole surface; a targeted run
     // trains its one file and never widens to them.
     if (config.target.kind !== "surface") config.nestedMemoryFiles = [];
-    config.memoryFiles = config.target.kind === "memory" ? [config.target.path] : scope.memoryFiles;
+    config.memoryFiles = scope.memoryFiles;
     config.skillsDir = scope.overflowDir;
     if (scope.skillDirs.length) config.skillsDirs = scope.skillDirs;
     config.state = new State(scope.root, {

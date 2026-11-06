@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { extractJson, isBlankOutput, openSession, usageRecord } from "./acpx.js";
+import { AcpxError, extractJson, isBlankOutput, openSession, usageRecord } from "./acpx.js";
 import { expandHomePath, userClaudeSkillsDir } from "./config.js";
 import { renderEvidenceForPrompt } from "./fold.js";
 import { renderInstructionIndex, resolveMemoryPath } from "./memory.js";
@@ -704,9 +704,17 @@ export async function synthesizeProposal({
   const holder = {
     session: null,
     ranWith,
-    prompt(args) {
+    async prompt(args) {
       if (!this.session) throw new Error("synthesis session is not open");
-      return this.session.prompt(args);
+      // Measure the assembled UTF-8 artifact before handing it to the harness. Size is
+      // diagnostic context for any failed turn, not a verdict about why it failed.
+      const promptBytes = fs.statSync(args.promptFile).size;
+      try {
+        return await this.session.prompt(args);
+      } catch (err) {
+        if (err instanceof AcpxError) err.message += `\nSynthesis prompt size: ${promptBytes} UTF-8 bytes.`;
+        throw err;
+      }
     },
   };
   let attempted = false;
@@ -731,7 +739,7 @@ export async function synthesizeProposal({
       writeAccess: true,
     });
     try {
-      return await holder.session.prompt({
+      return await holder.prompt({
         promptFile: editPromptFile,
         approveAll: true,
         timeoutSeconds,

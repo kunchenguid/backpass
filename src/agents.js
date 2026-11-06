@@ -567,7 +567,7 @@ function pinnedFailureError(role, pick, verdict, err) {
   } else if (verdict) {
     hint = pin;
   }
-  const detail = err?.message ? ` (${String(err.message).split("\n")[0]})` : "";
+  const detail = err?.message ? ` (${String(err.message)})` : "";
   return new UserError(`pinned ${role} agent ${pick.agent}${model} ${label}${detail}`, hint);
 }
 

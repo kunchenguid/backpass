@@ -537,7 +537,7 @@ export function removeOwnedSkillPaths(paths) {
  * `.claude/skills` is never clobbered: a symlink (to anywhere) is left as is, and a real
  * directory is reported so the user can merge it by hand.
  */
-export function ensureSkillsLayout(repoRoot, claudeSkillsDir = CLAUDE_SKILLS_LINK) {
+export function ensureSkillsLayout(repoRoot, claudeSkillsDir = CLAUDE_SKILLS_LINK, ownership = []) {
   const created = [];
   const warnings = [];
   const canonical = path.join(repoRoot, CANONICAL_SKILLS_DIR);
@@ -552,6 +552,7 @@ export function ensureSkillsLayout(repoRoot, claudeSkillsDir = CLAUDE_SKILLS_LIN
   if (claude.state === "missing") {
     fs.mkdirSync(path.dirname(link), { recursive: true });
     fs.symlinkSync(target, link, "dir");
+    ownership.push({ absolute: link, identity: pathIdentity(fs.lstatSync(link)), relative: claudeSkillsDir });
     created.push(`${claudeSkillsDir} -> ${target}`);
   } else if (claude.state === "dir") {
     warnings.push(claudeSkillsDirWarning(claudeSkillsDir, target));

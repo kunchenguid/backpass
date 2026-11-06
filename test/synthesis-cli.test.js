@@ -139,6 +139,23 @@ const SPLIT_THE_COPY = { editFirst: { "AGENTS.md": { replace: [[POINTERS, SPLIT]
 const proposalOf = (dir) => readJson(path.join(dir, ".backpass", "proposal.json"));
 const stagedTree = (dir) => snapshotTree(path.join(dir, ".backpass", "synthesis"));
 
+test("a memory target reuses whole-surface evidence without staging the other memory file", () => {
+  const other = "# Separate memory\n\n- Use the separate workflow.\n";
+  const dir = makeCliRepo({ memory: MEMORY, files: { "CLAUDE.md": other } });
+  const evidence = snapshotTree(path.join(dir, ".backpass", "evidence"));
+  const run = runCli(dir, ["propose", "--target", "AGENTS.md", ...PIN], {
+    script: { edit: EDIT_TURN, annotations: [{ reply: COALESCED_ANSWER }] },
+  });
+
+  assert.equal(run.status, 0, run.output);
+  assert.equal(proposalOf(dir).stats.transcripts, 3);
+  assert.deepEqual(proposalOf(dir).target, { kind: "memory", path: "AGENTS.md" });
+  assert.equal(stagedTree(dir)["CLAUDE.md"], undefined);
+  assert.equal(fs.readFileSync(path.join(dir, "CLAUDE.md"), "utf8"), other);
+  assert.equal(fs.readFileSync(path.join(dir, "AGENTS.md"), "utf8"), MEMORY);
+  assert.deepEqual(snapshotTree(path.join(dir, ".backpass", "evidence")), evidence);
+});
+
 test("propose stages extracts in an existing configured Claude skills directory", () => {
   const dir = makeCliRepo({ memory: MEMORY });
   fs.mkdirSync(path.join(dir, ".claude", "skills"), { recursive: true });

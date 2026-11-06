@@ -714,6 +714,196 @@ function rejectionsOf(dir) {
   return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")).entries : {};
 }
 
+test("successful normal apply stamps its proposal and refuses replay before review", () => {
+  for (const json of [false, true]) {
+    const dir = initRepo();
+    const proposal = proposeExtractions(dir);
+    const proposalFile = path.join(dir, ".backpass", "proposal.json");
+    const original = JSON.parse(fs.readFileSync(proposalFile, "utf8"));
+    const ids = proposal.edits.map((edit) => edit.id);
+    const beforeApply = Date.now();
+    const applied = json
+      ? runDecided(dir, ids.map((id) => `${id}=accepted`).join(" "), ["--json"])
+      : runApply(dir, ids);
+
+    assert.equal(applied.status, 0, applied.output);
+    const saved = JSON.parse(fs.readFileSync(proposalFile, "utf8"));
+    assert.equal(saved.appliedBy, "apply");
+    assert.ok(Date.parse(saved.appliedAt) >= beforeApply);
+    assert.ok(Date.parse(saved.appliedAt) <= Date.now());
+    assert.deepEqual(saved, { ...original, appliedAt: saved.appliedAt, appliedBy: "apply" });
+    let expected = MEMORY_TEXT;
+    for (const [heading, skill] of [
+      ["CI", "ci-details"],
+      ["Release", "release-details"],
+    ]) {
+      expected = expected.replace(sectionBody(expected, heading), `- Load \`${skill}\` for this topic.`);
+    }
+    const files = ["AGENTS.md", ".agents/skills/ci-details/SKILL.md", ".agents/skills/release-details/SKILL.md"];
+    assert.equal(fs.readFileSync(path.join(dir, "AGENTS.md"), "utf8"), expected);
+    const bytes = files.map((file) => fs.readFileSync(path.join(dir, file)));
+    const stamped = fs.readFileSync(proposalFile);
+
+    const replay = runApply(dir, ids);
+    assert.equal(replay.status, 1, replay.output);
+    assert.match(replay.output, /already applied by apply/);
+    assert.doesNotMatch(replay.output, /review surface:/);
+    const invalid = runDecided(dir, "invalid-decision");
+    assert.match(invalid.output, /already applied by apply/);
+    assert.deepEqual(fs.readFileSync(proposalFile), stamped);
+    files.forEach((file, i) => assert.deepEqual(fs.readFileSync(path.join(dir, file)), bytes[i]));
+  }
+});
+
+test("dry-run and rejected-only apply leave the proposal unstamped and retryable", () => {
+  for (const dryRun of [false, true]) {
+    const dir = initRepo();
+    const proposal = proposeExtractions(dir);
+    const proposalFile = path.join(dir, ".backpass", "proposal.json");
+    const before = fs.readFileSync(proposalFile);
+    const vector = proposal.edits.map((edit) => `${edit.id}=${dryRun ? "accepted" : "rejected"}`).join(" ");
+    const result = runDecided(dir, vector, dryRun ? ["--dry-run"] : []);
+
+    assert.equal(result.status, 0, result.output);
+    assert.deepEqual(fs.readFileSync(proposalFile), before);
+    assert.equal(fs.readFileSync(path.join(dir, "AGENTS.md"), "utf8"), MEMORY_TEXT);
+    assert.equal(fs.existsSync(path.join(dir, ".agents")), false);
+    const retry = runDecided(dir, proposal.edits.map((edit) => `${edit.id}=accepted`).join(" "));
+    assert.equal(retry.status, 0, retry.output);
+    assert.equal(JSON.parse(fs.readFileSync(proposalFile, "utf8")).appliedBy, "apply");
+  }
+});
+
+test("an older review preserves a replacement or cleared proposal and rolls back its edits", () => {
+  for (const replaced of [true, false]) {
+    const dir = initRepo();
+    proposeExtractions(dir);
+    const state = new State(dir).ensure();
+    const proposal = state.readProposal();
+    if (replaced) state.writeProposal({ ...proposal, notes: ["A fresh proposal saved during review"] });
+    else state.clearProposal();
+    const fresh = replaced ? fs.readFileSync(state.proposalPath) : null;
+
+    const results = applyDecisions({
+      proposal,
+      decisions: Object.fromEntries(proposal.edits.map((edit) => [edit.id, "accepted"])),
+      repo: { root: dir, name: path.basename(dir) },
+      state,
+      config: { budgetTokens: 5000, skillsDir: ".agents/skills" },
+      appliedBy: "apply",
+    });
+
+    assert.deepEqual(fs.existsSync(state.proposalPath) ? fs.readFileSync(state.proposalPath) : null, fresh);
+    assert.match(results.failed[0]?.error || "", /proposal changed/);
+    assert.deepEqual(results.written, []);
+    assert.deepEqual(results.skills, []);
+    assert.equal(fs.readFileSync(path.join(dir, "AGENTS.md"), "utf8"), MEMORY_TEXT);
+    assert.equal(fs.existsSync(path.join(dir, ".agents")), false);
+    assert.equal(fs.existsSync(path.join(dir, ".claude")), false);
+    if (!replaced) state.writeProposal(proposal);
+    const retry = runDecided(dir, proposal.edits.map((edit) => `${edit.id}=accepted`).join(" "));
+    assert.equal(retry.status, 0, retry.output);
+    assert.equal(state.readProposal().appliedBy, "apply");
+  }
+});
+
+test("an interrupted proposal save does not block later saves, apply, or clearing", () => {
+  const dir = initRepo();
+  proposeExtractions(dir);
+  const state = new State(dir).ensure();
+  const proposal = state.readProposal();
+  const before = fs.readFileSync(state.proposalPath);
+  const interrupted = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      `import { State } from "./src/state.js";
+       const state = new State(process.argv[1]);
+       state.writeJsonFile = () => process.exit(1);
+       state.writeProposal({});`,
+      dir,
+    ],
+    { cwd: ROOT, encoding: "utf8" },
+  );
+
+  assert.equal(interrupted.status, 1, interrupted.stderr);
+  assert.equal(interrupted.stderr, "");
+  assert.deepEqual(fs.readFileSync(state.proposalPath), before);
+  const fresh = { ...proposal, notes: ["Saved after interruption"] };
+  state.writeProposal(fresh);
+  assert.deepEqual(state.readProposal(), fresh);
+  const applied = runDecided(dir, proposal.edits.map((edit) => `${edit.id}=accepted`).join(" "));
+  assert.equal(applied.status, 0, applied.output);
+  assert.equal(state.readProposal().appliedBy, "apply");
+  state.clearProposal();
+  assert.equal(state.readProposal(), null);
+});
+
+test("a write failure leaves the proposal unstamped and retryable", () => {
+  const dir = initRepo();
+  const proposal = proposeExtractions(dir);
+  const proposalFile = path.join(dir, ".backpass", "proposal.json");
+  const before = fs.readFileSync(proposalFile);
+  const vector = proposal.edits.map((edit) => `${edit.id}=accepted`).join(" ");
+  fs.chmodSync(dir, 0o555);
+  let failed;
+  try {
+    failed = runDecided(dir, vector);
+  } finally {
+    fs.chmodSync(dir, 0o755);
+  }
+  assert.equal(failed.status, 1, failed.output);
+  assert.match(failed.output, /EACCES|EPERM/);
+  assert.deepEqual(fs.readFileSync(proposalFile), before);
+  assert.equal(fs.readFileSync(path.join(dir, "AGENTS.md"), "utf8"), MEMORY_TEXT);
+  assert.equal(fs.existsSync(path.join(dir, ".agents")), false);
+  const retry = runDecided(dir, vector);
+  assert.equal(retry.status, 0, retry.output);
+  assert.equal(JSON.parse(fs.readFileSync(proposalFile, "utf8")).appliedBy, "apply");
+});
+
+test("an unwritable state directory rolls back accepted edits before retry", () => {
+  for (const json of [false, true]) {
+    for (const rejectOne of [false, true]) {
+      const dir = initRepo();
+      const proposal = proposeExtractions(dir);
+      const stateDir = path.join(dir, ".backpass");
+      const proposalFile = path.join(stateDir, "proposal.json");
+      const before = fs.readFileSync(proposalFile);
+      const vector = proposal.edits
+        .map((edit, i) => `${edit.id}=${rejectOne && i ? "rejected" : "accepted"}`)
+        .join(" ");
+      fs.chmodSync(stateDir, 0o555);
+      let failed;
+      try {
+        failed = runDecided(dir, vector, json ? ["--json"] : []);
+      } finally {
+        fs.chmodSync(stateDir, 0o755);
+      }
+
+      assert.equal(failed.status, 1, failed.output);
+      assert.match(failed.output, /EACCES|EPERM/);
+      if (json) {
+        const { results } = JSON.parse(failed.stdout);
+        assert.deepEqual(results.written, []);
+        assert.deepEqual(results.skills, []);
+      }
+      assert.deepEqual(fs.readFileSync(proposalFile), before);
+      assert.equal(fs.readFileSync(path.join(dir, "AGENTS.md"), "utf8"), MEMORY_TEXT);
+      assert.equal(fs.existsSync(path.join(dir, ".agents")), false);
+      assert.equal(fs.existsSync(path.join(dir, ".claude")), false);
+      assert.deepEqual(rejectionsOf(dir), {});
+
+      const retry = runDecided(dir, vector, json ? ["--json"] : []);
+      assert.equal(retry.status, 0, retry.output);
+      assert.equal(JSON.parse(fs.readFileSync(proposalFile, "utf8")).appliedBy, "apply");
+      assert.notEqual(fs.readFileSync(path.join(dir, "AGENTS.md"), "utf8"), MEMORY_TEXT);
+      assert.equal(fs.existsSync(path.join(dir, ".agents/skills/ci-details/SKILL.md")), true);
+    }
+  }
+});
+
 test("--decisions writes accepted edits and remembers a rejection with its reason", () => {
   const dir = initRepo();
   const [accepted, rejected] = proposeExtractions(dir).edits;
