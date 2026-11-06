@@ -211,7 +211,7 @@ test("the first analysis performs work, an unchanged second reuses it, and --for
   );
 });
 
-test("successful v4 evidence remains reusable after permission-denial recovery is added", () => {
+test("successful v4 evidence is reanalyzed once for source-provenance validation", () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-reuse-home-"));
   const dir = initRepo(MEMORY);
   writeSession(home, "session-a", dir);
@@ -229,8 +229,13 @@ test("successful v4 evidence remains reusable after permission-denial recovery i
 
   const upgraded = runAnalyze(dir, home);
   assert.equal(upgraded.status, 0, upgraded.output);
-  assert.deepEqual([upgraded.summary.analyzed, upgraded.summary.cached], [0, 1]);
-  assert.deepEqual(upgraded.summary.usage, []);
+  assert.deepEqual([upgraded.summary.analyzed, upgraded.summary.cached], [1, 0]);
+  assert.equal(upgraded.summary.usage.length, 1);
+
+  const reused = runAnalyze(dir, home);
+  assert.equal(reused.status, 0, reused.output);
+  assert.deepEqual([reused.summary.analyzed, reused.summary.cached], [0, 1]);
+  assert.deepEqual(reused.summary.usage, []);
 });
 
 test("evidence from the previous analysis index is reanalyzed once without --force", () => {
