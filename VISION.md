@@ -10,7 +10,7 @@ It owns exactly one thing: the backward pass from session transcripts to a propo
 
 ## Evidence is the only currency
 
-Every claim a model makes carries a verbatim quote anchored to a genuine source event, and a claim without one is discarded rather than softened.
+Every claim a model makes carries a verbatim quote copied from the trace, and a claim without one is discarded rather than softened.
 A signal extracted mechanically, with no judgment applied to it, is noise until a quote anchors it to a real moment, so there is no quoteless path into the file.
 A visible violation outranks any number of "it went fine" observations, because negative evidence is what proves the file was steering anything at all.
 Adding, rewording, or deleting instruction content needs corroboration from at least two distinct sessions, and one session never counts twice however often it is re-analyzed; extraction and movement are exempt because they preserve that content.
