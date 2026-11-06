@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { evidenceKey, State } from "../src/state.js";
+import { distill, findQuoteProvenance } from "../src/distill.js";
 import { parseMemoryUnits } from "../src/memory.js";
 import { foldForRun } from "../src/commands/propose.js";
 import { foldEvidence, renderEvidenceForPrompt, renderEvidenceReport } from "../src/fold.js";
@@ -23,6 +24,11 @@ import { makeRepo, stageAndMeasure, writeIn } from "./helpers/staging.js";
 const MEMORY_PATH = "AGENTS.md";
 const DAY = 86_400_000;
 
+function sourceProof(quote) {
+  const { sources } = distill([{ kind: "message", role: "assistant", text: quote }], {});
+  return findQuoteProvenance(quote, sources);
+}
+
 function memoryFile(text = "# T\n\n- Run pnpm test before pushing.\n- Keep the README current.\n") {
   return { path: MEMORY_PATH, units: parseMemoryUnits(text) };
 }
@@ -37,13 +43,16 @@ function record(id, gaps, { startedAt = Date.parse("2026-08-01T00:00:00Z"), memo
     key: evidenceKey(transcript, memoryHash),
     positive: [],
     negative: [],
-    gaps: gaps.map((gap) => ({
-      proposedInstruction: typeof gap === "string" ? gap : gap.proposedInstruction,
-      mistake: "re-derived it",
-      quote: `quote from ${id}`,
-      recurrenceRisk: "high",
-      ...(typeof gap === "string" ? {} : gap),
-    })),
+    gaps: gaps.map((gap) => {
+      const observed = {
+        proposedInstruction: typeof gap === "string" ? gap : gap.proposedInstruction,
+        mistake: "re-derived it",
+        quote: `quote from ${id}`,
+        recurrenceRisk: "high",
+        ...(typeof gap === "string" ? {} : gap),
+      };
+      return { ...observed, quoteProvenance: sourceProof(observed.quote) };
+    }),
   };
 }
 
@@ -194,6 +203,7 @@ test("observer migration requires complete selected unambiguous native provenanc
         sourceSessionId: "G",
         sightingIds: ["H"],
         quote: "representative quote",
+        quoteProvenance: sourceProof("representative quote"),
         domain: "project",
         ...(scenario.unattributedSightings ? { unattributedSightings: true } : {}),
       };
@@ -250,6 +260,7 @@ test("foldForRun leaves ambiguous and incompletely selected old observers outsid
       sourceSessionId: "G",
       sightingIds: scenario.sightingIds,
       quote: "old G quote",
+      quoteProvenance: sourceProof("old G quote"),
       ...(scenario.unattributedSightings ? { unattributedSightings: true } : {}),
     };
     h.state.writeGapLedger({
@@ -297,6 +308,7 @@ test("a selected representative cannot grant its former selected observer to one
         {
           instruction: "AG-001",
           quote: "G skipped the database documentation",
+          quoteProvenance: sourceProof("G skipped the database documentation"),
           class: "non-compliance",
         },
       ];
@@ -417,6 +429,7 @@ test("unresolved occupied destinations do not absorb valid selected native alias
       sightingIds: ["G"],
       source: "pi · G · 2026-08-01",
       quote: "unresolved G quote",
+      quoteProvenance: sourceProof("unresolved G quote"),
       ...(scenario.unattributedSightings ? { unattributedSightings: true } : {}),
     };
     const valid = {
@@ -425,6 +438,7 @@ test("unresolved occupied destinations do not absorb valid selected native alias
       sightingIds: ["H"],
       source: "pi · H · 2026-08-01",
       quote: "valid H quote",
+      quoteProvenance: sourceProof("valid H quote"),
     };
     const ledger = {
       version: 1,
@@ -579,6 +593,7 @@ test("selected historical sightings remain admitted when their representative is
     sourceSessionId: "G",
     sightingIds: ["P", "G"],
     quote: "historical G quote",
+    quoteProvenance: sourceProof("historical G quote"),
   };
   h.state.writeGapLedger({
     version: 1,
@@ -610,6 +625,7 @@ test("fresh matching evidence cannot bypass rejected attributed alias migration"
       sourceSessionId: "G",
       sightingIds: ["G", "H"],
       quote: "old mixed quote",
+      quoteProvenance: sourceProof("old mixed quote"),
     };
     h.state.writeGapLedger({
       version: 1,
@@ -892,6 +908,7 @@ test("ordinary non-OMP selected legacy observations keep their native routing id
               observedAt: "2026-08-03T00:00:00Z",
               source: `claude · ${transcript.id} · 2026-08-01`,
               quote: `quote ${transcript.id}`,
+              quoteProvenance: sourceProof(`quote ${transcript.id}`),
             },
           ]),
         ),
@@ -1174,6 +1191,7 @@ test("a plain Pi session re-reporting a provenance-free sighting keeps its slot 
             memoryHash: "h1",
             source: "pi · pi-s1 · 2026-08-01",
             quote: "quote from pi-s1",
+            quoteProvenance: sourceProof("quote from pi-s1"),
             phrasings: [GAP_REPHRASED],
             coveredBySkill: "db-docs",
           },
@@ -1301,7 +1319,12 @@ function ledgerWith(...entries) {
       sessions: Object.fromEntries(
         sessions.map((s) => [
           s,
-          { firstObservedAt: "2026-08-01T00:00:00.000Z", observedAt: "2026-08-01T00:00:00.000Z" },
+          {
+            firstObservedAt: "2026-08-01T00:00:00.000Z",
+            observedAt: "2026-08-01T00:00:00.000Z",
+            quote: `quote from ${s}`,
+            quoteProvenance: sourceProof(`quote from ${s}`),
+          },
         ]),
       ),
     };
@@ -1321,6 +1344,53 @@ test("mergeGapEntries unions sessions without double-counting and keeps the shor
   assert.equal(entries.length, 1);
   assert.equal(entries[0].proposedInstruction, "The short phrasing.");
   assert.deepEqual(Object.keys(entries[0].sessions).sort(), ["s1", "s2", "shared"], "a session never counts twice");
+});
+
+test("merging keeps a source-backed quote and its provenance together in either direction", () => {
+  for (const verifiedTarget of [false, true]) {
+    const ledger = ledgerWith(
+      { id: "target", text: GAP, sessions: ["shared", "extra"] },
+      { id: "other", text: GAP_REPHRASED, sessions: ["shared"] },
+    );
+    const verified = ledger.entries[verifiedTarget ? "target" : "other"].sessions.shared;
+    verified.sourceSessionId = "genuine-native";
+    verified.source = "genuine session";
+    const unverified = ledger.entries[verifiedTarget ? "other" : "target"].sessions.shared;
+    unverified.quote = "[... 2000 chars elided ...]";
+    unverified.quoteProvenance = { kind: "unverified" };
+    unverified.sourceSessionId = "other-native";
+    const expected = structuredClone(verified);
+    mergeGapEntries(ledger, [["target", "other"]]);
+    const observation = ledgerGapObservations(ledger, MEMORY_PATH).find((obs) => obs.sessionId === "shared");
+    assert.equal(observation.quote, expected.quote);
+    assert.equal(observation.sourceSessionId, expected.sourceSessionId);
+    assert.deepEqual(observation.quoteProvenance, expected.quoteProvenance);
+  }
+});
+
+test("observer normalization prefers a verified native quote over an unverified destination", () => {
+  const ledger = ledgerWith({ id: "gap", text: GAP, sessions: ["native", "observer"] });
+  const verified = ledger.entries.gap.sessions.native;
+  verified.sourceSessionId = "native";
+  const destination = ledger.entries.gap.sessions.observer;
+  destination.sourceSessionId = "native";
+  destination.quote = "[... 2000 chars elided ...]";
+  delete destination.quoteProvenance;
+  const expected = structuredClone(verified);
+  normalizeGapLedgerSessions(ledger, [{ id: "pi-native", identity: "native", corroborationIdentity: "observer" }]);
+  const [observation] = ledgerGapObservations(ledger, MEMORY_PATH);
+  assert.equal(observation.sessionId, "observer");
+  assert.equal(observation.quote, expected.quote);
+  assert.deepEqual(observation.quoteProvenance, expected.quoteProvenance);
+});
+
+test("unverified legacy observations remain stored but cannot supply fold votes", () => {
+  const ledger = ledgerWith({ id: "gap", text: GAP, sessions: ["genuine", "legacy"] });
+  delete ledger.entries.gap.sessions.legacy.quoteProvenance;
+  const summary = foldEvidence([], { gapObservations: ledgerGapObservations(ledger, MEMORY_PATH), minGapEvidence: 2 });
+  assert.equal(summary.gaps.length, 0);
+  assert.equal(summary.totals.droppedGapSingletons, 1);
+  assert.equal(Object.keys(ledger.entries.gap.sessions).length, 2);
 });
 
 test("a merged entry keeps the absorbed entry id in its folded gap identity", () => {

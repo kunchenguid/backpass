@@ -131,5 +131,14 @@ test("a fatal analysis error stops the run from starting more model calls", () =
   assert.equal(evidence.length, 1, "only the healthy in-flight session saved evidence");
   assert.equal(path.basename(evidence[0].transcript.path), "second.jsonl");
   assert.equal(evidence[0].status, "ok", "the in-flight analysis succeeded despite the fatal error");
-  assert.deepEqual(evidence[0].gaps, [gap], "the healthy call's evidence survives shutdown");
+  assert.deepEqual(
+    evidence[0].gaps,
+    [
+      {
+        ...gap,
+        quoteProvenance: { kind: "source", event: 2, field: ["text"], start: 0, end: gap.quote.length },
+      },
+    ],
+    "the healthy call's evidence and measured source provenance survive shutdown",
+  );
 });
