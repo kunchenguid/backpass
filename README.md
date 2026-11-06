@@ -390,9 +390,8 @@ escaping. Measured offsets map these transformations back to the source, excludi
 truncation text. Stored quotes stay redacted.
 Each accepted quote records its source event, field, and character span. These spans remain
 valid when session growth hides text from the capped trace. Generated elisions cannot supply
-evidence, and a model's `usedRawTranscript` claim cannot bypass the check. Ledger v1 retains
-this provenance with each observation. Legacy observations remain on disk and contribute only
-after distillation verifies them against genuine source events.
+evidence, and a model's `usedRawTranscript` claim cannot bypass the check.
+For persisted observations, see the [ledger rules](src/gap-ledger.js).
 When a run discards quotes this way it says so on stderr:
 a model that paraphrases instead of copying produces fewer findings, not cleaner ones.
 Negative evidence is weighted highest, but its class determines what it supports:
