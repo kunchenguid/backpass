@@ -168,7 +168,7 @@ function copilotInvocation({ requestedModel, requestedEffort, notes, cleanups, d
   if (process.platform === "win32") {
     throw new UserError(
       `cannot apply ${describeOverride(requestedModel, requestedEffort)} through acpx --agent on Windows`,
-      "pin pi, claude, codex, grok, or opencode, or omit the model and effort override",
+      "pin pi, claude, codex, or opencode, or omit the model and effort override",
     );
   }
   const extra = [];
@@ -194,7 +194,7 @@ function grokInvocation({ requestedModel, requestedEffort, writeAccess = false, 
   if (process.platform === "win32") {
     throw new UserError(
       `cannot apply ${describeOverride(requestedModel, requestedEffort) || "file-write flags"} through acpx --agent on Windows`,
-      "pin pi, claude, codex, copilot, or opencode, or omit the model and effort override",
+      "pin pi, claude, codex, or opencode, or omit the model and effort override",
     );
   }
   const extra = [];
