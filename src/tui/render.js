@@ -34,6 +34,7 @@ const HARNESS_HUES = {
   cursor: "blue",
   "cursor-ide": "blue",
   hermes: "yellow",
+  copilot: "blue",
 };
 
 /**
