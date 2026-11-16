@@ -98,7 +98,7 @@ export function prepareHarnessInvocation({ agent, model = null, effort = null, w
     } else if (overlay) {
       throw new UserError(
         `${agent} has no proven invocation-scoped way to apply ${describeOverride(requestedModel, requestedEffort)} without writing persistent harness defaults`,
-        "pin pi, claude, codex, grok, or opencode, or omit the model and effort override",
+        "pin pi, claude, codex, copilot, grok, or opencode, or omit the model and effort override",
       );
     } else {
       invocation = baseInvocation({ notes, dispose });
@@ -168,7 +168,7 @@ function copilotInvocation({ requestedModel, requestedEffort, notes, cleanups, d
   if (process.platform === "win32") {
     throw new UserError(
       `cannot apply ${describeOverride(requestedModel, requestedEffort)} through acpx --agent on Windows`,
-      "pin pi, claude, codex, or opencode, or omit the model and effort override",
+      "pin pi, claude, codex, grok, or opencode, or omit the model and effort override",
     );
   }
   const extra = [];
@@ -194,7 +194,7 @@ function grokInvocation({ requestedModel, requestedEffort, writeAccess = false, 
   if (process.platform === "win32") {
     throw new UserError(
       `cannot apply ${describeOverride(requestedModel, requestedEffort) || "file-write flags"} through acpx --agent on Windows`,
-      "pin pi, claude, codex, or opencode, or omit the model and effort override",
+      "pin pi, claude, codex, copilot, or opencode, or omit the model and effort override",
     );
   }
   const extra = [];
