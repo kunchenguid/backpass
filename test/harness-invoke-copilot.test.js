@@ -13,7 +13,7 @@ test("copilot model and effort become process flags behind an acpx --agent wrapp
   const inv = prepareHarnessInvocation({ agent: "copilot", effort: "high", model: "some-model" });
   try {
     assert.ok(inv.acpxAgentCommand);
-    const wrapper = fs.readFileSync(inv.acpxAgentCommand.split(" ").pop().replace(/"/g, ""), "utf8");
+    const wrapper = fs.readFileSync(inv.acpxAgentCommand.split(" ").pop().replace(/["']/g, ""), "utf8");
     assert.match(wrapper, /--reasoning-effort/);
     assert.match(wrapper, /--acp/);
   } finally {
