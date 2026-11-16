@@ -93,7 +93,7 @@ COMMANDS
 COLLECT SAMPLES
   --since <dur>            only sessions newer than this (30d, 12h, 2w, all)  [30d]
   --harness <a,b>          limit to these harnesses
-                           (claude, codex, pi, opencode, grok, cursor, hermes)
+                           (claude, codex, pi, opencode, grok, cursor, hermes, copilot)
   --strict                 deterministic associations only (tiers 1, 1.5, and 2)
   --host <dest>            also collect from this SSH host this run (repeatable;
                            "none" collects locally only). Configure hosts once in

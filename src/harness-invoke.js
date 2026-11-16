@@ -84,6 +84,10 @@ export function prepareHarnessInvocation({ agent, model = null, effort = null, w
         : baseInvocation({ notes, dispose });
     } else if (agent === "grok") {
       invocation = grokInvocation({ requestedModel, requestedEffort, writeAccess, notes, cleanups, dispose });
+    } else if (agent === "copilot") {
+      invocation = overlay
+        ? copilotInvocation({ requestedModel, requestedEffort, notes, cleanups, dispose })
+        : baseInvocation({ notes, dispose });
     } else if (agent === "claude" || agent === "codex" || agent === "opencode") {
       invocation = {
         ...baseInvocation({ notes, dispose }),
@@ -94,7 +98,7 @@ export function prepareHarnessInvocation({ agent, model = null, effort = null, w
     } else if (overlay) {
       throw new UserError(
         `${agent} has no proven invocation-scoped way to apply ${describeOverride(requestedModel, requestedEffort)} without writing persistent harness defaults`,
-        "pin pi, claude, codex, grok, or opencode, or omit the model and effort override",
+        "pin pi, claude, codex, copilot, grok, or opencode, or omit the model and effort override",
       );
     } else {
       invocation = baseInvocation({ notes, dispose });
@@ -157,6 +161,32 @@ function piInvocation({ requestedModel, requestedEffort, notes, cleanups, dispos
     requiredBuiltinAgent: "pi",
     notes,
     dispose,
+  };
+}
+
+function copilotInvocation({ requestedModel, requestedEffort, notes, cleanups, dispose }) {
+  if (process.platform === "win32") {
+    throw new UserError(
+      `cannot apply ${describeOverride(requestedModel, requestedEffort)} through acpx --agent on Windows`,
+      "pin pi, claude, codex, or opencode, or omit the model and effort override",
+    );
+  }
+  const extra = [];
+  if (requestedModel) extra.push("--model", requestedModel);
+  if (requestedEffort) extra.push("--reasoning-effort", requestedEffort);
+  extra.push("--acp", "--stdio");
+  const real = resolveOnPath("copilot");
+  if (!real) {
+    throw new UserError(
+      `cannot apply ${describeOverride(requestedModel, requestedEffort)} as copilot process flags because copilot was not found on PATH`,
+      "install the Copilot CLI, or pin a different agent / omit the model and effort override",
+    );
+  }
+  const { nodeCommand, dir } = writeArgvWrapper({ realCommand: real, extraArgs: extra, binName: "copilot" });
+  cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
+  return {
+    ...baseInvocation({ notes, dispose }),
+    acpxAgentCommand: nodeCommand,
   };
 }
 

@@ -58,6 +58,7 @@ export const VERDICT_LABELS = {
 
 const LOGIN_HINTS = {
   codex: "codex login",
+  copilot: "copilot login",
   claude: "claude auth login",
   grok: "grok login",
   opencode: "opencode auth login",
