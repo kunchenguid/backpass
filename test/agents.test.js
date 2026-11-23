@@ -1143,8 +1143,8 @@ test("acpx failure classification and the per-adapter tables", () => {
   assert.equal(effortOptionKey("grok"), null);
 });
 
-test("resolvedEffort: an explicit off or none omits the overlay for every agent (#70)", () => {
-  for (const value of ["off", "none", " OFF "]) {
+test("resolvedEffort: an explicit off omits the overlay for every agent (#70)", () => {
+  for (const value of ["off", " OFF "]) {
     const config = { analysis: { effort: value }, synthesis: { effort: value } };
     for (const agent of ["claude", "codex", "pi", "opencode"]) {
       assert.equal(resolvedEffort("analysis", agent, config), null, `${agent} ${value}`);
@@ -1159,4 +1159,5 @@ test("resolvedEffort: unset keeps the role default, and a set value passes throu
   assert.equal(resolvedEffort("synthesis", "claude", unset), "high");
   assert.equal(resolvedEffort("analysis", "opencode", unset), null);
   assert.equal(resolvedEffort("analysis", "codex", { analysis: { effort: " low " } }), "low");
+  assert.equal(resolvedEffort("analysis", "codex", { analysis: { effort: "none" } }), "none", "codex none is a real level");
 });

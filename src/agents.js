@@ -530,19 +530,16 @@ export class AgentResolver {
   }
 }
 
-/** Values that turn the effort overlay off instead of falling back to the role default. */
-export const EFFORT_OFF = new Set(["off", "none"]);
-
 /**
  * OpenCode variants are per-model, so role defaults do not become an overlay.
- * An explicit `off`/`none` also omits it, for adapters that cannot apply an
+ * An explicit `off` also omits it, for adapters that cannot apply an
  * effort (#70); an unset effort still gets `DEFAULT_EFFORT[role]`.
  */
 export function resolvedEffort(role, agent, config) {
   const configured = config[role].effort;
   if (typeof configured === "string" && configured.trim()) {
     const value = configured.trim();
-    return EFFORT_OFF.has(value.toLowerCase()) ? null : value;
+    return value.toLowerCase() === "off" ? null : value;
   }
   if (agent === "opencode") return null;
   return DEFAULT_EFFORT[role];
