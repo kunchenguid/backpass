@@ -112,10 +112,10 @@ MODELS (two-tier: cheap analysis, smart synthesis - all through acpx)
   Setting an agent pins that pass and skips its ladder.
   --analysis-agent <a>     acpx agent for the per-transcript pass       [auto]
   --analysis-model <id>    model id for the analysis pass (needs --analysis-agent)
-  --analysis-effort <e>    one-off reasoning effort, when supported          [medium]
+  --analysis-effort <e>    one-off reasoning effort, when supported; off omits it [medium]
   --synthesis-agent <a>    acpx agent for the final proposal pass       [auto]
   --synthesis-model <id>   model id for the synthesis pass (needs --synthesis-agent)
-  --synthesis-effort <e>   one-off reasoning effort for synthesis            [high]
+  --synthesis-effort <e>   one-off reasoning effort for synthesis; off omits it [high]
   --no-auto-agent          skip the ladders and pin codex / claude (the pre-0.2 defaults)
   --jobs <n>               parallel analysis calls                      [4]
 

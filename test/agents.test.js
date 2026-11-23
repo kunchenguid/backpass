@@ -8,6 +8,7 @@ import {
   isProbeEntryFresh,
   probeCandidate,
   resolveModelId,
+  resolvedEffort,
 } from "../src/agents.js";
 import { AcpxError, acpxAgentName, classifyAcpxFailure, effortOptionKey, probeSession } from "../src/acpx.js";
 import { DEFAULT_LADDERS, loadConfig } from "../src/config.js";
@@ -1140,4 +1141,22 @@ test("acpx failure classification and the per-adapter tables", () => {
   assert.equal(effortOptionKey("opencode"), "effort");
   assert.equal(effortOptionKey("pi"), null, "Pi effort is process --thinking, not ACP set");
   assert.equal(effortOptionKey("grok"), null);
+});
+
+test("resolvedEffort: an explicit off or none omits the overlay for every agent (#70)", () => {
+  for (const value of ["off", "none", " OFF "]) {
+    const config = { analysis: { effort: value }, synthesis: { effort: value } };
+    for (const agent of ["claude", "codex", "pi", "opencode"]) {
+      assert.equal(resolvedEffort("analysis", agent, config), null, `${agent} ${value}`);
+      assert.equal(resolvedEffort("synthesis", agent, config), null, `${agent} ${value}`);
+    }
+  }
+});
+
+test("resolvedEffort: unset keeps the role default, and a set value passes through", () => {
+  const unset = { analysis: { effort: null }, synthesis: { effort: "" } };
+  assert.equal(resolvedEffort("analysis", "codex", unset), "medium");
+  assert.equal(resolvedEffort("synthesis", "claude", unset), "high");
+  assert.equal(resolvedEffort("analysis", "opencode", unset), null);
+  assert.equal(resolvedEffort("analysis", "codex", { analysis: { effort: " low " } }), "low");
 });
