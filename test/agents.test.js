@@ -1159,5 +1159,9 @@ test("resolvedEffort: unset keeps the role default, and a set value passes throu
   assert.equal(resolvedEffort("synthesis", "claude", unset), "high");
   assert.equal(resolvedEffort("analysis", "opencode", unset), null);
   assert.equal(resolvedEffort("analysis", "codex", { analysis: { effort: " low " } }), "low");
-  assert.equal(resolvedEffort("analysis", "codex", { analysis: { effort: "none" } }), "none", "codex none is a real level");
+  assert.equal(
+    resolvedEffort("analysis", "codex", { analysis: { effort: "none" } }),
+    "none",
+    "codex none is a real level",
+  );
 });
