@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.45](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.44...backpass-v0.1.45) (2026-11-24)
+
+
+### Bug Fixes
+
+* **agents:** omit effort overlay for explicit off on claude, codex and opencode ([#251](https://github.com/kunchenguid/backpass/issues/251)) ([b197999](https://github.com/kunchenguid/backpass/commit/b1979998c62700d05ffb57d0d41b68c6eedbe0f7))
+
 ## [0.1.44](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.43...backpass-v0.1.44) (2026-11-02)
 
 
