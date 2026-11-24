@@ -1153,11 +1153,13 @@ test("resolvedEffort: an explicit off omits the overlay where off is not a level
   }
 });
 
-test("resolvedEffort: off passes through to process-flag adapters (pi --thinking off, grok)", () => {
-  const config = { analysis: { effort: "off" }, synthesis: { effort: "off" } };
-  for (const agent of ["pi", "grok"]) {
-    assert.equal(resolvedEffort("analysis", agent, config), "off", agent);
-    assert.equal(resolvedEffort("synthesis", agent, config), "off", agent);
+test("resolvedEffort: off passes through lowercased to process-flag adapters (pi --thinking off, grok)", () => {
+  for (const value of ["off", " OFF ", "Off"]) {
+    const config = { analysis: { effort: value }, synthesis: { effort: value } };
+    for (const agent of ["pi", "grok"]) {
+      assert.equal(resolvedEffort("analysis", agent, config), "off", `${agent} ${value}`);
+      assert.equal(resolvedEffort("synthesis", agent, config), "off", `${agent} ${value}`);
+    }
   }
 });
 

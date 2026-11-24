@@ -548,7 +548,9 @@ export function resolvedEffort(role, agent, config) {
   const configured = config[role].effort;
   if (typeof configured === "string" && configured.trim()) {
     const value = configured.trim();
-    return value.toLowerCase() === "off" && effortOptionKey(agent) ? null : value;
+    // Pi only accepts lowercase `off` (`--thinking OFF` is a warning and falls back).
+    if (value.toLowerCase() === "off") return effortOptionKey(agent) ? null : "off";
+    return value;
   }
   if (agent === "opencode") return null;
   return DEFAULT_EFFORT[role];
