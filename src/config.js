@@ -86,7 +86,8 @@ export const DEFAULT_CONFIG = {
   /**
    * `agent: null` means auto-pick from `ladders[role]`; `effort: null` means
    * `DEFAULT_EFFORT[role]`, except OpenCode which omits the overlay until effort
-   * is set. Setting `agent` pins the role and skips the ladder.
+   * is set; `effort: "off"` omits it on claude, codex and opencode, and is passed
+   * through as a level to Pi and grok. Setting `agent` pins the role and skips the ladder.
    */
   analysis: { agent: null, model: null, effort: null },
   synthesis: { agent: null, model: null, effort: null },
