@@ -1,6 +1,13 @@
 import { UserError, color, info, warn } from "./logger.js";
 import { DEFAULT_EFFORT, LEGACY_DEFAULT_AGENTS } from "./config.js";
-import { AcpxError, SESSION_CREATE_TIMEOUT_MS, acpxVersion, classifyAcpxFailure, probeSession } from "./acpx.js";
+import {
+  AcpxError,
+  SESSION_CREATE_TIMEOUT_MS,
+  acpxVersion,
+  classifyAcpxFailure,
+  effortOptionKey,
+  probeSession,
+} from "./acpx.js";
 import { ambiguousModelDetail, providerAuthState, rankCollidingIds, readProviderAuthTypes } from "./provider-auth.js";
 import { runCapture } from "./subprocess.js";
 
@@ -532,14 +539,16 @@ export class AgentResolver {
 
 /**
  * OpenCode variants are per-model, so role defaults do not become an overlay.
- * An explicit `off` also omits it, for adapters that cannot apply an
- * effort (#70); an unset effort still gets `DEFAULT_EFFORT[role]`.
+ * An explicit `off` also omits it on the ACP `set` adapters (claude, codex,
+ * opencode), where off is not a level (#70). Pi and grok take effort as a
+ * process flag and get `off` as given: `pi --thinking off` is a real level,
+ * and grok rejects it loudly. An unset effort still gets `DEFAULT_EFFORT[role]`.
  */
 export function resolvedEffort(role, agent, config) {
   const configured = config[role].effort;
   if (typeof configured === "string" && configured.trim()) {
     const value = configured.trim();
-    return value.toLowerCase() === "off" ? null : value;
+    return value.toLowerCase() === "off" && effortOptionKey(agent) ? null : value;
   }
   if (agent === "opencode") return null;
   return DEFAULT_EFFORT[role];

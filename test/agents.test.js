@@ -1143,13 +1143,21 @@ test("acpx failure classification and the per-adapter tables", () => {
   assert.equal(effortOptionKey("grok"), null);
 });
 
-test("resolvedEffort: an explicit off omits the overlay for every agent (#70)", () => {
+test("resolvedEffort: an explicit off omits the overlay where off is not a level (#70)", () => {
   for (const value of ["off", " OFF "]) {
     const config = { analysis: { effort: value }, synthesis: { effort: value } };
-    for (const agent of ["claude", "codex", "pi", "opencode"]) {
+    for (const agent of ["claude", "codex", "opencode"]) {
       assert.equal(resolvedEffort("analysis", agent, config), null, `${agent} ${value}`);
       assert.equal(resolvedEffort("synthesis", agent, config), null, `${agent} ${value}`);
     }
+  }
+});
+
+test("resolvedEffort: off passes through to process-flag adapters (pi --thinking off, grok)", () => {
+  const config = { analysis: { effort: "off" }, synthesis: { effort: "off" } };
+  for (const agent of ["pi", "grok"]) {
+    assert.equal(resolvedEffort("analysis", agent, config), "off", agent);
+    assert.equal(resolvedEffort("synthesis", agent, config), "off", agent);
   }
 });
 
