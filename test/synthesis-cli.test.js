@@ -114,7 +114,7 @@ const EDIT_TURN = {
 const QUOTE = {
   polarity: "negative",
   text: "session 1 re-derived the release steps by hand",
-  source: "claude · s1 · turn 4",
+  source: "claude · s1 · 2026-08-01",
 };
 
 const extract = (changes, title, extra = {}) => ({

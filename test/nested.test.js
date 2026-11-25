@@ -517,9 +517,12 @@ test("an unknown native observer beside an API child keeps both the fold and pro
       assert.deepEqual(result.violations, []);
       assert.equal(result.proposal.edits[0].transcripts, 2);
     } else {
+      // The root-owned cluster is routed out of this pass, so its quotes are not in the
+      // nested fold catalog: the catalog gate refuses them before routing is measured.
       assert.equal(result.proposal.edits.length, 0);
       assert.ok(
-        result.violations.some((violation) => violation.includes("cross-cutting evidence belongs in AGENTS.md")),
+        result.violations.some((violation) => violation.includes("not a unique fold-issued quote from that source")),
+        result.violations.join("\n"),
       );
     }
     const withoutRootOverride = buildProposal(
@@ -619,6 +622,17 @@ function routedGate({
     analyzedSessions: 4,
     totals: { positive: 0, negative: 0, gapClusters: 1 },
     instructions: [],
+    // The fold catalog: evidence must cite a quote the fold issued for its source.
+    gaps: [
+      {
+        id: "gap-contract-tests",
+        quotes: [...ATTRIBUTION.keys()].map((id) => ({
+          polarity: "negative",
+          text: `${id} hit it`,
+          source: labelOf(id),
+        })),
+      },
+    ],
     sources: labels,
     sourceSessions: Object.fromEntries([...ATTRIBUTION.keys()].map((id) => [labelOf(id), id])),
   };
