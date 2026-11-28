@@ -130,14 +130,12 @@ function noteOnce(note) {
 /** Negative evidence carries one of these classes; anything else is dropped as unjudged. */
 export const NEGATIVE_CLASSES = ["harm", "non-compliance", "irrelevant"];
 
-/** Nonzero recovery requires the complete reply contract, before sanitizing quotes. */
+/**
+ * Nonzero recovery requires the complete reply contract, before sanitizing quotes. It parses
+ * with the same `extractJson` as the exit-0 path, so a fenced reply is judged by its shape.
+ */
 function acceptsDeniedAnalysis(text) {
-  let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return false;
-  }
+  const parsed = extractJson(text);
   if (!parsed || Array.isArray(parsed) || typeof parsed.usedRawTranscript !== "boolean") return false;
   const strings = (item, keys) => item && keys.every((key) => typeof item[key] === "string");
   return (

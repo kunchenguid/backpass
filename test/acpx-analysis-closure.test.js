@@ -209,12 +209,21 @@ test("the final completed attempt owns text, completion, and usage after retries
   assert.equal(evidence.deniedRequests, undefined);
 });
 
+// The exit-0 path accepts a fenced reply, so the exit-5 salvage must accept the same one.
+test("a fenced, schema-valid reply survives exit 5", async () => {
+  const { summary, evidence } = await analyze(completed("```json\n" + JSON.stringify(answer) + "\n```"));
+  assert.equal(summary.analyzed, 1);
+  assert.equal(evidence.status, "ok");
+  assert.equal(evidence.positive[0].quote, answer.positive[0].quote);
+});
+
 /** @type {[string, object[], number][]} */
 const rejected = [
   ["empty", completed(""), 5],
   ["malformed", completed("{"), 5],
   ["wrong schema", completed('{"positive":{}}'), 5],
   ["invalid item", completed(JSON.stringify({ ...answer, positive: [{ quote: "real quote" }] })), 5],
+  ["fenced wrong schema", completed('```json\n{"positive":{}}\n```'), 5],
   ["incomplete", [begin(), chunk(JSON.stringify(answer))], 5],
   ["cancelled", [begin(), chunk(JSON.stringify(answer)), end(2, "cancelled")], 5],
   ["last attempt incomplete", [...completed(), begin("next"), chunk(JSON.stringify(answer))], 5],
