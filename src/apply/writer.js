@@ -192,16 +192,23 @@ export function budgetMismatches(proposal, config, edits = proposal.edits) {
       remedy: `--budget ${rootCap}`,
     });
   }
-  const nestedCap = nestedBudget(config);
   for (const nested of proposal.nested || []) {
     const cap = nested.budget?.capTokens;
-    if (!edits.some((edit) => edit.nestedMemoryFile === nested.memoryFile.path)) continue;
-    if (!Number.isFinite(cap) || cap === nestedCap) continue;
+    const relative = nested.memoryFile.path;
+    if (!edits.some((edit) => edit.nestedMemoryFile === relative)) continue;
+    const current = nestedBudget(config, relative);
+    if (!Number.isFinite(cap) || cap === current) continue;
+    const own = config.nestedBudgetTokensByPath;
     mismatches.push({
-      file: nested.memoryFile.path,
+      file: relative,
       proposed: cap,
-      current: nestedCap,
-      remedy: config.nestedBudgetTokens == null ? `--budget ${cap}` : `nestedBudgetTokens set to ${cap}`,
+      current,
+      remedy:
+        own && Object.hasOwn(own, relative)
+          ? `budgetTokens set to ${cap} on its nestedMemoryFiles entry`
+          : config.nestedBudgetTokens == null
+            ? `--budget ${cap}`
+            : `nestedBudgetTokens set to ${cap}`,
     });
   }
   return mismatches;
@@ -571,7 +578,7 @@ export function applyDecisions({
       });
       continue;
     }
-    const capTokens = nestedBudget(config);
+    const capTokens = nestedBudget(config, plan.relative);
     const budget = budgetStatus(plan.before, plan.text, capTokens);
     const gate = budgetGateKind(budget);
     if (gate === "cap") {
