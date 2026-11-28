@@ -29,6 +29,13 @@ import { UserError, setLoggerSink } from "../src/logger.js";
 import { clearProgressSink, setProgressSink } from "../src/progress.js";
 import { foldEvidence } from "../src/fold.js";
 import { INTERACTIVE, NON_INTERACTIVE } from "../src/interaction.js";
+import { distill, findQuoteProvenance } from "../src/distill.js";
+
+const schemaQuote = "read the schema";
+const schemaProvenance = findQuoteProvenance(
+  schemaQuote,
+  distill([{ kind: "message", role: "assistant", text: schemaQuote }], {}).sources,
+);
 
 const REMOTE = "github.com/acme/demo";
 
@@ -88,7 +95,8 @@ function observerRecords(transcripts) {
       {
         proposedInstruction: "Read docs/db.md before writing queries.",
         mistake: "re-derived the schema",
-        quote: "read the schema",
+        quote: schemaQuote,
+        quoteProvenance: schemaProvenance,
         recurrenceRisk: "high",
         domain: "project",
       },
@@ -202,7 +210,8 @@ test("a copied OMP root and retained remote descendants count as one observer wi
       {
         proposedInstruction: "Read docs/db.md before writing queries.",
         mistake: "re-derived the schema",
-        quote: "read the schema",
+        quote: schemaQuote,
+        quoteProvenance: schemaProvenance,
         recurrenceRisk: "high",
         domain: "project",
       },
@@ -667,7 +676,8 @@ test("filtered OMP roots still share one cross-host gap and harm observer", asyn
           {
             proposedInstruction: "Read docs/db.md before writing queries.",
             mistake: "re-derived the schema",
-            quote: "read the schema",
+            quote: schemaQuote,
+            quoteProvenance: schemaProvenance,
             recurrenceRisk: "high",
             domain: "project",
           },

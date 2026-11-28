@@ -16,6 +16,7 @@ import { evidenceKey, State } from "../src/state.js";
 import { clearProgressSink, setProgressSink } from "../src/progress.js";
 import { ProposalViolation } from "../src/proposal.js";
 import { HostCache, PRUNE_MAX_AGE_MS } from "../src/discovery/cache.js";
+import { distill, findQuoteProvenance } from "../src/distill.js";
 
 const CLI = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../bin/backpass");
 
@@ -49,6 +50,11 @@ const discoverTwo = async () => ({ transcripts: [transcript("s1"), transcript("s
 
 /** Stands in for the tier-1 model: every session reports the same gap against the starter. */
 function writeFakeEvidence({ transcripts, memoryFile, config, memoryHash }, domainAt = (_index) => undefined) {
+  const quote = "applied the migration to prod-db";
+  const quoteProvenance = findQuoteProvenance(
+    quote,
+    distill([{ kind: "message", role: "assistant", text: quote }], {}).sources,
+  );
   for (const [index, t] of transcripts.entries()) {
     const evidenceTranscript = { ...t, interaction: "interactive" };
     config.state.writeEvidence(t.id, {
@@ -64,7 +70,8 @@ function writeFakeEvidence({ transcripts, memoryFile, config, memoryHash }, doma
           mistake: "ran migrations against the shared db",
           proposedInstruction: "Run migrations only against a scratch database.",
           recurrenceRisk: "high",
-          quote: "applied the migration to prod-db",
+          quote,
+          quoteProvenance,
           ...(domainAt(index) ? { domain: domainAt(index) } : {}),
         },
       ],

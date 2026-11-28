@@ -26,9 +26,14 @@ import { cmdScan } from "../src/commands/scan.js";
 import { renderApplySurface } from "../src/apply/lavish.js";
 import { evidenceKey, State } from "../src/state.js";
 import { recordGapObservations } from "../src/gap-ledger.js";
+import { distill, findQuoteProvenance } from "../src/distill.js";
 import { transcriptIdentity } from "../src/transcript.js";
 import { sampleTranscripts, capTranscripts } from "../src/sample.js";
 import { setLoggerSink } from "../src/logger.js";
+
+function sourceProof(quote) {
+  return findQuoteProvenance(quote, distill([{ kind: "message", role: "assistant", text: quote }], {}).sources);
+}
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CLI = path.join(ROOT, "bin", "backpass.js");
@@ -608,6 +613,7 @@ test("fold selection distinguishes colliding native IDs by source", async () => 
     observedAt,
     source,
     quote: `${source} used production`,
+    quoteProvenance: sourceProof(`${source} used production`),
     domain: "project",
   });
   state.writeGapLedger({
@@ -684,6 +690,7 @@ test("fold keeps legacy-id gap observations for sessions in the selected sample"
               observedAt,
               source: transcript.id,
               quote: `${transcript.id} used production`,
+              quoteProvenance: sourceProof(`${transcript.id} used production`),
               domain: "project",
             },
           ]),
@@ -745,6 +752,7 @@ test("fold bounds evidence and ledger observations to the selected sample", asyn
         proposedInstruction: "Always use the scratch database.",
         mistake: "used production",
         quote: `stale robot ${i} used the production database`,
+        quoteProvenance: sourceProof(`stale robot ${i} used the production database`),
         recurrenceRisk: "high",
       },
     ]),
@@ -1162,7 +1170,8 @@ test("nested OMP subagents share the root identity once the root session appears
         {
           proposedInstruction: "Read docs/db.md before writing queries.",
           mistake: "re-derived it",
-          quote: "quote",
+          quote: "native source quote",
+          quoteProvenance: sourceProof("native source quote"),
           recurrenceRisk: "high",
         },
       ],

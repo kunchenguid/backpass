@@ -30,16 +30,43 @@ const PATTERNS = [
 ];
 
 export function redact(text) {
-  if (!text) return text;
+  return redactText(text, false).text;
+}
+
+/** Redacted text plus numeric replacement offsets, never the replaced secret text. */
+export function redactWithOffsets(text) {
+  return redactText(text, true);
+}
+
+function redactText(text, measure) {
+  const redactions = [];
+  if (!text) return { text, redactions };
   let out = String(text);
   for (const [pattern, label] of PATTERNS) {
-    out = out.replace(pattern, (match, first, dqMulti, sqMulti, dq, sq, bare) => {
-      if (label !== "ASSIGNMENT") return `[redacted:${label}]`;
-      const second = dqMulti ?? sqMulti ?? dq ?? sq ?? bare;
-      // A specific pattern above may already have replaced the value; keep its label.
-      if (typeof second === "string" && second.startsWith("[redacted")) return match;
-      return `${first}=[redacted]`;
+    const replacements = [];
+    let delta = 0;
+    out = out.replace(pattern, (...args) => {
+      const [match, first, dqMulti, sqMulti, dq, sq, bare] = args;
+      let replacement = `[redacted:${label}]`;
+      if (label === "ASSIGNMENT") {
+        const second = dqMulti ?? sqMulti ?? dq ?? sq ?? bare;
+        // A specific pattern above may already have replaced the value; keep its label.
+        if (typeof second === "string" && second.startsWith("[redacted")) return match;
+        replacement = `${first}=[redacted]`;
+      }
+      if (measure) {
+        const offset = args[args.length - 2];
+        replacements.push({
+          start: offset + delta,
+          end: offset + delta + replacement.length,
+          sourceStart: offset,
+          sourceEnd: offset + match.length,
+        });
+        delta += replacement.length - match.length;
+      }
+      return replacement;
     });
+    if (replacements.length) redactions.push(replacements);
   }
-  return out;
+  return { text: out, redactions };
 }

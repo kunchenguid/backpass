@@ -39,7 +39,8 @@ import { corroborationIdentityOf } from "./transcript.js";
  *    destination are compatible; legacy id keys additionally require unambiguous
  *    `legacyIds`. Incompatible history stays separately keyed, and recording uses a
  *    native or source-qualified key rather than overwriting it. Storage keys do not
- *    grant extra observer votes. Persisted observations only contribute when their
+ *    grant extra observer votes. Persisted observations require verified source-span
+ *    provenance to contribute; unverified history stays on disk. They count only when their
  *    admitted observer belongs to the current selected sample, so sessions outside the
  *    window or cap cannot skew fold.
  *  - A gap is a fact about its session: re-analysis that no longer mentions it is model
@@ -379,6 +380,7 @@ export function recordGapObservations(ledger, evidenceRecords, options = {}) {
         ...(priors.some(hasUnattributedSightings) ? { unattributedSightings: true } : {}),
         mistake: gap.mistake,
         quote: gap.quote,
+        quoteProvenance: gap.quoteProvenance,
         recurrenceRisk: gap.recurrenceRisk,
         phrasings,
         domain:
@@ -462,7 +464,7 @@ export function normalizeGapLedgerSessions(ledger, transcripts, { legacyIds = ne
         aliases,
         transcript,
       );
-      const current = priors[0];
+      const current = priors.find((observation) => observation.quoteProvenance?.kind === "source") || priors[0];
       const project = current.project || priors.find((observation) => observation.project)?.project;
       const projectRoot = current.projectRoot || priors.find((observation) => observation.projectRoot)?.projectRoot;
 
@@ -555,6 +557,7 @@ export function ledgerGapObservations(ledger, memoryPath, skills = null) {
   for (const entry of Object.values(ledger.entries)) {
     if (entry.memoryPath !== memoryPath) continue;
     for (const [sessionId, obs] of Object.entries(entry.sessions)) {
+      if (obs.quoteProvenance?.kind !== "source") continue;
       observations.push({
         proposedInstruction: entry.proposedInstruction,
         phrasings: obs.phrasings?.length ? obs.phrasings : [entry.proposedInstruction],
@@ -566,6 +569,7 @@ export function ledgerGapObservations(ledger, memoryPath, skills = null) {
         unattributedSightings: hasUnattributedSightings(obs),
         mistake: obs.mistake,
         quote: obs.quote,
+        quoteProvenance: obs.quoteProvenance,
         recurrenceRisk: obs.recurrenceRisk,
         domain: obs.domain === "orchestration" ? "orchestration" : "project",
         ...(obs.coveredBySkill && (!skillNames || skillNames.has(obs.coveredBySkill))
@@ -624,6 +628,19 @@ export function mergeGapEntries(ledger, groups) {
         if (!prior) {
           target.sessions[sessionId] = obs;
         } else {
+          if (prior.quoteProvenance?.kind !== "source" && obs.quoteProvenance?.kind === "source") {
+            for (const field of [
+              "quote",
+              "quoteProvenance",
+              "source",
+              "sourceSessionId",
+              "mistake",
+              "recurrenceRisk",
+              "project",
+              "projectRoot",
+            ])
+              prior[field] = obs[field];
+          }
           const earlier =
             Date.parse(obs.firstObservedAt || obs.observedAt) < Date.parse(prior.firstObservedAt || prior.observedAt);
           if (earlier) prior.firstObservedAt = obs.firstObservedAt || obs.observedAt;
