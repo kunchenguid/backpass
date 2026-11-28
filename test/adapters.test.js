@@ -9,6 +9,7 @@ import { execFileSync } from "node:child_process";
 
 import * as claude from "../src/discovery/adapters/claude.js";
 import * as codex from "../src/discovery/adapters/codex.js";
+import * as copilot from "../src/discovery/adapters/copilot.js";
 import * as pi from "../src/discovery/adapters/pi.js";
 import * as grok from "../src/discovery/adapters/grok.js";
 import * as cursorCli from "../src/discovery/adapters/cursor-cli.js";
@@ -101,6 +102,60 @@ test("claude adapter enumerates the default store and CLAUDE_CONFIG_DIR, without
   assert.deepEqual(enumerateClaude(fakeHome, workRoot), ["personal.jsonl", "work.jsonl"]);
   assert.deepEqual(enumerateClaude(fakeHome, null), ["personal.jsonl"]);
   assert.deepEqual(enumerateClaude(fakeHome, defaultRoot), ["personal.jsonl"]);
+});
+
+test("copilot adapter classifies a session from its session.start context", () => {
+  const file = path.join(FIXTURES, "copilot-session.jsonl");
+  const descriptor = copilot.classify(candidateFor(file));
+
+  assert.equal(descriptor.id, "11111111-2222-4333-8444-555555555555");
+  assert.equal(descriptor.cwd, "/work/demo");
+  assert.equal(descriptor.gitRoot, "/work/demo");
+  assert.equal(descriptor.gitBranch, "main");
+  assert.equal(descriptor.model, "claude-sonnet-5.5");
+  // The recorded repository is a host label, not a remote URL.
+  assert.deepEqual(descriptor.remotes, []);
+});
+
+test("copilot adapter keeps user turns, folds tool results, and drops injected and sub-agent events", () => {
+  const file = path.join(FIXTURES, "copilot-session.jsonl");
+  const { events, model } = copilot.read({ path: file });
+
+  assert.equal(model, "claude-sonnet-5.5");
+  assert.deepEqual(
+    messages(events).map((m) => `${m.role}: ${m.text}`),
+    [
+      "user: Fix the failing build",
+      "assistant: Looking at the build output.",
+      "user: Use pnpm, not npm",
+      "assistant: Switching to pnpm.",
+    ],
+  );
+
+  const [toolCall] = tools(events);
+  assert.equal(toolCall.name, "bash");
+  assert.equal(toolCall.input.command, "npm test");
+  assert.equal(toolCall.result, "1 failing");
+  assert.equal(toolCall.status, "error");
+});
+
+test("copilot adapter enumerates events.jsonl per session and honors COPILOT_HOME", () => {
+  const previous = process.env.COPILOT_HOME;
+  const relocated = fs.mkdtempSync(path.join(os.tmpdir(), "backpass-copilot-home-"));
+  const sessionDir = path.join(relocated, "session-state", "abc");
+  fs.mkdirSync(sessionDir, { recursive: true });
+  fs.mkdirSync(path.join(relocated, "session-state", "empty"), { recursive: true });
+  fs.copyFileSync(path.join(FIXTURES, "copilot-session.jsonl"), path.join(sessionDir, "events.jsonl"));
+  process.env.COPILOT_HOME = relocated;
+  try {
+    assert.deepEqual(
+      copilot.enumerate().map((c) => path.relative(relocated, c.path)),
+      [path.join("session-state", "abc", "events.jsonl")],
+    );
+  } finally {
+    if (previous === undefined) delete process.env.COPILOT_HOME;
+    else process.env.COPILOT_HOME = previous;
+  }
 });
 
 test("codex adapter honors CODEX_HOME", () => {
