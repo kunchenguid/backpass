@@ -169,6 +169,11 @@ function sessionCreateTimeoutError({ agent, acpxAgentArgs, timeoutMs, result }) 
 const MODEL_REJECTED =
   /did not advertise that model|does not support this model|session\/set_(?:config_option|model) for model/i;
 
+// Provider billing refusals may first appear on a paid call, after a successful
+// zero-token probe. A bare 429 or rate limit is transient, not exhausted funding.
+const BILLING_REJECTED =
+  /\binsufficient[ _](?:account[ _])?(?:funds|credits?|quota)\b|\bcredit balance is too low\b|\b(?:billing|spending)[ _]hard[ _]limit[ _](?:reached|exceeded)\b|\byou exceeded your current quota\b|\b(?:HTTP(?:\/\d(?:\.\d)?)?\s+402|402\s+Payment Required)\b/i;
+
 /**
  * Availability verdicts for a failed acpx call. Only a *classifiable* failure is a
  * reason to drop a candidate and fall through to the next one; anything else (a
@@ -189,7 +194,7 @@ export function classifyAcpxFailure(failure) {
   if (failure.spawnError?.code === "ENOENT") return "unreachable";
   const text = failure.stderr || "";
   if (/AUTH_REQUIRED|authentication required/i.test(text)) return "unauthenticated";
-  if (MODEL_REJECTED.test(text)) return "model-unavailable";
+  if (MODEL_REJECTED.test(text) || BILLING_REJECTED.test(text)) return "model-unavailable";
   if (/\b(ENOENT|command not found|not found on PATH|failed to spawn|spawn .* ENOENT)\b/i.test(text)) {
     return "unreachable";
   }
