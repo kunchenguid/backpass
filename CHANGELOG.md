@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.46](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.45...backpass-v0.1.46) (2026-11-28)
+
+
+### Bug Fixes
+
+* **analyze:** accept fenced JSON when salvaging an exit-5 analysis ([#254](https://github.com/kunchenguid/backpass/issues/254)) ([078263f](https://github.com/kunchenguid/backpass/commit/078263fceb460576aebad11f53cbef0846f1ab93)), closes [#253](https://github.com/kunchenguid/backpass/issues/253)
+
 ## [0.1.45](https://github.com/kunchenguid/backpass/compare/backpass-v0.1.44...backpass-v0.1.45) (2026-11-24)
 
 
