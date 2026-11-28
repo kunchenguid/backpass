@@ -414,6 +414,11 @@ function discoverFiles(
       continue;
     }
 
+    if (adapter.isIndependentSession?.(descriptor) === false) {
+      stats.skipped += 1;
+      continue;
+    }
+
     const association = associateFn({
       cwd: descriptor.cwd,
       remotes: descriptor.remotes || [],
